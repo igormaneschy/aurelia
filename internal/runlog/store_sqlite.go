@@ -375,7 +375,7 @@ func (s *SQLiteStore) ListEvents(ctx context.Context, runID string) ([]RunEvent,
 	if err != nil {
 		return nil, fmt.Errorf("runlog list_events %s: %w", runID, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var events []RunEvent
 	for rows.Next() {
@@ -467,7 +467,7 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, chatID int64, limit int) ([]
 	if err != nil {
 		return nil, fmt.Errorf("runlog list_runs: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var records []RunRecord
 	for rows.Next() {

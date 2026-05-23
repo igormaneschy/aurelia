@@ -14,10 +14,6 @@ import (
 // Telegram allows ~1 edit/sec per message; we leave a margin.
 const progressEditInterval = 1500 * time.Millisecond
 
-// maxToolResultDisplay limits how much of a tool result summary is shown
-// in the progress message. The full summary is stored in the run log.
-const maxToolResultDisplay = 150
-
 type progressReporter struct {
 	bot           *telebot.Bot
 	chat          *telebot.Chat

@@ -160,15 +160,6 @@ func buildFallbackConsolidation(results []orchestrator.TaskResult) string {
 	return sb.String()
 }
 
-func (bc *BotController) getRepoRoot() string {
-	// Use the chat's cwd if set, otherwise fall back to working dir
-	// In practice this comes from the orchestrator config
-	if bc.orchestrator != nil {
-		return bc.orchestrator.Config().RepoRoot
-	}
-	return "."
-}
-
 func (bc *BotController) buildAgentSummaries() []orchestrator.AgentSummary {
 	if bc.agents == nil {
 		return nil
