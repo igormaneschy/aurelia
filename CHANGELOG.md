@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-05-23
+
+### Added
+
+- **session-lifecycle**: gerenciamento automático de ciclo de vida de sessão PI.
+  - Estados de saúde: healthy, large, suspect, dangerous, cold.
+  - Decisões automáticas: continue, cold_resume, compact, rotate.
+  - Estatísticas reais do PI (input_tokens) direcionam compactação/rotação.
+  - Limiares `MaxEmptyResultsBeforeRotate` e `MaxProcessDeathsBeforeRotate`.
+- **bridge**: novos comandos `get-session-stats`, `compact-session`, `rotate-session`.
+- **bridge**: forwarding de eventos de lifecycle (compaction, agent, turn, auto_retry).
+- **session**: metadados de falha (timeout, empty result, process death) persistem
+  em `sessions.json` e sobrevivem a restart/deploy.
+- **config**: seção `session_lifecycle` com validação de limites.
+- **ux**: mensagens no Telegram para compactação e rotação de sessão.
+
+### Fixed
+
+- **session**: process death em retry agora marca o userID correto, preservando
+  isolamento em grupos/forums.
+- **session**: compactação/rotação com falha registra metadado de falha.
+- **security**: summary de rotação passa por redaction e escape de delimitadores.
+
 ## [0.14.2] - 2026-05-23
 
 ### Added
