@@ -45,6 +45,26 @@ type RequestOptions struct {
 	StreamingBehavior string            `json:"streaming_behavior,omitempty"`
 }
 
+// SessionStats holds PI session statistics returned by get-session-stats.
+// Mirrors the PI SDK's SessionStats interface for multi-session lifecycle
+// management on the Go side.
+type SessionStats struct {
+	SessionFile       string `json:"session_file,omitempty"`
+	SessionID         string `json:"session_id"`
+	UserMessages      int    `json:"user_messages,omitempty"`
+	AssistantMessages int    `json:"assistant_messages,omitempty"`
+	ToolCalls         int    `json:"tool_calls,omitempty"`
+	ToolResults       int    `json:"tool_results,omitempty"`
+	TotalMessages     int    `json:"total_messages,omitempty"`
+	InputTokens       int    `json:"input_tokens,omitempty"`
+	OutputTokens      int    `json:"output_tokens,omitempty"`
+	CacheReadTokens   int    `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens  int    `json:"cache_write_tokens,omitempty"`
+	TotalTokens       int    `json:"total_tokens,omitempty"`
+	Cost              float64 `json:"cost,omitempty"`
+	ContextUsagePct   float64 `json:"context_usage_pct,omitempty"`
+}
+
 // SecurityContext carries capability profile and policy configuration to the
 // Bridge so the PI tool_call hook can evaluate and govern individual tool
 // calls before they execute.

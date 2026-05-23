@@ -1138,6 +1138,49 @@ async function handleGetState(req: Request): Promise<void> {
   });
 }
 
+// ── Handle get-session-stats command ───────────────────────────────────────
+
+async function handleGetSessionStats(req: Request): Promise<void> {
+  const reqId = req.request_id || "";
+  const emitReq = (obj: OutEvent) => emit({ ...obj, request_id: reqId });
+
+  try {
+    // Open or resolve session temporarily; do not retain in chatSessions.
+    const piSession = await createPiSession(req.options);
+    const session = piSession.session;
+
+    const stats = session.getSessionStats();
+    const usage = stats.contextUsage;
+
+    emitReq({
+      event: "result",
+      content: JSON.stringify({
+        session_file: stats.sessionFile,
+        session_id: stats.sessionId,
+        user_messages: stats.userMessages,
+        assistant_messages: stats.assistantMessages,
+        tool_calls: stats.toolCalls,
+        tool_results: stats.toolResults,
+        total_messages: stats.totalMessages,
+        input_tokens: stats.tokens.input,
+        output_tokens: stats.tokens.output,
+        cache_read_tokens: stats.tokens.cacheRead,
+        cache_write_tokens: stats.tokens.cacheWrite,
+        total_tokens: stats.tokens.total,
+        cost: stats.cost,
+        context_usage_pct: usage?.usagePercentage ?? 0,
+      }),
+    });
+
+    // Dispose of the temporary session immediately (never stored in chatSessions).
+    session.dispose();
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    redactedLog(`get-session-stats error: rid=${reqId} ${errMsg}`);
+    emitReq({ event: "error", message: redactSDKError(errMsg) });
+  }
+}
+
 // ── Handle incoming request ──────────────────────────────────────────────────
 
 async function handleRequest(line: string): Promise<void> {
@@ -1247,6 +1290,11 @@ async function handleRequest(line: string): Promise<void> {
 
     case "get-state": {
       await handleGetState(req);
+      break;
+    }
+
+    case "get-session-stats": {
+      await handleGetSessionStats(req);
       break;
     }
 

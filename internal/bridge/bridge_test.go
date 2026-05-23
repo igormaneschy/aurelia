@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -696,5 +697,149 @@ func TestBridge_CleanupAfterPanic_KillsProcess(t *testing.T) {
 	case <-b.done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for readLoop to finish after cleanupAfterPanic")
+	}
+}
+
+const sessionStatsMockJS = `
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+
+rl.on('line', (line) => {
+    const req = JSON.parse(line);
+    const rid = req.request_id || "";
+
+    if (req.command === "get-session-stats") {
+        process.stdout.write(JSON.stringify({
+            event: "result",
+            request_id: rid,
+            content: JSON.stringify({
+                session_file: "/tmp/sessions/test.jsonl",
+                session_id: "abc123",
+                user_messages: 3,
+                assistant_messages: 2,
+                tool_calls: 1,
+                tool_results: 1,
+                total_messages: 5,
+                input_tokens: 100,
+                output_tokens: 50,
+                cache_read_tokens: 10,
+                cache_write_tokens: 20,
+                total_tokens: 150,
+                cost: 0.005,
+                context_usage_pct: 45.5,
+            }),
+        }) + "\n");
+    } else if (req.command === "ping") {
+        process.stdout.write(JSON.stringify({event:"pong",request_id:rid}) + "\n");
+    } else {
+        process.stdout.write(JSON.stringify({event:"error",request_id:rid,message:"unknown command: " + req.command}) + "\n");
+    }
+});
+
+rl.on('close', () => process.exit(0));
+`
+
+func TestBridge_GetSessionStats(t *testing.T) {
+	dir := t.TempDir()
+	b := newMockBridge(t, dir, sessionStatsMockJS)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	stats, err := b.GetSessionStats(ctx, RequestOptions{
+		Resume: "/tmp/sessions/test.jsonl",
+	})
+	if err != nil {
+		t.Fatalf("GetSessionStats() error: %v", err)
+	}
+	if stats == nil {
+		t.Fatal("expected non-nil stats")
+	}
+	if stats.SessionFile != "/tmp/sessions/test.jsonl" {
+		t.Fatalf("SessionFile = %q, want %q", stats.SessionFile, "/tmp/sessions/test.jsonl")
+	}
+	if stats.SessionID != "abc123" {
+		t.Fatalf("SessionID = %q, want %q", stats.SessionID, "abc123")
+	}
+	if stats.InputTokens != 100 {
+		t.Fatalf("InputTokens = %d, want 100", stats.InputTokens)
+	}
+	if stats.OutputTokens != 50 {
+		t.Fatalf("OutputTokens = %d, want 50", stats.OutputTokens)
+	}
+	if stats.Cost != 0.005 {
+		t.Fatalf("Cost = %f, want 0.005", stats.Cost)
+	}
+	if stats.UserMessages != 3 {
+		t.Fatalf("UserMessages = %d, want 3", stats.UserMessages)
+	}
+	if stats.AssistantMessages != 2 {
+		t.Fatalf("AssistantMessages = %d, want 2", stats.AssistantMessages)
+	}
+	if stats.TotalTokens != 150 {
+		t.Fatalf("TotalTokens = %d, want 150", stats.TotalTokens)
+	}
+	if stats.ContextUsagePct != 45.5 {
+		t.Fatalf("ContextUsagePct = %f, want 45.5", stats.ContextUsagePct)
+	}
+}
+
+func TestBridge_GetSessionStats_Error(t *testing.T) {
+	dir := t.TempDir()
+
+	errorMock := `
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+
+rl.on('line', (line) => {
+    const req = JSON.parse(line);
+    const rid = req.request_id || "";
+    process.stdout.write(JSON.stringify({event:"error",request_id:rid,message:"session not found: /tmp/missing.jsonl"}) + "\n");
+});
+
+rl.on('close', () => process.exit(0));
+`
+	b := newMockBridge(t, dir, errorMock)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := b.GetSessionStats(ctx, RequestOptions{
+		Resume: "/tmp/missing.jsonl",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing session")
+	}
+	if !strings.Contains(err.Error(), "session not found: /tmp/missing.jsonl") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBridge_GetSessionStats_EmptyContent(t *testing.T) {
+	dir := t.TempDir()
+
+	emptyMock := `
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+
+rl.on('line', (line) => {
+    const req = JSON.parse(line);
+    const rid = req.request_id || "";
+    process.stdout.write(JSON.stringify({event:"result",request_id:rid,content:""}) + "\n");
+});
+
+rl.on('close', () => process.exit(0));
+`
+	b := newMockBridge(t, dir, emptyMock)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	stats, err := b.GetSessionStats(ctx, RequestOptions{})
+	if err != nil {
+		t.Fatalf("GetSessionStats() error: %v", err)
+	}
+	if stats != nil {
+		t.Fatal("expected nil stats for empty content")
 	}
 }

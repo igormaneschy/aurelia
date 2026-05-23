@@ -504,6 +504,30 @@ func (b *Bridge) Ping(ctx context.Context) error {
 	return nil
 }
 
+// GetSessionStats returns PI session statistics for the given session file.
+// Uses the get-session-stats bridge command. Returns nil stats without error
+// when session is missing or bridge doesn't support the command.
+func (b *Bridge) GetSessionStats(ctx context.Context, opts RequestOptions) (*SessionStats, error) {
+	ev, err := b.ExecuteSync(ctx, Request{
+		Command: "get-session-stats",
+		Options: opts,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("bridge: get-session-stats: %w", err)
+	}
+	if ev.Type == "error" {
+		return nil, fmt.Errorf("bridge: get-session-stats error: %s", ev.Message)
+	}
+	if ev.Content == "" {
+		return nil, nil
+	}
+	var stats SessionStats
+	if err := json.Unmarshal([]byte(ev.Content), &stats); err != nil {
+		return nil, fmt.Errorf("bridge: get-session-stats parse: %w", err)
+	}
+	return &stats, nil
+}
+
 // ModelInfo describes a model available through the bridge.
 type ModelInfo struct {
 	Provider       string `json:"provider"`
