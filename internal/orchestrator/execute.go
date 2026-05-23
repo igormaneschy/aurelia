@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -31,6 +33,11 @@ func newRunID() string {
 // (ChatID, ThreadID, UserID) tuple is therefore reserved for internal worker
 // sessions and cannot collide with real session keys.
 var workerSessionCounter int64
+
+// Validator is the callback used by ExecutePlan to validate a worker's result.
+// It receives the task, bridge result, collected artifacts, and attempt number.
+// Implementations should be fail-closed: return error for infrastructure failures.
+type Validator func(ctx context.Context, task Task, result TaskResult, artifacts *ArtifactSnapshot, attempt int) (*ValidationResult, error)
 
 // ExecuteTask runs a single task as a worker via the bridge.
 // It streams events and calls onEvent for visual feedback.
@@ -147,25 +154,30 @@ func (o *Orchestrator) ExecuteTask(
 }
 
 // ExecutePlan executes all tasks in the plan, respecting dependencies (wave-based).
-// It resolves agent config per task and manages worktrees.
-// If any task requires a worktree, the base branch is resolved once and a single
-// runID is generated for namespace isolation across all worktrees in this plan.
+// It resolves agent config per task, manages worktrees, validates results,
+// retries on validation failure, and merges approved worktrees serially after
+// each wave.
+//
+// The signature includes ExecutionContext for run metadata and a Validator
+// callback so the orchestrator package stays unaware of Telegram concerns.
 func (o *Orchestrator) ExecutePlan(
 	ctx context.Context,
+	exec ExecutionContext,
 	plan *Plan,
 	registry *agents.Registry,
 	systemPromptBuilder func(task Task, cfg WorkerConfig) string,
+	validate Validator,
 	onEvent func(WorkerEvent),
-) ([]TaskResult, error) {
+) (*ExecutionManifest, []TaskResult, error) {
 	waves, err := plan.ExecutionOrder()
 	if err != nil {
-		return nil, fmt.Errorf("resolving execution order: %w", err)
+		return nil, nil, fmt.Errorf("resolving execution order: %w", err)
 	}
 
 	// Determine if any task requires a worktree
 	needsWorktree := planHasWorktree(waves)
 	if needsWorktree && o.worktree == nil {
-		return nil, fmt.Errorf("worktree not available: no repo root configured")
+		return nil, nil, fmt.Errorf("worktree not available: no repo root configured")
 	}
 
 	// Resolve base branch once if worktrees are needed
@@ -173,21 +185,63 @@ func (o *Orchestrator) ExecutePlan(
 	var runID string
 	if needsWorktree {
 		var bbErr error
-		baseBranch, bbErr = resolveBaseBranch(ctx, o.config.RepoRoot)
+		baseBranch, bbErr = resolveBaseBranch(ctx, exec.RepoRoot)
 		if bbErr != nil {
-			return nil, fmt.Errorf("resolving base branch for worktree tasks: %w", bbErr)
+			return nil, nil, fmt.Errorf("resolving base branch for worktree tasks: %w", bbErr)
 		}
-		runID = newRunID()
+		runID = exec.RunID
+		if runID == "" {
+			runID = newRunID()
+		}
 	}
+
+	manifest := NewExecutionManifest(runID, exec.RepoRoot, baseBranch, exec.Feature, plan.Tasks)
+
+	// taskWorktrees holds created worktrees keyed by task ID so they can be
+	// reused across validation retries.
+	taskWorktrees := make(map[string]*Worktree)
+	var taskWorktreesMu sync.Mutex
+
+	// completedStatuses tracks the final status of each task for dependency skip logic.
+	completedStatuses := make(map[string]TaskStatus)
+	var completedMu sync.Mutex
 
 	var allResults []TaskResult
 	var mu sync.Mutex
 
 	for _, wave := range waves {
+		// --- Skip dependents whose dependencies are not approved ---
+		readyTasks := make([]Task, 0, len(wave))
+		for _, t := range wave {
+			if shouldSkip(t, completedStatuses) {
+				onEvent(WorkerEvent{TaskID: t.ID, Type: "skipped", Message: "dependency did not ship"})
+				mu.Lock()
+				allResults = append(allResults, TaskResult{
+					TaskID:  t.ID,
+					Success: false,
+					Status:  TaskSkipped,
+					Skipped: true,
+					Error:   "skipped because dependency did not ship",
+				})
+				mu.Unlock()
+				completedMu.Lock()
+				completedStatuses[t.ID] = TaskSkipped
+				completedMu.Unlock()
+				manifest.RecordResult(allResults[len(allResults)-1])
+			} else {
+				readyTasks = append(readyTasks, t)
+			}
+		}
+
+		if len(readyTasks) == 0 {
+			continue
+		}
+
+		// --- Execute ready tasks in parallel ---
 		sem := make(chan struct{}, o.config.MaxConcurrentWorkers)
 		var wg sync.WaitGroup
 
-		for _, task := range wave {
+		for _, task := range readyTasks {
 			wg.Add(1)
 			sem <- struct{}{}
 
@@ -198,83 +252,189 @@ func (o *Orchestrator) ExecutePlan(
 					if r := recover(); r != nil {
 						log.Printf("orchestrator: panic executing task %s: %v", t.ID, r)
 						mu.Lock()
-						allResults = append(allResults, TaskResult{TaskID: t.ID, Success: false, Error: fmt.Sprintf("panic: %v", r)})
+						result := TaskResult{
+							TaskID:  t.ID,
+							Success: false,
+							Status:  TaskFailed,
+							Error:   fmt.Sprintf("panic: %v", r),
+						}
+						allResults = append(allResults, result)
 						mu.Unlock()
+						completedMu.Lock()
+						completedStatuses[t.ID] = TaskFailed
+						completedMu.Unlock()
+						manifest.RecordResult(result)
 					}
 				}()
 
 				cfg := ResolveAgentConfig(registry, t.Agent)
 
-				// If the task requires a worktree, create one. Failure to create
-				// is fatal — we do NOT fall back to the repo root (fail-closed).
-				// baseBranch and runID are pre-resolved; they are non-empty when
-				// needsWorktree is true.
-				cwd := o.config.RepoRoot
+				// Create worktree once per task (reused across retries).
 				var wt *Worktree
+				var cwd string
 				if t.NeedsWorktree {
-					var wtErr error
-					wt, wtErr = o.worktree.Create(runID, t.ID, baseBranch)
-					if wtErr != nil {
-						result := TaskResult{
-							TaskID:  t.ID,
-							Success: false,
-							Error:   fmt.Sprintf("worktree creation failed: %v", wtErr),
-						}
-						onEvent(WorkerEvent{TaskID: t.ID, Type: "error", Message: result.Error})
-						mu.Lock()
-						allResults = append(allResults, result)
-						mu.Unlock()
-						return
-					}
-					cwd = wt.Path
-				}
-
-				prompt := systemPromptBuilder(t, cfg)
-				result := o.ExecuteTask(ctx, t, cfg, cwd, prompt, onEvent)
-
-				// Worktree lifecycle: merge successful work, then cleanup.
-				// On merge failure the worktree/branch are preserved for manual
-				// recovery — do NOT force-delete unmerged changes.
-				if wt != nil {
-					if result.Success {
-						if err := o.worktree.Merge(wt, baseBranch); err != nil {
-							// Merge failed: preserve worktree for recovery, mark task
-							// as failed with a sanitized user-facing message. The full
-							// git error (including paths) stays in the server log.
-							log.Printf("orchestrator: worktree merge failed for task %s, worktree preserved at %s: %v", t.ID, wt.Path, err)
-							result.Success = false
-							result.Error = "merge failed; worktree preserved for recovery"
-							// Use a distinct event type ("merge_failed") rather than
-							// "error" because ExecuteTask already emitted a "done"
-							// event. Re-using "error" would invert the event stream
-							// (done → error) and confuse UI consumers.
-							onEvent(WorkerEvent{TaskID: t.ID, Type: "merge_failed", Message: result.Error})
-							// Do NOT cleanup — worktree/branch left for manual recovery
-						} else {
-							// Merge succeeded — safe to remove worktree and branch
-							if err := o.worktree.Cleanup(wt); err != nil {
-								log.Printf("orchestrator: worktree cleanup failed for task %s: %v", t.ID, err)
+					taskWorktreesMu.Lock()
+					wt = taskWorktrees[t.ID]
+					if wt == nil {
+						var wtErr error
+						wt, wtErr = o.worktree.Create(runID, t.ID, baseBranch)
+						if wtErr != nil {
+							result := TaskResult{
+								TaskID:  t.ID,
+								Success: false,
+								Status:  TaskFailed,
+								Error:   fmt.Sprintf("worktree creation failed: %v", wtErr),
 							}
+							onEvent(WorkerEvent{TaskID: t.ID, Type: "error", Message: result.Error})
+							mu.Lock()
+							allResults = append(allResults, result)
+							mu.Unlock()
+							completedMu.Lock()
+							completedStatuses[t.ID] = TaskFailed
+							completedMu.Unlock()
+							manifest.RecordResult(result)
+							taskWorktreesMu.Unlock()
+							return
 						}
-					} else {
-						// Task execution failed — no successful changes to merge.
-						// Cleanup is safe because nothing was merged.
-						if err := o.worktree.Cleanup(wt); err != nil {
-							log.Printf("orchestrator: worktree cleanup failed for task %s: %v", t.ID, err)
-						}
+						taskWorktrees[t.ID] = wt
 					}
+					taskWorktreesMu.Unlock()
+					cwd = wt.Path
+				} else {
+					cwd = exec.RepoRoot
 				}
 
+				// --- Per-task attempt loop ---
+				var result TaskResult
+				attempt := 1
+				workingTask := t
+				for attempt <= o.config.MaxValidationRetries {
+					manifest.Tasks[workingTask.ID].Status = TaskRunning
+					manifest.Tasks[workingTask.ID].Attempts = attempt
+
+					prompt := systemPromptBuilder(workingTask, cfg)
+					result = o.ExecuteTask(ctx, workingTask, cfg, cwd, prompt, onEvent)
+
+					if !result.Success {
+						result.Status = TaskFailed
+						break // bridge error, no point validating
+					}
+
+					// Collect artifacts for validation
+					var artifacts *ArtifactSnapshot
+					if t.NeedsWorktree {
+						art, artErr := o.CollectArtifacts(ctx, cwd, workingTask, plan)
+						if artErr != nil {
+							log.Printf("orchestrator: artifact collection failed for task %s: %v", workingTask.ID, artErr)
+						}
+						artifacts = art
+					}
+
+					// Validate
+					vr, valErr := validate(ctx, workingTask, result, artifacts, attempt)
+					if valErr != nil {
+						result.Status = TaskUnverified
+						result.Error = "validation unavailable: " + valErr.Error()
+						break
+					}
+					if vr.Approved {
+						result.Status = TaskApproved
+						result.Approved = true
+						if artifacts != nil {
+							result.ChangedFiles = artifacts.ChangedFiles
+							result.Verify = artifacts.Verify
+						}
+						break
+					}
+					if !vr.ShouldRetry || attempt == o.config.MaxValidationRetries {
+						result.Status = TaskEscalated
+						result.Error = "validation failed after attempts: " + strings.Join(vr.Issues, "; ")
+						onEvent(WorkerEvent{TaskID: workingTask.ID, Type: "escalated", Message: result.Error})
+						break
+					}
+
+					// Build retry: append feedback to user prompt
+					workingTask.Prompt = workingTask.Prompt + "\n\nPrevious attempt issues:\n- " + strings.Join(vr.Issues, "\n- ")
+					attempt++
+				}
+
+				result.Attempts = attempt
 				mu.Lock()
 				allResults = append(allResults, result)
 				mu.Unlock()
+				completedMu.Lock()
+				completedStatuses[t.ID] = result.Status
+				completedMu.Unlock()
+				manifest.RecordResult(result)
 			}(task)
 		}
 
 		wg.Wait()
+
+		// --- Serial merge of approved worktrees in deterministic task-id order ---
+		if needsWorktree {
+			approvedTasks := approvedTaskIDsInWave(readyTasks, completedStatuses)
+			for _, tid := range approvedTasks {
+				taskWorktreesMu.Lock()
+				wt := taskWorktrees[tid]
+				taskWorktreesMu.Unlock()
+				if wt == nil {
+					continue
+				}
+				if err := o.worktree.Merge(wt, baseBranch); err != nil {
+					log.Printf("orchestrator: worktree merge failed for task %s, worktree preserved at %s: %v", tid, wt.Path, err)
+					// Update the result to reflect merge failure
+					completedMu.Lock()
+					completedStatuses[tid] = TaskFailed
+					completedMu.Unlock()
+					for i := range allResults {
+						if allResults[i].TaskID == tid {
+							allResults[i].Status = TaskFailed
+							allResults[i].Success = false
+							allResults[i].Error = "merge failed; worktree preserved for recovery"
+							manifest.RecordResult(allResults[i])
+							onEvent(WorkerEvent{TaskID: tid, Type: "merge_failed", Message: allResults[i].Error})
+							break
+						}
+					}
+				} else {
+					// Merge succeeded — safe to remove worktree and branch
+					if err := o.worktree.Cleanup(wt); err != nil {
+						log.Printf("orchestrator: worktree cleanup failed for task %s: %v", tid, err)
+					}
+					taskWorktreesMu.Lock()
+					delete(taskWorktrees, tid)
+					taskWorktreesMu.Unlock()
+				}
+			}
+		}
 	}
 
-	return allResults, nil
+	manifest.FinishedAt = time.Now()
+	return manifest, allResults, nil
+}
+
+// shouldSkip returns true if any of the task's dependencies is not approved.
+func shouldSkip(task Task, statuses map[string]TaskStatus) bool {
+	for _, dep := range task.DependsOn {
+		if statuses[dep] != TaskApproved {
+			return true
+		}
+	}
+	return false
+}
+
+// approvedTaskIDsInWave returns the task IDs in the wave that have status
+// TaskApproved, sorted deterministically for serial merge ordering.
+func approvedTaskIDsInWave(wave []Task, statuses map[string]TaskStatus) []string {
+	var ids []string
+	for _, t := range wave {
+		if statuses[t.ID] == TaskApproved {
+			ids = append(ids, t.ID)
+		}
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 // planHasWorktree returns true if any task in any wave has NeedsWorktree set.

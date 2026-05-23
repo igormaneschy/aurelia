@@ -46,13 +46,17 @@ func BuildExecutionPrompt(tasksContent string, availableAgents []AgentSummary) s
 	sb.WriteString("## Output Format\n\n")
 	sb.WriteString("Respond with ONLY a JSON plan inside an `aurelia-plan` code block:\n\n")
 	sb.WriteString("```aurelia-plan\n")
-	sb.WriteString(`{"tasks":[{"id":"T1","description":"...","agent":"worker","prompt":"...","depends_on":[],"needs_worktree":true}]}`)
+	sb.WriteString(`{"feature":"feature-name","create_pr":false,"verify":"go test ./...","tasks":[{"id":"T1","description":"...","agent":"worker","prompt":"...","depends_on":[],"needs_worktree":true,"verify":""}]}`)
 	sb.WriteString("\n```\n\n")
 	sb.WriteString("Rules:\n")
+	sb.WriteString("- `feature` is the feature directory name (e.g. \"agent-orchestration-execution\")\n")
+	sb.WriteString("- `create_pr` is true when the user explicitly wants a PR opened\n")
+	sb.WriteString("- `verify` is an optional default verify command for the whole plan (e.g. `go test ./...`)\n")
 	sb.WriteString("- Each task maps to one entry in the tasks.md\n")
 	sb.WriteString("- `agent` is the name of the agent to use (or `worker` for default)\n")
 	sb.WriteString("- `prompt` is the full instruction for the worker — be specific and include file paths\n")
 	sb.WriteString("- `needs_worktree` is true for tasks that modify files, false for read-only tasks (review, analysis)\n")
+	sb.WriteString("- `verify` on a task overrides the plan-level verify for that task\n")
 	sb.WriteString("- Respect dependencies from the tasks.md\n")
 	return sb.String()
 }
@@ -82,20 +86,18 @@ func BuildWorkerPrompt(agentPrompt, claudeMd, agentsMd, specContent, designConte
 		sections = append(sections, "# Feature Design\n\n"+designContent)
 	}
 
-	// Task-specific instructions
+	// Task-specific instructions (summary only — full prompt is injected via user message)
 	var taskSection strings.Builder
 	taskSection.WriteString("# Your Task\n\n")
 	fmt.Fprintf(&taskSection, "**ID**: %s\n", task.ID)
 	fmt.Fprintf(&taskSection, "**Description**: %s\n\n", task.Description)
-	taskSection.WriteString("## Instructions\n\n")
-	taskSection.WriteString(task.Prompt)
-	taskSection.WriteString("\n\n## Rules\n\n")
+	taskSection.WriteString("## Rules\n\n")
 	taskSection.WriteString("- Focus ONLY on this task — do not make changes outside its scope\n")
 	taskSection.WriteString("- Follow the conventions in CLAUDE.md\n")
 	taskSection.WriteString("- When done, report what you did and what files you changed\n")
 	sections = append(sections, taskSection.String())
 
-	// Sibling awareness
+	// Sibling awareness (summaries only — no full prompts)
 	if len(siblings) > 0 {
 		var sibSection strings.Builder
 		sibSection.WriteString("# Other Workers (context only — do not do their work)\n\n")
@@ -263,16 +265,20 @@ func buildPlanOutputInstructions() string {
 When the user approves the tasks and says to execute (e.g., "aprovado", "pode fazer", "manda ver", "bora", "execute"), emit an execution plan as a JSON block:
 
 ` + "```aurelia-plan" + `
-{"tasks":[
-  {"id":"T1","description":"...","agent":"worker","prompt":"Full task instructions...","depends_on":[],"needs_worktree":true},
+{"feature":"feature-name","create_pr":false,"verify":"go test ./...","tasks":[
+  {"id":"T1","description":"...","agent":"worker","prompt":"Full task instructions...","depends_on":[],"needs_worktree":true,"verify":""},
   {"id":"T2","description":"...","agent":"qa","prompt":"...","depends_on":["T1"],"needs_worktree":true}
 ]}
 ` + "```" + `
 
 Rules for the plan:
 - Only emit when user explicitly approves execution
+- ` + "`feature`" + ` is the feature directory name under .specs/features/ (e.g. "agent-orchestration-execution")
+- ` + "`create_pr`" + ` is true when the user explicitly asked to open a PR
+- ` + "`verify`" + ` is an optional default verify command for the whole plan
 - Each task must have a clear, self-contained prompt (workers have no conversation history)
 - Set needs_worktree=true for tasks that modify files, false for read-only tasks
+- Task-level ` + "`verify`" + ` overrides the plan-level verify for that task
 - Respect task dependencies from tasks.md
 - Use specific agent names from the Available Agents table, or "worker" for default`
 }

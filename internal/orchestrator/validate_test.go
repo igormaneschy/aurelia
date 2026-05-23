@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
@@ -14,6 +16,7 @@ func TestValidate_FailedWorker(t *testing.T) {
 		context.Background(),
 		Task{ID: "1", Description: "test"},
 		TaskResult{TaskID: "1", Success: false, Error: "timeout"},
+		nil,
 		"validate prompt",
 	)
 	if err != nil {
@@ -39,6 +42,7 @@ func TestValidate_SetsCwd(t *testing.T) {
 		context.Background(),
 		Task{ID: "1", Prompt: "implement X"},
 		TaskResult{TaskID: "1", Success: true, Content: "done"},
+		nil,
 		"validate prompt",
 	)
 	if err != nil {
@@ -66,6 +70,7 @@ func TestValidate_ApprovedByBridge(t *testing.T) {
 		context.Background(),
 		Task{ID: "1", Description: "test", Prompt: "implement X"},
 		TaskResult{TaskID: "1", Success: true, Content: "implemented X"},
+		nil,
 		"validate prompt",
 	)
 	if err != nil {
@@ -88,6 +93,7 @@ func TestValidate_RejectedByBridge(t *testing.T) {
 		context.Background(),
 		Task{ID: "1"},
 		TaskResult{TaskID: "1", Success: true, Content: "did stuff"},
+		nil,
 		"validate",
 	)
 	if err != nil {
@@ -101,6 +107,112 @@ func TestValidate_RejectedByBridge(t *testing.T) {
 	}
 	if !vr.ShouldRetry {
 		t.Error("should suggest retry")
+	}
+}
+
+func TestValidateBridgeFailure_IsNotApproved(t *testing.T) {
+	fb := newFakeBridge()
+	fb.SetSyncErr(fmt.Errorf("bridge timeout"))
+	o := NewOrchestrator(fb, OrchestratorConfig{})
+
+	vr, err := o.Validate(
+		context.Background(),
+		Task{ID: "1"},
+		TaskResult{TaskID: "1", Success: true, Content: "done"},
+		nil,
+		"validate prompt",
+	)
+	if err == nil {
+		t.Fatal("expected error for bridge failure, got nil")
+	}
+	if vr != nil {
+		t.Error("expected nil ValidationResult on bridge failure")
+	}
+}
+
+func TestValidate_ReceivesDiffAndVerifyOutput(t *testing.T) {
+	fb := newFakeBridge()
+	fb.SetDefault(&bridge.Event{
+		Type:    "result",
+		Content: `{"approved": true, "issues": [], "should_retry": false}`,
+	})
+	o := NewOrchestrator(fb, OrchestratorConfig{})
+
+	artifacts := &ArtifactSnapshot{
+		ChangedFiles: []string{"main.go"},
+		DiffStat:     " main.go | 1 +\n",
+		Diff:         "diff --git a/main.go b/main.go\n+func main() {}",
+		Verify: &VerifyResult{
+			Command:  "go test ./...",
+			ExitCode: 0,
+			Stdout:   "ok",
+		},
+	}
+
+	vr, err := o.Validate(
+		context.Background(),
+		Task{ID: "1", Description: "implement main", Prompt: "add main func"},
+		TaskResult{TaskID: "1", Success: true, Content: "done"},
+		artifacts,
+		"validate prompt",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !vr.Approved {
+		t.Error("expected approved")
+	}
+
+	req := fb.LastRequest()
+	prompt := req.Prompt
+	if !strings.Contains(prompt, "Changed Files") {
+		t.Error("validation prompt should include changed files")
+	}
+	if !strings.Contains(prompt, "main.go") {
+		t.Error("validation prompt should include file name")
+	}
+	if !strings.Contains(prompt, "Diff Stat") {
+		t.Error("validation prompt should include diffstat")
+	}
+	if !strings.Contains(prompt, "Diff") {
+		t.Error("validation prompt should include diff")
+	}
+	if !strings.Contains(prompt, "Verify Result") {
+		t.Error("validation prompt should include verify result")
+	}
+	if !strings.Contains(prompt, "go test ./...") {
+		t.Error("validation prompt should include verify command")
+	}
+}
+
+func TestValidate_EmptyDiffRejectedForWriteTask(t *testing.T) {
+	fb := newFakeBridge()
+	fb.SetDefault(&bridge.Event{
+		Type:    "result",
+		Content: `{"approved": true, "issues": [], "should_retry": false}`,
+	})
+	o := NewOrchestrator(fb, OrchestratorConfig{})
+
+	// Write task with empty artifacts (no changes)
+	artifacts := &ArtifactSnapshot{ChangedFiles: []string{}}
+
+	vr, err := o.Validate(
+		context.Background(),
+		Task{ID: "1", Description: "write file", Prompt: "create foo.go", NeedsWorktree: true},
+		TaskResult{TaskID: "1", Success: true, Content: "done"},
+		artifacts,
+		"validate prompt",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// The bridge approved, but we check that the prompt included the warning
+	req := fb.LastRequest()
+	if !strings.Contains(req.Prompt, "no changes were detected") {
+		t.Error("validation prompt should warn about empty diff for write task")
+	}
+	if !vr.Approved {
+		t.Error("expected approved (bridge said yes, prompt warning is advisory)")
 	}
 }
 

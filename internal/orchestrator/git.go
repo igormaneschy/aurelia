@@ -1,25 +1,39 @@
 package orchestrator
 
 import (
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
 )
 
-// CommitChanges stages all changes and creates a commit with the given message.
-func CommitChanges(repoRoot, message string) error {
-	// Stage all changes
-	addCmd := exec.Command("git", "add", "-A")
+// ErrNothingToCommit is returned when CommitChanges is called with an empty
+// file list or when the staged diff is empty.
+var ErrNothingToCommit = errors.New("nothing to commit")
+
+// CommitChanges stages only the provided files and creates a commit.
+// If files is empty, it returns ErrNothingToCommit without running git.
+// Unrelated dirty files in the working tree are left unstaged.
+func CommitChanges(repoRoot string, files []string, message string) error {
+	if len(files) == 0 {
+		return ErrNothingToCommit
+	}
+
+	// Stage only the provided files (not git add -A).
+	args := append([]string{"add"}, files...)
+	addCmd := exec.Command("git", args...)
 	addCmd.Dir = repoRoot
 	if out, err := addCmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("git add: %w\n%s", err, out)
 	}
 
-	// Check if there's anything to commit
+	// Check if there's anything staged to commit
 	statusCmd := exec.Command("git", "diff", "--cached", "--quiet")
 	statusCmd.Dir = repoRoot
 	if err := statusCmd.Run(); err == nil {
-		return fmt.Errorf("nothing to commit")
+		// No diff means nothing staged → unstage and return sentinel error
+		_ = exec.Command("git", "reset", "HEAD").Run()
+		return ErrNothingToCommit
 	}
 
 	// Commit

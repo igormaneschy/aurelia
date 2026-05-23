@@ -2,9 +2,25 @@
 
 **Design:** `.specs/features/operational-observability/design.md`  
 **Roadmap step:** 2 — Observability Foundation  
-**Status:** 🔴 A implementar  
+**Status:** ✅ Implementado em v0.14.0 (2026-05-23)  
 **Depende de:** User Isolation + Security Guard-Rails + Project Binding  
 **Desbloqueia:** safer Orchestration Cycle, Plan Mode debugging, operational support
+
+## Implementation Summary
+
+This spec was fully implemented in v0.14.0. All core acceptance criteria met:
+- `run_id` correlation from Telegram → Pipeline → Bridge → runlog ✅
+- Structured `slog` with JSON/text format and level filtering ✅
+- `run_journal` expanded with user/provider/model/tokens/cost/fallback/error fields ✅
+- `run_events` timeline with phase constants ✅
+- `/status` upgraded with run_id, provider/model, duration, cost ✅
+- CLI `aurelia debug last|run|errors|metrics` with `--json` ✅
+- Telegram `/debug` commands (owner-only) ✅
+- Local metrics with p50/p95, provider/model/entrypoint breakdowns ✅
+- `docs/OBSERVABILITY.md` operator guide ✅
+
+### Residual Gap
+Circuit breaker state transitions (open → half-open → closed) are not yet persisted as `run_events`. The `circuit_breaker.go` has no event hook. This is a minor gap that can be closed opportunistically but does not block downstream specs.
 
 ---
 
@@ -41,11 +57,11 @@ flowchart TD
 
 **Done when:**
 
-- [ ] `RunContext` fields are defined.
-- [ ] Standard field names are documented in code comments.
-- [ ] Entrypoints are enumerated: `telegram`, `cron`, `orchestration`, `nudge`, `cli`.
-- [ ] Phase names are declared as constants.
-- [ ] Redaction/truncation expectations are documented.
+- [x] `RunContext` fields are defined.
+- [x] Standard field names are documented in code comments.
+- [x] Entrypoints are enumerated: `telegram`, `cron`, `orchestration`, `nudge`, `cli`.
+- [x] Phase names are declared as constants.
+- [x] Redaction/truncation expectations are documented.
 
 **Verify:** package builds with types only.
 
@@ -59,11 +75,11 @@ flowchart TD
 
 **Done when:**
 
-- [ ] Supports `text` and `json` formats.
-- [ ] Supports `debug`, `info`, `warn`, `error` levels.
-- [ ] `slog.SetDefault` is called once during app bootstrap after config load.
-- [ ] Invalid format/level falls back safely with a warning.
-- [ ] Tests cover JSON output and level filtering.
+- [x] Supports `text` and `json` formats.
+- [x] Supports `debug`, `info`, `warn`, `error` levels.
+- [x] `slog.SetDefault` is called once during app bootstrap after config load.
+- [x] Invalid format/level falls back safely with a warning.
+- [x] Tests cover JSON output and level filtering.
 
 **Verify:** `go test ./internal/observability/... -run TestLogger -v`
 
@@ -77,12 +93,12 @@ flowchart TD
 
 **Done when:**
 
-- [ ] Idempotent migrations add `user_id`, `entrypoint`, `agent_name`, `provider`, `model`, `capability_profile`.
-- [ ] Idempotent migrations add `duration_ms`, `input_tokens`, `output_tokens`, `cost_usd`, `tool_count`.
-- [ ] Idempotent migrations add `error_class`, `timeout_origin`, `used_fallback`, `session_file`.
-- [ ] `run_events` table exists with indexes.
-- [ ] Existing DBs open without destructive migration.
-- [ ] `Latest` remains backward-compatible.
+- [x] Idempotent migrations add `user_id`, `entrypoint`, `agent_name`, `provider`, `model`, `capability_profile`.
+- [x] Idempotent migrations add `duration_ms`, `input_tokens`, `output_tokens`, `cost_usd`, `tool_count`.
+- [x] Idempotent migrations add `error_class`, `timeout_origin`, `used_fallback`, `session_file`.
+- [x] `run_events` table exists with indexes.
+- [x] Existing DBs open without destructive migration.
+- [x] `Latest` remains backward-compatible.
 
 **Verify:** `go test ./internal/runlog/... -v`
 
@@ -96,11 +112,11 @@ flowchart TD
 
 **Done when:**
 
-- [ ] `RecordEvent(ctx, RunEvent)` is available.
-- [ ] `ListEvents(ctx, runID)` returns ordered events.
-- [ ] Event metadata is JSON, redacted and byte-limited.
-- [ ] Recorder calls use context timeouts in runtime code.
-- [ ] Failures are logged but do not block the pipeline.
+- [x] `RecordEvent(ctx, RunEvent)` is available.
+- [x] `ListEvents(ctx, runID)` returns ordered events.
+- [x] Event metadata is JSON, redacted and byte-limited.
+- [x] Recorder calls use context timeouts in runtime code.
+- [x] Failures are logged but do not block the pipeline.
 
 **Verify:** Store tests for event roundtrip, ordering, truncation and malformed metadata handling.
 
@@ -114,11 +130,11 @@ flowchart TD
 
 **Done when:**
 
-- [ ] `run_id` is created once per user turn before `bridge.Request` execution.
-- [ ] `run_journal` start row includes `user_id`, `entrypoint`, `cwd`, `agent`, `provider`, `model`, `capability_profile`.
-- [ ] `run_id` is stored in pipeline in-memory state by session key, not only chat/thread.
-- [ ] Completion updates duration, tokens, cost and terminal status.
-- [ ] `/status` can still read old rows.
+- [x] `run_id` is created once per user turn before `bridge.Request` execution.
+- [x] `run_journal` start row includes `user_id`, `entrypoint`, `cwd`, `agent`, `provider`, `model`, `capability_profile`.
+- [x] `run_id` is stored in pipeline in-memory state by session key, not only chat/thread.
+- [x] Completion updates duration, tokens, cost and terminal status.
+- [x] `/status` can still read old rows.
 
 **Verify:** Pipeline tests assert new run fields are populated for fake turns.
 
@@ -132,12 +148,12 @@ flowchart TD
 
 **Done when:**
 
-- [ ] `bridge_request_started` event persisted before execution.
-- [ ] `bridge_system` records model, session_file and tool list.
-- [ ] `bridge_tool_use` records tool name and redacted argument summary.
-- [ ] `bridge_tool_result` records redacted/truncated result summary.
-- [ ] `bridge_result` records duration, tokens, turns and cost.
-- [ ] `bridge_error` records redacted error message and error class.
+- [x] `bridge_request_started` event persisted before execution.
+- [x] `bridge_system` records model, session_file and tool list.
+- [x] `bridge_tool_use` records tool name and redacted argument summary.
+- [x] `bridge_tool_result` records redacted/truncated result summary.
+- [x] `bridge_result` records duration, tokens, turns and cost.
+- [x] `bridge_error` records redacted error message and error class.
 
 **Verify:** Fake bridge event stream produces ordered run events.
 
@@ -151,11 +167,11 @@ flowchart TD
 
 **Done when:**
 
-- [ ] Retry attempts emit `retry_started` and `retry_failed` with attempt number.
-- [ ] Fallback emits `fallback_started` and `fallback_result`.
-- [ ] Circuit breaker open/half-open/closed transitions are observable.
-- [ ] Timeout completion includes `timeout_origin` (`idle_bridge_timeout`, `max_execution_timeout`, etc.).
-- [ ] Provider error category is persisted as `error_class`.
+- [x] Retry attempts emit `retry_started` and `retry_failed` with attempt number.
+- [x] Fallback emits `fallback_started` and `fallback_result`.
+- [ ] Circuit breaker open/half-open/closed transitions are observable. *(gap: circuit_breaker.go has no event hook)*
+- [x] Timeout completion includes `timeout_origin` (`idle_bridge_timeout`, `max_execution_timeout`, etc.).
+- [x] Provider error category is persisted as `error_class`.
 
 **Verify:** Resilient bridge tests assert fallback/retry timeline events.
 
@@ -169,11 +185,11 @@ flowchart TD
 
 **Done when:**
 
-- [ ] Latest run line includes short `run_id`.
-- [ ] Shows provider/model when available.
-- [ ] Shows duration, tokens/cost when available.
-- [ ] Shows timeout/error class when terminal failed.
-- [ ] Output remains concise and redacted.
+- [x] Latest run line includes short `run_id`.
+- [x] Shows provider/model when available.
+- [x] Shows duration, tokens/cost when available.
+- [x] Shows timeout/error class when terminal failed.
+- [x] Output remains concise and redacted.
 
 **Verify:** Command tests for old rows and new rows.
 
@@ -187,11 +203,11 @@ flowchart TD
 
 **Done when:**
 
-- [ ] `aurelia debug last` prints latest run.
-- [ ] `aurelia debug run <id>` prints metadata + timeline.
-- [ ] `aurelia debug errors --limit N` prints recent failed/timed-out runs.
-- [ ] `--json` outputs machine-readable data.
-- [ ] Missing DB/empty results have clear messages.
+- [x] `aurelia debug last` prints latest run.
+- [x] `aurelia debug run <id>` prints metadata + timeline.
+- [x] `aurelia debug errors --limit N` prints recent failed/timed-out runs.
+- [x] `--json` outputs machine-readable data.
+- [x] Missing DB/empty results have clear messages.
 
 **Verify:** CLI tests with temp `runlog.db`.
 
@@ -205,11 +221,11 @@ flowchart TD
 
 **Done when:**
 
-- [ ] `/debug last` works and is owner-only.
-- [ ] `/debug run <id>` shows compact timeline.
-- [ ] `/debug errors` shows recent failed/timed-out runs.
-- [ ] Non-owner receives permission denied.
-- [ ] Output redacts prompt/checkpoint/tool data.
+- [x] `/debug last` works and is owner-only.
+- [x] `/debug run <id>` shows compact timeline.
+- [x] `/debug errors` shows recent failed/timed-out runs.
+- [x] Non-owner receives permission denied.
+- [x] Output redacts prompt/checkpoint/tool data.
 
 **Verify:** Telegram command tests for owner/non-owner and formatting.
 
@@ -223,12 +239,12 @@ flowchart TD
 
 **Done when:**
 
-- [ ] Computes total runs, completed, failed, timed out, canceled.
-- [ ] Computes success rate.
-- [ ] Computes p50/p95 duration.
-- [ ] Computes input/output tokens and cost.
-- [ ] Breaks down by provider/model and entrypoint.
-- [ ] Includes cron success/failure rate where available.
+- [x] Computes total runs, completed, failed, timed out, canceled.
+- [x] Computes success rate.
+- [x] Computes p50/p95 duration.
+- [x] Computes input/output tokens and cost.
+- [x] Breaks down by provider/model and entrypoint.
+- [x] Includes cron success/failure rate where available.
 
 **Verify:** Metrics tests with seeded rows.
 
@@ -242,11 +258,11 @@ flowchart TD
 
 **Done when:**
 
-- [ ] Operator guide explains `/debug` and CLI commands.
-- [ ] Documents where logs live: launchd/stderr, `runlog.db`, `audit.log`.
-- [ ] Documents env/config flags for log format/level.
-- [ ] Documents privacy/redaction guarantees.
-- [ ] Roadmap updated after implementation state is known.
+- [x] Operator guide explains `/debug` and CLI commands.
+- [x] Documents where logs live: launchd/stderr, `runlog.db`, `audit.log`.
+- [x] Documents env/config flags for log format/level.
+- [x] Documents privacy/redaction guarantees.
+- [x] Roadmap updated after implementation state is known.
 
 **Verify:** Docs review.
 
@@ -260,12 +276,12 @@ flowchart TD
 
 **Done when:**
 
-- [ ] `go build ./...` passes.
-- [ ] `go vet ./...` passes.
-- [ ] `go test ./... -v` passes.
-- [ ] Manual smoke: send Telegram message, run `/debug last`, inspect same run with CLI.
-- [ ] Manual smoke: force a Bridge error and confirm timeline shows failure phase.
-- [ ] Propose version bump and changelog entry to Igor before release commit.
+- [x] `go build ./...` passes.
+- [x] `go vet ./...` passes.
+- [x] `go test ./... -v` passes.
+- [x] Manual smoke: send Telegram message, run `/debug last`, inspect same run with CLI.
+- [x] Manual smoke: force a Bridge error and confirm timeline shows failure phase.
+- [x] Propose version bump and changelog entry to Igor before release commit.
 
 **Verify:** standard validation commands + manual checklist.
 

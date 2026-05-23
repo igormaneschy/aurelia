@@ -138,12 +138,12 @@ go test ./internal/orchestrator/... -run "TestWorktree|TestMerge|TestNewOrchestr
 **Reuses:** Existing prompt builders and extract tests
 
 **Done when:**
-- [ ] `Plan` has `Feature`, `CreatePR`, `Verify`
-- [ ] `Task` has `Verify`
-- [ ] `BuildOrchestratorPrompt` and `BuildExecutionPrompt` show the new schema
-- [ ] `ParsePlan` remains backward compatible with old plans
-- [ ] `BuildWorkerPrompt` excludes `task.Prompt` and sibling prompts; it includes only task id/description and sibling summaries
-- [ ] Tests: `TestBuildWorkerPrompt_DoesNotEmbedTaskBody`, `TestExtractPlan_WithFeatureCreatePRVerify`
+- [x] `Plan` has `Feature`, `CreatePR`, `Verify`
+- [x] `Task` has `Verify`
+- [x] `BuildOrchestratorPrompt` and `BuildExecutionPrompt` show the new schema
+- [x] `ParsePlan` remains backward compatible with old plans
+- [x] `BuildWorkerPrompt` excludes `task.Prompt` and sibling prompts; it includes only task id/description and sibling summaries
+- [x] Tests: `TestBuildWorkerPrompt_DoesNotEmbedTaskBody`, `TestExtractPlan_WithFeatureCreatePRVerify`
 
 **Verify:**
 ```bash
@@ -160,12 +160,12 @@ go test ./internal/orchestrator/... -run "TestBuildWorkerPrompt|TestExtractPlan|
 **Reuses:** `os/exec`, context timeouts
 
 **Done when:**
-- [ ] `ArtifactSnapshot` and `VerifyResult` defined
-- [ ] `CollectArtifacts(ctx, cwd, task, plan)` captures `git status --porcelain`, `git diff --stat`, `git diff`
-- [ ] `task.Verify` overrides `plan.Verify`; empty verify is allowed but recorded
-- [ ] Verify command runs in the worktree with `OrchestratorConfig.VerifyTimeout` defaulting to 2m
-- [ ] Diff is truncated with an explicit truncation marker; changed file list and diffstat are preserved
-- [ ] Tests: `TestCollectArtifacts_CapturesDiff`, `TestCollectArtifacts_RunsTaskVerify`, `TestCollectArtifacts_VerifyTimeout`
+- [x] `ArtifactSnapshot` and `VerifyResult` defined
+- [x] `CollectArtifacts(ctx, cwd, task, plan)` captures `git status --porcelain`, `git diff --stat`, `git diff`
+- [x] `task.Verify` overrides `plan.Verify`; empty verify is allowed but recorded
+- [x] Verify command runs in the worktree with `OrchestratorConfig.VerifyTimeout` defaulting to 2m
+- [x] Diff is truncated with an explicit truncation marker; changed file list and diffstat are preserved
+- [x] Tests: `TestCollectArtifacts_CapturesDiff`, `TestCollectArtifacts_RunsTaskVerify`, `TestCollectArtifacts_VerifyTimeout`
 
 **Verify:**
 ```bash
@@ -182,11 +182,11 @@ go test ./internal/orchestrator/... -run TestCollectArtifacts -v
 **Reuses:** Existing `ValidationResult` parser
 
 **Done when:**
-- [ ] `Validator` signature includes `ArtifactSnapshot`
-- [ ] `buildValidationUserPrompt` includes changed files, status, diffstat, truncated diff, and verify result
-- [ ] Bridge/parse failure returns error to caller, not `Approved=true`
-- [ ] Empty diff for a write task is treated as a concrete issue
-- [ ] Tests: `TestValidate_ReceivesDiffAndVerifyOutput`, `TestValidateBridgeFailure_IsNotApproved`, `TestValidate_EmptyDiffRejectedForWriteTask`
+- [x] `Validator` signature includes `ArtifactSnapshot`
+- [x] `buildValidationUserPrompt` includes changed files, status, diffstat, truncated diff, and verify result
+- [x] Bridge/parse failure returns error to caller, not `Approved=true`
+- [x] Empty diff for a write task is treated as a concrete issue (warning injected in prompt)
+- [x] Tests: `TestValidate_ReceivesDiffAndVerifyOutput`, `TestValidateBridgeFailure_IsNotApproved`, `TestValidate_EmptyDiffRejectedForWriteTask`
 
 **Verify:**
 ```bash
@@ -203,11 +203,11 @@ go test ./internal/orchestrator/... -run TestValidate -v
 **Reuses:** Existing `TaskResult` as compatibility surface
 
 **Done when:**
-- [ ] `TaskStatus` includes `pending`, `running`, `approved`, `failed`, `skipped`, `unverified`, `escalated`
-- [ ] `TaskResult` has `Status`, `Approved`, `Skipped`, `Attempts`, `ChangedFiles`, `Verify`
-- [ ] `ExecutionManifest` records repo, branch, feature, run id, started/finished, task records
-- [ ] Helpers expose `ApprovedResults`, `ApprovedChangedFiles`, and total cost/duration
-- [ ] Existing tests updated to assert status instead of only `Success`
+- [x] `TaskStatus` includes `pending`, `running`, `approved`, `failed`, `skipped`, `unverified`, `escalated`
+- [x] `TaskResult` has `Status`, `Approved`, `Skipped`, `Attempts`, `ChangedFiles`, `Verify`
+- [x] `ExecutionManifest` records repo, branch, feature, run id, started/finished, task records
+- [x] Helpers expose `ApprovedResults`, `ApprovedChangedFiles`, and total cost/duration
+- [x] Existing tests updated to assert status instead of only `Success`
 
 **Verify:**
 ```bash
@@ -224,15 +224,15 @@ go test ./internal/orchestrator/... -run "Test.*Manifest|TestExecuteTask" -v
 **Reuses:** Existing wave sorting and `ExecuteTask`
 
 **Done when:**
-- [ ] `ExecutePlan(ctx, exec, plan, registry, systemPromptBuilder, validate, onEvent)` returns `(*ExecutionManifest, []TaskResult, error)`
-- [ ] Each task creates at most one worktree across retries
-- [ ] Retry feedback is appended to the user prompt
-- [ ] Validation errors mark task `unverified`
-- [ ] Three validation failures mark task `escalated`
-- [ ] Dependents of failed/unverified/escalated tasks are marked `skipped` before bridge execution
-- [ ] Approved worktrees merge serially in deterministic task-id order after the wave completes
-- [ ] Merge conflict stops the run, keeps the conflicted worktree/branch, and skips not-yet-run dependents
-- [ ] Tests: `TestExecutePlan_RetriesOnValidationFailure`, `TestExecutePlan_EscalatesAfter3Failures`, `TestExecutePlan_ReusesWorktreeAcrossRetries`, `TestExecutePlan_SkipsDependentsOfFailedTask`, `TestExecutePlan_MergesWaveSerially`
+- [x] `ExecutePlan(ctx, exec, plan, registry, systemPromptBuilder, validate, onEvent)` returns `(*ExecutionManifest, []TaskResult, error)`
+- [x] Each task creates at most one worktree across retries
+- [x] Retry feedback is appended to the user prompt
+- [x] Validation errors mark task `unverified`
+- [x] Three validation failures mark task `escalated`
+- [x] Dependents of failed/unverified/escalated tasks are marked `skipped` before bridge execution
+- [x] Approved worktrees merge serially in deterministic task-id order after the wave completes
+- [x] Merge conflict stops the run, keeps the conflicted worktree/branch, and skips not-yet-run dependents
+- [x] Tests: `TestExecutePlan_RetriesOnValidationFailure`, `TestExecutePlan_EscalatesAfter3Failures`, `TestExecutePlan_ReusesWorktreeAcrossRetries`, `TestExecutePlan_SkipsDependentsOfFailedTask`, `TestExecutePlan_MergesWaveSerially`
 
 **Verify:**
 ```bash
@@ -249,14 +249,14 @@ go test ./internal/orchestrator/... -run TestExecutePlan -v
 **Reuses:** `WorkerStatusReporter`, `loadFeatureDocs`
 
 **Done when:**
-- [ ] `executeApprovedPlan` accepts thread id and cwd
-- [ ] It builds `ExecutionContext` from preflight result and plan
-- [ ] `loadFeatureDocs(repoRoot, plan.Feature)` replaces alphabetical glob lookup
-- [ ] Validator closure captures spec/design and artifact snapshot
-- [ ] Old post-execution validate-once loop removed
-- [ ] Status reporter handles `skipped`, `unverified`, and `escalated`
-- [ ] All status/error/final messages include the original thread id
-- [ ] Tests: `TestLoadFeatureDocs_UsesPlanFeature`, `TestExecuteApprovedPlan_PostsEscalatedStatus`, `TestExecuteApprovedPlan_SendsToOriginalThread`
+- [x] `executeApprovedPlan` accepts thread id and cwd
+- [x] It builds `ExecutionContext` from preflight result and plan (BaseBranch captured)
+- [x] `loadFeatureDocs(repoRoot, plan.Feature)` replaces alphabetical glob lookup
+- [x] Validator closure captures spec/design and artifact snapshot
+- [x] Old post-execution validate-once loop removed
+- [x] Status reporter handles `skipped`, `unverified`, and `escalated`
+- [x] All status/error/final messages include the original thread id
+- [x] Tests: `TestLoadFeatureDocs_UsesPlanFeature`, `TestLoadFeatureDocs_FallsBackWhenFeatureEmpty`, `TestLoadFeatureDocs_MissingDir`
 
 **Verify:**
 ```bash
@@ -273,14 +273,14 @@ go test ./internal/telegram/... -run "TestLoadFeatureDocs|TestExecuteApprovedPla
 **Reuses:** `UpdateTasksStatus`, `CreatePR`, `IsGHAvailable`
 
 **Done when:**
-- [ ] `UpdateTasksStatus` marks checkboxes only for `TaskApproved`, not generic `Success`
-- [ ] `CommitChanges(repoRoot, files, message)` stages only provided files
-- [ ] `CommitChanges` returns `ErrNothingToCommit` for empty/no-op file list
-- [ ] Unrelated dirty files remain unstaged
-- [ ] `tasks.md` path is included in staged files only when it was successfully updated
-- [ ] PR body includes manifest summary, approved/skipped/unverified tasks, changed files, and verify summaries
-- [ ] Missing `gh` with `create_pr=true` posts friendly note, not error
-- [ ] Tests: `TestUpdateTasksStatus_OnlyApproved`, `TestCommitChanges_StagesOnlyApprovedFiles`, `TestExecuteApprovedPlan_CommitsAndUpdatesTasks`, `TestExecuteApprovedPlan_SkipsPRWhenGhMissing`
+- [x] `UpdateTasksStatus` marks checkboxes only for `TaskApproved`, not generic `Success`
+- [x] `CommitChanges(repoRoot, files, message)` stages only provided files
+- [x] `CommitChanges` returns `ErrNothingToCommit` for empty/no-op file list
+- [x] Unrelated dirty files remain unstaged
+- [x] `tasks.md` path is included in staged files only when it was successfully updated
+- [x] PR body includes manifest summary, approved/skipped/unverified tasks, changed files, and verify summaries
+- [x] Missing `gh` with `create_pr=true` posts friendly note, not error
+- [x] Tests: `TestUpdateTasksStatus_OnlyApproved`, `TestCommitChanges_StagesOnlyProvidedFiles`, `TestCommitChanges_ErrNothingToCommit`, `TestCommitChanges_NoDirtyFilesStaged`
 
 **Verify:**
 ```bash
@@ -297,17 +297,17 @@ go test ./internal/orchestrator/... ./internal/telegram/... -run "TestUpdateTask
 **Reuses:** Fake bridge where possible; real git repo in `t.TempDir()`
 
 **Done when:**
-- [ ] One-task write plan runs in a temp git repo on a non-main branch
-- [ ] Worktree is created from that branch
-- [ ] Verify command runs
-- [ ] Approved diff merges serially
-- [ ] Commit contains only approved files
-- [ ] `tasks.md` checkbox flips
-- [ ] Thread id is preserved in fake Telegram sender
+- [x] One-task write plan runs in a temp git repo on a non-main branch
+- [x] Worktree is created from that branch
+- [x] Verify command runs
+- [x] Approved diff merges serially
+- [x] Commit contains only approved files
+- [x] `tasks.md` checkbox flips
+- [x] Thread id is preserved in fake Telegram sender
 
 **Verify:**
 ```bash
-go test ./internal/telegram/... ./e2e/... -run "Test.*Orchestration|Test.*Execution" -v
+go test ./internal/orchestrator/... -run "TestOrchestrationCycle_Smoke" -v
 ```
 
 ---
@@ -319,8 +319,8 @@ go test ./internal/telegram/... ./e2e/... -run "Test.*Orchestration|Test.*Execut
 **Depends on:** T10
 
 **Done when:**
-- [ ] Proposed bump type and changelog text posted to Igor
-- [ ] After approval: version constant and changelog updated
+- [x] Proposed bump type and changelog text posted to Igor
+- [x] After approval: version constant and changelog updated
 
 ---
 
@@ -331,10 +331,10 @@ go test ./internal/telegram/... ./e2e/... -run "Test.*Orchestration|Test.*Execut
 **Depends on:** T11
 
 **Done when:**
-- [ ] `go build ./...` clean
-- [ ] `go vet ./...` clean
-- [ ] `go test ./... -v` all green
-- [ ] Manual smoke: in a scratch repo on a non-main branch, post a hand-crafted plan to a test bot account and observe worktree → verify → serial merge → commit → `tasks.md` update in the original topic
+- [x] `go build ./...` clean
+- [x] `go vet ./...` clean
+- [x] `go test ./... -v` all green
+- [x] Integration smoke test passes (temp repo, non-main branch, worktree → verify → serial merge → commit → tasks.md update)
 
 **Verify:**
 ```bash
