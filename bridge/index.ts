@@ -1294,6 +1294,87 @@ async function handleCompactSession(req: Request): Promise<void> {
   }
 }
 
+// ── Handle rotate-session command ───────────────────────────────────────────
+
+async function handleRotateSession(req: Request): Promise<void> {
+  const reqId = req.request_id || "";
+  const opts = req.options;
+  const emitReq = (obj: OutEvent) => emit({ ...obj, request_id: reqId });
+
+  try {
+    // 1. Open current session to get stats and generate summary
+    const oldPiSession = await createPiSession(opts);
+    const oldSession = oldPiSession.session;
+
+    // Get stats for summary context
+    const stats = oldSession.getSessionStats();
+
+    // Generate compact summary of the old session
+    const compactionResult = await oldSession.compact(
+      "Summarize the session's goal, current state, completed work, " +
+      "in-progress items, key decisions, files read/modified, and next actions."
+    );
+
+    const summary = compactionResult?.summary ?? "";
+    const sessionId = oldSession.sessionId;
+    const oldFile = oldSession.sessionFile;
+
+    redactedLog(`rotate: old session id=${sessionId} file=${oldFile} tokens=${stats.tokens.total}`);
+
+    // Emit progress
+    emitReq({ event: "system", message: "Generating session summary..." });
+
+    // Dispose old session (don't need to keep it alive after compaction)
+    oldSession.dispose();
+
+    // 2. Create a new fresh session with same options (cwd, model, tools, security)
+    // Force no-resume by clearing resume/continue
+    const newOpts: RequestOptions = { ...opts };
+    newOpts.resume = undefined;
+    newOpts.continue = false;
+    newOpts.persist_session = true;
+
+    const newPiSession = await createPiSession(newOpts);
+    const newSession = newPiSession.session;
+    const newFile = newSession.sessionFile;
+    const newId = newSession.sessionId;
+
+    redactedLog(`rotate: new session id=${newId} file=${newFile}`);
+
+    // 3. Inject structured summary as untrusted context
+    const summaryBlock = `<previous_session_summary_untrusted>
+${summary}
+</previous_session_summary_untrusted>`;
+
+    // Send as initial user message so the agent has context
+    await newSession.sendUserMessage([{ type: "text", text: summaryBlock }]);
+
+    // Wait briefly for the message to be processed
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    emitReq({
+      event: "result",
+      content: JSON.stringify({
+        success: true,
+        old_session_file: oldFile,
+        old_session_id: sessionId,
+        new_session_file: newFile,
+        new_session_id: newId,
+        summary_length: summary.length,
+        tokens_before: stats.tokens.total,
+      }),
+    });
+
+    // Dispose the new session — the Go side will store the new file path
+    // and the bridge will open it fresh on the next query.
+    newSession.dispose();
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    redactedLog(`rotate-session error: rid=${reqId} ${errMsg}`);
+    emitReq({ event: "error", message: redactSDKError(errMsg) });
+  }
+}
+
 // ── Handle incoming request ──────────────────────────────────────────────────
 
 async function handleRequest(line: string): Promise<void> {
@@ -1413,6 +1494,11 @@ async function handleRequest(line: string): Promise<void> {
 
     case "compact-session": {
       await handleCompactSession(req);
+      break;
+    }
+
+    case "rotate-session": {
+      await handleRotateSession(req);
       break;
     }
 

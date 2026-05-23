@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"path/filepath"
 	"time"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
@@ -108,20 +109,59 @@ func (s *Service) applyLifecycle(req *bridge.Request, chatID int64, threadID int
 		}
 
 	case session.ActionRotate:
-		// For now, force cold resume. T10 will implement full rotation.
-		log.Printf("lifecycle: rotate needed for chat=%d — falling back to cold resume until rotation is implemented", chatID)
+		result, err := s.rotateSession(context.Background(), chatID, threadID, userID, req.Options)
+		if err != nil {
+			log.Printf("lifecycle: rotation failed for chat=%d: %v — falling back to cold resume", chatID, err)
+			req.Options.Continue = false
+			return lifecycleDecisionResult{
+				Decision: session.Decision{
+					State:  session.HealthSuspect,
+					Action: session.ActionColdResume,
+					Reason: fmt.Sprintf("rotation failed: %v", err),
+				},
+				ModifiedReq: req,
+			}
+		}
+
+		log.Printf("lifecycle: rotation succeeded for chat=%d old=%s new=%s",
+			chatID, filepath.Base(result.OldSessionFile), filepath.Base(result.NewSessionFile))
+
+		// Update session store with new session file
+		if s.sessions != nil {
+			s.sessions.SetSession(chatID, threadID, userID, result.NewSessionFile)
+			s.sessions.ClearFailureState(chatID, threadID, userID)
+		}
+
+		// Resume the new session without continuing (cold start)
+		req.Options.Resume = result.NewSessionFile
 		req.Options.Continue = false
 		return lifecycleDecisionResult{
-			Decision: session.Decision{
-				State:  session.HealthCold,
-				Action: session.ActionColdResume,
-				Reason: "rotate not yet implemented, using cold resume",
-			},
+			Decision:    dec,
 			ModifiedReq: req,
 		}
 	}
 
 	return lifecycleDecisionResult{Decision: dec}
+}
+
+// rotateSession runs the rotate-session bridge command with a timeout.
+func (s *Service) rotateSession(ctx context.Context, chatID int64, threadID int, userID int64, opts bridge.RequestOptions) (*bridge.RotateSessionResult, error) {
+	if s.bridge == nil {
+		return nil, fmt.Errorf("bridge not available")
+	}
+
+	rotateCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	// Ensure resume path is set
+	if opts.Resume == "" && s.sessions != nil {
+		opts.Resume = s.sessions.GetSession(chatID, threadID, userID)
+	}
+	opts.ChatID = chatID
+	opts.ThreadID = threadID
+	opts.UserID = userID
+
+	return s.bridge.RotateSession(rotateCtx, opts)
 }
 
 // compactSession runs the compact-session bridge command with a timeout.

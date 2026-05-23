@@ -504,6 +504,40 @@ func (b *Bridge) Ping(ctx context.Context) error {
 	return nil
 }
 
+// RotateSessionResult holds the result of a rotate-session command.
+type RotateSessionResult struct {
+	Success       bool   `json:"success"`
+	OldSessionFile string `json:"old_session_file,omitempty"`
+	OldSessionID  string `json:"old_session_id,omitempty"`
+	NewSessionFile string `json:"new_session_file,omitempty"`
+	NewSessionID  string `json:"new_session_id,omitempty"`
+	SummaryLength int    `json:"summary_length,omitempty"`
+	TokensBefore  int    `json:"tokens_before,omitempty"`
+}
+
+// RotateSession rotates a session by compacting the old one and creating a new
+// one seeded with the structured summary. Returns the new session file path.
+func (b *Bridge) RotateSession(ctx context.Context, opts RequestOptions) (*RotateSessionResult, error) {
+	ev, err := b.ExecuteSync(ctx, Request{
+		Command: "rotate-session",
+		Options: opts,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("bridge: rotate-session: %w", err)
+	}
+	if ev.Type == "error" {
+		return nil, fmt.Errorf("bridge: rotate-session error: %s", ev.Message)
+	}
+	if ev.Content == "" {
+		return nil, nil
+	}
+	var result RotateSessionResult
+	if err := json.Unmarshal([]byte(ev.Content), &result); err != nil {
+		return nil, fmt.Errorf("bridge: rotate-session parse: %w", err)
+	}
+	return &result, nil
+}
+
 // CompactSessionResult holds the result of a compact-session command.
 type CompactSessionResult struct {
 	Success     bool   `json:"success"`

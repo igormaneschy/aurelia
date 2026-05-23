@@ -1009,3 +1009,134 @@ rl.on('close', () => process.exit(0));
 		t.Fatal("expected nil result for empty content")
 	}
 }
+
+const rotateSessionMockJS = `
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+
+rl.on('line', (line) => {
+    const req = JSON.parse(line);
+    const rid = req.request_id || "";
+
+    if (req.command === "rotate-session") {
+        process.stdout.write(JSON.stringify({
+            event: "result",
+            request_id: rid,
+            content: JSON.stringify({
+                success: true,
+                old_session_file: "/tmp/sessions/old.jsonl",
+                old_session_id: "old-abc-123",
+                new_session_file: "/tmp/sessions/new.jsonl",
+                new_session_id: "new-xyz-789",
+                summary_length: 450,
+                tokens_before: 180000,
+            }),
+        }) + "\n");
+    } else if (req.command === "ping") {
+        process.stdout.write(JSON.stringify({event:"pong",request_id:rid}) + "\n");
+    } else {
+        process.stdout.write(JSON.stringify({event:"error",request_id:rid,message:"unknown command: " + req.command}) + "\n");
+    }
+});
+
+rl.on('close', () => process.exit(0));
+`
+
+func TestBridge_RotateSession_Success(t *testing.T) {
+	dir := t.TempDir()
+	b := newMockBridge(t, dir, rotateSessionMockJS)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := b.RotateSession(ctx, RequestOptions{
+		Resume: "/tmp/sessions/old.jsonl",
+	})
+	if err != nil {
+		t.Fatalf("RotateSession() error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if !result.Success {
+		t.Fatal("expected success")
+	}
+	if result.OldSessionFile != "/tmp/sessions/old.jsonl" {
+		t.Fatalf("OldSessionFile = %q, want %q", result.OldSessionFile, "/tmp/sessions/old.jsonl")
+	}
+	if result.NewSessionFile != "/tmp/sessions/new.jsonl" {
+		t.Fatalf("NewSessionFile = %q, want %q", result.NewSessionFile, "/tmp/sessions/new.jsonl")
+	}
+	if result.OldSessionID != "old-abc-123" {
+		t.Fatalf("OldSessionID = %q, want %q", result.OldSessionID, "old-abc-123")
+	}
+	if result.NewSessionID != "new-xyz-789" {
+		t.Fatalf("NewSessionID = %q, want %q", result.NewSessionID, "new-xyz-789")
+	}
+	if result.SummaryLength != 450 {
+		t.Fatalf("SummaryLength = %d, want 450", result.SummaryLength)
+	}
+	if result.TokensBefore != 180000 {
+		t.Fatalf("TokensBefore = %d, want 180000", result.TokensBefore)
+	}
+}
+
+func TestBridge_RotateSession_Error(t *testing.T) {
+	dir := t.TempDir()
+
+	rotateErrorMock := `
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+
+rl.on('line', (line) => {
+    const req = JSON.parse(line);
+    const rid = req.request_id || "";
+    process.stdout.write(JSON.stringify({event:"error",request_id:rid,message:"rotate failed: session not found"}) + "\n");
+});
+
+rl.on('close', () => process.exit(0));
+`
+	b := newMockBridge(t, dir, rotateErrorMock)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := b.RotateSession(ctx, RequestOptions{
+		Resume: "/tmp/missing.jsonl",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "rotate failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBridge_RotateSession_EmptyContent(t *testing.T) {
+	dir := t.TempDir()
+
+	emptyRotateMock := `
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+
+rl.on('line', (line) => {
+    const req = JSON.parse(line);
+    const rid = req.request_id || "";
+    process.stdout.write(JSON.stringify({event:"result",request_id:rid,content:""}) + "\n");
+});
+
+rl.on('close', () => process.exit(0));
+`
+	b := newMockBridge(t, dir, emptyRotateMock)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := b.RotateSession(ctx, RequestOptions{})
+	if err != nil {
+		t.Fatalf("RotateSession() error: %v", err)
+	}
+	if result != nil {
+		t.Fatal("expected nil result for empty content")
+	}
+}
