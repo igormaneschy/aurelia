@@ -63,6 +63,17 @@ func (bc *BotController) processInputWithImages(c telebot.Context, text string, 
 		}
 	}
 
+	if isContinueResumeText(text) && bc.sessions != nil {
+		chatID := c.Chat().ID
+		threadID := c.Message().ThreadID
+		if sessionFile, active := bc.sessions.GetSessionWithState(chatID, threadID, senderID); sessionFile != "" && !active {
+			if err := SendContextText(c, interruptedResumeAck(sessionFile)); err != nil {
+				return err
+			}
+			return bc.runPipeline(chatID, threadID, c.Message().ID, interruptedResumePrompt(), images, senderID)
+		}
+	}
+
 	if cmd := MatchCommand(text); cmd != nil {
 		return bc.handleCommand(c, cmd)
 	}

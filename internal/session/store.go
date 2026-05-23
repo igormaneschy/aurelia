@@ -44,6 +44,16 @@ type entry struct {
 	lastSeen    time.Time
 }
 
+// Info is a read-only view of a stored PI session.
+type Info struct {
+	ChatID      int64
+	ThreadID    int
+	UserID      int64
+	SessionFile string
+	Active      bool
+	LastSeen    time.Time
+}
+
 // NewStore creates a new session store.
 func NewStore() *Store {
 	return &Store{
@@ -246,6 +256,28 @@ func (s *Store) GetSessionWithState(chatID int64, threadID int, userID int64) (s
 	}
 	e.lastSeen = time.Now()
 	return e.sessionFile, e.active
+}
+
+// RecentColdSessions returns inactive sessions seen within maxAge.
+func (s *Store) RecentColdSessions(maxAge time.Duration) []Info {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	cutoff := time.Now().Add(-maxAge)
+	infos := make([]Info, 0)
+	for key, e := range s.sessions {
+		if e == nil || e.active || e.sessionFile == "" || e.lastSeen.Before(cutoff) {
+			continue
+		}
+		infos = append(infos, Info{
+			ChatID:      key.ChatID,
+			ThreadID:    key.ThreadID,
+			UserID:      key.UserID,
+			SessionFile: e.sessionFile,
+			Active:      e.active,
+			LastSeen:    e.lastSeen,
+		})
+	}
+	return infos
 }
 
 // SetSession creates or updates a session for a specific chat, thread, and user.

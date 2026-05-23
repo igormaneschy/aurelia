@@ -480,6 +480,15 @@ func (a *app) start() {
 	}
 	a.startSessionGC()
 	go a.bot.Start()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("panic in interrupted session notifier: %v", r)
+			}
+		}()
+		time.Sleep(2 * time.Second)
+		a.bot.NotifyRecentInterruptedSessions(telegram.InterruptedSessionMaxAge)
+	}()
 }
 
 func (a *app) startSessionGC() {

@@ -3,6 +3,7 @@ package session
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestPersistentStoreRestoresSessionsCold(t *testing.T) {
@@ -29,6 +30,14 @@ func TestPersistentStoreRestoresSessionsCold(t *testing.T) {
 	}
 	if cwd := restored.GetCwd(42, 99); cwd != "/repo" {
 		t.Fatalf("expected restored cwd, got %q", cwd)
+	}
+
+	recent := restored.RecentColdSessions(time.Minute)
+	if len(recent) != 1 {
+		t.Fatalf("expected one recent cold session, got %d", len(recent))
+	}
+	if recent[0].ChatID != 42 || recent[0].ThreadID != 99 || recent[0].UserID != 100 {
+		t.Fatalf("unexpected recent session: %+v", recent[0])
 	}
 }
 
