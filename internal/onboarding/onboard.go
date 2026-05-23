@@ -310,7 +310,7 @@ func validateTelegramToken(token string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to reach Telegram API: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	var result struct {
 		OK     bool `json:"ok"`

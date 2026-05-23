@@ -10,13 +10,16 @@ LOG_DIR       := $(HOME)/.aurelia/logs
 STDERR_LOG    := $(LOG_DIR)/aurelia.stderr.log
 STDOUT_LOG    := $(LOG_DIR)/aurelia.stdout.log
 
-.PHONY: help build test vet bridge install install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
+.PHONY: help build test vet lint sec check bridge install install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
 
 help:
 	@echo "Common targets:"
 	@echo "  make build            Compile the binary to $(BINARY)"
 	@echo "  make test             Run go test ./... -short"
 	@echo "  make vet              Run go vet ./..."
+	@echo "  make lint             Run golangci-lint"
+	@echo "  make sec              Run gosec and govulncheck"
+	@echo "  make check            Run lint, security, tests, and vet"
 	@echo "  make bridge           Rebuild the TS bridge bundle"
 	@echo ""
 	@echo "Service targets:"
@@ -55,6 +58,18 @@ test:
 
 vet:
 	go vet ./...
+
+lint:
+	@command -v golangci-lint >/dev/null 2>&1 || { echo "golangci-lint not found. Install: brew install golangci-lint" >&2; exit 1; }
+	golangci-lint run --timeout=3m ./...
+
+sec:
+	@command -v gosec >/dev/null 2>&1 || { echo "gosec not found. Install: go install github.com/securego/gosec/v2/cmd/gosec@latest" >&2; exit 1; }
+	gosec -include=G401,G402,G404,G501,G502,G503,G504,G505,G506,G507,G601,G602 ./...
+	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
+check: lint sec test vet
+	@echo "✅ All checks passed"
 
 bridge:
 	cd bridge && npx esbuild index.ts --bundle --platform=node --target=node18 --outfile=bundle.js --format=esm

@@ -178,7 +178,6 @@ func buildCwdStatusText(defaultCwd, groupCwd, topicCwd, agentCwd string, threadI
 	if agentCwd != "" {
 		fmt.Fprintf(&b, "%d. 🤖 Agent: `%s`\n", n, agentCwd)
 		b.WriteString("   (defined in agent markdown — highest priority)\n\n")
-		n++
 	}
 
 	// Only show "no cwd" guidance when truly no binding exists at any level.

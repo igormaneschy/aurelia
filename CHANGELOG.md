@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Technical Debt
+- **ci-hardening**: reavaliar futuramente `gocritic`, `misspell` e `goconst`.
+  Eles ficaram fora do gate inicial por ruído de estilo/PT-BR/constantes artificiais.
+- **staticcheck**: reavaliar checks de estilo `ST1020`, `ST1016` e `ST1005`,
+  desabilitados no baseline atual para manter o gate high-signal.
+
 ## [0.14.1] - 2026-05-23
 
 ### Fixed

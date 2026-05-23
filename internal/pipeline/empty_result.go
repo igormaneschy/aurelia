@@ -1,17 +1,12 @@
 package pipeline
 
 import (
-	"context"
 	"strings"
-	"time"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
 )
 
-const (
-	runLogTimeout            = 3 * time.Second
-	maxToolSummaryChars      = 2000
-)
+const maxToolSummaryChars = 2000
 
 // emptyResultHadWork returns true when the bridge result event shows evidence
 // of processor work (turns, tokens, or cost) despite having no output text.
@@ -36,45 +31,6 @@ func buildEmptyResultRecoveryMessage(toolSummary string) string {
 
 	sb.WriteString("\n\nUse /status para ver o estado atual ou continue a partir do último checkpoint salvo.")
 	return sb.String()
-}
-
-// latestRunCheckpoint returns an informative checkpoint for the most recent
-// run on the given chat/thread. It prefers the in-memory tool summary from
-// the active runLogState, falling back to the persisted runlog store.
-func (s *Service) latestRunCheckpoint(chatID int64, threadID int) string {
-	if s.runLog == nil {
-		return ""
-	}
-
-	// Prefer in-memory state (current active run)
-	key := runLogKey(chatID, threadID)
-	s.runLogMu.Lock()
-	state, ok := s.runLogStates[key]
-	s.runLogMu.Unlock()
-
-	if ok && state != nil {
-		state.mu.Lock()
-		summary := state.summary.String()
-		state.mu.Unlock()
-		if summary != "" {
-			return summary
-		}
-	}
-
-	// Fallback: query persisted latest run
-	ctx, cancel := context.WithTimeout(context.Background(), runLogTimeout)
-	defer cancel()
-	record, err := s.runLog.Latest(ctx, chatID, threadID)
-	if err == nil && record != nil {
-		if record.Checkpoint != "" {
-			return record.Checkpoint
-		}
-		if record.ToolSummary != "" {
-			return record.ToolSummary
-		}
-	}
-
-	return ""
 }
 
 // getRunToolSummary reads the in-memory tool summary from the active runLogState

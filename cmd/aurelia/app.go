@@ -101,7 +101,9 @@ func bootstrapApp() (*app, error) {
 	if homeDir == "" {
 		log.Printf("Warning: cannot determine home directory — PI_CODING_AGENT_DIR not set, bridge will use default ~/.pi/agent/")
 	} else {
-		os.Setenv("PI_CODING_AGENT_DIR", filepath.Join(homeDir, ".aurelia", "pi-agent"))
+		if err := os.Setenv("PI_CODING_AGENT_DIR", filepath.Join(homeDir, ".aurelia", "pi-agent")); err != nil {
+			return nil, fmt.Errorf("set PI_CODING_AGENT_DIR: %w", err)
+		}
 	}
 
 	br := setupBridge()
@@ -193,7 +195,11 @@ func bootstrapApp() (*app, error) {
 	if err != nil {
 		log.Printf("Warning: failed to resolve executable path: %v", err)
 	}
-	sessions := session.NewStore()
+	sessions, err := session.NewPersistentStore(resolver.DBPath("sessions.json"))
+	if err != nil {
+		log.Printf("Warning: failed to load session snapshot, starting with empty sessions: %v", err)
+		sessions = session.NewStore()
+	}
 
 	br.SetOnDeath(func() {
 		log.Printf("bridge: process died, deactivating all sessions")

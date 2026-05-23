@@ -6,6 +6,7 @@ How to build, deploy, and manage the Aurelia daemon on macOS.
 
 ```bash
 make install-service   # one-time: install launchd plist
+make check             # local CI parity: lint + security + tests + vet
 make deploy            # every code change: atomic build + restart
 make logs              # tail stderr to see what the daemon is doing
 ```
@@ -39,6 +40,26 @@ What this does:
    starts immediately.
 
 Re-run this any time you change the plist template (env vars, log paths, etc).
+
+## Local validation
+
+Run the same quality gates used by CI before pushing:
+
+```bash
+make check
+```
+
+This runs `golangci-lint`, an incremental `gosec` ruleset, `govulncheck`,
+`go test ./... -short -count=1`, and `go vet ./...`.
+
+## Session resume after deploy
+
+Aurelia persists Telegram PI session references to
+`~/.aurelia/data/sessions.json`. After `make deploy` restarts the daemon, the
+next message in the same `chatID/threadID/userID` resumes the saved PI
+`session_file` as a cold session. Cold resume intentionally does not use
+`continue`, because the bridge process that held live in-memory state was
+restarted.
 
 ## Daily workflow
 

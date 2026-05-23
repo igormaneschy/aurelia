@@ -31,10 +31,11 @@ func (k ConversationKey) String() string {
 
 // Store manages session IDs and working directories per chat thread.
 type Store struct {
-	mu       sync.RWMutex
-	sessions map[SessionKey]*entry
-	cwds     map[ConversationKey]string
-	cwdSeen  map[ConversationKey]time.Time
+	mu          sync.RWMutex
+	sessions    map[SessionKey]*entry
+	cwds        map[ConversationKey]string
+	cwdSeen     map[ConversationKey]time.Time
+	persistPath string
 }
 
 type entry struct {
@@ -87,6 +88,7 @@ func (s *Store) Set(chatID int64, threadID int, sessionFile string) {
 	defer s.mu.Unlock()
 	key := SessionKeyFor(chatID, threadID, 0)
 	s.sessions[key] = &entry{sessionFile: sessionFile, active: true, lastSeen: time.Now()}
+	s.persistLocked()
 }
 
 // Clear removes session and cwd for a specific chat thread.
@@ -98,6 +100,7 @@ func (s *Store) Clear(chatID int64, threadID int) {
 	delete(s.sessions, sk)
 	delete(s.cwds, ck)
 	delete(s.cwdSeen, ck)
+	s.persistLocked()
 }
 
 // ClearSession removes only the session ID for a specific chat thread.
@@ -106,6 +109,7 @@ func (s *Store) ClearSession(chatID int64, threadID int) {
 	defer s.mu.Unlock()
 	key := SessionKeyFor(chatID, threadID, 0)
 	delete(s.sessions, key)
+	s.persistLocked()
 }
 
 // ClearAll removes all sessions and cwds for a chat (all threads, all users).
@@ -125,6 +129,7 @@ func (s *Store) ClearAll(chatID int64) {
 			delete(s.cwdSeen, key)
 		}
 	}
+	s.persistLocked()
 }
 
 // DeactivateAll marks all sessions as inactive (cold). Used when the bridge
@@ -136,6 +141,7 @@ func (s *Store) DeactivateAll() {
 	for _, e := range s.sessions {
 		e.active = false
 	}
+	s.persistLocked()
 }
 
 // Deactivate marks a single session as inactive (cold). Used when a run times
@@ -147,6 +153,7 @@ func (s *Store) Deactivate(chatID int64, threadID int) {
 	key := SessionKeyFor(chatID, threadID, 0)
 	if e, ok := s.sessions[key]; ok {
 		e.active = false
+		s.persistLocked()
 	}
 }
 
@@ -174,6 +181,7 @@ func (s *Store) GC(maxAge time.Duration) {
 			delete(s.cwds, key)
 		}
 	}
+	s.persistLocked()
 }
 
 func (s *Store) GetCwd(chatID int64, threadID int) string {
@@ -202,6 +210,7 @@ func (s *Store) SetCwd(chatID int64, threadID int, cwd string) {
 	key := ConversationKey{ChatID: chatID, ThreadID: threadID}
 	s.cwds[key] = cwd
 	s.cwdSeen[key] = time.Now()
+	s.persistLocked()
 }
 
 func (s *Store) ClearCwd(chatID int64, threadID int) {
@@ -210,6 +219,7 @@ func (s *Store) ClearCwd(chatID int64, threadID int) {
 	key := ConversationKey{ChatID: chatID, ThreadID: threadID}
 	delete(s.cwds, key)
 	delete(s.cwdSeen, key)
+	s.persistLocked()
 }
 
 // GetSession returns the session ID for a specific chat, thread, and user.
@@ -244,6 +254,7 @@ func (s *Store) SetSession(chatID int64, threadID int, userID int64, sessionFile
 	defer s.mu.Unlock()
 	key := SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID}
 	s.sessions[key] = &entry{sessionFile: sessionFile, active: true, lastSeen: time.Now()}
+	s.persistLocked()
 }
 
 // ClearSessionForUser removes the session for a specific chat, thread, and user.
@@ -252,6 +263,7 @@ func (s *Store) ClearSessionForUser(chatID int64, threadID int, userID int64) {
 	defer s.mu.Unlock()
 	key := SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID}
 	delete(s.sessions, key)
+	s.persistLocked()
 }
 
 // DeactivateSession marks a session as inactive for a specific chat, thread, and user.
@@ -261,5 +273,6 @@ func (s *Store) DeactivateSession(chatID int64, threadID int, userID int64) {
 	key := SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID}
 	if e, ok := s.sessions[key]; ok {
 		e.active = false
+		s.persistLocked()
 	}
 }

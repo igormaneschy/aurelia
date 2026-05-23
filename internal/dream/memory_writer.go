@@ -25,9 +25,9 @@ var (
 // safeMemoryWriter writes memory fact files under a validated memory root.
 // It enforces path containment, persona exclusion, and file naming rules.
 type safeMemoryWriter struct {
-	memoryDir  string // global memory root (~/.aurelia/memory), symlink-resolved
+	memoryDir   string // global memory root (~/.aurelia/memory), symlink-resolved
 	resolvedDir string // memoryDir after EvalSymlinks
-	resolver   memoryDirResolver
+	resolver    memoryDirResolver
 }
 
 // memoryDirResolver provides layer-specific subdirectories.
@@ -300,7 +300,7 @@ func appendUniqueFacts(path string, facts []string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// If the file is new or empty, no leading newline needed
 	stat, err := f.Stat()
@@ -411,4 +411,3 @@ func isSubDirLexical(parent, sub string) bool {
 	}
 	return !strings.HasPrefix(rel, "..") && !filepath.IsAbs(rel)
 }
-
