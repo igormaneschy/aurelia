@@ -9,6 +9,7 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/security"
+	"github.com/igormaneschy/aurelia/internal/session"
 )
 
 // NormalizeProvider returns a canonical lowercase provider name.
@@ -61,6 +62,81 @@ type ProviderConfig struct {
 	AuthMode string `json:"auth_mode,omitempty"`
 }
 
+// SessionLifecycleConfig controls automatic session health management.
+type SessionLifecycleConfig struct {
+	Enabled                      bool `json:"enabled"`
+	CompactAfterInputTokens      int  `json:"compact_after_input_tokens"`
+	RotateAfterInputTokens       int  `json:"rotate_after_input_tokens"`
+	MaxEmptyResultsBeforeRotate  int  `json:"max_empty_results_before_rotate"`
+	MaxProcessDeathsBeforeRotate int  `json:"max_process_deaths_before_rotate"`
+	IdleTimeoutMinutes           int  `json:"idle_timeout_minutes"`
+	KeepRecentTokens             int  `json:"keep_recent_tokens"`
+	ReserveTokens                int  `json:"reserve_tokens"`
+}
+
+// DefaultSessionLifecycleConfig returns safe defaults for session lifecycle.
+func DefaultSessionLifecycleConfig() SessionLifecycleConfig {
+	return SessionLifecycleConfig{
+		Enabled:                      true,
+		CompactAfterInputTokens:      120000,
+		RotateAfterInputTokens:       250000,
+		MaxEmptyResultsBeforeRotate:  1,
+		MaxProcessDeathsBeforeRotate: 1,
+		IdleTimeoutMinutes:           20,
+		KeepRecentTokens:             8000,
+		ReserveTokens:                32768,
+	}
+}
+
+// Validate checks that thresholds are consistent. Returns a descriptive error
+// with the offending value if invalid.
+func (c SessionLifecycleConfig) Validate() error {
+	if c.Enabled {
+		if c.CompactAfterInputTokens <= 0 {
+			return fmt.Errorf("session_lifecycle.compact_after_input_tokens must be > 0, got %d", c.CompactAfterInputTokens)
+		}
+		if c.RotateAfterInputTokens <= 0 {
+			return fmt.Errorf("session_lifecycle.rotate_after_input_tokens must be > 0, got %d", c.RotateAfterInputTokens)
+		}
+		if c.RotateAfterInputTokens <= c.CompactAfterInputTokens {
+			return fmt.Errorf(
+				"session_lifecycle.rotate_after_input_tokens (%d) must be > compact_after_input_tokens (%d)",
+				c.RotateAfterInputTokens, c.CompactAfterInputTokens,
+			)
+		}
+		if c.MaxEmptyResultsBeforeRotate <= 0 {
+			return fmt.Errorf("session_lifecycle.max_empty_results_before_rotate must be > 0, got %d", c.MaxEmptyResultsBeforeRotate)
+		}
+		if c.MaxProcessDeathsBeforeRotate <= 0 {
+			return fmt.Errorf("session_lifecycle.max_process_deaths_before_rotate must be > 0, got %d", c.MaxProcessDeathsBeforeRotate)
+		}
+		if c.IdleTimeoutMinutes <= 0 {
+			return fmt.Errorf("session_lifecycle.idle_timeout_minutes must be > 0, got %d", c.IdleTimeoutMinutes)
+		}
+		if c.KeepRecentTokens <= 0 {
+			return fmt.Errorf("session_lifecycle.keep_recent_tokens must be > 0, got %d", c.KeepRecentTokens)
+		}
+		if c.ReserveTokens <= 0 {
+			return fmt.Errorf("session_lifecycle.reserve_tokens must be > 0, got %d", c.ReserveTokens)
+		}
+	}
+	return nil
+}
+
+// LifecyclePolicy converts the config to the session package's policy type.
+func (c SessionLifecycleConfig) LifecyclePolicy() session.LifecyclePolicy {
+	return session.LifecyclePolicy{
+		Enabled:                      c.Enabled,
+		CompactAfterInputTokens:      c.CompactAfterInputTokens,
+		RotateAfterInputTokens:       c.RotateAfterInputTokens,
+		MaxEmptyResultsBeforeRotate:  c.MaxEmptyResultsBeforeRotate,
+		MaxProcessDeathsBeforeRotate: c.MaxProcessDeathsBeforeRotate,
+		IdleTimeoutMinutes:           c.IdleTimeoutMinutes,
+		KeepRecentTokens:             c.KeepRecentTokens,
+		ReserveTokens:                c.ReserveTokens,
+	}
+}
+
 // AppConfig holds all runtime configuration needed for the application.
 type AppConfig struct {
 	DefaultProvider string                    `json:"default_provider"`
@@ -108,6 +184,9 @@ type AppConfig struct {
 
 	// DefaultOwnerUserID is the fallback user ID when none is explicitly provided.
 	DefaultOwnerUserID int64 `json:"default_owner_user_id,omitempty"`
+
+	// SessionLifecycleConfig controls automatic session health management.
+	SessionLifecycle SessionLifecycleConfig `json:"session_lifecycle,omitempty"`
 }
 
 // DefaultOwnerUserIDOrFallback returns the configured DefaultOwnerUserID, or the
@@ -210,6 +289,15 @@ type fileConfig struct {
 	SummaryInterval int                     `json:"summary_interval,omitempty"`
 
 	DefaultOwnerUserID int64 `json:"default_owner_user_id"`
+
+	// SessionLifecycleConfig controls automatic session health management.
+	SessionLifecycle SessionLifecycleConfig `json:"session_lifecycle,omitempty"`
+}
+
+// ValidateConfig checks the full fileConfig for consistency.
+// Returns nil if valid, or an error describing the first issue.
+func (f fileConfig) ValidateConfig() error {
+	return f.SessionLifecycle.Validate()
 }
 
 // Load reads the instance-local JSON config, creates it with defaults when
@@ -278,6 +366,7 @@ func defaultFileConfig(r *runtime.PathResolver) fileConfig {
 		DBPath:                  filepath.Join(r.Data(), "aurelia.db"),
 		MCPConfigPath:           filepath.Join(r.Config(), "mcp_servers.json"),
 		SecurityConfig:          security.DefaultConfig(),
+		SessionLifecycle:        DefaultSessionLifecycleConfig(),
 	}
 }
 
@@ -329,6 +418,30 @@ func normalizeFileConfig(cfg fileConfig, r *runtime.PathResolver, preserveAutoMo
 	}
 	if cfg.Providers == nil {
 		cfg.Providers = map[string]ProviderConfig{}
+	}
+	// Apply lifecycle defaults if not set (zero values = use default)
+	if !cfg.SessionLifecycle.Enabled && cfg.SessionLifecycle == (SessionLifecycleConfig{}) {
+		cfg.SessionLifecycle = defaults.SessionLifecycle
+	} else if cfg.SessionLifecycle.CompactAfterInputTokens <= 0 {
+		cfg.SessionLifecycle.CompactAfterInputTokens = defaults.SessionLifecycle.CompactAfterInputTokens
+		cfg.SessionLifecycle.RotateAfterInputTokens = defaults.SessionLifecycle.RotateAfterInputTokens
+	} else if cfg.SessionLifecycle.RotateAfterInputTokens <= 0 {
+		cfg.SessionLifecycle.RotateAfterInputTokens = defaults.SessionLifecycle.RotateAfterInputTokens
+	}
+	if cfg.SessionLifecycle.MaxEmptyResultsBeforeRotate <= 0 {
+		cfg.SessionLifecycle.MaxEmptyResultsBeforeRotate = defaults.SessionLifecycle.MaxEmptyResultsBeforeRotate
+	}
+	if cfg.SessionLifecycle.MaxProcessDeathsBeforeRotate <= 0 {
+		cfg.SessionLifecycle.MaxProcessDeathsBeforeRotate = defaults.SessionLifecycle.MaxProcessDeathsBeforeRotate
+	}
+	if cfg.SessionLifecycle.IdleTimeoutMinutes <= 0 {
+		cfg.SessionLifecycle.IdleTimeoutMinutes = defaults.SessionLifecycle.IdleTimeoutMinutes
+	}
+	if cfg.SessionLifecycle.KeepRecentTokens <= 0 {
+		cfg.SessionLifecycle.KeepRecentTokens = defaults.SessionLifecycle.KeepRecentTokens
+	}
+	if cfg.SessionLifecycle.ReserveTokens <= 0 {
+		cfg.SessionLifecycle.ReserveTokens = defaults.SessionLifecycle.ReserveTokens
 	}
 	return cfg
 }
@@ -432,6 +545,7 @@ func toAppConfig(cfg fileConfig) *AppConfig {
 		SecurityConfig:          cfg.SecurityConfig,
 		SummaryInterval:         cfg.SummaryInterval,
 		DefaultOwnerUserID:      cfg.DefaultOwnerUserID,
+		SessionLifecycle:        cfg.SessionLifecycle,
 	}
 	applyEnvOverrides(app)
 	return app
