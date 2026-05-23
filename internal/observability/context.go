@@ -41,6 +41,7 @@ const (
 	PhaseReplyStarted         = "reply_started"
 	PhaseReplySent            = "reply_sent"
 	PhaseContinuityPatched    = "continuity_patched"
+	PhaseSessionLifecycle     = "session_lifecycle"
 	PhaseDreamNudgeScheduled  = "dream_nudge_scheduled"
 	PhaseRunCompleted         = "run_completed"
 

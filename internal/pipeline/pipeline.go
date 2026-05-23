@@ -341,6 +341,16 @@ func (s *Service) processRun(input pipelineInput) {
 	req.Options.Images = input.images
 	s.applyVisionFallback(&req, input.images)
 
+	// Apply session lifecycle decision before executing
+	if lcResult := s.applyLifecycle(&req, input.chatID, input.threadID, input.userID); lcResult.SkipExecution {
+		log.Printf("lifecycle: execution skipped for chat=%d: %s", input.chatID, lcResult.ErrorMessage)
+		if lcResult.ErrorMessage != "" {
+			_ = s.output.SendError(input.chatID, input.threadID, lcResult.ErrorMessage)
+		}
+		s.output.ConfirmMessage(input.chatID, input.messageID)
+		return
+	}
+
 	s.executeAsync(ctx, input.chatID, input.threadID, input.messageID, req, userText, input.userID)
 }
 
