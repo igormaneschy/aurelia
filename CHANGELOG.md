@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-05-23
+
+### Added
+- **ci**: adicionados gates paralelos de lint e segurança no GitHub Actions.
+- **make**: adicionados `make lint`, `make sec` e `make check` para paridade local com CI.
+- **session**: sessões PI do Telegram agora são persistidas e retomadas em modo frio após restart/deploy.
+- **session**: notificação automática para sessões interrompidas recentemente, com retomada segura via `continuar`.
+
+### Changed
+- **lint**: baseline limpo com `errcheck`, `govet`, `ineffassign`, `staticcheck` e `unused` habilitados.
+
 ### Technical Debt
 - **ci-hardening**: reavaliar futuramente `gocritic`, `misspell` e `goconst`.
   Eles ficaram fora do gate inicial por ruído de estilo/PT-BR/constantes artificiais.
