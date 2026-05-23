@@ -57,6 +57,14 @@ A próxima onda foca em tornar o sistema seguro e estável para trabalho autôno
 
 > **Nota sobre o delta real:** Security Guard-Rails e Project Binding já foram implementados (revisão de Maio 2026), então o roadmap foi reordenado para refletir o estado real da codebase. Antes de fechar Orchestration, entrou uma fundação curta de Observability porque execução autônoma só é segura se cada run puder ser depurado por `run_id`, timeline, provider/model, tokens/custo, erro e fase de falha.
 
+### Future Quality Gates
+
+CI hardening começou pelos linters high-signal (`errcheck`, `govet`,
+`ineffassign`, `staticcheck`, `unused`) com baseline limpo. Reavaliar em sprint
+futuro os gates que ficaram fora por ruído de estilo/PT-BR ou constantes
+artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
+`staticcheck` `ST1020`, `ST1016` e `ST1005`.
+
 ---
 
 ## 0. Delegate to PI SDK Native ✅

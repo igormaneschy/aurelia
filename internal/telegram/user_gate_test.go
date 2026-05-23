@@ -108,7 +108,7 @@ func TestUserGate_BeginAndStep(t *testing.T) {
 	}
 
 	// Bio step
-	reply, done, err = gate.Step(1, "Sou dev")
+	_, done, err = gate.Step(1, "Sou dev")
 	if err != nil {
 		t.Fatalf("Step(bio) error = %v", err)
 	}

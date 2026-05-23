@@ -193,7 +193,7 @@ func (bc *Service) detectProjectPath(ctx context.Context, text string) string {
 	if bc.projectIndex != nil {
 		indexMiss := false
 		for _, word := range strings.Fields(text) {
-			clean := strings.Trim(strings.ToLower(word), ".,!?;:()\"'/'")
+			clean := strings.Trim(strings.ToLower(word), ".,!?;:()\"'/")
 			if len(clean) >= 3 && !isStopWord(clean) && looksLikeProjectName(clean) {
 				indexMiss = true
 				if path := bc.projectIndex.Lookup(clean); path != "" {

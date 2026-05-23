@@ -46,7 +46,6 @@ type migrationPlan struct {
 	targetUserID int64
 	root         string
 	fileOps      []migrationOp
-	cronUpdates  int // populated after execution
 }
 
 type migrateStats struct {
@@ -247,10 +246,10 @@ func buildMigrationPlan(root string, userID int64) (*migrationPlan, error) {
 
 	// Reserved files that stay in memory/.
 	reserved := map[string]bool{
-		filepath.Join(memoryDir, "personas", "IDENTITY.md"):   true,
-		filepath.Join(memoryDir, "personas", "SOUL.md"):       true,
-		filepath.Join(memoryDir, "OWNER_PLAYBOOK.md"):          true,
-		filepath.Join(memoryDir, "MEMORY.md"):                  true,
+		filepath.Join(memoryDir, "personas", "IDENTITY.md"): true,
+		filepath.Join(memoryDir, "personas", "SOUL.md"):     true,
+		filepath.Join(memoryDir, "OWNER_PLAYBOOK.md"):       true,
+		filepath.Join(memoryDir, "MEMORY.md"):               true,
 	}
 
 	// 1. Walk memory/ and move non-reserved, non-persona, non-topics files.
@@ -520,13 +519,13 @@ func copyFile(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer srcFile.Close()
+	defer func() { _ = srcFile.Close() }()
 
 	dstFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
 	if err != nil {
 		return err
 	}
-	defer dstFile.Close()
+	defer func() { _ = dstFile.Close() }()
 
 	_, err = io.Copy(dstFile, srcFile)
 	return err

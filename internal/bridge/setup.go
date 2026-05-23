@@ -137,11 +137,11 @@ func EnsureBridge(targetDir string, bundleJS []byte) (string, error) {
 			// Embedded bundle provided — write it directly.
 			tmpPath := bundlePath + ".tmp"
 			if err := os.WriteFile(tmpPath, bundleJS, 0600); err != nil {
-				os.Remove(tmpPath)
+				_ = os.Remove(tmpPath)
 				return "", fmt.Errorf("write bundle.js.tmp: %w", err)
 			}
 			if err := os.Rename(tmpPath, bundlePath); err != nil {
-				os.Remove(tmpPath)
+				_ = os.Remove(tmpPath)
 				return "", fmt.Errorf("rename bundle.js.tmp → bundle.js: %w", err)
 			}
 			if err := writeSourceHash(targetDir); err != nil {
@@ -204,5 +204,3 @@ func writeSourceHash(targetDir string) error {
 	}
 	return os.WriteFile(sourceHashPath(targetDir), []byte(computeSourceHash()), 0600)
 }
-
-

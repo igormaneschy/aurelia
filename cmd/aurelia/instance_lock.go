@@ -61,7 +61,7 @@ func acquireLock() (release func(), err error) {
 	//    future instances go through the same code path, it works reliably.
 	//    Returns EWOULDBLOCK if another process holds the lock.
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
+		_ = f.Close()
 		// If another process holds the lock AND wrote its PID first, the PID
 		// check above should have caught it. If not (race), surface the error.
 		return nil, fmt.Errorf("outra instância já está rodando (flock conflict)")
@@ -69,11 +69,11 @@ func acquireLock() (release func(), err error) {
 
 	// 4. Truncate and write our PID.
 	if err := f.Truncate(0); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, fmt.Errorf("instance lock: truncate: %w", err)
 	}
 	if _, err := f.WriteString(strconv.Itoa(os.Getpid()) + "\n"); err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, fmt.Errorf("instance lock: write PID: %w", err)
 	}
 	_ = f.Sync()

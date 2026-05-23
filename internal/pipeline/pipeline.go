@@ -684,7 +684,6 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 				s.recordPipelineEvent(chatID, threadID, observability.NewErrorEvent("",
 					observability.PhaseBridgeProcessDeath, "bridge process exited during Execute"))
 			}
-			outcome = OutcomeProcessDeath
 		} else if errors.Is(err, context.Canceled) {
 			if handled := s.handleContextOutcome(parentCtx, ctx, chatID, threadID, userID, timeoutTracker); handled {
 				s.output.ConfirmMessage(chatID, messageID)
@@ -1642,11 +1641,11 @@ func (s *Service) recordPipelineEvent(chatID int64, threadID int, ev observabili
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	if err := s.runLog.RecordEvent(ctx, runlog.RunEvent{
-		RunID:     ev.RunID,
-		Timestamp: ev.Timestamp.Unix(),
-		Phase:     ev.Phase,
-		Level:     ev.Level,
-		Message:   ev.Message,
+		RunID:        ev.RunID,
+		Timestamp:    ev.Timestamp.Unix(),
+		Phase:        ev.Phase,
+		Level:        ev.Level,
+		Message:      ev.Message,
 		MetadataJSON: ev.MetadataJSON,
 	}); err != nil {
 		slog.Warn("observability: event dropped", "run_id", runID, "phase", ev.Phase, "error", err)

@@ -1,9 +1,27 @@
 version: "2"
 
 linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
   settings:
     staticcheck:
       checks:
         - "all"
         - "-SA5011"  # false positive: t.Fatal stops execution but analyzer doesn't see it
         - "-ST1000"  # package comments — not enforced in this project
+        - "-ST1020"  # exported comments — not enforced in this project
+        - "-ST1016"  # receiver naming — too noisy for current baseline
+        - "-ST1005"  # punctuation in user-facing errors is accepted here
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - errcheck
+      - path: internal/bridge/bundle\.js
+        linters:
+          - all

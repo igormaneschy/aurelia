@@ -27,10 +27,6 @@ type progressReporter struct {
 	mu            sync.Mutex
 }
 
-func newProgressReporter(bot *telebot.Bot, chat *telebot.Chat) *progressReporter {
-	return &progressReporter{bot: bot, chat: chat, startTime: time.Now()}
-}
-
 func newProgressReporterWithThread(bot *telebot.Bot, chat *telebot.Chat, threadID int) *progressReporter {
 	return &progressReporter{bot: bot, chat: chat, threadID: threadID, startTime: time.Now()}
 }
@@ -88,7 +84,7 @@ func (p *progressReporter) ReportToolResult(summary string) {
 	// Just mark as done with checkmark — don't show the actual result
 	// to keep progress clean and avoid exposing internal operation details
 	lastIdx := len(p.tools) - 1
-	p.tools[lastIdx] = p.tools[lastIdx] + " ✓"
+	p.tools[lastIdx] += " ✓"
 
 	if p.bot == nil {
 		return
@@ -215,7 +211,10 @@ func (p *progressReporter) Delete() {
 
 func toolDisplayName(name string) string {
 	// Normalize to Title case for matching (bridge sends lowercase: "bash", "read", etc.)
-	name = strings.Title(strings.ToLower(name))
+	lowerName := strings.ToLower(name)
+	if lowerName != "" {
+		name = strings.ToUpper(lowerName[:1]) + lowerName[1:]
+	}
 
 	switch name {
 	case "Read":

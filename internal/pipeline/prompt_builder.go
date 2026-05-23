@@ -208,14 +208,14 @@ func (bc *Service) buildTelegramInstructions(chatID int64, messageID int, thread
 
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf(`## Telegram Context
+	fmt.Fprintf(&sb, `## Telegram Context
 
 You ARE the Telegram bot. The user is talking to you via Telegram chat %d.
-The current message ID is %d.`, chatID, messageID))
+The current message ID is %d.`, chatID, messageID)
 	if forumContext != "" {
 		sb.WriteString(forumContext)
 	}
-	sb.WriteString(fmt.Sprintf(`
+	fmt.Fprintf(&sb, `
 
 You can interact with the chat using the Aurelia CLI via Bash:
 
@@ -234,7 +234,7 @@ IMPORTANT rules about the working directory:
 - When cwd is "(none)", you are in CHAT MODE. Do NOT read files, run commands, or analyze any project. Only use your memory and conversation context to answer questions.
 - When the user wants to work on files or a project, tell them to set the directory first: `+"`/cwd <path>`"+`
 - Only perform file operations (Read, Write, Edit, Bash, Glob, Grep) when a cwd is explicitly set.
-- If the user asks about "this project" or "the project", refer to conversation context and memory — do NOT go reading random directories.`, bin, chatID, messageID, cwdDisplay))
+- If the user asks about "this project" or "the project", refer to conversation context and memory — do NOT go reading random directories.`, bin, chatID, messageID, cwdDisplay)
 
 	// When cwd is empty, add distinction about known projects and memory.
 	// This applies broadly (not only codebase-read intent) but concisely.
@@ -250,7 +250,7 @@ IMPORTANT rules about the working directory:
 - Known/remembered project paths from other chats are NOT the active operational cwd. They are suggestions.`)
 			sb.WriteString("\n  Suggested projects (use `/cwd <path>` to activate):")
 			for _, p := range knownPaths {
-				sb.WriteString(fmt.Sprintf("\n  - `/cwd %s`", p))
+				fmt.Fprintf(&sb, "\n  - `/cwd %s`", p)
 			}
 		}
 	}
@@ -279,9 +279,9 @@ func (bc *Service) buildMemoryInstructions(chatID int64, threadID int, userID in
 		topicSuffix = fmt.Sprintf(" (topic %d)", threadID)
 	}
 
-	sb.WriteString(fmt.Sprintf(`## Persistent Memory — YOU HAVE MEMORY
+	sb.WriteString(`## Persistent Memory — YOU HAVE MEMORY
 
-IMPORTANT: Unlike standard coding agents, you DO have persistent memory across conversations. Your memory contents are loaded below. NEVER say you "don't have memory" or that "each session starts from zero" — that is FALSE. Always check your memory contents below before answering questions about past conversations.`))
+IMPORTANT: Unlike standard coding agents, you DO have persistent memory across conversations. Your memory contents are loaded below. NEVER say you "don't have memory" or that "each session starts from zero" — that is FALSE. Always check your memory contents below before answering questions about past conversations.`)
 
 	// Saving instructions depend on whether project context is active
 	topicDir := topicMemoryDir(bc.memoryDir, chatID, threadID)
@@ -787,7 +787,7 @@ func matchContinuationWord(lower, trigger string) bool {
 			return false
 		}
 		// For leading bytes of multi-byte sequences: check there's no combining letter
-		if prev >= 0xC0 && prev <= 0xFF {
+		if prev >= 0xC0 {
 			return false
 		}
 	}
@@ -802,7 +802,7 @@ func matchContinuationWord(lower, trigger string) bool {
 		if next >= 0x80 && next <= 0xBF {
 			return false
 		}
-		if next >= 0xC0 && next <= 0xFF {
+		if next >= 0xC0 {
 			return false
 		}
 	}

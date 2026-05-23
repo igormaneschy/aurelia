@@ -351,10 +351,10 @@ func (bc *BotController) downloadTelegramFile(file *telebot.File, name string) (
 		return "", fmt.Errorf("create temp file: %w", err)
 	}
 	tempPath := f.Name()
-	f.Close() // Close; bot.Download will overwrite
+	_ = f.Close() // Close; bot.Download will overwrite
 
 	if err := bc.bot.Download(file, tempPath); err != nil {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath)
 		return "", err
 	}
 	return tempPath, nil

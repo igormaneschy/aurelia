@@ -45,7 +45,6 @@ type BotController struct {
 	bootstrapMu      sync.Mutex
 	pendingBootstrap map[int64]bootstrapState
 	albums           *albumBuffer
-	bridgeFailures   bridgeFailureTracker
 	orchestrator     *orchestrator.Orchestrator
 	nudgeBuffer      *session.NudgeBuffer
 	botCwd           string // working directory of the aurelia daemon
