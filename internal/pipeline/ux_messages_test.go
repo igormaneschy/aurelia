@@ -74,7 +74,7 @@ func TestBridgeErrorMessagesIncludeActionableHints(t *testing.T) {
 	}{
 		{name: "connect", msg: bridgeConnectErrorMessage, want: "/new"},
 		{name: "retry", msg: bridgeRetryFailedMessage, want: "Dica"},
-		{name: "timeout", msg: bridgeTimeoutMessage, want: "dividir em partes menores"},
+		{name: "timeout", msg: buildTimeoutMessage(timeoutOriginMaxExecution), want: "dividir em partes"},
 		{name: "cooldown", msg: bridgeCooldownMessage(12 * time.Second), want: "~12 segundos"},
 	}
 	for _, tc := range cases {

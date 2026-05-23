@@ -2,7 +2,9 @@ package pipeline
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
@@ -255,5 +257,78 @@ func TestGetLifecyclePolicy_FromConfig(t *testing.T) {
 	policy := s.getLifecyclePolicy()
 	if policy.CompactAfterInputTokens != 50000 {
 		t.Fatalf("expected compact_after=50000, got %d", policy.CompactAfterInputTokens)
+	}
+}
+
+func TestGetIdleTimeout_Defaults(t *testing.T) {
+	s := &Service{config: nil}
+	d := s.getIdleTimeout()
+	if d != defaultIdleTimeout {
+		t.Fatalf("expected defaultIdleTimeout=%s, got %s", defaultIdleTimeout, d)
+	}
+}
+
+func TestGetIdleTimeout_DisabledLifecycle(t *testing.T) {
+	s := &Service{
+		config: &config.AppConfig{
+			SessionLifecycle: config.SessionLifecycleConfig{Enabled: false},
+		},
+	}
+	d := s.getIdleTimeout()
+	if d != defaultIdleTimeout {
+		t.Fatalf("expected defaultIdleTimeout when disabled, got %s", d)
+	}
+}
+
+func TestGetIdleTimeout_FromConfig(t *testing.T) {
+	s := &Service{
+		config: &config.AppConfig{
+			SessionLifecycle: config.SessionLifecycleConfig{
+				Enabled:            true,
+				IdleTimeoutMinutes: 30,
+			},
+		},
+	}
+	d := s.getIdleTimeout()
+	if d != 30*time.Minute {
+		t.Fatalf("expected 30m, got %s", d)
+	}
+}
+
+func TestGetIdleTimeout_ZeroMinutes(t *testing.T) {
+	s := &Service{
+		config: &config.AppConfig{
+			SessionLifecycle: config.SessionLifecycleConfig{
+				Enabled:            true,
+				IdleTimeoutMinutes: 0,
+			},
+		},
+	}
+	d := s.getIdleTimeout()
+	if d != defaultIdleTimeout {
+		t.Fatalf("expected defaultIdleTimeout for zero config, got %s", d)
+	}
+}
+
+func TestBuildTimeoutMessage_AllOrigins(t *testing.T) {
+	tests := []struct {
+		origin string
+		want   string // substring expected in message
+	}{
+		{timeoutOriginIdleBridge, "inatividade"},
+		{timeoutOriginBridgeQuery, "consulta"},
+		{timeoutOriginProviderPI, "provedor de IA"},
+		{timeoutOriginMaxExecution, "complexa"},
+		{timeoutOriginUnknown, "Tempo limite"},
+		{"", "Tempo limite"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.origin, func(t *testing.T) {
+			msg := buildTimeoutMessage(tt.origin)
+			if !strings.Contains(msg, tt.want) {
+				t.Errorf("buildTimeoutMessage(%q) = %q, want substring %q", tt.origin, msg, tt.want)
+			}
+		})
 	}
 }

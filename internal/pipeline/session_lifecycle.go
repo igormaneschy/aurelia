@@ -161,3 +161,16 @@ func (s *Service) getLifecyclePolicy() session.LifecyclePolicy {
 	}
 	return s.config.SessionLifecycle.LifecyclePolicy()
 }
+
+// getIdleTimeout returns the configured idle timeout, falling back to defaultIdleTimeout
+// when config is not available or lifecycle is disabled.
+func (s *Service) getIdleTimeout() time.Duration {
+	if s.config == nil || !s.config.SessionLifecycle.Enabled {
+		return defaultIdleTimeout
+	}
+	min := s.config.SessionLifecycle.IdleTimeoutMinutes
+	if min <= 0 {
+		return defaultIdleTimeout
+	}
+	return time.Duration(min) * time.Minute
+}

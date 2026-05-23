@@ -47,15 +47,13 @@ type pipelineInput struct {
 const (
 	classifyTimeout        = 5 * time.Second
 	classifyMinTextLen     = 10
-	bridgeExecutionTimeout = 30 * time.Minute
-	idleBridgeTimeout      = 15 * time.Minute
+	bridgeExecutionTimeout = 30 * time.Minute // hard safety net, not configurable
+	defaultIdleTimeout     = 15 * time.Minute // fallback when config not available
 
 	bridgeConnectErrorMessage = "Falha ao conectar com o processador.\n\n" +
 		"Dica: verifique se o daemon está rodando. Se persistir, tente /new para reiniciar a sessão."
 	bridgeRetryFailedMessage = "Processador reiniciado mas não conseguiu completar. Tente novamente.\n\n" +
 		"Dica: se persistir, use /new para reiniciar a sessão."
-	bridgeTimeoutMessage = "Tempo limite atingido antes de concluir.\n\n" +
-		"A solicitação foi muito complexa. Tente dividir em partes menores."
 
 	heartbeatInterval  = 10 * time.Second
 	heartbeatThreshold = 15 * time.Second
@@ -66,6 +64,27 @@ const (
 	timeoutOriginBridgeQuery  = "bridge_query_timeout"
 	timeoutOriginProviderPI   = "provider/pi_timeout"
 )
+
+// buildTimeoutMessage returns a user-facing error message based on the timeout origin.
+func buildTimeoutMessage(origin string) string {
+	switch origin {
+	case timeoutOriginIdleBridge:
+		return "Tempo limite de inatividade atingido. O processador ficou muito tempo sem responder.\n\n" +
+			"Dica: tente enviar uma mensagem mais curta ou dividir em partes. Se persistir, use /new."
+	case timeoutOriginBridgeQuery:
+		return "O processador não conseguiu completar a consulta a tempo.\n\n" +
+			"Dica: tente novamente. Se o problema persistir, pode ser um problema no provedor de IA."
+	case timeoutOriginProviderPI:
+		return "O provedor de IA não respondeu a tempo.\n\n" +
+			"Dica: tente novamente em alguns instantes. Se persistir, verifique o status do provedor."
+	case timeoutOriginMaxExecution:
+		return "Tempo máximo de execução atingido.\n\n" +
+			"A solicitação foi muito complexa. Tente dividir em partes menores."
+	default:
+		return "Tempo limite atingido antes de concluir.\n\n" +
+			"A solicitação foi muito complexa. Tente dividir em partes menores."
+	}
+}
 
 type runTimeoutTracker struct {
 	mu        sync.Mutex
@@ -681,7 +700,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	}
 
 	if ch != nil {
-		ch = idleTimeoutWrapper(ctx, ch, idleBridgeTimeout, cancel, func() {
+		ch = idleTimeoutWrapper(ctx, ch, s.getIdleTimeout(), cancel, func() {
 			timeoutTracker.mark(timeoutOriginIdleBridge)
 		})
 	}
@@ -791,7 +810,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	}
 
 	if ch != nil {
-		ch = idleTimeoutWrapper(ctx, ch, idleBridgeTimeout, cancel, func() {
+		ch = idleTimeoutWrapper(ctx, ch, s.getIdleTimeout(), cancel, func() {
 			timeoutTracker.mark(timeoutOriginIdleBridge)
 		})
 	}
@@ -847,7 +866,7 @@ func (s *Service) handleContextOutcome(parentCtx context.Context, ctx context.Co
 		if s.sessions != nil {
 			s.sessions.MarkFailure(chatID, threadID, userID, origin)
 		}
-		_ = s.output.SendError(chatID, threadID, bridgeTimeoutMessage)
+		_ = s.output.SendError(chatID, threadID, buildTimeoutMessage(origin))
 		return true
 	}
 	return false
