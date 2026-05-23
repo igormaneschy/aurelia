@@ -844,8 +844,39 @@ async function handleQuery(req: Request): Promise<void> {
           });
           break;
         }
+        case "agent_start": {
+          eReq({ event: "agent_start" });
+          break;
+        }
+        case "agent_end": {
+          eReq({ event: "agent_end" });
+          break;
+        }
+        case "turn_start": {
+          eReq({ event: "turn_start" });
+          break;
+        }
         case "turn_end": {
           turnCount += 1;
+          eReq({ event: "turn_end" });
+          break;
+        }
+        case "auto_retry_start": {
+          eReq({
+            event: "auto_retry_start",
+            attempt: event.attempt,
+            max_attempts: event.maxAttempts,
+            error: event.errorMessage,
+          });
+          break;
+        }
+        case "auto_retry_end": {
+          eReq({
+            event: "auto_retry_end",
+            success: event.success,
+            attempt: event.attempt,
+            error: event.finalError,
+          });
           break;
         }
         case "compaction_start": {

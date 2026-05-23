@@ -920,6 +920,67 @@ rl.on('close', () => process.exit(0));
 	}
 }
 
+const lifecycleEventMockJS = `
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+
+rl.on('line', (line) => {
+    const req = JSON.parse(line);
+    const rid = req.request_id || "";
+
+    if (req.command === "query") {
+        // Emit lifecycle events before the result
+        process.stdout.write(JSON.stringify({event:"agent_start",request_id:rid}) + "\n");
+        process.stdout.write(JSON.stringify({event:"turn_start",request_id:rid}) + "\n");
+        process.stdout.write(JSON.stringify({event:"tool_use",request_id:rid,name:"Read",input:{path:"test.go"}}) + "\n");
+        process.stdout.write(JSON.stringify({event:"tool_result",request_id:rid,content:"file contents"}) + "\n");
+        process.stdout.write(JSON.stringify({event:"turn_end",request_id:rid}) + "\n");
+        process.stdout.write(JSON.stringify({event:"agent_end",request_id:rid}) + "\n");
+        process.stdout.write(JSON.stringify({event:"result",request_id:rid,content:"done"}) + "\n");
+    } else {
+        process.stdout.write(JSON.stringify({event:"error",request_id:rid,message:"unknown command: " + req.command}) + "\n");
+    }
+});
+
+rl.on('close', () => process.exit(0));
+`
+
+func TestBridge_LifecycleEvents(t *testing.T) {
+	dir := t.TempDir()
+	b := newMockBridge(t, dir, lifecycleEventMockJS)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	ch, err := b.Execute(ctx, Request{Command: "query", Prompt: "test"})
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+
+	var events []Event
+	for ev := range ch {
+		events = append(events, ev)
+	}
+
+	// Expected: agent_start, turn_start, tool_use, tool_result, turn_end, agent_end, result
+	if len(events) != 7 {
+		t.Fatalf("expected 7 events, got %d: %+v", len(events), events)
+	}
+
+	expectedTypes := []string{"agent_start", "turn_start", "tool_use", "tool_result", "turn_end", "agent_end", "result"}
+	for i, et := range expectedTypes {
+		if events[i].Type != et {
+			t.Errorf("events[%d].Type = %q, want %q", i, events[i].Type, et)
+		}
+	}
+
+	// Verify terminal event has expected content
+	last := events[len(events)-1]
+	if last.Type != "result" || last.Content != "done" {
+		t.Errorf("last event = %+v, want result/done", last)
+	}
+}
+
 func TestBridge_CompactSession_EmptyContent(t *testing.T) {
 	dir := t.TempDir()
 

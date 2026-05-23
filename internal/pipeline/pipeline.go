@@ -987,11 +987,12 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 			return s.handleErrorEvent(chatID, threadID, messageID, ev, userID)
 		case "compaction_start", "compaction_end":
 			// Compaction events reset idle timer and provide observability.
-			// Log briefly for diagnostics.
 			if s.runLog != nil {
 				s.recordPipelineEvent(chatID, threadID, observability.NewEvent("",
 					observability.PhaseBridgeSystem, fmt.Sprintf("event=%s", ev.Type)))
 			}
+		case "agent_start", "agent_end", "turn_start", "turn_end":
+			// Agent/turn lifecycle events reset idle timer.
 		case "auto_retry_start", "auto_retry_end":
 			// Retry events reset idle timer.
 			if s.runLog != nil {
