@@ -746,6 +746,11 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	s.bridgeFailures.record()
 	log.Printf("bridge: process died mid-request, retrying for chat=%d thread=%d", chatID, threadID)
 
+	// Mark process death in session store for lifecycle evaluation
+	if s.sessions != nil {
+		s.sessions.MarkProcessDeath(chatID, threadID, userID)
+	}
+
 	if runLogStarted {
 		s.patchContinuityFailure(chatID, threadID, "failed", "process death, retrying", userID)
 		s.completeRunLog(chatID, threadID, runlog.RunFailed, "", "process death, retrying")
@@ -840,7 +845,7 @@ func (s *Service) handleContextOutcome(parentCtx context.Context, ctx context.Co
 			observability.PhaseRunTimedOut,
 			fmt.Sprintf("origin=%s elapsed=%s", origin, elapsed.Round(time.Second))))
 		if s.sessions != nil {
-			s.sessions.DeactivateSession(chatID, threadID, userID)
+			s.sessions.MarkFailure(chatID, threadID, userID, origin)
 		}
 		_ = s.output.SendError(chatID, threadID, bridgeTimeoutMessage)
 		return true
@@ -868,6 +873,9 @@ func (s *Service) handleRetryOutcome(chatID int64, threadID int, messageID int, 
 		s.bridgeFailures.reset()
 	case OutcomeProcessDeath:
 		s.bridgeFailures.record()
+		if s.sessions != nil {
+			s.sessions.MarkProcessDeath(chatID, threadID, sessionUserID())
+		}
 		s.patchContinuitySessionCold(chatID, threadID, "bridge retry process death")
 		_ = s.output.SendError(chatID, threadID, bridgeRetryFailedMessage)
 		s.output.ConfirmMessage(chatID, messageID)
@@ -1100,9 +1108,9 @@ func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, e
 		log.Printf("bridge: empty result after work chat=%d thread=%d request=%s turns=%d cost=$%.4f in=%d out=%d",
 			chatID, threadID, ev.RequestID, ev.NumTurns, ev.CostUSD, ev.InputTokens, ev.OutputTokens)
 
-		// Deactivate session so next turn does not Continue into a suspect session
+		// Mark empty result so next turn does not Continue into a suspect session
 		if s.sessions != nil {
-			s.sessions.DeactivateSession(chatID, threadID, userID)
+			s.sessions.MarkEmptyResult(chatID, threadID, userID)
 		}
 
 		s.patchContinuityFailure(chatID, threadID, "failed", "empty result after work", userID)
@@ -1309,6 +1317,11 @@ Updated summary (max 900 chars, no preamble):`,
 }
 
 func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText string, finalText string, runID string, userID int64) {
+	// Clear failure/suspect state after successful completion
+	if s.sessions != nil {
+		s.sessions.ClearFailureState(chatID, threadID, userID)
+	}
+
 	key := continuity.ConversationKey{ChatID: chatID, ThreadID: threadID}
 
 	// Progressive summarization: on non-summary turns, re-read the existing
@@ -1582,11 +1595,18 @@ func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev
 	}
 	redacted := redactSecrets(errMsg)
 	log.Printf("Bridge error: %s", redacted)
+	uid := sessionUserID(userID...)
 	status, runStatus, reason := classifyBridgeErrorOutcome(redacted)
-	s.patchContinuityFailure(chatID, threadID, status, reason, sessionUserID(userID...))
+	s.patchContinuityFailure(chatID, threadID, status, reason, uid)
 	s.completeRunLog(chatID, threadID, runStatus, "", reason)
 	s.recordPipelineEvent(chatID, threadID, observability.NewErrorEvent("",
 		observability.PhaseRunFailed, reason))
+
+	// Mark failure for timeout/provider errors so lifecycle manager marks session suspect
+	if s.sessions != nil && status == "timed_out" {
+		s.sessions.MarkFailure(chatID, threadID, uid, reason)
+	}
+
 	if err := s.output.SendError(chatID, threadID, redacted); err != nil {
 		log.Printf("Failed to send error to chat %d: %v", chatID, err)
 	}
