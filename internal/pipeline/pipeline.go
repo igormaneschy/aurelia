@@ -985,6 +985,23 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 			return s.handleResultEvent(chatID, threadID, messageID, ev, &assistantText, userText, userID)
 		case "error":
 			return s.handleErrorEvent(chatID, threadID, messageID, ev, userID)
+		case "compaction_start", "compaction_end":
+			// Compaction events reset idle timer and provide observability.
+			// Log briefly for diagnostics.
+			if s.runLog != nil {
+				s.recordPipelineEvent(chatID, threadID, observability.NewEvent("",
+					observability.PhaseBridgeSystem, fmt.Sprintf("event=%s", ev.Type)))
+			}
+		case "auto_retry_start", "auto_retry_end":
+			// Retry events reset idle timer.
+			if s.runLog != nil {
+				msg := fmt.Sprintf("event=%s", ev.Type)
+				if ev.Content != "" {
+					msg += " " + ev.Content
+				}
+				s.recordPipelineEvent(chatID, threadID, observability.NewEvent("",
+					observability.PhaseBridgeSystem, msg))
+			}
 		default:
 			log.Printf("Bridge event (ignored): %s", ev.Type)
 		}

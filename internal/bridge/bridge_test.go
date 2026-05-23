@@ -708,7 +708,22 @@ rl.on('line', (line) => {
     const req = JSON.parse(line);
     const rid = req.request_id || "";
 
-    if (req.command === "get-session-stats") {
+    if (req.command === "compact-session") {
+        // Emit compaction events, then result
+        process.stdout.write(JSON.stringify({event:"compaction_start",request_id:rid,reason:"manual"}) + "\n");
+        process.stdout.write(JSON.stringify({event:"compaction_end",request_id:rid,reason:"manual",tokens_before:150000,success:true}) + "\n");
+        process.stdout.write(JSON.stringify({
+            event: "result",
+            request_id: rid,
+            content: JSON.stringify({
+                success: true,
+                tokens_before: 150000,
+                summary: "Session compacted successfully. Previous topics: ...",
+                session_id: "abc123",
+                session_file: "/tmp/sessions/test.jsonl",
+            }),
+        }) + "\n");
+    } else if (req.command === "get-session-stats") {
         process.stdout.write(JSON.stringify({
             event: "result",
             request_id: rid,
@@ -841,5 +856,95 @@ rl.on('close', () => process.exit(0));
 	}
 	if stats != nil {
 		t.Fatal("expected nil stats for empty content")
+	}
+}
+
+func TestBridge_CompactSession_Success(t *testing.T) {
+	dir := t.TempDir()
+	b := newMockBridge(t, dir, sessionStatsMockJS)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := b.CompactSession(ctx, RequestOptions{
+		Resume: "/tmp/sessions/test.jsonl",
+	})
+	if err != nil {
+		t.Fatalf("CompactSession() error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if !result.Success {
+		t.Fatal("expected success")
+	}
+	if result.TokensBefore != 150000 {
+		t.Fatalf("TokensBefore = %d, want 150000", result.TokensBefore)
+	}
+	if result.SessionID != "abc123" {
+		t.Fatalf("SessionID = %q, want %q", result.SessionID, "abc123")
+	}
+	if result.SessionFile != "/tmp/sessions/test.jsonl" {
+		t.Fatalf("SessionFile = %q", result.SessionFile)
+	}
+}
+
+func TestBridge_CompactSession_Error(t *testing.T) {
+	dir := t.TempDir()
+
+	compactErrorMock := `
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+
+rl.on('line', (line) => {
+    const req = JSON.parse(line);
+    const rid = req.request_id || "";
+    process.stdout.write(JSON.stringify({event:"error",request_id:rid,message:"compaction failed: session not found"}) + "\n");
+});
+
+rl.on('close', () => process.exit(0));
+`
+	b := newMockBridge(t, dir, compactErrorMock)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := b.CompactSession(ctx, RequestOptions{
+		Resume: "/tmp/missing.jsonl",
+	})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "compaction failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestBridge_CompactSession_EmptyContent(t *testing.T) {
+	dir := t.TempDir()
+
+	emptyCompactMock := `
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+
+rl.on('line', (line) => {
+    const req = JSON.parse(line);
+    const rid = req.request_id || "";
+    process.stdout.write(JSON.stringify({event:"result",request_id:rid,content:""}) + "\n");
+});
+
+rl.on('close', () => process.exit(0));
+`
+	b := newMockBridge(t, dir, emptyCompactMock)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	result, err := b.CompactSession(ctx, RequestOptions{})
+	if err != nil {
+		t.Fatalf("CompactSession() error: %v", err)
+	}
+	if result != nil {
+		t.Fatal("expected nil result for empty content")
 	}
 }

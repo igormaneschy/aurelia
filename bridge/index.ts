@@ -848,6 +848,23 @@ async function handleQuery(req: Request): Promise<void> {
           turnCount += 1;
           break;
         }
+        case "compaction_start": {
+          eReq({
+            event: "compaction_start",
+            reason: event.reason,
+          });
+          break;
+        }
+        case "compaction_end": {
+          eReq({
+            event: "compaction_end",
+            reason: event.reason,
+            tokens_before: event.result?.tokensBefore ?? 0,
+            success: !!event.result && !event.aborted,
+            error: event.errorMessage,
+          });
+          break;
+        }
         default:
           break;
       }
@@ -1181,6 +1198,71 @@ async function handleGetSessionStats(req: Request): Promise<void> {
   }
 }
 
+// ── Handle compact-session command ────────────────────────────────────────
+
+async function handleCompactSession(req: Request): Promise<void> {
+  const reqId = req.request_id || "";
+  const emitReq = (obj: OutEvent) => emit({ ...obj, request_id: reqId });
+
+  try {
+    const piSession = await createPiSession(req.options);
+    const session = piSession.session;
+
+    let terminalEmitted = false;
+
+    // Subscribe to compaction events and forward them
+    const unsub = session.subscribe((event) => {
+      if (terminalEmitted) return;
+      if (event.type === "compaction_start") {
+        emitReq({ event: "compaction_start", reason: event.reason });
+      } else if (event.type === "compaction_end") {
+        emitReq({
+          event: "compaction_end",
+          reason: event.reason,
+          tokens_before: event.result?.tokensBefore ?? 0,
+          success: !!event.result && !event.aborted,
+          error: event.errorMessage,
+        });
+      }
+    });
+
+    // Signal start
+    emitReq({ event: "compaction_start", reason: "manual" });
+
+    const customInstructions = req.prompt || undefined;
+    const result = await session.compact(customInstructions);
+
+    if (!terminalEmitted) {
+      terminalEmitted = true;
+      emitReq({
+        event: "compaction_end",
+        reason: "manual",
+        tokens_before: result?.tokensBefore ?? 0,
+        success: !!result,
+      });
+
+      // Return result as terminal event
+      emitReq({
+        event: "result",
+        content: JSON.stringify({
+          success: !!result,
+          tokens_before: result?.tokensBefore ?? 0,
+          summary: result?.summary ?? "",
+          session_id: session.sessionId,
+          session_file: session.sessionFile,
+        }),
+      });
+    }
+
+    unsub();
+    session.dispose();
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    redactedLog(`compact-session error: rid=${reqId} ${errMsg}`);
+    emitReq({ event: "error", message: redactSDKError(errMsg) });
+  }
+}
+
 // ── Handle incoming request ──────────────────────────────────────────────────
 
 async function handleRequest(line: string): Promise<void> {
@@ -1295,6 +1377,11 @@ async function handleRequest(line: string): Promise<void> {
 
     case "get-session-stats": {
       await handleGetSessionStats(req);
+      break;
+    }
+
+    case "compact-session": {
+      await handleCompactSession(req);
       break;
     }
 

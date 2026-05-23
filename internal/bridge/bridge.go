@@ -504,6 +504,38 @@ func (b *Bridge) Ping(ctx context.Context) error {
 	return nil
 }
 
+// CompactSessionResult holds the result of a compact-session command.
+type CompactSessionResult struct {
+	Success     bool   `json:"success"`
+	TokensBefore int   `json:"tokens_before"`
+	Summary     string `json:"summary,omitempty"`
+	SessionID   string `json:"session_id,omitempty"`
+	SessionFile string `json:"session_file,omitempty"`
+}
+
+// CompactSession requests proactive compaction of a PI session.
+// Returns the compaction result with tokens before/after.
+func (b *Bridge) CompactSession(ctx context.Context, opts RequestOptions) (*CompactSessionResult, error) {
+	ev, err := b.ExecuteSync(ctx, Request{
+		Command: "compact-session",
+		Options: opts,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("bridge: compact-session: %w", err)
+	}
+	if ev.Type == "error" {
+		return nil, fmt.Errorf("bridge: compact-session error: %s", ev.Message)
+	}
+	if ev.Content == "" {
+		return nil, nil
+	}
+	var result CompactSessionResult
+	if err := json.Unmarshal([]byte(ev.Content), &result); err != nil {
+		return nil, fmt.Errorf("bridge: compact-session parse: %w", err)
+	}
+	return &result, nil
+}
+
 // GetSessionStats returns PI session statistics for the given session file.
 // Uses the get-session-stats bridge command. Returns nil stats without error
 // when session is missing or bridge doesn't support the command.

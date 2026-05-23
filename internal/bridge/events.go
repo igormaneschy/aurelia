@@ -32,6 +32,11 @@ type Event struct {
 	// get_state response
 	IsStreaming  bool `json:"is_streaming,omitempty"`
 	PendingCount int  `json:"pending_count,omitempty"`
+
+	// compaction event fields
+	Reason       string `json:"reason,omitempty"`
+	TokensBefore int    `json:"tokens_before,omitempty"`
+	Success      bool   `json:"success,omitempty"`
 }
 
 // IsTerminal returns true if the event signals the end of a request stream.
