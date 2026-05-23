@@ -70,6 +70,7 @@ type SessionLifecycleConfig struct {
 	MaxEmptyResultsBeforeRotate  int  `json:"max_empty_results_before_rotate"`
 	MaxProcessDeathsBeforeRotate int  `json:"max_process_deaths_before_rotate"`
 	IdleTimeoutMinutes           int  `json:"idle_timeout_minutes"`
+	InterruptedSessionMaxAgeMinutes int `json:"interrupted_session_max_age_minutes,omitempty"`
 	KeepRecentTokens             int  `json:"keep_recent_tokens"`
 	ReserveTokens                int  `json:"reserve_tokens"`
 }
@@ -77,14 +78,15 @@ type SessionLifecycleConfig struct {
 // DefaultSessionLifecycleConfig returns safe defaults for session lifecycle.
 func DefaultSessionLifecycleConfig() SessionLifecycleConfig {
 	return SessionLifecycleConfig{
-		Enabled:                      true,
-		CompactAfterInputTokens:      120000,
-		RotateAfterInputTokens:       250000,
-		MaxEmptyResultsBeforeRotate:  1,
-		MaxProcessDeathsBeforeRotate: 1,
-		IdleTimeoutMinutes:           20,
-		KeepRecentTokens:             8000,
-		ReserveTokens:                32768,
+		Enabled:                         true,
+		CompactAfterInputTokens:         120000,
+		RotateAfterInputTokens:          250000,
+		MaxEmptyResultsBeforeRotate:     1,
+		MaxProcessDeathsBeforeRotate:    1,
+		IdleTimeoutMinutes:              20,
+		InterruptedSessionMaxAgeMinutes: 1,
+		KeepRecentTokens:                8000,
+		ReserveTokens:                   32768,
 	}
 }
 
@@ -442,6 +444,9 @@ func normalizeFileConfig(cfg fileConfig, r *runtime.PathResolver, preserveAutoMo
 	}
 	if cfg.SessionLifecycle.ReserveTokens <= 0 {
 		cfg.SessionLifecycle.ReserveTokens = defaults.SessionLifecycle.ReserveTokens
+	}
+	if cfg.SessionLifecycle.InterruptedSessionMaxAgeMinutes <= 0 {
+		cfg.SessionLifecycle.InterruptedSessionMaxAgeMinutes = defaults.SessionLifecycle.InterruptedSessionMaxAgeMinutes
 	}
 	return cfg
 }

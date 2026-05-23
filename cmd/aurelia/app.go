@@ -487,8 +487,34 @@ func (a *app) start() {
 			}
 		}()
 		time.Sleep(2 * time.Second)
-		a.bot.NotifyRecentInterruptedSessions(telegram.InterruptedSessionMaxAge)
+		maxAge := a.bot.InterruptedSessionMaxAgeFromConfig()
+		a.bot.NotifyRecentInterruptedSessions(maxAge)
 	}()
+
+	// Reconcile stale run_journal rows from before this process start
+	go a.reconcileStaleRuns()
+}
+
+func (a *app) reconcileStaleRuns() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("panic in reconcileStaleRuns: %v", r)
+		}
+	}()
+
+	if a.runLog == nil {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Mark continuity sessions as cold with deploy reason
+	if a.continuity != nil {
+		if err := a.continuity.MarkColdForSessions(ctx, "daemon restarted/deployed"); err != nil {
+			log.Printf("Warning: failed to mark continuity cold on startup: %v", err)
+		}
+	}
 }
 
 func (a *app) startSessionGC() {

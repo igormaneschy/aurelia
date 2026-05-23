@@ -9,8 +9,17 @@ import (
 	"gopkg.in/telebot.v3"
 )
 
-// InterruptedSessionMaxAge is the startup window for offering cold resume.
+// InterruptedSessionMaxAge is the default startup window for offering cold resume.
 const InterruptedSessionMaxAge = time.Minute
+
+// InterruptedSessionMaxAgeFromConfig returns the configured resume window from
+// the session lifecycle config, or the default if config is not available.
+func (bc *BotController) InterruptedSessionMaxAgeFromConfig() time.Duration {
+	if bc == nil || bc.config == nil || bc.config.SessionLifecycle.InterruptedSessionMaxAgeMinutes <= 0 {
+		return InterruptedSessionMaxAge
+	}
+	return time.Duration(bc.config.SessionLifecycle.InterruptedSessionMaxAgeMinutes) * time.Minute
+}
 
 func (bc *BotController) NotifyRecentInterruptedSessions(maxAge time.Duration) {
 	if bc == nil || bc.bot == nil || bc.sessions == nil {

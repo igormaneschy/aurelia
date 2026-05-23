@@ -80,10 +80,17 @@ func (s *Service) applyLifecycle(req *bridge.Request, chatID int64, threadID int
 		}
 
 	case session.ActionCompact:
-		// Proactive compaction before query
+		// Notify user about proactive compaction
+		if s.output != nil {
+			s.output.SendText(chatID, threadID, "🧠 Compactando histórico longo para continuar com segurança...")
+		}
+
 		result, err := s.compactSession(context.Background(), chatID, threadID, userID, req.Options)
 		if err != nil {
 			log.Printf("lifecycle: compaction failed for chat=%d: %v — falling back to cold resume", chatID, err)
+			if s.output != nil {
+				s.output.SendText(chatID, threadID, "⚠️ Compactação automática falhou. Retomando sessão com segurança.")
+			}
 			req.Options.Continue = false
 			return lifecycleDecisionResult{
 				Decision: session.Decision{
@@ -98,7 +105,6 @@ func (s *Service) applyLifecycle(req *bridge.Request, chatID int64, threadID int
 		log.Printf("lifecycle: compaction succeeded for chat=%d tokens_before=%d", chatID, result.TokensBefore)
 
 		// After compaction, the session is healthy enough to continue
-		// The session file might have changed; update request options
 		if result.SessionFile != "" {
 			req.Options.Resume = result.SessionFile
 		}
@@ -109,9 +115,17 @@ func (s *Service) applyLifecycle(req *bridge.Request, chatID int64, threadID int
 		}
 
 	case session.ActionRotate:
+		// Notify user about session rotation
+		if s.output != nil {
+			s.output.SendText(chatID, threadID, "🔄 Histórico muito longo. Criando nova sessão com resumo do contexto anterior...")
+		}
+
 		result, err := s.rotateSession(context.Background(), chatID, threadID, userID, req.Options)
 		if err != nil {
 			log.Printf("lifecycle: rotation failed for chat=%d: %v — falling back to cold resume", chatID, err)
+			if s.output != nil {
+				s.output.SendText(chatID, threadID, "⚠️ Rotação automática falhou. Retomando sessão anterior com segurança.")
+			}
 			req.Options.Continue = false
 			return lifecycleDecisionResult{
 				Decision: session.Decision{
@@ -125,6 +139,10 @@ func (s *Service) applyLifecycle(req *bridge.Request, chatID int64, threadID int
 
 		log.Printf("lifecycle: rotation succeeded for chat=%d old=%s new=%s",
 			chatID, filepath.Base(result.OldSessionFile), filepath.Base(result.NewSessionFile))
+
+		if s.output != nil {
+			s.output.SendText(chatID, threadID, "✅ Nova sessão criada com resumo do contexto anterior. Continuando com segurança.")
+		}
 
 		// Update session store with new session file
 		if s.sessions != nil {

@@ -608,6 +608,33 @@ func (bc *BotController) cmdStatus(chatID int64, threadID int, userID int64) (st
 		if sid, active := bc.sessions.GetSessionWithState(chatID, threadID, userID); sid != "" {
 			if !active {
 				lines = append(lines, "😴 Sessão: **fria** (inativa) — mensagens passadas não estão mais disponíveis para o modelo.")
+			} else {
+				lines = append(lines, "🔥 Sessão: **ativa** — contexto completo disponível.")
+			}
+
+			// Add lifecycle health state based on suspect metadata
+			signals := bc.sessions.GetHealthSignals(chatID, threadID, userID)
+			policy := bc.defaultLifecyclePolicy()
+			if policy.Enabled {
+				dec := session.EvaluateLifecycle(signals, policy)
+				emoji := ""
+				switch dec.State {
+				case session.HealthHealthy:
+					emoji = "✅"
+				case session.HealthLarge:
+					emoji = "📏"
+				case session.HealthCold:
+					emoji = "😴"
+				case session.HealthSuspect:
+					emoji = "⚠️"
+				case session.HealthDangerous:
+					emoji = "🚨"
+				}
+				lines = append(lines, fmt.Sprintf("%s Saúde da sessão: **%s**", emoji, string(dec.State)))
+				if dec.Reason != "" {
+					// Show reason without exposing session file path
+					lines = append(lines, fmt.Sprintf("   └ %s", dec.Reason))
+				}
 			}
 		}
 	}
@@ -1453,4 +1480,13 @@ func formatTelegramRunDetail(r *runlog.RunRecord, events []runlog.RunEvent) stri
 	}
 
 	return sb.String()
+}
+
+// defaultLifecyclePolicy returns the session lifecycle policy from config,
+// or a safe default if config is not available.
+func (bc *BotController) defaultLifecyclePolicy() session.LifecyclePolicy {
+	if bc.config == nil {
+		return session.DefaultLifecyclePolicy()
+	}
+	return bc.config.SessionLifecycle.LifecyclePolicy()
 }
