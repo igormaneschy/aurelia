@@ -506,13 +506,13 @@ func (b *Bridge) Ping(ctx context.Context) error {
 
 // RotateSessionResult holds the result of a rotate-session command.
 type RotateSessionResult struct {
-	Success       bool   `json:"success"`
+	Success        bool   `json:"success"`
 	OldSessionFile string `json:"old_session_file,omitempty"`
-	OldSessionID  string `json:"old_session_id,omitempty"`
+	OldSessionID   string `json:"old_session_id,omitempty"`
 	NewSessionFile string `json:"new_session_file,omitempty"`
-	NewSessionID  string `json:"new_session_id,omitempty"`
-	SummaryLength int    `json:"summary_length,omitempty"`
-	TokensBefore  int    `json:"tokens_before,omitempty"`
+	NewSessionID   string `json:"new_session_id,omitempty"`
+	SummaryLength  int    `json:"summary_length,omitempty"`
+	TokensBefore   int    `json:"tokens_before,omitempty"`
 }
 
 // RotateSession rotates a session by compacting the old one and creating a new
@@ -540,11 +540,11 @@ func (b *Bridge) RotateSession(ctx context.Context, opts RequestOptions) (*Rotat
 
 // CompactSessionResult holds the result of a compact-session command.
 type CompactSessionResult struct {
-	Success     bool   `json:"success"`
-	TokensBefore int   `json:"tokens_before"`
-	Summary     string `json:"summary,omitempty"`
-	SessionID   string `json:"session_id,omitempty"`
-	SessionFile string `json:"session_file,omitempty"`
+	Success      bool   `json:"success"`
+	TokensBefore int    `json:"tokens_before"`
+	Summary      string `json:"summary,omitempty"`
+	SessionID    string `json:"session_id,omitempty"`
+	SessionFile  string `json:"session_file,omitempty"`
 }
 
 // CompactSession requests proactive compaction of a PI session.

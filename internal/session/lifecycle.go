@@ -20,25 +20,25 @@ const (
 type LifecycleAction string
 
 const (
-	ActionContinue    LifecycleAction = "continue"
-	ActionColdResume  LifecycleAction = "cold_resume"
-	ActionCompact     LifecycleAction = "compact"
-	ActionRotate      LifecycleAction = "rotate"
+	ActionContinue   LifecycleAction = "continue"
+	ActionColdResume LifecycleAction = "cold_resume"
+	ActionCompact    LifecycleAction = "compact"
+	ActionRotate     LifecycleAction = "rotate"
 )
 
 // HealthSignals carries the metrics used to assess session health.
 type HealthSignals struct {
-	Active               bool
-	InputTokens          int
-	OutputTokens         int
-	TotalMessages        int
-	AssistantMessages    int
-	ToolResults          int
-	RecentTimeouts       int
-	RecentEmptyResults   int
-	RecentProcessDeaths  int
-	LastError            string
-	LastSeen             time.Time
+	Active              bool
+	InputTokens         int
+	OutputTokens        int
+	TotalMessages       int
+	AssistantMessages   int
+	ToolResults         int
+	RecentTimeouts      int
+	RecentEmptyResults  int
+	RecentProcessDeaths int
+	LastError           string
+	LastSeen            time.Time
 }
 
 // Decision is the output of lifecycle evaluation.
@@ -83,22 +83,21 @@ func DefaultLifecyclePolicy() LifecyclePolicy {
 func EvaluateLifecycle(signals HealthSignals, policy LifecyclePolicy) Decision {
 	// Priority order: check most consequential states first.
 
-	// 1. Cold: session is not active (e.g. restored from disk after restart).
-	// Check before dangerous/large because an inactive session's metrics are stale.
-	if !signals.Active {
-		return Decision{
-			State:  HealthCold,
-			Action: ActionColdResume,
-			Reason: "session is inactive (cold)",
-		}
-	}
-
-	// 2. Dangerous: input tokens exceed rotate threshold.
+	// 1. Dangerous: input tokens exceed rotate threshold.
 	if signals.InputTokens >= policy.RotateAfterInputTokens {
 		return Decision{
 			State:  HealthDangerous,
 			Action: ActionRotate,
 			Reason: fmt.Sprintf("input_tokens=%d >= rotate_after=%d", signals.InputTokens, policy.RotateAfterInputTokens),
+		}
+	}
+
+	// 2. Repeated suspect signals are dangerous enough to rotate.
+	if policy.NeedsRotation(signals) {
+		return Decision{
+			State:  HealthDangerous,
+			Action: ActionRotate,
+			Reason: fmt.Sprintf("suspect threshold reached: empty_results=%d process_deaths=%d", signals.RecentEmptyResults, signals.RecentProcessDeaths),
 		}
 	}
 
@@ -127,7 +126,16 @@ func EvaluateLifecycle(signals HealthSignals, policy LifecyclePolicy) Decision {
 		}
 	}
 
-	// 5. Healthy: normal continue.
+	// 5. Cold: session is not active (e.g. restored from disk after restart).
+	if !signals.Active {
+		return Decision{
+			State:  HealthCold,
+			Action: ActionColdResume,
+			Reason: "session is inactive (cold)",
+		}
+	}
+
+	// 6. Healthy: normal continue.
 	return Decision{
 		State:  HealthHealthy,
 		Action: ActionContinue,

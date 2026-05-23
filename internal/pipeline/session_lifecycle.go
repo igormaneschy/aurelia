@@ -35,7 +35,17 @@ type lifecycleDecisionResult struct {
 //  4. Record lifecycle decision as runlog event
 //
 // Returns a result with the modified request or skip signal.
-func (s *Service) applyLifecycle(req *bridge.Request, chatID int64, threadID int, userID int64) lifecycleDecisionResult {
+func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatID int64, threadID int, userID int64) lifecycleDecisionResult {
+	if s.config == nil {
+		return lifecycleDecisionResult{
+			Decision: session.Decision{
+				State:  session.HealthHealthy,
+				Action: session.ActionContinue,
+				Reason: "lifecycle unavailable: missing config",
+			},
+		}
+	}
+
 	// Get lifecycle policy from config
 	lc := s.config.SessionLifecycle
 	if !lc.Enabled {
@@ -50,11 +60,13 @@ func (s *Service) applyLifecycle(req *bridge.Request, chatID int64, threadID int
 
 	policy := lc.LifecyclePolicy()
 
-	// Gather health signals from session store (nil-safe for tests)
+	// Gather health signals from session store (nil-safe for tests), then enrich
+	// with PI stats when the bridge can inspect the persisted session file.
 	var signals session.HealthSignals
 	if s.sessions != nil {
 		signals = s.sessions.GetHealthSignals(chatID, threadID, userID)
 	}
+	signals = s.enrichLifecycleSignals(ctx, req, signals)
 
 	// Evaluate
 	dec := session.EvaluateLifecycle(signals, policy)
@@ -85,11 +97,14 @@ func (s *Service) applyLifecycle(req *bridge.Request, chatID int64, threadID int
 			s.output.SendText(chatID, threadID, "🧠 Compactando histórico longo para continuar com segurança...")
 		}
 
-		result, err := s.compactSession(context.Background(), chatID, threadID, userID, req.Options)
+		result, err := s.compactSession(ctx, chatID, threadID, userID, req.Options)
 		if err != nil {
 			log.Printf("lifecycle: compaction failed for chat=%d: %v — falling back to cold resume", chatID, err)
 			if s.output != nil {
 				s.output.SendText(chatID, threadID, "⚠️ Compactação automática falhou. Retomando sessão com segurança.")
+			}
+			if s.sessions != nil {
+				s.sessions.MarkFailure(chatID, threadID, userID, "compaction failed")
 			}
 			req.Options.Continue = false
 			return lifecycleDecisionResult{
@@ -97,6 +112,22 @@ func (s *Service) applyLifecycle(req *bridge.Request, chatID int64, threadID int
 					State:  session.HealthSuspect,
 					Action: session.ActionColdResume,
 					Reason: fmt.Sprintf("compaction failed: %v", err),
+				},
+				ModifiedReq: req,
+			}
+		}
+
+		if result == nil || !result.Success {
+			log.Printf("lifecycle: compaction returned unsuccessful result for chat=%d", chatID)
+			if s.sessions != nil {
+				s.sessions.MarkFailure(chatID, threadID, userID, "compaction returned unsuccessful result")
+			}
+			req.Options.Continue = false
+			return lifecycleDecisionResult{
+				Decision: session.Decision{
+					State:  session.HealthSuspect,
+					Action: session.ActionColdResume,
+					Reason: "compaction returned unsuccessful result",
 				},
 				ModifiedReq: req,
 			}
@@ -120,11 +151,14 @@ func (s *Service) applyLifecycle(req *bridge.Request, chatID int64, threadID int
 			s.output.SendText(chatID, threadID, "🔄 Histórico muito longo. Criando nova sessão com resumo do contexto anterior...")
 		}
 
-		result, err := s.rotateSession(context.Background(), chatID, threadID, userID, req.Options)
+		result, err := s.rotateSession(ctx, chatID, threadID, userID, req.Options)
 		if err != nil {
 			log.Printf("lifecycle: rotation failed for chat=%d: %v — falling back to cold resume", chatID, err)
 			if s.output != nil {
 				s.output.SendText(chatID, threadID, "⚠️ Rotação automática falhou. Retomando sessão anterior com segurança.")
+			}
+			if s.sessions != nil {
+				s.sessions.MarkFailure(chatID, threadID, userID, "rotation failed")
 			}
 			req.Options.Continue = false
 			return lifecycleDecisionResult{
@@ -132,6 +166,22 @@ func (s *Service) applyLifecycle(req *bridge.Request, chatID int64, threadID int
 					State:  session.HealthSuspect,
 					Action: session.ActionColdResume,
 					Reason: fmt.Sprintf("rotation failed: %v", err),
+				},
+				ModifiedReq: req,
+			}
+		}
+
+		if result == nil || !result.Success || result.NewSessionFile == "" {
+			log.Printf("lifecycle: rotation returned invalid result for chat=%d", chatID)
+			if s.sessions != nil {
+				s.sessions.MarkFailure(chatID, threadID, userID, "rotation returned invalid result")
+			}
+			req.Options.Continue = false
+			return lifecycleDecisionResult{
+				Decision: session.Decision{
+					State:  session.HealthSuspect,
+					Action: session.ActionColdResume,
+					Reason: "rotation returned invalid result",
 				},
 				ModifiedReq: req,
 			}
@@ -160,6 +210,34 @@ func (s *Service) applyLifecycle(req *bridge.Request, chatID int64, threadID int
 	}
 
 	return lifecycleDecisionResult{Decision: dec}
+}
+
+// enrichLifecycleSignals reads PI session stats when possible and merges them
+// into store-derived signals. Stats failures are non-fatal: lifecycle still
+// protects known cold/suspect sessions from the store metadata.
+func (s *Service) enrichLifecycleSignals(ctx context.Context, req *bridge.Request, signals session.HealthSignals) session.HealthSignals {
+	if s == nil || s.bridge == nil || req == nil || req.Options.Resume == "" {
+		return signals
+	}
+
+	statsCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	stats, err := s.bridge.GetSessionStats(statsCtx, req.Options)
+	if err != nil {
+		log.Printf("lifecycle: get-session-stats failed for session=%s: %s", filepath.Base(req.Options.Resume), redactSecrets(err.Error()))
+		return signals
+	}
+	if stats == nil {
+		return signals
+	}
+
+	signals.InputTokens = stats.InputTokens
+	signals.OutputTokens = stats.OutputTokens
+	signals.TotalMessages = stats.TotalMessages
+	signals.AssistantMessages = stats.AssistantMessages
+	signals.ToolResults = stats.ToolResults
+	return signals
 }
 
 // rotateSession runs the rotate-session bridge command with a timeout.

@@ -361,7 +361,7 @@ func (s *Service) processRun(input pipelineInput) {
 	s.applyVisionFallback(&req, input.images)
 
 	// Apply session lifecycle decision before executing
-	if lcResult := s.applyLifecycle(&req, input.chatID, input.threadID, input.userID); lcResult.SkipExecution {
+	if lcResult := s.applyLifecycle(ctx, &req, input.chatID, input.threadID, input.userID); lcResult.SkipExecution {
 		log.Printf("lifecycle: execution skipped for chat=%d: %s", input.chatID, lcResult.ErrorMessage)
 		if lcResult.ErrorMessage != "" {
 			_ = s.output.SendError(input.chatID, input.threadID, lcResult.ErrorMessage)
@@ -822,7 +822,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 		s.output.ConfirmMessage(chatID, messageID)
 		return
 	}
-	s.handleRetryOutcome(chatID, threadID, messageID, outcome)
+	s.handleRetryOutcome(chatID, threadID, messageID, outcome, userID)
 }
 
 func (s *Service) cancelBridgeOnContextDone(ctx context.Context, requestID string) func() {
@@ -886,14 +886,14 @@ func sessionUserID(userID ...int64) int64 {
 	return userID[0]
 }
 
-func (s *Service) handleRetryOutcome(chatID int64, threadID int, messageID int, outcome Outcome) {
+func (s *Service) handleRetryOutcome(chatID int64, threadID int, messageID int, outcome Outcome, userID int64) {
 	switch outcome {
 	case OutcomeSuccess:
 		s.bridgeFailures.reset()
 	case OutcomeProcessDeath:
 		s.bridgeFailures.record()
 		if s.sessions != nil {
-			s.sessions.MarkProcessDeath(chatID, threadID, sessionUserID())
+			s.sessions.MarkProcessDeath(chatID, threadID, userID)
 		}
 		s.patchContinuitySessionCold(chatID, threadID, "bridge retry process death")
 		_ = s.output.SendError(chatID, threadID, bridgeRetryFailedMessage)

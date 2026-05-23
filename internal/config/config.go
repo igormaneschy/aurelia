@@ -64,15 +64,15 @@ type ProviderConfig struct {
 
 // SessionLifecycleConfig controls automatic session health management.
 type SessionLifecycleConfig struct {
-	Enabled                      bool `json:"enabled"`
-	CompactAfterInputTokens      int  `json:"compact_after_input_tokens"`
-	RotateAfterInputTokens       int  `json:"rotate_after_input_tokens"`
-	MaxEmptyResultsBeforeRotate  int  `json:"max_empty_results_before_rotate"`
-	MaxProcessDeathsBeforeRotate int  `json:"max_process_deaths_before_rotate"`
-	IdleTimeoutMinutes           int  `json:"idle_timeout_minutes"`
-	InterruptedSessionMaxAgeMinutes int `json:"interrupted_session_max_age_minutes,omitempty"`
-	KeepRecentTokens             int  `json:"keep_recent_tokens"`
-	ReserveTokens                int  `json:"reserve_tokens"`
+	Enabled                         bool `json:"enabled"`
+	CompactAfterInputTokens         int  `json:"compact_after_input_tokens"`
+	RotateAfterInputTokens          int  `json:"rotate_after_input_tokens"`
+	MaxEmptyResultsBeforeRotate     int  `json:"max_empty_results_before_rotate"`
+	MaxProcessDeathsBeforeRotate    int  `json:"max_process_deaths_before_rotate"`
+	IdleTimeoutMinutes              int  `json:"idle_timeout_minutes"`
+	InterruptedSessionMaxAgeMinutes int  `json:"interrupted_session_max_age_minutes,omitempty"`
+	KeepRecentTokens                int  `json:"keep_recent_tokens"`
+	ReserveTokens                   int  `json:"reserve_tokens"`
 }
 
 // DefaultSessionLifecycleConfig returns safe defaults for session lifecycle.

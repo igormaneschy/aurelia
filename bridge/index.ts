@@ -189,6 +189,12 @@ function redactedLog(msg: string): void {
   log(redactSDKError(msg));
 }
 
+function escapeUntrustedSummary(text: string): string {
+  return redactSDKError(text)
+    .replace(/<\/previous_session_summary_untrusted>/gi, "&lt;/previous_session_summary_untrusted&gt;")
+    .replace(/<previous_session_summary_untrusted>/gi, "&lt;previous_session_summary_untrusted&gt;");
+}
+
 function piAgentDir(): string {
   return process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
 }
@@ -1315,7 +1321,7 @@ async function handleRotateSession(req: Request): Promise<void> {
       "in-progress items, key decisions, files read/modified, and next actions."
     );
 
-    const summary = compactionResult?.summary ?? "";
+    const summary = escapeUntrustedSummary(compactionResult?.summary ?? "");
     const sessionId = oldSession.sessionId;
     const oldFile = oldSession.sessionFile;
 

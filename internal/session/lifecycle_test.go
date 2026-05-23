@@ -7,10 +7,10 @@ import (
 
 func TestEvaluateLifecycle_HealthyActiveSession(t *testing.T) {
 	signals := HealthSignals{
-		Active:         true,
-		InputTokens:    1000,
-		OutputTokens:   500,
-		TotalMessages:  5,
+		Active:            true,
+		InputTokens:       1000,
+		OutputTokens:      500,
+		TotalMessages:     5,
 		AssistantMessages: 3,
 	}
 	policy := DefaultLifecyclePolicy()
@@ -86,6 +86,7 @@ func TestEvaluateLifecycle_SuspectDueToEmptyResults(t *testing.T) {
 		RecentEmptyResults: 1,
 	}
 	policy := DefaultLifecyclePolicy()
+	policy.MaxEmptyResultsBeforeRotate = 2
 
 	dec := EvaluateLifecycle(signals, policy)
 
@@ -104,6 +105,7 @@ func TestEvaluateLifecycle_SuspectDueToProcessDeaths(t *testing.T) {
 		RecentProcessDeaths: 1,
 	}
 	policy := DefaultLifecyclePolicy()
+	policy.MaxProcessDeathsBeforeRotate = 2
 
 	dec := EvaluateLifecycle(signals, policy)
 
@@ -135,11 +137,12 @@ func TestEvaluateLifecycle_PriorityDangerousOverSuspect(t *testing.T) {
 func TestEvaluateLifecycle_PrioritySuspectOverHealthy(t *testing.T) {
 	// Suspect should take priority even with large tokens in healthy range.
 	signals := HealthSignals{
-		Active:              true,
-		InputTokens:         1000,
-		RecentEmptyResults:  1,
+		Active:             true,
+		InputTokens:        1000,
+		RecentEmptyResults: 1,
 	}
 	policy := DefaultLifecyclePolicy()
+	policy.MaxEmptyResultsBeforeRotate = 2
 
 	dec := EvaluateLifecycle(signals, policy)
 
@@ -231,7 +234,8 @@ func TestDecision_String(t *testing.T) {
 }
 
 func TestEvaluateLifecycle_InactiveEvenWithLargeTokens(t *testing.T) {
-	// Inactive is checked before large/dangerous, so inactive + large tokens = cold.
+	// Fresh stats are authoritative: dangerous token counts rotate even if the
+	// session is currently cold after a daemon restart.
 	signals := HealthSignals{
 		Active:      false,
 		InputTokens: 300000,
@@ -240,8 +244,11 @@ func TestEvaluateLifecycle_InactiveEvenWithLargeTokens(t *testing.T) {
 
 	dec := EvaluateLifecycle(signals, policy)
 
-	if dec.State != HealthCold {
-		t.Fatalf("expected cold for inactive session even with high tokens, got %s", dec.State)
+	if dec.State != HealthDangerous {
+		t.Fatalf("expected dangerous for inactive session with high tokens, got %s", dec.State)
+	}
+	if dec.Action != ActionRotate {
+		t.Fatalf("expected rotate for inactive session with high tokens, got %s", dec.Action)
 	}
 }
 

@@ -71,14 +71,14 @@ func (s *Store) loadSnapshot(path string) error {
 		}
 		key := SessionKey{ChatID: item.ChatID, ThreadID: item.ThreadID, UserID: item.UserID}
 		s.sessions[key] = &entry{
-			sessionFile:   item.SessionFile,
-			active:        false,
-			lastSeen:      item.LastSeen,
-			lastFailure:   item.LastFailure,
-			lastFailureAt: item.LastFailureAt,
-			suspectCount:  item.SuspectCount,
-			emptyResults:  item.EmptyResults,
-			processDeaths: item.ProcessDeaths,
+			sessionFile:         item.SessionFile,
+			active:              false,
+			lastSeen:            item.LastSeen,
+			lastFailure:         item.LastFailure,
+			lastFailureAt:       item.LastFailureAt,
+			suspectCount:        item.SuspectCount,
+			emptyResults:        item.EmptyResults,
+			processDeaths:       item.ProcessDeaths,
 			lastLifecycleAction: item.LastLifecycleAction,
 		}
 	}

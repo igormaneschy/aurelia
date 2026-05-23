@@ -31,7 +31,7 @@ func TestApplyLifecycle_Disabled(t *testing.T) {
 		Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"},
 	}
 
-	result := s.applyLifecycle(req, 1, 2, 100)
+	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
 	if result.Decision.Action != session.ActionContinue {
 		t.Fatalf("expected continue when disabled, got %s", result.Decision.Action)
@@ -50,7 +50,7 @@ func TestApplyLifecycle_HealthyContinue(t *testing.T) {
 		Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"},
 	}
 
-	result := s.applyLifecycle(req, 1, 2, 100)
+	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
 	if result.Decision.Action != session.ActionContinue {
 		t.Fatalf("expected continue for healthy session, got %s (state=%s)", result.Decision.Action, result.Decision.State)
@@ -72,7 +72,7 @@ func TestApplyLifecycle_ColdResume(t *testing.T) {
 		Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"},
 	}
 
-	result := s.applyLifecycle(req, 1, 2, 100)
+	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
 	if result.Decision.Action != session.ActionColdResume {
 		t.Fatalf("expected cold_resume for inactive session, got %s (state=%s)", result.Decision.Action, result.Decision.State)
@@ -93,7 +93,7 @@ func TestApplyLifecycle_SuspectDueToEmptyResult(t *testing.T) {
 		Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"},
 	}
 
-	result := s.applyLifecycle(req, 1, 2, 100)
+	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
 	// MarkEmptyResult sets active=false, so the cold priority wins.
 	// The action (cold_resume) is the same for both cold and suspect.
@@ -116,7 +116,7 @@ func TestApplyLifecycle_SuspectDueToProcessDeath(t *testing.T) {
 		Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"},
 	}
 
-	result := s.applyLifecycle(req, 1, 2, 100)
+	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
 	// MarkProcessDeath sets active=false, so cold priority wins.
 	// The action (cold_resume) is the same for both.
@@ -143,7 +143,7 @@ func TestApplyLifecycle_LargeTokens(t *testing.T) {
 		Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"},
 	}
 
-	_ = s.applyLifecycle(req, 1, 2, 100)
+	_ = s.applyLifecycle(context.Background(), req, 1, 2, 100)
 	// Without a real bridge, large tokens decision can't be reached via store signals
 	// (GetHealthSignals doesn't include InputTokens). This test is a placeholder
 	// for when bridge stats are fully integrated.
@@ -158,7 +158,7 @@ func TestApplyLifecycle_NoSession(t *testing.T) {
 		Options: bridge.RequestOptions{},
 	}
 
-	result := s.applyLifecycle(req, 1, 2, 100)
+	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
 	if result.Decision.Action != session.ActionColdResume {
 		t.Fatalf("expected cold_resume for no session, got %s (state=%s)", result.Decision.Action, result.Decision.State)
@@ -176,7 +176,7 @@ func TestApplyLifecycle_ColdResumeThenClearFailure(t *testing.T) {
 		Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"},
 	}
 
-	result := s.applyLifecycle(req, 1, 2, 100)
+	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
 	if result.Decision.Action != session.ActionColdResume {
 		t.Fatalf("expected cold_resume after failure, got %s", result.Decision.Action)
@@ -193,7 +193,7 @@ func TestApplyLifecycle_ColdResumeThenClearFailure(t *testing.T) {
 		Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"},
 	}
 
-	result2 := s.applyLifecycle(req2, 1, 2, 100)
+	result2 := s.applyLifecycle(context.Background(), req2, 1, 2, 100)
 
 	if result2.Decision.Action != session.ActionContinue {
 		t.Fatalf("expected continue after clearing failure, got %s", result2.Decision.Action)
@@ -211,7 +211,7 @@ func TestApplyLifecycle_NoSessionStore(t *testing.T) {
 	}
 
 	// Should not panic when sessions store is nil
-	result := s.applyLifecycle(req, 1, 2, 100)
+	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
 	// Without session store, signals are zero-valued with Active=false → cold
 	if result.Decision.State != session.HealthCold {
@@ -223,6 +223,24 @@ func TestApplyLifecycle_NoSessionStore(t *testing.T) {
 	// Continue should be forced to false
 	if req.Options.Continue != false {
 		t.Fatal("request continue should be false when lifecycle is cold")
+	}
+}
+
+func TestHandleRetryOutcome_MarksProcessDeathForCurrentUser(t *testing.T) {
+	sessions := session.NewStore()
+	sessions.SetSession(42, 7, 100, "/tmp/user-100.jsonl")
+	sessions.SetSession(42, 7, 200, "/tmp/user-200.jsonl")
+	svc := &Service{sessions: sessions, output: &fakeOutput{}}
+
+	svc.handleRetryOutcome(42, 7, 123, OutcomeProcessDeath, 100)
+
+	user100 := sessions.GetHealthSignals(42, 7, 100)
+	if user100.RecentProcessDeaths != 1 {
+		t.Fatalf("expected process death for user 100, got %d", user100.RecentProcessDeaths)
+	}
+	user200 := sessions.GetHealthSignals(42, 7, 200)
+	if user200.RecentProcessDeaths != 0 {
+		t.Fatalf("expected no process death for user 200, got %d", user200.RecentProcessDeaths)
 	}
 }
 

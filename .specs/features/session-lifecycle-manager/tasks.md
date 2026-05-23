@@ -1,7 +1,7 @@
 # Session Lifecycle Manager — Tasks
 
-**Spec:** `.specs/features/session-lifecycle-manager/spec.md`  
-**Design:** `.specs/features/session-lifecycle-manager/design.md`  
+**Spec:** `.specs/features/session-lifecycle-manager/spec.md`
+**Design:** `.specs/features/session-lifecycle-manager/design.md`
 **Status:** Draft
 
 ---

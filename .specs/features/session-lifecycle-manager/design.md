@@ -1,6 +1,6 @@
 # Session Lifecycle Manager — Design
 
-**Spec:** `.specs/features/session-lifecycle-manager/spec.md`  
+**Spec:** `.specs/features/session-lifecycle-manager/spec.md`
 **Status:** Draft
 
 ---

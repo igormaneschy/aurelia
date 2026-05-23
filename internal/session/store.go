@@ -39,14 +39,14 @@ type Store struct {
 }
 
 type entry struct {
-	sessionFile   string
-	active        bool
-	lastSeen      time.Time
-	lastFailure   string
-	lastFailureAt time.Time
-	suspectCount  int
-	emptyResults  int
-	processDeaths int
+	sessionFile         string
+	active              bool
+	lastSeen            time.Time
+	lastFailure         string
+	lastFailureAt       time.Time
+	suspectCount        int
+	emptyResults        int
+	processDeaths       int
 	lastLifecycleAction string
 }
 
