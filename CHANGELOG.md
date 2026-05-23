@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-05-23
+
 ### Fixed
 - **lint**: resolvidos 7 problemas de lint e testes identificados pelo relatório
   Conrado após o sprint de observabilidade v0.14.0.
