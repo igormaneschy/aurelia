@@ -187,7 +187,7 @@ func (s *SQLiteStore) breakdown(ctx context.Context, column string, filter Metri
 	if err != nil {
 		return nil
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	total := 0
 	var items []BreakdownItem
