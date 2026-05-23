@@ -189,6 +189,12 @@ function redactedLog(msg: string): void {
   log(redactSDKError(msg));
 }
 
+function escapeUntrustedSummary(text: string): string {
+  return redactSDKError(text)
+    .replace(/<\/previous_session_summary_untrusted>/gi, "&lt;/previous_session_summary_untrusted&gt;")
+    .replace(/<previous_session_summary_untrusted>/gi, "&lt;previous_session_summary_untrusted&gt;");
+}
+
 function piAgentDir(): string {
   return process.env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
 }
@@ -844,8 +850,56 @@ async function handleQuery(req: Request): Promise<void> {
           });
           break;
         }
+        case "agent_start": {
+          eReq({ event: "agent_start" });
+          break;
+        }
+        case "agent_end": {
+          eReq({ event: "agent_end" });
+          break;
+        }
+        case "turn_start": {
+          eReq({ event: "turn_start" });
+          break;
+        }
         case "turn_end": {
           turnCount += 1;
+          eReq({ event: "turn_end" });
+          break;
+        }
+        case "auto_retry_start": {
+          eReq({
+            event: "auto_retry_start",
+            attempt: event.attempt,
+            max_attempts: event.maxAttempts,
+            error: event.errorMessage,
+          });
+          break;
+        }
+        case "auto_retry_end": {
+          eReq({
+            event: "auto_retry_end",
+            success: event.success,
+            attempt: event.attempt,
+            error: event.finalError,
+          });
+          break;
+        }
+        case "compaction_start": {
+          eReq({
+            event: "compaction_start",
+            reason: event.reason,
+          });
+          break;
+        }
+        case "compaction_end": {
+          eReq({
+            event: "compaction_end",
+            reason: event.reason,
+            tokens_before: event.result?.tokensBefore ?? 0,
+            success: !!event.result && !event.aborted,
+            error: event.errorMessage,
+          });
           break;
         }
         default:
@@ -1138,6 +1192,195 @@ async function handleGetState(req: Request): Promise<void> {
   });
 }
 
+// ── Handle get-session-stats command ───────────────────────────────────────
+
+async function handleGetSessionStats(req: Request): Promise<void> {
+  const reqId = req.request_id || "";
+  const emitReq = (obj: OutEvent) => emit({ ...obj, request_id: reqId });
+
+  try {
+    // Open or resolve session temporarily; do not retain in chatSessions.
+    const piSession = await createPiSession(req.options);
+    const session = piSession.session;
+
+    const stats = session.getSessionStats();
+    const usage = stats.contextUsage;
+
+    emitReq({
+      event: "result",
+      content: JSON.stringify({
+        session_file: stats.sessionFile,
+        session_id: stats.sessionId,
+        user_messages: stats.userMessages,
+        assistant_messages: stats.assistantMessages,
+        tool_calls: stats.toolCalls,
+        tool_results: stats.toolResults,
+        total_messages: stats.totalMessages,
+        input_tokens: stats.tokens.input,
+        output_tokens: stats.tokens.output,
+        cache_read_tokens: stats.tokens.cacheRead,
+        cache_write_tokens: stats.tokens.cacheWrite,
+        total_tokens: stats.tokens.total,
+        cost: stats.cost,
+        context_usage_pct: usage?.usagePercentage ?? 0,
+      }),
+    });
+
+    // Dispose of the temporary session immediately (never stored in chatSessions).
+    session.dispose();
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    redactedLog(`get-session-stats error: rid=${reqId} ${errMsg}`);
+    emitReq({ event: "error", message: redactSDKError(errMsg) });
+  }
+}
+
+// ── Handle compact-session command ────────────────────────────────────────
+
+async function handleCompactSession(req: Request): Promise<void> {
+  const reqId = req.request_id || "";
+  const emitReq = (obj: OutEvent) => emit({ ...obj, request_id: reqId });
+
+  try {
+    const piSession = await createPiSession(req.options);
+    const session = piSession.session;
+
+    let terminalEmitted = false;
+
+    // Subscribe to compaction events and forward them
+    const unsub = session.subscribe((event) => {
+      if (terminalEmitted) return;
+      if (event.type === "compaction_start") {
+        emitReq({ event: "compaction_start", reason: event.reason });
+      } else if (event.type === "compaction_end") {
+        emitReq({
+          event: "compaction_end",
+          reason: event.reason,
+          tokens_before: event.result?.tokensBefore ?? 0,
+          success: !!event.result && !event.aborted,
+          error: event.errorMessage,
+        });
+      }
+    });
+
+    // Signal start
+    emitReq({ event: "compaction_start", reason: "manual" });
+
+    const customInstructions = req.prompt || undefined;
+    const result = await session.compact(customInstructions);
+
+    if (!terminalEmitted) {
+      terminalEmitted = true;
+      emitReq({
+        event: "compaction_end",
+        reason: "manual",
+        tokens_before: result?.tokensBefore ?? 0,
+        success: !!result,
+      });
+
+      // Return result as terminal event
+      emitReq({
+        event: "result",
+        content: JSON.stringify({
+          success: !!result,
+          tokens_before: result?.tokensBefore ?? 0,
+          summary: result?.summary ?? "",
+          session_id: session.sessionId,
+          session_file: session.sessionFile,
+        }),
+      });
+    }
+
+    unsub();
+    session.dispose();
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    redactedLog(`compact-session error: rid=${reqId} ${errMsg}`);
+    emitReq({ event: "error", message: redactSDKError(errMsg) });
+  }
+}
+
+// ── Handle rotate-session command ───────────────────────────────────────────
+
+async function handleRotateSession(req: Request): Promise<void> {
+  const reqId = req.request_id || "";
+  const opts = req.options;
+  const emitReq = (obj: OutEvent) => emit({ ...obj, request_id: reqId });
+
+  try {
+    // 1. Open current session to get stats and generate summary
+    const oldPiSession = await createPiSession(opts);
+    const oldSession = oldPiSession.session;
+
+    // Get stats for summary context
+    const stats = oldSession.getSessionStats();
+
+    // Generate compact summary of the old session
+    const compactionResult = await oldSession.compact(
+      "Summarize the session's goal, current state, completed work, " +
+      "in-progress items, key decisions, files read/modified, and next actions."
+    );
+
+    const summary = escapeUntrustedSummary(compactionResult?.summary ?? "");
+    const sessionId = oldSession.sessionId;
+    const oldFile = oldSession.sessionFile;
+
+    redactedLog(`rotate: old session id=${sessionId} file=${oldFile} tokens=${stats.tokens.total}`);
+
+    // Emit progress
+    emitReq({ event: "system", message: "Generating session summary..." });
+
+    // Dispose old session (don't need to keep it alive after compaction)
+    oldSession.dispose();
+
+    // 2. Create a new fresh session with same options (cwd, model, tools, security)
+    // Force no-resume by clearing resume/continue
+    const newOpts: RequestOptions = { ...opts };
+    newOpts.resume = undefined;
+    newOpts.continue = false;
+    newOpts.persist_session = true;
+
+    const newPiSession = await createPiSession(newOpts);
+    const newSession = newPiSession.session;
+    const newFile = newSession.sessionFile;
+    const newId = newSession.sessionId;
+
+    redactedLog(`rotate: new session id=${newId} file=${newFile}`);
+
+    // 3. Inject structured summary as untrusted context
+    const summaryBlock = `<previous_session_summary_untrusted>
+${summary}
+</previous_session_summary_untrusted>`;
+
+    // Send as initial user message so the agent has context
+    await newSession.sendUserMessage([{ type: "text", text: summaryBlock }]);
+
+    // Wait briefly for the message to be processed
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    emitReq({
+      event: "result",
+      content: JSON.stringify({
+        success: true,
+        old_session_file: oldFile,
+        old_session_id: sessionId,
+        new_session_file: newFile,
+        new_session_id: newId,
+        summary_length: summary.length,
+        tokens_before: stats.tokens.total,
+      }),
+    });
+
+    // Dispose the new session — the Go side will store the new file path
+    // and the bridge will open it fresh on the next query.
+    newSession.dispose();
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    redactedLog(`rotate-session error: rid=${reqId} ${errMsg}`);
+    emitReq({ event: "error", message: redactSDKError(errMsg) });
+  }
+}
+
 // ── Handle incoming request ──────────────────────────────────────────────────
 
 async function handleRequest(line: string): Promise<void> {
@@ -1247,6 +1490,21 @@ async function handleRequest(line: string): Promise<void> {
 
     case "get-state": {
       await handleGetState(req);
+      break;
+    }
+
+    case "get-session-stats": {
+      await handleGetSessionStats(req);
+      break;
+    }
+
+    case "compact-session": {
+      await handleCompactSession(req);
+      break;
+    }
+
+    case "rotate-session": {
+      await handleRotateSession(req);
       break;
     }
 

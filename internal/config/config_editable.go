@@ -202,6 +202,10 @@ func sameFileConfig(a, b fileConfig) bool {
 			return false
 		}
 	}
+	// Compare session lifecycle config
+	if a.SessionLifecycle != b.SessionLifecycle {
+		return false
+	}
 	return true
 }
 

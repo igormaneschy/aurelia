@@ -47,15 +47,13 @@ type pipelineInput struct {
 const (
 	classifyTimeout        = 5 * time.Second
 	classifyMinTextLen     = 10
-	bridgeExecutionTimeout = 30 * time.Minute
-	idleBridgeTimeout      = 15 * time.Minute
+	bridgeExecutionTimeout = 30 * time.Minute // hard safety net, not configurable
+	defaultIdleTimeout     = 15 * time.Minute // fallback when config not available
 
 	bridgeConnectErrorMessage = "Falha ao conectar com o processador.\n\n" +
 		"Dica: verifique se o daemon está rodando. Se persistir, tente /new para reiniciar a sessão."
 	bridgeRetryFailedMessage = "Processador reiniciado mas não conseguiu completar. Tente novamente.\n\n" +
 		"Dica: se persistir, use /new para reiniciar a sessão."
-	bridgeTimeoutMessage = "Tempo limite atingido antes de concluir.\n\n" +
-		"A solicitação foi muito complexa. Tente dividir em partes menores."
 
 	heartbeatInterval  = 10 * time.Second
 	heartbeatThreshold = 15 * time.Second
@@ -66,6 +64,27 @@ const (
 	timeoutOriginBridgeQuery  = "bridge_query_timeout"
 	timeoutOriginProviderPI   = "provider/pi_timeout"
 )
+
+// buildTimeoutMessage returns a user-facing error message based on the timeout origin.
+func buildTimeoutMessage(origin string) string {
+	switch origin {
+	case timeoutOriginIdleBridge:
+		return "Tempo limite de inatividade atingido. O processador ficou muito tempo sem responder.\n\n" +
+			"Dica: tente enviar uma mensagem mais curta ou dividir em partes. Se persistir, use /new."
+	case timeoutOriginBridgeQuery:
+		return "O processador não conseguiu completar a consulta a tempo.\n\n" +
+			"Dica: tente novamente. Se o problema persistir, pode ser um problema no provedor de IA."
+	case timeoutOriginProviderPI:
+		return "O provedor de IA não respondeu a tempo.\n\n" +
+			"Dica: tente novamente em alguns instantes. Se persistir, verifique o status do provedor."
+	case timeoutOriginMaxExecution:
+		return "Tempo máximo de execução atingido.\n\n" +
+			"A solicitação foi muito complexa. Tente dividir em partes menores."
+	default:
+		return "Tempo limite atingido antes de concluir.\n\n" +
+			"A solicitação foi muito complexa. Tente dividir em partes menores."
+	}
+}
 
 type runTimeoutTracker struct {
 	mu        sync.Mutex
@@ -340,6 +359,16 @@ func (s *Service) processRun(input pipelineInput) {
 	req.RequestID = fmt.Sprintf("run-%d", time.Now().UnixNano())
 	req.Options.Images = input.images
 	s.applyVisionFallback(&req, input.images)
+
+	// Apply session lifecycle decision before executing
+	if lcResult := s.applyLifecycle(ctx, &req, input.chatID, input.threadID, input.userID); lcResult.SkipExecution {
+		log.Printf("lifecycle: execution skipped for chat=%d: %s", input.chatID, lcResult.ErrorMessage)
+		if lcResult.ErrorMessage != "" {
+			_ = s.output.SendError(input.chatID, input.threadID, lcResult.ErrorMessage)
+		}
+		s.output.ConfirmMessage(input.chatID, input.messageID)
+		return
+	}
 
 	s.executeAsync(ctx, input.chatID, input.threadID, input.messageID, req, userText, input.userID)
 }
@@ -671,7 +700,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	}
 
 	if ch != nil {
-		ch = idleTimeoutWrapper(ctx, ch, idleBridgeTimeout, cancel, func() {
+		ch = idleTimeoutWrapper(ctx, ch, s.getIdleTimeout(), cancel, func() {
 			timeoutTracker.mark(timeoutOriginIdleBridge)
 		})
 	}
@@ -736,6 +765,11 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	s.bridgeFailures.record()
 	log.Printf("bridge: process died mid-request, retrying for chat=%d thread=%d", chatID, threadID)
 
+	// Mark process death in session store for lifecycle evaluation
+	if s.sessions != nil {
+		s.sessions.MarkProcessDeath(chatID, threadID, userID)
+	}
+
 	if runLogStarted {
 		s.patchContinuityFailure(chatID, threadID, "failed", "process death, retrying", userID)
 		s.completeRunLog(chatID, threadID, runlog.RunFailed, "", "process death, retrying")
@@ -776,7 +810,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	}
 
 	if ch != nil {
-		ch = idleTimeoutWrapper(ctx, ch, idleBridgeTimeout, cancel, func() {
+		ch = idleTimeoutWrapper(ctx, ch, s.getIdleTimeout(), cancel, func() {
 			timeoutTracker.mark(timeoutOriginIdleBridge)
 		})
 	}
@@ -788,7 +822,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 		s.output.ConfirmMessage(chatID, messageID)
 		return
 	}
-	s.handleRetryOutcome(chatID, threadID, messageID, outcome)
+	s.handleRetryOutcome(chatID, threadID, messageID, outcome, userID)
 }
 
 func (s *Service) cancelBridgeOnContextDone(ctx context.Context, requestID string) func() {
@@ -830,9 +864,9 @@ func (s *Service) handleContextOutcome(parentCtx context.Context, ctx context.Co
 			observability.PhaseRunTimedOut,
 			fmt.Sprintf("origin=%s elapsed=%s", origin, elapsed.Round(time.Second))))
 		if s.sessions != nil {
-			s.sessions.DeactivateSession(chatID, threadID, userID)
+			s.sessions.MarkFailure(chatID, threadID, userID, origin)
 		}
-		_ = s.output.SendError(chatID, threadID, bridgeTimeoutMessage)
+		_ = s.output.SendError(chatID, threadID, buildTimeoutMessage(origin))
 		return true
 	}
 	return false
@@ -852,12 +886,15 @@ func sessionUserID(userID ...int64) int64 {
 	return userID[0]
 }
 
-func (s *Service) handleRetryOutcome(chatID int64, threadID int, messageID int, outcome Outcome) {
+func (s *Service) handleRetryOutcome(chatID int64, threadID int, messageID int, outcome Outcome, userID int64) {
 	switch outcome {
 	case OutcomeSuccess:
 		s.bridgeFailures.reset()
 	case OutcomeProcessDeath:
 		s.bridgeFailures.record()
+		if s.sessions != nil {
+			s.sessions.MarkProcessDeath(chatID, threadID, userID)
+		}
 		s.patchContinuitySessionCold(chatID, threadID, "bridge retry process death")
 		_ = s.output.SendError(chatID, threadID, bridgeRetryFailedMessage)
 		s.output.ConfirmMessage(chatID, messageID)
@@ -985,6 +1022,24 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 			return s.handleResultEvent(chatID, threadID, messageID, ev, &assistantText, userText, userID)
 		case "error":
 			return s.handleErrorEvent(chatID, threadID, messageID, ev, userID)
+		case "compaction_start", "compaction_end":
+			// Compaction events reset idle timer and provide observability.
+			if s.runLog != nil {
+				s.recordPipelineEvent(chatID, threadID, observability.NewEvent("",
+					observability.PhaseBridgeSystem, fmt.Sprintf("event=%s", ev.Type)))
+			}
+		case "agent_start", "agent_end", "turn_start", "turn_end":
+			// Agent/turn lifecycle events reset idle timer.
+		case "auto_retry_start", "auto_retry_end":
+			// Retry events reset idle timer.
+			if s.runLog != nil {
+				msg := fmt.Sprintf("event=%s", ev.Type)
+				if ev.Content != "" {
+					msg += " " + ev.Content
+				}
+				s.recordPipelineEvent(chatID, threadID, observability.NewEvent("",
+					observability.PhaseBridgeSystem, msg))
+			}
 		default:
 			log.Printf("Bridge event (ignored): %s", ev.Type)
 		}
@@ -1072,9 +1127,9 @@ func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, e
 		log.Printf("bridge: empty result after work chat=%d thread=%d request=%s turns=%d cost=$%.4f in=%d out=%d",
 			chatID, threadID, ev.RequestID, ev.NumTurns, ev.CostUSD, ev.InputTokens, ev.OutputTokens)
 
-		// Deactivate session so next turn does not Continue into a suspect session
+		// Mark empty result so next turn does not Continue into a suspect session
 		if s.sessions != nil {
-			s.sessions.DeactivateSession(chatID, threadID, userID)
+			s.sessions.MarkEmptyResult(chatID, threadID, userID)
 		}
 
 		s.patchContinuityFailure(chatID, threadID, "failed", "empty result after work", userID)
@@ -1281,6 +1336,11 @@ Updated summary (max 900 chars, no preamble):`,
 }
 
 func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText string, finalText string, runID string, userID int64) {
+	// Clear failure/suspect state after successful completion
+	if s.sessions != nil {
+		s.sessions.ClearFailureState(chatID, threadID, userID)
+	}
+
 	key := continuity.ConversationKey{ChatID: chatID, ThreadID: threadID}
 
 	// Progressive summarization: on non-summary turns, re-read the existing
@@ -1554,11 +1614,18 @@ func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev
 	}
 	redacted := redactSecrets(errMsg)
 	log.Printf("Bridge error: %s", redacted)
+	uid := sessionUserID(userID...)
 	status, runStatus, reason := classifyBridgeErrorOutcome(redacted)
-	s.patchContinuityFailure(chatID, threadID, status, reason, sessionUserID(userID...))
+	s.patchContinuityFailure(chatID, threadID, status, reason, uid)
 	s.completeRunLog(chatID, threadID, runStatus, "", reason)
 	s.recordPipelineEvent(chatID, threadID, observability.NewErrorEvent("",
 		observability.PhaseRunFailed, reason))
+
+	// Mark failure for timeout/provider errors so lifecycle manager marks session suspect
+	if s.sessions != nil && status == "timed_out" {
+		s.sessions.MarkFailure(chatID, threadID, uid, reason)
+	}
+
 	if err := s.output.SendError(chatID, threadID, redacted); err != nil {
 		log.Printf("Failed to send error to chat %d: %v", chatID, err)
 	}

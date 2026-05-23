@@ -41,6 +41,7 @@ const (
 	PhaseReplyStarted         = "reply_started"
 	PhaseReplySent            = "reply_sent"
 	PhaseContinuityPatched    = "continuity_patched"
+	PhaseSessionLifecycle     = "session_lifecycle"
 	PhaseDreamNudgeScheduled  = "dream_nudge_scheduled"
 	PhaseRunCompleted         = "run_completed"
 
@@ -57,11 +58,11 @@ const (
 	PhaseSecurityBlock      = "security_block"
 
 	// Cron phases
-	PhaseCronDue          = "cron_due"
-	PhaseCronPromptBuilt  = "cron_prompt_built"
-	PhaseCronBridgeStart  = "cron_bridge_started"
-	PhaseCronCompleted    = "cron_completed"
-	PhaseCronFailed       = "cron_failed"
+	PhaseCronDue         = "cron_due"
+	PhaseCronPromptBuilt = "cron_prompt_built"
+	PhaseCronBridgeStart = "cron_bridge_started"
+	PhaseCronCompleted   = "cron_completed"
+	PhaseCronFailed      = "cron_failed"
 
 	// Orchestration phases
 	PhaseOrchPreflightStarted = "orchestration_preflight_started"

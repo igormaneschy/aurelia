@@ -39,19 +39,31 @@ type Store struct {
 }
 
 type entry struct {
-	sessionFile string
-	active      bool
-	lastSeen    time.Time
+	sessionFile         string
+	active              bool
+	lastSeen            time.Time
+	lastFailure         string
+	lastFailureAt       time.Time
+	suspectCount        int
+	emptyResults        int
+	processDeaths       int
+	lastLifecycleAction string
 }
 
 // Info is a read-only view of a stored PI session.
 type Info struct {
-	ChatID      int64
-	ThreadID    int
-	UserID      int64
-	SessionFile string
-	Active      bool
-	LastSeen    time.Time
+	ChatID              int64
+	ThreadID            int
+	UserID              int64
+	SessionFile         string
+	Active              bool
+	LastSeen            time.Time
+	LastFailure         string
+	LastFailureAt       time.Time
+	SuspectCount        int
+	EmptyResults        int
+	ProcessDeaths       int
+	LastLifecycleAction string
 }
 
 // NewStore creates a new session store.
@@ -296,6 +308,108 @@ func (s *Store) ClearSessionForUser(chatID int64, threadID int, userID int64) {
 	key := SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID}
 	delete(s.sessions, key)
 	s.persistLocked()
+}
+
+// MarkFailure records a failure event for a session and deactivates it.
+// The failure reason is stored as suspect metadata for lifecycle evaluation.
+// Returns true if the session was found and updated.
+func (s *Store) MarkFailure(chatID int64, threadID int, userID int64, reason string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID}
+	e, ok := s.sessions[key]
+	if !ok || e == nil {
+		return false
+	}
+	e.active = false
+	e.lastFailure = reason
+	e.lastFailureAt = time.Now()
+	e.suspectCount++
+	s.persistLocked()
+	return true
+}
+
+// MarkProcessDeath increments the process death counter for a session.
+func (s *Store) MarkProcessDeath(chatID int64, threadID int, userID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID}
+	e, ok := s.sessions[key]
+	if !ok || e == nil {
+		return
+	}
+	e.processDeaths++
+	e.active = false
+	e.lastFailure = "process death"
+	e.lastFailureAt = time.Now()
+	e.suspectCount++
+	s.persistLocked()
+}
+
+// MarkEmptyResult increments the empty result counter for a session.
+func (s *Store) MarkEmptyResult(chatID int64, threadID int, userID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID}
+	e, ok := s.sessions[key]
+	if !ok || e == nil {
+		return
+	}
+	e.emptyResults++
+	e.active = false
+	e.lastFailure = "empty result after work"
+	e.lastFailureAt = time.Now()
+	e.suspectCount++
+	s.persistLocked()
+}
+
+// ClearFailureState resets failure/suspect metadata for a session.
+// Called after a successful run to clear stale suspect state.
+func (s *Store) ClearFailureState(chatID int64, threadID int, userID int64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID}
+	e, ok := s.sessions[key]
+	if !ok || e == nil {
+		return
+	}
+	e.lastFailure = ""
+	e.lastFailureAt = time.Time{}
+	e.suspectCount = 0
+	e.emptyResults = 0
+	e.processDeaths = 0
+	e.lastLifecycleAction = ""
+	s.persistLocked()
+}
+
+// GetHealthSignals returns the health signals for a session for lifecycle evaluation.
+func (s *Store) GetHealthSignals(chatID int64, threadID int, userID int64) HealthSignals {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	key := SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID}
+	e, ok := s.sessions[key]
+	if !ok || e == nil {
+		return HealthSignals{}
+	}
+	return HealthSignals{
+		Active:              e.active,
+		RecentEmptyResults:  e.emptyResults,
+		RecentProcessDeaths: e.processDeaths,
+		LastSeen:            e.lastSeen,
+		LastError:           e.lastFailure,
+	}
+}
+
+// GetSuspectCount returns the suspect counter for a session.
+func (s *Store) GetSuspectCount(chatID int64, threadID int, userID int64) int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	key := SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID}
+	e, ok := s.sessions[key]
+	if !ok || e == nil {
+		return 0
+	}
+	return e.suspectCount
 }
 
 // DeactivateSession marks a session as inactive for a specific chat, thread, and user.

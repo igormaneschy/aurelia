@@ -15,11 +15,17 @@ type snapshot struct {
 }
 
 type sessionSnapshot struct {
-	ChatID      int64     `json:"chat_id"`
-	ThreadID    int       `json:"thread_id"`
-	UserID      int64     `json:"user_id"`
-	SessionFile string    `json:"session_file"`
-	LastSeen    time.Time `json:"last_seen"`
+	ChatID              int64     `json:"chat_id"`
+	ThreadID            int       `json:"thread_id"`
+	UserID              int64     `json:"user_id"`
+	SessionFile         string    `json:"session_file"`
+	LastSeen            time.Time `json:"last_seen"`
+	LastFailure         string    `json:"last_failure,omitempty"`
+	LastFailureAt       time.Time `json:"last_failure_at,omitempty"`
+	SuspectCount        int       `json:"suspect_count,omitempty"`
+	EmptyResults        int       `json:"empty_results,omitempty"`
+	ProcessDeaths       int       `json:"process_deaths,omitempty"`
+	LastLifecycleAction string    `json:"last_lifecycle_action,omitempty"`
 }
 
 type cwdSnapshot struct {
@@ -64,7 +70,17 @@ func (s *Store) loadSnapshot(path string) error {
 			continue
 		}
 		key := SessionKey{ChatID: item.ChatID, ThreadID: item.ThreadID, UserID: item.UserID}
-		s.sessions[key] = &entry{sessionFile: item.SessionFile, active: false, lastSeen: item.LastSeen}
+		s.sessions[key] = &entry{
+			sessionFile:         item.SessionFile,
+			active:              false,
+			lastSeen:            item.LastSeen,
+			lastFailure:         item.LastFailure,
+			lastFailureAt:       item.LastFailureAt,
+			suspectCount:        item.SuspectCount,
+			emptyResults:        item.EmptyResults,
+			processDeaths:       item.ProcessDeaths,
+			lastLifecycleAction: item.LastLifecycleAction,
+		}
 	}
 	for _, item := range snap.Cwds {
 		if item.Cwd == "" {
@@ -93,11 +109,17 @@ func (s *Store) writeSnapshotLocked() error {
 			continue
 		}
 		snap.Sessions = append(snap.Sessions, sessionSnapshot{
-			ChatID:      key.ChatID,
-			ThreadID:    key.ThreadID,
-			UserID:      key.UserID,
-			SessionFile: item.sessionFile,
-			LastSeen:    item.lastSeen,
+			ChatID:              key.ChatID,
+			ThreadID:            key.ThreadID,
+			UserID:              key.UserID,
+			SessionFile:         item.sessionFile,
+			LastSeen:            item.lastSeen,
+			LastFailure:         item.lastFailure,
+			LastFailureAt:       item.lastFailureAt,
+			SuspectCount:        item.suspectCount,
+			EmptyResults:        item.emptyResults,
+			ProcessDeaths:       item.processDeaths,
+			LastLifecycleAction: item.lastLifecycleAction,
 		})
 	}
 	for key, cwd := range s.cwds {
