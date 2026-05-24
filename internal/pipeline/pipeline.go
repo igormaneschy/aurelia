@@ -24,6 +24,309 @@ import (
 	"github.com/igormaneschy/aurelia/internal/security"
 )
 
+// toolCallTracker monitors cumulative tool calls and emits warnings when
+// the model makes too many tool calls without producing a final result.
+// This prevents silent tool-call explosions that lead to 30-min timeouts.
+// Warnings are sent both to the chat (user-facing) and via steer (model-facing).
+type toolCallTracker struct {
+	mu        sync.Mutex
+	count     int
+	chatID    int64
+	threadID  int
+	output    Output
+	steerFunc func(string) // sends a steer command to the active bridge session
+	startedAt time.Time
+}
+
+func newToolCallTracker(chatID int64, threadID int, output Output, steerFunc func(string)) *toolCallTracker {
+	return &toolCallTracker{
+		chatID:    chatID,
+		threadID:  threadID,
+		output:    output,
+		steerFunc: steerFunc,
+		startedAt: time.Now(),
+	}
+}
+
+// increment records one tool call and emits progressive warnings when
+// thresholds are crossed. At each threshold:
+//   1. A Telegram message is sent to the user
+//   2. A steer command is sent to the bridge asking the model to consolidate
+// This dual approach ensures both the user and the model know about the explosion.
+func (t *toolCallTracker) increment(toolName string) {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.count++
+	count := t.count
+	t.mu.Unlock()
+
+	switch count {
+	case toolCallWarningThreshold:
+		t.sendWarning(fmt.Sprintf(
+			"🔧 Já usei ferramentas %d vezes (%s). Vou consolidar em breve.",
+			count, toolName))
+		t.steer("Você já usou ferramentas %d vezes (%s). "+
+			"Consolide o que já descobriu e apresente um resumo parcial agora.", count, toolName)
+	case toolCallCriticalThreshold:
+		t.sendWarning(fmt.Sprintf(
+			"⚠️ Estou usando muitas ferramentas (%d calls — último: %s). "+
+				"Vou tentar acelerar e apresentar um resumo parcial em breve.",
+			count, toolName))
+		t.steer("Você já usou ferramentas %d vezes (%s). "+
+			"Conclua imediatamente o que está fazendo e apresente um resumo parcial. "+
+			"O limite de tempo está próximo.", count, toolName)
+	default:
+		if count > toolCallCriticalThreshold && count%toolCallCriticalThreshold == 0 {
+			t.sendWarning(fmt.Sprintf(
+				"⚠️ %d chamadas de ferramenta. Vou concluir o que tenho e resumir.",
+				count))
+			t.steer("Você já usou ferramentas %d vezes. "+
+				"Conclua e apresente um resumo parcial imediatamente.", count)
+		}
+	}
+}
+
+func (t *toolCallTracker) sendWarning(msg string) {
+	if t == nil || t.output == nil {
+		return
+	}
+	if _, err := t.output.SendText(t.chatID, t.threadID, msg); err != nil {
+		log.Printf("pipeline: toolCallTracker SendText failed for chat=%d: %v", t.chatID, err)
+	}
+}
+
+func (t *toolCallTracker) steer(format string, args ...any) {
+	if t == nil || t.steerFunc == nil {
+		return
+	}
+	msg := fmt.Sprintf(format, args...)
+	t.steerFunc(msg)
+}
+
+func (t *toolCallTracker) countLocked() int {
+	if t == nil {
+		return 0
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.count
+}
+
+// elapsed returns the duration since the tracker was created.
+func (t *toolCallTracker) elapsed() time.Duration {
+	if t == nil {
+		return 0
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return time.Since(t.startedAt)
+}
+
+// ── Loop detection ────────────────────────────────────────────────────────
+
+const (
+	loopDetectorWindow   = 12 // track last N tool calls for pattern detection
+	loopRepeatThreshold  = 3  // same tool+input repeated N times → loop
+	loopPingPongLength   = 4  // A-B-A-B pattern detected after this many calls
+	loopOnlyReadLength   = 8  // only "read" calls in window → read spiral
+)
+
+// toolCallSnapshot fingerprints one tool_use event for pattern matching.
+type toolCallSnapshot struct {
+	name    string
+	inputFp string // stable input fingerprint (JSON keys + first 200 chars)
+}
+
+// loopDetector tracks recent tool calls and detects repetitive patterns.
+// When a loop is detected, it sends a steer command asking the model to
+// break the cycle and present findings so far.
+type loopDetector struct {
+	mu        sync.Mutex
+	ring      []toolCallSnapshot     // circular buffer of recent calls
+	next      int                    // next write position in ring
+	count     int                    // total calls seen (for ring-fill tracking)
+	warned    bool                   // prevent repeated steer during same loop
+	chatID    int64
+	threadID  int
+	output    Output
+	steerFunc func(string)
+}
+
+func newLoopDetector(chatID int64, threadID int, output Output, steerFunc func(string)) *loopDetector {
+	return &loopDetector{
+		ring:      make([]toolCallSnapshot, loopDetectorWindow),
+		chatID:    chatID,
+		threadID:  threadID,
+		output:    output,
+		steerFunc: steerFunc,
+	}
+}
+
+// record stores one tool call and returns true if a loop pattern was detected.
+func (d *loopDetector) record(toolName string, input any) bool {
+	if d == nil {
+		return false
+	}
+	fp := fingerprintInput(input)
+	snap := toolCallSnapshot{name: toolName, inputFp: fp}
+
+	d.mu.Lock()
+	d.ring[d.next] = snap
+	d.next = (d.next + 1) % loopDetectorWindow
+	d.count++
+	isLoop := d.detectLocked()
+	d.mu.Unlock()
+
+	if isLoop && !d.warned {
+		d.warned = true
+		msg := fmt.Sprintf(
+			"🔁 Detectei um padrão repetitivo de ferramentas (%s). "+
+				"Pare o que está fazendo e apresente um resumo do que já descobriu.",
+			toolName)
+		d.sendWarning(msg)
+		d.steerLoop(msg, toolName)
+		return true
+	}
+	return false
+}
+
+// detectLocked checks for loop patterns in the ring buffer.
+// Must be called with d.mu held.
+func (d *loopDetector) detectLocked() bool {
+	filled := d.count
+	if filled > loopDetectorWindow {
+		filled = loopDetectorWindow
+	}
+	if filled < 4 {
+		return false
+	}
+
+	// Build ordered slice from ring buffer for analysis
+	calls := make([]toolCallSnapshot, filled)
+	// Ring buffer: oldest entry is at (d.next - filled + window) % window, newest at (d.next-1 + window) % window.
+	// Re-arrange to chronological order:
+	for i := 0; i < filled; i++ {
+		pos := (d.next - filled + i + loopDetectorWindow) % loopDetectorWindow
+		calls[i] = d.ring[pos]
+	}
+
+	// Pattern 1: same tool+input repeated consecutively
+	if detectConsecutiveRepeat(calls, loopRepeatThreshold) {
+		return true
+	}
+
+	// Pattern 2: alternating A-B-A-B with same inputs
+	if detectPingPong(calls, loopPingPongLength) {
+		return true
+	}
+
+	// Pattern 3: only "read" calls in the window (read spiral)
+	if detectToolSpiral(calls, "read", loopOnlyReadLength) {
+		return true
+	}
+
+	return false
+}
+
+// detectConsecutiveRepeat returns true if the same tool+input appears
+// threshold or more times consecutively at the end of calls.
+func detectConsecutiveRepeat(calls []toolCallSnapshot, threshold int) bool {
+	n := len(calls)
+	if n < threshold {
+		return false
+	}
+	last := calls[n-1]
+	count := 1
+	for i := n - 2; i >= 0; i-- {
+		if calls[i].name == last.name && calls[i].inputFp == last.inputFp {
+			count++
+			if count >= threshold {
+				return true
+			}
+		} else {
+			break
+		}
+	}
+	return false
+}
+
+// detectPingPong returns true if the last calls form an A-B-A-B pattern
+// with matching inputs for each role.
+func detectPingPong(calls []toolCallSnapshot, length int) bool {
+	n := len(calls)
+	if n < length {
+		return false
+	}
+	// Check last `length` calls for A-B-A-B pattern
+	tail := calls[n-length:]
+	// Must have exactly 2 distinct (name, input) values alternating
+	if tail[0].name == tail[1].name && tail[0].inputFp == tail[1].inputFp {
+		return false // A-B-A-B requires alternation, not repetition
+	}
+	for i := 2; i < length; i++ {
+		expected := i % 2
+		if tail[i].name != tail[expected].name || tail[i].inputFp != tail[expected].inputFp {
+			return false
+		}
+	}
+	return true
+}
+
+// detectToolSpiral returns true if the last `minLen` calls are all the
+// same tool (e.g., only "read" calls without making progress).
+func detectToolSpiral(calls []toolCallSnapshot, toolName string, minLen int) bool {
+	n := len(calls)
+	if n < minLen {
+		return false
+	}
+	for i := n - minLen; i < n; i++ {
+		if calls[i].name != toolName {
+			return false
+		}
+	}
+	return true
+}
+
+// fingerprintInput produces a stable string fingerprint of a tool call input.
+// Uses JSON serialization to ensure deterministic output.
+func fingerprintInput(input any) string {
+	if input == nil {
+		return ""
+	}
+	b, err := json.Marshal(input)
+	if err != nil {
+		return fmt.Sprintf("%v", input)
+	}
+	s := string(b)
+	if len(s) > 200 {
+		s = s[:200]
+	}
+	return s
+}
+
+func (d *loopDetector) sendWarning(msg string) {
+	if d == nil || d.output == nil {
+		return
+	}
+	if _, err := d.output.SendText(d.chatID, d.threadID, msg); err != nil {
+		log.Printf("pipeline: loopDetector SendText failed for chat=%d: %v", d.chatID, err)
+	}
+}
+
+func (d *loopDetector) steerLoop(msg string, toolName string) {
+	if d == nil || d.steerFunc == nil {
+		return
+	}
+	steerMsg := fmt.Sprintf(
+		"Você está repetindo a chamada de ferramenta '%s' em ciclo. "+
+			"Pare imediatamente. Apresente um resumo do que já descobriu até agora. "+
+			"Se precisar de mais informações, peça orientação ao usuário.",
+		toolName)
+	d.steerFunc(steerMsg)
+}
+
 // runLogState tracks per-run state for the run journal.
 // mu serializes summary mutations independently of the runLogState map lock,
 // preventing data races between recordToolUse/recordToolResult and completeRunLog.
@@ -51,13 +354,21 @@ const (
 	bridgeExecutionTimeout = 30 * time.Minute // hard safety net, not configurable
 	defaultIdleTimeout     = 15 * time.Minute // fallback when config not available
 
+	// tool call explosion thresholds
+	toolCallWarningThreshold  = 20  // warn user after this many tool calls without result
+	toolCallCriticalThreshold = 50 // critical warning after this many tool calls
+
+	// timeout warning: warn N minutes before hard 30-min timeout
+	timeoutWarningLead = 5 * time.Minute
+
 	bridgeConnectErrorMessage = "Falha ao conectar com o processador.\n\n" +
 		"Dica: verifique se o daemon está rodando. Se persistir, tente /new para reiniciar a sessão."
 	bridgeRetryFailedMessage = "Processador reiniciado mas não conseguiu completar. Tente novamente.\n\n" +
 		"Dica: se persistir, use /new para reiniciar a sessão."
 
-	heartbeatInterval  = 10 * time.Second
-	heartbeatThreshold = 15 * time.Second
+	heartbeatInterval      = 10 * time.Second
+	heartbeatThreshold     = 15 * time.Second
+	heartbeatToolThreshold = 8 // include tool call count in heartbeat every N beats
 
 	timeoutOriginUnknown      = "unknown_timeout"
 	timeoutOriginMaxExecution = "max_execution_timeout"
@@ -629,6 +940,23 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	defer cancel()
 	timeoutTracker := newRunTimeoutTracker()
 
+	// steerDuringExecution sends a steer command to the active bridge session.
+	// This injects a message into the model's context without canceling execution.
+	steerDuringExecution := func(msg string) {
+		steerCtx, steerCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer steerCancel()
+		_, err := s.bridge.ExecuteSync(steerCtx, bridge.Request{
+			Command: "steer",
+			Prompt:  msg,
+			Options: bridge.RequestOptions{ChatID: chatID, ThreadID: threadID, UserID: userID},
+		})
+		if err != nil {
+			log.Printf("pipeline: steer failed during execution chat=%d: %v", chatID, err)
+		}
+	}
+	toolTracker := newToolCallTracker(chatID, threadID, s.output, steerDuringExecution)
+	loopDetect := newLoopDetector(chatID, threadID, s.output, steerDuringExecution)
+
 	// Max timeout goroutine — safety net after 30min
 	go func() {
 		defer func() {
@@ -644,6 +972,37 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 			log.Printf("pipeline: max execution timeout (%s) reached chat=%d thread=%d user=%d",
 				bridgeExecutionTimeout, chatID, threadID, userID)
 			cancel()
+		case <-ctx.Done():
+		}
+	}()
+
+	// Timeout warning goroutine — warns user 5min before hard timeout.
+	// Does NOT cancel — only notifies. The max timeout goroutine above
+	// handles the actual 30-min cancellation.
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("pipeline: panic in timeoutWarning goroutine: %v", r)
+			}
+		}()
+		timer := time.NewTimer(bridgeExecutionTimeout - timeoutWarningLead)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			// Send Telegram warning to user
+			userMsg := fmt.Sprintf(
+				"⏰ Aproximando do limite de tempo de %s. "+
+					"Vou concluir o que tenho e apresentar um resumo parcial.",
+				bridgeExecutionTimeout)
+			if _, err := s.output.SendText(chatID, threadID, userMsg); err != nil {
+				log.Printf("pipeline: SendText(timeout warning) failed for chat=%d: %v", chatID, err)
+			}
+			// Steer the model to wrap up — this injects into the active model context
+			steerDuringExecution(fmt.Sprintf(
+				"Você está próximo do limite de tempo de %s. "+
+					"Conclua imediatamente o que está fazendo e apresente um resumo parcial "+
+					"do que conseguiu até agora.",
+				bridgeExecutionTimeout))
 		case <-ctx.Done():
 		}
 	}()
@@ -750,8 +1109,8 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 		}
 	} else {
 		toolUseSignal := make(chan struct{}, 16)
-		go heartbeatMonitor(ctx.Done(), toolUseSignal, chatID, threadID, s.output)
-		outcome = s.ProcessBridgeEvents(chatID, threadID, messageID, ch, progress, userText, toolUseSignal, userID)
+		go heartbeatMonitor(ctx.Done(), toolUseSignal, toolTracker, chatID, threadID, s.output)
+		outcome = s.ProcessBridgeEvents(chatID, threadID, messageID, ch, progress, userText, toolUseSignal, userID, toolTracker, loopDetect)
 		if handled := s.handleContextOutcome(parentCtx, ctx, chatID, threadID, userID, timeoutTracker); handled {
 			s.output.ConfirmMessage(chatID, messageID)
 			return
@@ -830,8 +1189,8 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	}
 
 	toolUseSignal := make(chan struct{}, 16)
-	go heartbeatMonitor(ctx.Done(), toolUseSignal, chatID, threadID, s.output)
-	outcome = s.ProcessBridgeEvents(chatID, threadID, messageID, ch, progress, userText, toolUseSignal, userID)
+	go heartbeatMonitor(ctx.Done(), toolUseSignal, toolTracker, chatID, threadID, s.output)
+	outcome = s.ProcessBridgeEvents(chatID, threadID, messageID, ch, progress, userText, toolUseSignal, userID, toolTracker, loopDetect)
 	if handled := s.handleContextOutcome(parentCtx, ctx, chatID, threadID, userID, timeoutTracker); handled {
 		s.output.ConfirmMessage(chatID, messageID)
 		return
@@ -922,8 +1281,9 @@ func (s *Service) handleRetryOutcome(chatID int64, threadID int, messageID int, 
 // heartbeatMonitor sends a "still thinking" update when no tool_use event
 // arrives within heartbeatThreshold. It resets on each tool_use event so the
 // user only sees the message when the model is thinking without tools.
+// Includes tool call count from toolTracker in the status message.
 // Stopped by doneCh (e.g., ctx.Done()).
-func heartbeatMonitor(doneCh <-chan struct{}, toolUseSignal <-chan struct{}, chatID int64, threadID int, output Output) {
+func heartbeatMonitor(doneCh <-chan struct{}, toolUseSignal <-chan struct{}, toolTracker *toolCallTracker, chatID int64, threadID int, output Output) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("pipeline: panic in heartbeatMonitor: %v", r)
@@ -932,6 +1292,7 @@ func heartbeatMonitor(doneCh <-chan struct{}, toolUseSignal <-chan struct{}, cha
 
 	lastTool := time.Now()
 	beatSent := false
+	beatCount := 0
 	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 
@@ -945,7 +1306,14 @@ func heartbeatMonitor(doneCh <-chan struct{}, toolUseSignal <-chan struct{}, cha
 		case <-ticker.C:
 			if time.Since(lastTool) >= heartbeatThreshold && !beatSent {
 				elapsed := time.Since(lastTool).Round(time.Second)
-				msg := fmt.Sprintf("⏱️ %s — processando sem ferramentas ativas no momento", elapsed)
+				beatCount++
+				var msg string
+				toolCount := toolTracker.countLocked()
+				if toolCount > 0 && beatCount%heartbeatToolThreshold == 0 {
+					msg = fmt.Sprintf("⏱️ %s — processando (%d chamadas de ferramenta)", elapsed, toolCount)
+				} else {
+					msg = fmt.Sprintf("⏱️ %s — processando sem ferramentas ativas no momento", elapsed)
+				}
 				if _, err := output.SendText(chatID, threadID, msg); err != nil {
 					log.Printf("pipeline: heartbeat SendText failed for chat=%d: %v", chatID, err)
 				}
@@ -958,7 +1326,8 @@ func heartbeatMonitor(doneCh <-chan struct{}, toolUseSignal <-chan struct{}, cha
 // ProcessBridgeEvents reads bridge events and sends responses to the output.
 // toolUseSignal, if non-nil, receives a signal on every tool_use event so a
 // caller can monitor thinking gaps (heartbeat).
-func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int, ch <-chan bridge.Event, progress ProgressReporter, userText string, toolUseSignal chan<- struct{}, userID int64) Outcome {
+// toolTracker, if non-nil, is used to count tool calls and warn on explosion.
+func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int, ch <-chan bridge.Event, progress ProgressReporter, userText string, toolUseSignal chan<- struct{}, userID int64, toolTracker *toolCallTracker, loopDetect *loopDetector) Outcome {
 	var (
 		assistantText       strings.Builder
 		lastStreamFlush     = time.Now()
@@ -997,6 +1366,14 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 			}
 			lastStreamFlush = time.Now()
 			s.recordToolUse(chatID, threadID, toolName)
+			// Track tool call count and warn on explosion thresholds
+			if toolTracker != nil {
+				toolTracker.increment(toolName)
+			}
+			// Detect repetitive tool call patterns (loops)
+			if loopDetect != nil {
+				loopDetect.record(toolName, ev.Input)
+			}
 			// Record bridge_tool_use event.
 			s.recordPipelineEvent(chatID, threadID, observability.NewEvent("",
 				observability.PhaseBridgeToolUse,
