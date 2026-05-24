@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-05-24
+
+### Added
+- **transport**: Extract generic `Transport` interface from Telegram (T-1, Sprint D).
+  - New `internal/transport/` package with `Transport`, `IncomingMessage`, `OutgoingMessage`, `ImageAttachment`.
+  - `TelegramTransport` implements `Transport` reusing existing send/format helpers.
+  - `telegramPipelineOutput` delegates `SendText`, `SendError`, `SendReply`, `StartTyping` to `Transport`.
+  - `MockTransport` in `transport_test.go` for future pipeline tests.
+  - Zero regressions: all Telegram and pipeline tests pass unchanged.
+  - Prepares ground for TUI (Sprint J) and other future surfaces.
+
 ## [0.16.1] - 2026-05-24
 
 ### Security
