@@ -101,6 +101,9 @@ The long-term differentiator is the **Wiki Memory Gateway**: a local-first, mark
 - **Operational observability** — structured slog logging (text/JSON), durable run
   timelines with `run_events`, extended `run_journal` (provider, model, tokens,
   cost, errors, timeout, fallback), metrics queries, and debug commands
+- **Agent orchestration** — close orchestration cycle with `ExecutionContext`, git
+  preflight, artifact collection, fail-closed validation with retry, serial merge,
+  dependency skip, commit + optional PR creation
 
 ## Runtime Features
 

@@ -2,7 +2,7 @@
 
 **Spec:** `.specs/features/session-lifecycle-manager/spec.md`
 **Design:** `.specs/features/session-lifecycle-manager/design.md`
-**Status:** Draft
+**Status:** ✅ Implementado em v0.15.0 (2026-05-23)
 
 ---
 

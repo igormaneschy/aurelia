@@ -62,7 +62,7 @@ The strategic differentiator is the future **Wiki Memory Gateway**: local-first,
 - Onboarding CLI: interactive setup for providers, tokens, and configuration
 - Vision model fallback + Groq STT + bridge image format (PI SDK compatible)
 
-### Recently completed (v0.11.0–v0.13.0)
+### Recently completed (v0.11.0–v0.16.0)
 - **User Isolation MVP + runtime hardening**: user profiles, owner gate, per-user persona/memory loading, user-scoped sessions/active runs/Bridge commands, cron ownership, `/users`, `/forgetme`, migration CLI.
 - **Delegate to PI SDK Native — core slice**: PI model resolution, PI context-file loading, PI compaction, `session_file` resume, Bridge-side session lifecycle (`steer`/`followUp`/`abort`).
 - **Security Guard-Rails**: CapabilityProfile governance, PI tool_call hooks in the Bridge, audit trail, fail-closed. 5 profiles: observe→privileged.
@@ -70,13 +70,14 @@ The strategic differentiator is the future **Wiki Memory Gateway**: local-first,
 - **Continuity Engine v1**: Persistent conversation state, progressive summarization, checkpoint/run journal.
 - **UX Polish**: Streaming text, idle timeout, live progress metrics, `/stop`, `/status`, queue system, Telegram ack flow.
 - **Bridge Resilience**: Circuit breaker, retry with backoff, translated error messages, scanner-based NDJSON with 10MB limit.
-- **Orchestrator scaffold** (~40%): Worktree management, wave execution, validate prompts, git helpers, tasks status — but the cycle doesn't close.
+- **CI Hardening**: Lint gates (`errcheck`, `govet`, `staticcheck`, `unused`), security scan (`gosec`), local parity via `make check`.
+- **Operational Observability v0.14.0**: `run_id` correlation, structured `slog`, expanded `run_journal`, `run_events` timeline, `/debug` CLI/Telegram commands, local metrics.
+- **Session Lifecycle Manager v0.15.0**: Health states (healthy/large/suspect/dangerous/cold), auto-decisions (continue/compact/rotate/cold_resume), bridge commands (`get-session-stats`, `compact-session`, `rotate-session`), failure metadata persistence.
+- **Close Orchestration Cycle v0.16.0**: `ExecutionContext` with cwd/threadID, git preflight, artifact collection, fail-closed validation with retry, serial merge, dependency skip, commit + optional PR, `ExecutionManifest`.
 
 ### In progress
 - Closing the conceptual boundary: PI owns model/session/context/tool execution; Aurelia owns Telegram UX, identity/persona, persistence, scheduling, memory, project binding, policy/audit and orchestration.
 - Agent registry boundary decision: keep Aurelia specialists as a product-layer feature for now; investigate PI-native parsing/discovery later via `agentsFilesOverride` rather than forcing a user-facing migration.
-- Operational Observability: new spec defines the correlation, run timeline, debug commands and local metrics needed before expanding autonomous execution.
-- Orchestration Cycle: existing scaffold must be connected to validation, commit/PR, task-status updates and artifact manifests after observability foundation.
 - Memory/Wiki preparation: project memory scopes must become user×project private plus project-team shared before exposing Wiki MCP.
 
 ## Roadmap

@@ -138,8 +138,8 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 **Spec:** `.specs/features/operational-observability/`  
 **Design:** `.specs/features/operational-observability/design.md`  
 **Tasks:** `.specs/features/operational-observability/tasks.md`  
-**Status:** 🔴 Spec pronta; implementação pendente  
-**Prioridade:** P0 antes de execução autônoma
+**Status:** ✅ Implementado em v0.14.0 (2026-05-23)  
+**Prioridade:** P0 — Fechado
 
 **Problem:** Aurelia já tem `runlog`, `/status`, progresso Telegram, audit log e cron executions, mas a observabilidade é fragmentada. Para depurar produção, ainda é preciso correlacionar manualmente Telegram input, `request_id`, Bridge events, session_file, runlog, audit.log e logs do daemon.
 
@@ -161,8 +161,8 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 **Spec:** `.specs/features/agent-orchestration-execution/`
 **Design:** `.specs/features/agent-orchestration-execution/design.md`
 **Tasks:** `.specs/features/agent-orchestration-execution/tasks.md`
-**Status:** 🟡 Parcial (scaffold ~40%, ciclo não fecha)
-**Depende de:** Operational Observability; User Isolation runtime hardening; Project Binding já disponível
+**Status:** ✅ Implementado em v0.16.0 (2026-05-24)  
+**Depende de:** Operational Observability (✅); User Isolation runtime hardening (✅); Project Binding (✅)
 
 **Problem:** Aurelia já tem `internal/orchestrator/` com worktree, waves, git.go, validate.go, tasks_status.go (80% do código), mas **o ciclo não fecha**: `Validate`, `CommitChanges`, `CreatePR`, `UpdateTasksStatus` não são chamados no fluxo real. `currentBranch()` retorna hardcoded `"HEAD"`. Thread ID é perdido no handoff. O executor funcional prometido pela spec nunca foi entregue.
 
@@ -317,10 +317,10 @@ Foundation validada (Security Guard-Rails + Project Binding + Bridge Resilience)
 1. User Isolation MVP + runtime hardening ✅
       │
       ▼
-2. Operational Observability
+2. Operational Observability ✅
       │
       ▼
-3. Close Orchestration Cycle
+3. Close Orchestration Cycle ✅
       │
       ▼
 4. Plan Mode Architecture
@@ -366,26 +366,26 @@ Sprint A: User Isolation MVP + runtime hardening
   ├─ ✅ CancelAllForUser + active run/cancel/status/get-state user-scoped
   └─ ➡️ User×project private memory movida para Sprint E
 
-Sprint B: Operational Observability (T0–T12 do tasks.md)
-  ├─ RunContext + field map
-  ├─ slog estruturado configurável
-  ├─ run_journal expandido
-  ├─ run_events timeline
-  ├─ pipeline/Bridge retry/fallback/timeout events
-  ├─ /status com run_id curto
-  ├─ aurelia debug CLI
-  ├─ /debug owner-only
-  └─ métricas locais por SQLite
+Sprint B: Operational Observability (T0–T12 do tasks.md) ✅ v0.14.0
+  ├─ ✅ RunContext + field map
+  ├─ ✅ slog estruturado configurável
+  ├─ ✅ run_journal expandido
+  ├─ ✅ run_events timeline
+  ├─ ✅ pipeline/Bridge retry/fallback/timeout events
+  ├─ ✅ /status com run_id curto
+  ├─ ✅ aurelia debug CLI
+  ├─ ✅ /debug owner-only
+  └─ ✅ métricas locais por SQLite
 
-Sprint C: Close Orchestration Cycle (T0–T12 do tasks.md)
-  ├─ ExecutionContext com cwd+threadID
-  ├─ git preflight
-  ├─ artifact collection + verify command
-  ├─ fail-closed validation com retry
-  ├─ merge serial + skip dependents
-  ├─ commit + PR + tasks.md update
-  ├─ orphan cleanup no startup
-  └─ integration smoke test
+Sprint C: Close Orchestration Cycle (T0–T12 do tasks.md) ✅ v0.16.0
+  ├─ ✅ ExecutionContext com cwd+threadID
+  ├─ ✅ git preflight
+  ├─ ✅ artifact collection + verify command
+  ├─ ✅ fail-closed validation com retry
+  ├─ ✅ merge serial + skip dependents
+  ├─ ✅ commit + PR + tasks.md update
+  ├─ ✅ orphan cleanup no startup
+  └─ ✅ integration smoke test
 
 Sprint D: Plan Mode (T0–T13 do tasks.md)
   ├─ internal/planning/ types + SQLite store

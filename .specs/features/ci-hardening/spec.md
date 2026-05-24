@@ -1,5 +1,6 @@
 # CI Hardening — Lint & Security Gates
 
+**Status:** ✅ Implementado em v0.14.2 (2026-05-23)
 **Depends on:** none (standalone quality gate)  
 **Desbloqueia:** confidence in every push/PR, catches regression before merge
 
