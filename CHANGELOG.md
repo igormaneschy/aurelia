@@ -6,6 +6,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-05-24
+
+### Added
+- **Plan Mode Architecture** (Sprint D, T0–T13):
+  - `internal/planning/` package with `State`, `Store`, `OfferStore`, `Artifact`, `ProjectContext`
+  - SQLite persistence for planning state and offers with optimistic locking
+  - Stat-only project discovery: detects layouts (TLC, RFC, ADR, planning), stacks (Go, Node, Python, Rust), git, docs
+  - `BuildPlanningPrompt()` — injects planning context into system prompt when state is active
+  - Tool observer — watches Write/Edit/MultiEdit events and tracks materialized artifacts
+  - Offer-only heuristic — offers Plan Mode on intent detection, never imposes; 5-minute throttle
+  - Commands: `/plan`, `/plan status`, `/plan list`, `/plan cancel`, `/plan reset`, `/execute`
+  - Safe handoff to orchestrator via `ExecutionContext` — only executes when state is `awaiting_exec`
+  - State cleanup after successful execution; preservation on failure
+  - E2E test covering full Plan Mode flow
+- **Transport Abstraction** (T-1, from Sprint D):
+  - `internal/transport/` package with generic `Transport` interface
+  - `TelegramTransport` implementing `Transport`, reusing existing send helpers
+  - Desacouples pipeline from Telegram-specific transport
+
+### Changed
+- `planningKeywords` no longer includes approval/execution terms ("aprovado", "execute", etc.)
+- Replaced silent `BuildOrchestratorPrompt` injection with explicit Plan Mode offer
+
 ## [0.17.0] - 2026-05-24
 
 ### Added
