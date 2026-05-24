@@ -331,11 +331,12 @@ func (d *loopDetector) steerLoop(msg string, toolName string) {
 // mu serializes summary mutations independently of the runLogState map lock,
 // preventing data races between recordToolUse/recordToolResult and completeRunLog.
 type runLogState struct {
-	mu           sync.Mutex
-	runID        string
-	summary      strings.Builder
-	summaryCount int
-	wg           sync.WaitGroup // tracks in-flight DB updates
+	mu               sync.Mutex
+	runID            string
+	summary          strings.Builder
+	summaryCount     int
+	wg               sync.WaitGroup // tracks in-flight DB updates
+	partialAssistant string         // last partial assistant text, for checkpoint on timeout
 }
 
 // pipelineInput carries a user message through processing.
@@ -1413,6 +1414,8 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 						progress.ReportText(text)
 					}
 				}
+				// Save partial assistant text for checkpoint on timeout
+				s.savePartialAssistant(chatID, threadID, assistantText.String())
 				lastStreamFlush = time.Now()
 			}
 		case "result":
@@ -1863,10 +1866,11 @@ func (s *Service) patchContinuityFailure(chatID int64, threadID int, status stri
 	now := time.Now()
 	sessionCold := true
 
-	// Capture latest checkpoint and tools from the runLogState
+	// Capture latest checkpoint, tools, and partial assistant text from runLogState
 	checkpoint := ""
 	tools := ""
 	runID := ""
+	assistantText := ""
 	key := runLogKey(chatID, threadID)
 	s.runLogMu.Lock()
 	state, ok := s.runLogStates[key]
@@ -1874,6 +1878,7 @@ func (s *Service) patchContinuityFailure(chatID int64, threadID int, status stri
 		runID = state.runID
 		state.mu.Lock()
 		tools = state.summary.String()
+		assistantText = state.partialAssistant
 		state.mu.Unlock()
 	}
 	s.runLogMu.Unlock()
@@ -1881,9 +1886,12 @@ func (s *Service) patchContinuityFailure(chatID int64, threadID int, status stri
 	if tools != "" {
 		tools = redactSecrets(tools)
 	}
+	if assistantText != "" {
+		assistantText = redactSecrets(assistantText)
+	}
 
-	// Build checkpoint from available info
-	cp := buildCheckpoint(runlog.RunStatus(status), "", tools, errMsg)
+	// Build checkpoint from available info, including partial assistant text
+	cp := buildCheckpoint(runlog.RunStatus(status), "", tools, errMsg, assistantText)
 	checkpoint = redactSecrets(cp)
 
 	cwd := s.effectiveCwd(nil, chatID, threadID)
@@ -1967,6 +1975,9 @@ func (s *Service) continuitySnapshot(ctx context.Context, chatID int64, threadID
 	}
 	if state.LastAssistantSummary != "" {
 		parts = append(parts, "Last assistant summary: "+redactSecrets(state.LastAssistantSummary))
+	}
+	if state.LastCheckpoint != "" {
+		parts = append(parts, "Last checkpoint: "+redactSecrets(state.LastCheckpoint))
 	}
 	if state.LastRunStatus != "" {
 		parts = append(parts, "Last run status: "+redactSecrets(state.LastRunStatus))
@@ -2194,6 +2205,25 @@ func (s *Service) recordToolUse(chatID int64, threadID int, toolName string) {
 	}
 }
 
+// savePartialAssistant stores the current partial assistant response text
+// into the run log state. Used for checkpoint on timeout so the resume has
+// context of what the model was saying.
+func (s *Service) savePartialAssistant(chatID int64, threadID int, text string) {
+	key := runLogKey(chatID, threadID)
+	s.runLogMu.Lock()
+	state, ok := s.runLogStates[key]
+	s.runLogMu.Unlock()
+	if !ok || state == nil {
+		return
+	}
+	state.mu.Lock()
+	if len(text) > 2000 {
+		text = text[:2000]
+	}
+	state.partialAssistant = text
+	state.mu.Unlock()
+}
+
 // recordToolResult appends a summarized tool result to the tool summary.
 func (s *Service) recordToolResult(chatID int64, threadID int, summary string) {
 	if s.runLog == nil || summary == "" {
@@ -2229,10 +2259,10 @@ func (s *Service) completeRunLog(chatID int64, threadID int, status runlog.RunSt
 		return
 	}
 
-	// Capture final tool summary under the per-state lock to serialize
-	// with concurrent recordToolUse / recordToolResult mutations.
+	// Capture final tool summary and partial assistant text under the per-state lock
 	state.mu.Lock()
 	summary := state.summary.String()
+	partialAssistant := state.partialAssistant
 	state.mu.Unlock()
 
 	// Defensive redaction: assistant output may contain credentials.
@@ -2240,11 +2270,11 @@ func (s *Service) completeRunLog(chatID int64, threadID int, status runlog.RunSt
 	checkpoint = redactSecrets(checkpoint)
 	errMsg = redactSecrets(errMsg)
 
-	// Build checkpoint
+	// Build checkpoint with partial assistant text if available
 	if checkpoint == "" {
-		checkpoint = buildCheckpoint(status, "", summary, errMsg)
+		checkpoint = buildCheckpoint(status, "", summary, errMsg, partialAssistant)
 	} else {
-		checkpoint = buildCheckpoint(status, checkpoint, summary, errMsg)
+		checkpoint = buildCheckpoint(status, checkpoint, summary, errMsg, partialAssistant)
 	}
 
 	// Wait for any in-flight DB updates (e.g., tool summary from recordToolUse)
@@ -2267,7 +2297,9 @@ func (s *Service) completeRunLog(chatID int64, threadID int, status runlog.RunSt
 }
 
 // buildCheckpoint formats a textual checkpoint from run status and context.
-func buildCheckpoint(status runlog.RunStatus, checkpoint, toolSummary, errMsg string) string {
+// If partialAssistant is provided, it includes the last partial response text
+// so the model can continue from where it left off on resume.
+func buildCheckpoint(status runlog.RunStatus, checkpoint, toolSummary, errMsg string, extraArgs ...string) string {
 	var sb strings.Builder
 	sb.WriteString("Status: ")
 	sb.WriteString(string(status))
@@ -2278,6 +2310,11 @@ func buildCheckpoint(status runlog.RunStatus, checkpoint, toolSummary, errMsg st
 	if checkpoint != "" {
 		sb.WriteString("\nResposta/último resumo: ")
 		sb.WriteString(truncateCheckpoint(checkpoint))
+	}
+	// Include partial assistant response (last thing model was saying)
+	if len(extraArgs) > 0 && extraArgs[0] != "" {
+		sb.WriteString("\nResposta parcial do assistente: ")
+		sb.WriteString(truncateCheckpoint(extraArgs[0]))
 	}
 	if errMsg != "" {
 		sb.WriteString("\nErro: ")

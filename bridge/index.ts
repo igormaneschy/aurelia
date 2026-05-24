@@ -907,8 +907,12 @@ async function handleQuery(req: Request): Promise<void> {
       }
     });
 
-    // Health check: warn if no subscription events for 30s during active query.
-    // Does not affect execution — purely diagnostic.
+    // Health check: monitor for stalls during active query.
+    // At 30s: log warning (diagnostic).
+    // At 60s: send a steer to nudge the model back to producing output.
+    // At 120s: send a more urgent steer.
+    let stallSteerSent = false;
+    let stallUrgentSent = false;
     healthTimer = setInterval(() => {
       if (terminalEmitted || canceled) {
         clearInterval(healthTimer);
@@ -919,6 +923,24 @@ async function handleQuery(req: Request): Promise<void> {
         redactedLog(
           `streaming stall: no PI SDK events for ${Math.round(silent / 1000)}s (rid=${reqId})`,
         );
+      }
+      if (silent >= 60_000 && !stallSteerSent) {
+        stallSteerSent = true;
+        session.steer(
+          "Continue please. You have been silent for over a minute. " +
+          "If you have finished your current task, present your findings."
+        ).catch((err: unknown) => {
+          redactedLog(`stall steer failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+      }
+      if (silent >= 120_000 && !stallUrgentSent) {
+        stallUrgentSent = true;
+        session.steer(
+          "You have been silent for over 2 minutes. " +
+          "Stop your current activity and present a summary of what you have done so far."
+        ).catch((err: unknown) => {
+          redactedLog(`stall urgent steer failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
       }
     }, 15_000);
 
