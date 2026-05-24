@@ -4,14 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.19.0] - 2026-05-24
 
 ### Removed
-- **Plan Mode removed** (feature pruning, 2026-05-24):
-  - Removed `internal/planning/` package, Plan Mode commands (`/plan*`, `/execute`), menu entries, help text
-  - Removed Plan Mode prompt injection, offer heuristic, intent detection, artifact observation/reconciliation
-  - Planning remains conversational/user-driven; orchestrator and `aurelia-plan` legacy execution preserved
-  - Old `planning.db` files left inert on disk — no automatic deletion
+- Plan Mode feature entirely removed (feature pruning)
+  - Removed `internal/planning/` package and all planning state management
+  - Removed `/plan*`, `/execute` Telegram commands, menu entries, help text
+  - Removed Plan Mode prompt injection, offer heuristic, intent detection
+  - Removed artifact observation and reconciliation
+  - Planning remains conversational and user-driven, case by case
+  - Orchestrator and `aurelia-plan` execution preserved for legacy path
 
 ## [0.18.0] - 2026-05-24
 
