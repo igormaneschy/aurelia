@@ -48,7 +48,7 @@ A próxima onda foca em tornar o sistema seguro e estável para trabalho autôno
 1. manter fechado o hardening pós-v0.13 do limite PI↔Aurelia;
 2. criar base de observabilidade operacional antes de ampliar execução autônoma;
 3. usar a base de User Isolation já auditada para fechar o ciclo de execução orquestrada;
-4. transformar plan mode em modo explícito, persistente e retomável;
+4. planejamento permanece conversacional, sem Plan Mode explícito (removido em 2026-05-24);
 5. escopar memória por usuário/projeto com semântica estável;
 6. promover a memória para uma Wiki transversal via MCP;
 7. só então ativar nudge profundo, agent comms e auto-skills.
@@ -129,7 +129,7 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 - Memória privada de projeto por `(user_id, project_slug)` continua no Sprint E (`User-Scoped Project Memory`). Hoje há memória pessoal por usuário, mas `runtime.ProjectMemoryDir/ConversationProjectMemoryDir` ainda é principalmente cwd/chat/thread-scoped.
 - O `continuity.Store` permanece `ConversationKey{chat_id, thread_id}` por semântica atual de conversa/tópico. Os patches usam o `session_file` user-scoped correto; continuidade privada por usuário fica como decisão futura antes de Nudge profundo, se necessário.
 
-**Por que era P0:** sem `user_id` propagado integralmente, Plan Mode, Auto-Skills, memória e nudge poderiam vazar estado entre usuários autorizados. O caminho crítico de sessão/runtime está fechado.
+**Por que era P0:** sem `user_id` propagado integralmente, Auto-Skills, memória e nudge poderiam vazar estado entre usuários autorizados. O caminho crítico de sessão/runtime está fechado.
 
 ---
 
@@ -152,7 +152,7 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 - `/debug` e `aurelia debug` para latest run, run específico, erros recentes e métricas;
 - métricas locais por SQLite: sucesso/falha, latência, tokens, custo, fallback, provider/model e cron.
 
-**Por que agora:** Orchestration e Plan Mode vão aumentar muito a complexidade operacional. Antes de executar workflows autônomos mais longos, precisamos conseguir responder rapidamente “qual run falhou, em que fase, com qual modelo, custo, tools e erro?”.
+**Por que agora:** Orchestration e workflows autônomos vão aumentar muito a complexidade operacional. Antes de executar workflows mais longos, precisamos conseguir responder rapidamente “qual run falhou, em que fase, com qual modelo, custo, tools e erro?”.
 
 ---
 
@@ -176,31 +176,24 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 - orphan worktree cleanup no startup;
 - artifact collection + manifest.
 
-**Por que agora:** o scaffold já existe e ~40% do esforço total foi investido, mas o ciclo não fecha. Plan Mode precisa do handoff funcionando. É mais rápido conectar o que já existe do que reconstruir depois.
+**Por que agora:** o scaffold já existe e ~40% do esforço total foi investido, mas o ciclo não fecha. O handoff entre planejamento conversacional e execução precisa funcionar. É mais rápido conectar o que já existe do que reconstruir depois.
 
 ---
 
-## 4. Plan Mode Architecture
+## 4. Plan Mode (Removed)
 
-**Spec:** `.specs/features/plan-mode-architecture/`
-**Design:** `.specs/features/plan-mode-architecture/design.md`
-**Tasks:** `.specs/features/plan-mode-architecture/tasks.md`
-**Status:** 🟡 Parcial (detecção heurística + parsing de `aurelia-plan` existem)
-**Depende de:** User Isolation + Operational Observability + Orchestration Cycle (ExecutionContext, handoff)
+**Decision (2026-05-24):** Aurelia no longer has a formal Plan Mode. Planning remains conversational and user-driven, case by case.
 
-**Problem:** hoje planejamento é implícito: keywords disparam prompt de orquestração sem permissão, e `aurelia-plan` executa sem estado persistente. Precisa virar modo explícito, persistente e retomável.
+**What was removed:**
+- `internal/planning/` package (types, SQLite store, observer, prompt, discover)
+- `/plan*` and `/execute` commands, menu entries, help text
+- Plan Mode prompt injection, offer heuristic, planning intent detection
+- Artifact observation and reconciliation in the pipeline
 
-**Scope:**
-
-- **Fase 0 — Transport Abstraction (T-1):** extrair interface `Transport` do Telegram; desacoplar pipeline do transport específico; preparar base para TUI e outros surfaces;
-- `/plan`, `/plan status`, `/plan cancel`, `/plan list`;
-- state persistente em SQLite por `SessionKey`;
-- discovery baseado no project binding;
-- materialização observada via Write/Edit (`observer.go`);
-- offer-only heuristic (oferece, nunca impõe);
-- handoff seguro para executor via `ExecutionContext`.
-
-**Por que depois da orquestração:** Plan Mode produz o plano que o executor consome. O handoff depende do `ExecutionContext` e do preflight definidos na Orchestration spec.
+**What was preserved:**
+- Orchestrator and `tryExecutePlan` for legacy/conversational `aurelia-plan` execution
+- `sanitizeExecutionPlanForChat` — still sanitizes invalid plan blocks
+- `ExecuteApprovedPlan` on the Output interface (used by orchestrator)
 
 ---
 
@@ -311,7 +304,7 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 
 **Spec:** `docs/aurelia-tui-roadmap.md`
 **Status:** 🔴 Proposta
-**Depende de:** Plan Mode (Sprint D) + User-Scoped Project Memory (Sprint E) + Wiki Memory Gateway (Sprint F)
+**Depende de:** User-Scoped Project Memory (Sprint E) + Wiki Memory Gateway (Sprint F)
 
 **Problem:** o Telegram é hoje o único ponto de entrada conversacional da Aurelia. Isso cria fricção no contexto de terminal, sessões não retomáveis cross-surface e dependência de conectividade externa.
 
@@ -321,7 +314,7 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 - IPC layer via Unix socket para comunicação com daemon;
 - TUI MVP com Bubble Tea: sidebar, viewport, input, streaming;
 - multi-sessão local + retomada de sessões Telegram;
-- Plan Mode visual com painel de artefatos;
+- painel de estado do projeto (cwd, artefatos, checkpoints);
 - polish: temas, mouse, resize, flags `--session`/`--attach`.
 
 **Decisão:** Unix socket + JSON lines no MVP; gRPC em P2. Bubble Tea v2 + Lipgloss + Bubbles + Glamour. Binary separado `aurelia-tui`.
@@ -346,11 +339,8 @@ Foundation validada (Security Guard-Rails + Project Binding + Bridge Resilience)
       │
       ▼
 D0. Memory Contract & Spec Hygiene ✅
-      │
-      ▼
-4. Plan Mode Architecture
-      │
-      ▼
+       │
+       ▼
 5. User-Scoped Project Memory
       │
       ▼
@@ -425,14 +415,10 @@ Sprint D0: Memory Contract & Spec Hygiene ✅ v0.16.1
   ├─ runtime: ProjectTeamMemoryDir → `~/.aurelia/projects/<slug>/team/`
   └─ README: memory layers updated, Node.js >=20.6.0
 
-Sprint D: Plan Mode (T-1–T13 do tasks.md)
-  ├─ T-1: Transport Abstraction (2d) — pode antecipar; zero regressão
-  ├─ T0–T13: internal/planning/ types + SQLite store
-  ├─ context discovery
-  ├─ BuildPlanningPrompt + observer
-  ├─ offer-only heuristic
-  ├─ /plan commands
-  └─ handoff com ExecutionContext
+Sprint D: ~~Plan Mode (T-1–T13 do tasks.md)~~  🗑️ Removido 2026-05-24
+  Planejamento permanece conversacional, sem Plan Mode explícito.
+  internal/planning/ removido. /plan* e /execute removidos.
+  Orquestrador e aurelia-plan preservados para execução legada.
 
 Sprint E: User-Scoped Project Memory
   ├─ runtime.PathResolver per-user
@@ -465,7 +451,7 @@ Sprint J: TUI
   ├─ Fase 1: IPC Layer (3d)
   ├─ Fase 2: TUI MVP (5d)
   ├─ Fase 3: Multi-sessão (4d)
-  ├─ Fase 4: Plan Mode Visual (4d)
+  ├─ Fase 4: Painel de Estado do Projeto (3d) — cwd, artefatos, checkpoints
   └─ Fase 5: Polish + Distribuição (3d)
 ```
 

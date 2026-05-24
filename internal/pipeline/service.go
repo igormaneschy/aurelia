@@ -16,7 +16,6 @@ import (
 	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/persona"
-	"github.com/igormaneschy/aurelia/internal/planning"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
@@ -70,7 +69,6 @@ type Config struct {
 	Bindings     projectbinding.Store
 	RunLog       runlog.Store
 	Continuity     continuity.Store
-	PlanningStore  planning.Store
 	UsersStore     *users.Store
 	UserResolver   *users.Resolver
 }
@@ -100,8 +98,6 @@ type Service struct {
 	runLogMu        sync.Mutex
 	runLogStates    map[string]*runLogState
 	continuity       continuity.Store
-	planningStore    planning.Store
-	planningStates   sync.Map // sessionKey string → *planning.State
 	summaryCounter   *summaryCounter
 	summaryInterval  int
 	usersStore       *users.Store
@@ -132,7 +128,6 @@ func NewService(cfg Config) *Service {
 		runLog:          cfg.RunLog,
 		runLogStates:    make(map[string]*runLogState),
 		continuity:      cfg.Continuity,
-		planningStore:   cfg.PlanningStore,
 		summaryCounter:  &summaryCounter{counts: make(map[continuity.ConversationKey]int)},
 		summaryInterval: defaultSummaryInterval,
 		usersStore:      cfg.UsersStore,

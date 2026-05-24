@@ -12,7 +12,6 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/continuity"
-	"github.com/igormaneschy/aurelia/internal/planning"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/security"
@@ -75,17 +74,6 @@ func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatI
 	if agent != nil && agent.Prompt != "" {
 		agentSection := "# Agent Instructions\n\n" + agent.Prompt
 		sections = append(sections, agentSection)
-	}
-
-	// Plan Mode prompt injection — only when active state exists
-	if bc.planningStore != nil {
-		key := sessionKey(chatID, threadID, userID)
-		if stateVal, ok := bc.planningStates.Load(key); ok {
-			if state, ok := stateVal.(*planning.State); ok && state.Status == planning.StatusActive {
-				planSection := planning.BuildPlanningPrompt(state)
-				sections = append(sections, planSection)
-			}
-		}
 	}
 
 	// Cron scheduling instructions

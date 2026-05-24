@@ -16,7 +16,7 @@ Telegram / CLI / Cron / future interfaces
 Aurelia Product Layer
 - identity and persona
 - Telegram-native UX
-- workflows and planning state
+- workflows and conversational planning
 - persistent memory and future Wiki
 - user/project/topic scoping
 - policy, audit, continuity and scheduling
@@ -89,7 +89,7 @@ Sprint 0 → Delegate to PI SDK Native core ✅; remaining: agent registry bound
 Sprint A → User Isolation MVP + runtime hardening ✅; remaining user×project memory moved to Sprint E
 Sprint B → Operational Observability (run_id, timeline, /debug, métricas locais)
 Sprint C → Close Orchestration Cycle (conectar scaffold existente)
-Sprint D → Plan Mode Architecture explícito
+Sprint D → ~~Plan Mode Architecture~~ 🗑️ Removido 2026-05-24; planejamento conversational
 Sprint E → User-Scoped Project Memory
 Sprint F → Wiki Memory Gateway (MCP)
 Sprint G → Learning Nudge escopado

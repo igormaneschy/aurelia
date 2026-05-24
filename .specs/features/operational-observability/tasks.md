@@ -4,7 +4,7 @@
 **Roadmap step:** 2 — Observability Foundation  
 **Status:** ✅ Implementado em v0.14.0 (2026-05-23)  
 **Depende de:** User Isolation + Security Guard-Rails + Project Binding  
-**Desbloqueia:** safer Orchestration Cycle, Plan Mode debugging, operational support
+**Desbloqueia:** safer Orchestration Cycle, autonomous long-run debugging, operational support
 
 ## Implementation Summary
 
