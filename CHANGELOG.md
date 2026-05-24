@@ -29,6 +29,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `planningKeywords` no longer includes approval/execution terms ("aprovado", "execute", etc.)
 - Replaced silent `BuildOrchestratorPrompt` injection with explicit Plan Mode offer
 
+### Fixed
+- **Plan Mode command registration** — wired `/plan*`, `/execute` handlers to Telegram bot routes, menu, and help text
+- **Telegram menu registration** — removed invalid spaced commands (`plan status`, `plan list`, etc.) from `SetCommands` to prevent `BOT_COMMAND_INVALID (400)` failure
+- **Plan Mode thread routing** — all plan command replies now include `ThreadID` so responses arrive in the correct topic/thread instead of the general chat
+
 ## [0.17.0] - 2026-05-24
 
 ### Added

@@ -53,3 +53,8 @@
 
 ## Change auth-symlink-daemon-credentials (2026-05-22)
 - [pattern] auth-symlink-instead-of-copy
+
+## Change plan-mode-commands-fix (2026-05-24)
+- [anti-pattern] telegram-handler-wiring-checklist
+- [anti-pattern] telegram-setcommands-validation
+- [anti-pattern] telegram-threadid-explicit
