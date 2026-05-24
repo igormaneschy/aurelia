@@ -66,6 +66,12 @@ func (bc *BotController) registerContentRoutes() {
 	bc.bot.Handle("/model", bc.handleModelCommand)
 	bc.bot.Handle("/users", bc.handleUsersCommand)
 	bc.bot.Handle("/forgetme", bc.handleForgetMeCommand)
+	bc.bot.Handle("/plan", bc.handlePlan)
+	bc.bot.Handle("/plan status", bc.handlePlanStatus)
+	bc.bot.Handle("/plan list", bc.handlePlanList)
+	bc.bot.Handle("/plan cancel", bc.handlePlanCancel)
+	bc.bot.Handle("/plan reset", bc.handlePlanReset)
+	bc.bot.Handle("/execute", bc.handleExecute)
 	bc.bot.Handle("\fforget_me_confirm", bc.handleForgetMeConfirm)
 	bc.bot.Handle("\fforget_me_cancel", bc.handleForgetMeCancel)
 	bc.bot.Handle(telebot.OnCallback, bc.handleModelCallback)
@@ -89,6 +95,12 @@ func (bc *BotController) registerSlashMenu() {
 		{Text: "stop", Description: "Interromper processamento ativo (preserva sessão)"},
 		{Text: "users", Description: "Listar usuários autorizados (owner)"},
 		{Text: "forgetme", Description: "Apagar meus dados e recomeçar"},
+		{Text: "plan", Description: "Criar um plano de execução"},
+		{Text: "plan status", Description: "Ver status do plano ativo"},
+		{Text: "plan list", Description: "Listar planos"},
+		{Text: "plan cancel", Description: "Cancelar plano ativo"},
+		{Text: "plan reset", Description: "Reiniciar plano"},
+		{Text: "execute", Description: "Executar plano aprovado"},
 		{Text: "help", Description: "Mostrar comandos disponíveis"},
 	}
 	if err := bc.bot.SetCommands(commands); err != nil {
@@ -112,7 +124,13 @@ func helpMessage() string {
 		"/agents — Listar agentes disponíveis (também roteáveis com @nome)\n" +
 		"/memory — Ver status da memória e criar checkpoints\n" +
 		"/model — Ver/trocar modelo ativo\n" +
-		"/help — Mostrar esta mensagem\n\n" +
+		"/help — Mostrar esta mensagem\n" +
+		"/plan — Criar um plano de execução\n" +
+		"/plan status — Ver status do plano ativo\n" +
+		"/plan list — Listar planos\n" +
+		"/plan cancel — Cancelar plano ativo\n" +
+		"/plan reset — Reiniciar plano\n" +
+		"/execute — Executar plano aprovado\n\n" +
 		"---\n\n" +
 		"💡 Também entendo comandos naturais:\n" +
 		"• \"agenda todo dia às 9h revisar emails\"\n" +
