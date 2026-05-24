@@ -121,6 +121,30 @@ func TestParsePlan_InvalidJSON(t *testing.T) {
 	}
 }
 
+func TestParsePlan_BackwardCompatibility(t *testing.T) {
+	// Old plans without Feature/CreatePR/Verify/Task.Verify should still parse
+	data := []byte(`{"tasks":[{"id":"1","description":"test","agent":"worker","prompt":"do it","needs_worktree":true}]}`)
+	p, err := ParsePlan(data)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if p.Feature != "" {
+		t.Errorf("unexpected feature: %q", p.Feature)
+	}
+	if p.CreatePR {
+		t.Error("unexpected create_pr = true")
+	}
+	if p.Verify != "" {
+		t.Errorf("unexpected verify: %q", p.Verify)
+	}
+	if len(p.Tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(p.Tasks))
+	}
+	if p.Tasks[0].Verify != "" {
+		t.Errorf("unexpected task verify: %q", p.Tasks[0].Verify)
+	}
+}
+
 func taskIDs(tasks []Task) []string {
 	ids := make([]string, len(tasks))
 	for i, t := range tasks {

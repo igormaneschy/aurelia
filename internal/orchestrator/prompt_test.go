@@ -51,6 +51,15 @@ func TestBuildExecutionPrompt_ContainsTasksAndSchema(t *testing.T) {
 	if !strings.Contains(prompt, "worker") {
 		t.Error("missing agent list")
 	}
+	if !strings.Contains(prompt, `"feature"`) {
+		t.Error("missing feature field in schema")
+	}
+	if !strings.Contains(prompt, `"create_pr"`) {
+		t.Error("missing create_pr field in schema")
+	}
+	if !strings.Contains(prompt, `"verify"`) {
+		t.Error("missing verify field in schema")
+	}
 }
 
 func TestBuildWorkerPrompt_AllLayers(t *testing.T) {
@@ -76,7 +85,7 @@ func TestBuildWorkerPrompt_AllLayers(t *testing.T) {
 		"Feature Design",
 		"Your Task",
 		"T1",
-		"GET /health returning 200 OK",
+		"Implement /health",
 		"Focus ONLY",
 		"Other Workers",
 		"T2",
@@ -87,6 +96,11 @@ func TestBuildWorkerPrompt_AllLayers(t *testing.T) {
 			t.Errorf("worker prompt missing %q", check)
 		}
 	}
+
+	// The full task body must NOT be in the system prompt (it goes in user message)
+	if strings.Contains(prompt, "Create GET /health returning 200 OK") {
+		t.Error("worker prompt should NOT embed the full task.Prompt body")
+	}
 }
 
 func TestBuildWorkerPrompt_NoSiblings(t *testing.T) {
@@ -96,6 +110,26 @@ func TestBuildWorkerPrompt_NoSiblings(t *testing.T) {
 	)
 	if strings.Contains(prompt, "Other Workers") {
 		t.Error("should not show sibling section when no siblings")
+	}
+	if strings.Contains(prompt, "do it") {
+		t.Error("worker prompt should NOT embed task.Prompt even when no siblings")
+	}
+}
+
+func TestBuildWorkerPrompt_DoesNotEmbedTaskBody(t *testing.T) {
+	prompt := BuildWorkerPrompt(
+		"agent",
+		"", "", "", "",
+		Task{ID: "T1", Description: "task one", Prompt: "This is the full long prompt with many details and file paths that should not appear in the system prompt."},
+		[]Task{
+			{ID: "T2", Agent: "qa", Description: "task two", Prompt: "Another long prompt that should not leak."},
+		},
+	)
+	if strings.Contains(prompt, "This is the full long prompt") {
+		t.Error("worker prompt embedded current task body")
+	}
+	if strings.Contains(prompt, "Another long prompt") {
+		t.Error("worker prompt embedded sibling task body")
 	}
 }
 

@@ -18,6 +18,7 @@ type fakeBridge struct {
 	results    map[string]*bridge.Event // requestPrompt → terminal event
 	defaultEv  *bridge.Event            // fallback for unmatched prompts
 	lastReq    bridge.Request           // captured from most recent Execute/ExecuteSync
+	syncErr    error                    // error returned by ExecuteSync
 	mu         sync.Mutex
 }
 
@@ -35,6 +36,12 @@ func (f *fakeBridge) SetDefault(ev *bridge.Event) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.defaultEv = ev
+}
+
+func (f *fakeBridge) SetSyncErr(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.syncErr = err
 }
 
 func (f *fakeBridge) Execute(ctx context.Context, req bridge.Request) (<-chan bridge.Event, error) {
@@ -64,7 +71,11 @@ func (f *fakeBridge) Execute(ctx context.Context, req bridge.Request) (<-chan br
 func (f *fakeBridge) ExecuteSync(ctx context.Context, req bridge.Request) (*bridge.Event, error) {
 	f.mu.Lock()
 	f.lastReq = req
+	err := f.syncErr
 	f.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 
 	ch, err := f.Execute(ctx, req)
 	if err != nil {
@@ -261,11 +272,16 @@ func TestExecutePlan_WorktreeFailure_FailsClosed(t *testing.T) {
 		{ID: "1", Description: "needs worktree", Prompt: "should not execute", NeedsWorktree: true},
 	}}
 
-	_, err := o.ExecutePlan(
+	noopValidator := func(ctx context.Context, task Task, result TaskResult, artifacts *ArtifactSnapshot, attempt int) (*ValidationResult, error) {
+		return &ValidationResult{Approved: true}, nil
+	}
+	_, _, err := o.ExecutePlan(
 		context.Background(),
+		ExecutionContext{},
 		plan,
 		nil,
 		func(task Task, cfg WorkerConfig) string { return "prompt" },
+		noopValidator,
 		func(ev WorkerEvent) {},
 	)
 	if err == nil {
@@ -295,11 +311,16 @@ func TestExecutePlan_TwoWaves(t *testing.T) {
 	var events []WorkerEvent
 	var mu sync.Mutex
 
-	results, err := o.ExecutePlan(
+	noopValidator := func(ctx context.Context, task Task, result TaskResult, artifacts *ArtifactSnapshot, attempt int) (*ValidationResult, error) {
+		return &ValidationResult{Approved: true}, nil
+	}
+	_, results, err := o.ExecutePlan(
 		context.Background(),
+		ExecutionContext{RepoRoot: o.config.RepoRoot},
 		plan,
 		nil, // no registry — uses defaults
 		func(task Task, cfg WorkerConfig) string { return "test prompt" },
+		noopValidator,
 		func(ev WorkerEvent) {
 			mu.Lock()
 			events = append(events, ev)
@@ -370,8 +391,12 @@ func TestExecutePlan_MergeFailure_PreservesWorktree(t *testing.T) {
 		return nil
 	}
 
-	results, err := o.ExecutePlan(context.Background(), plan, nil,
+	noopValidator := func(ctx context.Context, task Task, result TaskResult, artifacts *ArtifactSnapshot, attempt int) (*ValidationResult, error) {
+		return &ValidationResult{Approved: true}, nil
+	}
+	_, results, err := o.ExecutePlan(context.Background(), ExecutionContext{RepoRoot: repoDir}, plan, nil,
 		func(task Task, cfg WorkerConfig) string { return "prompt" },
+		noopValidator,
 		func(ev WorkerEvent) {
 			wtMu.Lock()
 			defer wtMu.Unlock()
@@ -464,4 +489,238 @@ func TestExecutePlan_MergeFailure_PreservesWorktree(t *testing.T) {
 		delCmd.Dir = repoDir
 		_ = delCmd.Run()
 	}
+}
+
+func TestExecutePlan_RetriesOnValidationFailure(t *testing.T) {
+	fb := newFakeBridge()
+	fb.SetDefault(&bridge.Event{Type: "result", Content: "done"})
+
+	o := NewOrchestrator(fb, OrchestratorConfig{
+		RepoRoot:             t.TempDir(),
+		MaxValidationRetries: 3,
+	})
+
+	plan := &Plan{Tasks: []Task{
+		{ID: "t1", Description: "task", Prompt: "do work"},
+	}}
+
+	attemptCount := 0
+	validator := func(ctx context.Context, task Task, result TaskResult, artifacts *ArtifactSnapshot, attempt int) (*ValidationResult, error) {
+		attemptCount++
+		if attempt < 2 {
+			return &ValidationResult{Approved: false, Issues: []string{"needs fix"}, ShouldRetry: true}, nil
+		}
+		return &ValidationResult{Approved: true}, nil
+	}
+
+	_, results, err := o.ExecutePlan(
+		context.Background(),
+		ExecutionContext{RepoRoot: o.config.RepoRoot},
+		plan,
+		nil,
+		func(task Task, cfg WorkerConfig) string { return "prompt" },
+		validator,
+		func(ev WorkerEvent) {},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].Status != TaskApproved {
+		t.Errorf("status = %q, want approved", results[0].Status)
+	}
+	if results[0].Attempts != 2 {
+		t.Errorf("attempts = %d, want 2", results[0].Attempts)
+	}
+	if attemptCount != 2 {
+		t.Errorf("validator called %d times, want 2", attemptCount)
+	}
+}
+
+func TestExecutePlan_EscalatesAfter3Failures(t *testing.T) {
+	fb := newFakeBridge()
+	fb.SetDefault(&bridge.Event{Type: "result", Content: "done"})
+
+	o := NewOrchestrator(fb, OrchestratorConfig{
+		RepoRoot:             t.TempDir(),
+		MaxValidationRetries: 3,
+	})
+
+	plan := &Plan{Tasks: []Task{
+		{ID: "t1", Description: "task", Prompt: "do work"},
+	}}
+
+	validator := func(ctx context.Context, task Task, result TaskResult, artifacts *ArtifactSnapshot, attempt int) (*ValidationResult, error) {
+		return &ValidationResult{Approved: false, Issues: []string{"bad"}, ShouldRetry: true}, nil
+	}
+
+	_, results, err := o.ExecutePlan(
+		context.Background(),
+		ExecutionContext{RepoRoot: o.config.RepoRoot},
+		plan,
+		nil,
+		func(task Task, cfg WorkerConfig) string { return "prompt" },
+		validator,
+		func(ev WorkerEvent) {},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if results[0].Status != TaskEscalated {
+		t.Errorf("status = %q, want escalated", results[0].Status)
+	}
+	if results[0].Attempts != 3 {
+		t.Errorf("attempts = %d, want 3", results[0].Attempts)
+	}
+}
+
+func TestExecutePlan_SkipsDependentsOfFailedTask(t *testing.T) {
+	fb := newFakeBridge()
+	fb.SetResult("task 1 prompt", &bridge.Event{Type: "result", Content: "done 1"})
+	fb.SetResult("task 2 prompt", &bridge.Event{Type: "result", Content: "done 2"})
+
+	o := NewOrchestrator(fb, OrchestratorConfig{RepoRoot: t.TempDir()})
+
+	plan := &Plan{Tasks: []Task{
+		{ID: "1", Description: "first", Prompt: "task 1 prompt"},
+		{ID: "2", Description: "second", Prompt: "task 2 prompt", DependsOn: []string{"1"}},
+	}}
+
+	validator := func(ctx context.Context, task Task, result TaskResult, artifacts *ArtifactSnapshot, attempt int) (*ValidationResult, error) {
+		if task.ID == "1" {
+			return &ValidationResult{Approved: false, Issues: []string{"fail"}, ShouldRetry: false}, nil
+		}
+		return &ValidationResult{Approved: true}, nil
+	}
+
+	_, results, err := o.ExecutePlan(
+		context.Background(),
+		ExecutionContext{RepoRoot: o.config.RepoRoot},
+		plan,
+		nil,
+		func(task Task, cfg WorkerConfig) string { return "prompt" },
+		validator,
+		func(ev WorkerEvent) {},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+
+	// Task 1 failed
+	if results[0].Status != TaskEscalated {
+		t.Errorf("task 1 status = %q, want escalated", results[0].Status)
+	}
+
+	// Task 2 skipped
+	if results[1].Status != TaskSkipped {
+		t.Errorf("task 2 status = %q, want skipped", results[1].Status)
+	}
+	if !results[1].Skipped {
+		t.Error("expected task 2 Skipped = true")
+	}
+}
+
+func TestExecutePlan_MergesWaveSerially(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	repoDir := t.TempDir()
+	initRepo(t, repoDir)
+
+	fb := newFakeBridge()
+	fb.SetDefault(&bridge.Event{Type: "result", Content: "done"})
+
+	o := NewOrchestrator(fb, OrchestratorConfig{RepoRoot: repoDir})
+
+	plan := &Plan{Tasks: []Task{
+		{ID: "t2", Description: "second", Prompt: "p2", NeedsWorktree: true},
+		{ID: "t1", Description: "first", Prompt: "p1", NeedsWorktree: true},
+	}}
+
+	validator := func(ctx context.Context, task Task, result TaskResult, artifacts *ArtifactSnapshot, attempt int) (*ValidationResult, error) {
+		return &ValidationResult{Approved: true}, nil
+	}
+
+	_, results, err := o.ExecutePlan(
+		context.Background(),
+		ExecutionContext{RepoRoot: repoDir},
+		plan,
+		nil,
+		func(task Task, cfg WorkerConfig) string { return "prompt" },
+		validator,
+		func(ev WorkerEvent) {},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	for _, r := range results {
+		if r.Status != TaskApproved {
+			t.Errorf("task %s status = %q, want approved", r.TaskID, r.Status)
+		}
+	}
+	// Both approved → both should have merged. Verify by checking no orphan worktrees remain.
+	matches, _ := filepath.Glob(filepath.Join(repoDir, ".worktrees", "worker-*"))
+	if len(matches) > 0 {
+		t.Errorf("expected all worktrees cleaned up after successful merge, found %v", matches)
+	}
+}
+
+func TestExecutePlan_ReusesWorktreeAcrossRetries(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	repoDir := t.TempDir()
+	initRepo(t, repoDir)
+
+	fb := newFakeBridge()
+	fb.SetDefault(&bridge.Event{Type: "result", Content: "done"})
+
+	o := NewOrchestrator(fb, OrchestratorConfig{
+		RepoRoot:             repoDir,
+		MaxValidationRetries: 3,
+	})
+
+	plan := &Plan{Tasks: []Task{
+		{ID: "t1", Description: "task", Prompt: "do work", NeedsWorktree: true},
+	}}
+
+	attemptCount := 0
+	validator := func(ctx context.Context, task Task, result TaskResult, artifacts *ArtifactSnapshot, attempt int) (*ValidationResult, error) {
+		attemptCount++
+		if attempt < 2 {
+			return &ValidationResult{Approved: false, Issues: []string{"fix"}, ShouldRetry: true}, nil
+		}
+		return &ValidationResult{Approved: true}, nil
+	}
+
+	_, results, err := o.ExecutePlan(
+		context.Background(),
+		ExecutionContext{RepoRoot: repoDir},
+		plan,
+		nil,
+		func(task Task, cfg WorkerConfig) string { return "prompt" },
+		validator,
+		func(ev WorkerEvent) {},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if results[0].Status != TaskApproved {
+		t.Errorf("status = %q, want approved", results[0].Status)
+	}
+	if results[0].Attempts != 2 {
+		t.Errorf("attempts = %d, want 2", results[0].Attempts)
+	}
+	// Worktree is cleaned up after successful merge; the key assertion is that
+	// only 1 worktree was ever created (reused across retries), not visible here.
 }

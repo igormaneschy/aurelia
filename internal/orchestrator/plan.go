@@ -7,7 +7,10 @@ import (
 
 // Plan is the structured execution plan returned by Aurelia.
 type Plan struct {
-	Tasks []Task `json:"tasks"`
+	Feature  string `json:"feature,omitempty"`   // e.g. "agent-orchestration-execution"
+	CreatePR bool   `json:"create_pr,omitempty"` // true when user asked to open a PR
+	Verify   string `json:"verify,omitempty"`    // optional default verify command
+	Tasks    []Task `json:"tasks"`
 }
 
 // Task is an atomic subtask in the execution plan.
@@ -18,16 +21,36 @@ type Task struct {
 	Prompt        string   `json:"prompt"`
 	DependsOn     []string `json:"depends_on,omitempty"`
 	NeedsWorktree bool     `json:"needs_worktree"`
+	Verify        string   `json:"verify,omitempty"` // optional per-task verify command (overrides plan.Verify)
 }
+
+// TaskStatus represents the lifecycle state of a task in the execution manifest.
+type TaskStatus string
+
+const (
+	TaskPending    TaskStatus = "pending"
+	TaskRunning    TaskStatus = "running"
+	TaskApproved   TaskStatus = "approved"
+	TaskFailed     TaskStatus = "failed"
+	TaskSkipped    TaskStatus = "skipped"
+	TaskUnverified TaskStatus = "unverified"
+	TaskEscalated  TaskStatus = "escalated"
+)
 
 // TaskResult holds the outcome of a single worker execution.
 type TaskResult struct {
-	TaskID     string
-	Content    string
-	Success    bool
-	DurationMs int64
-	CostUSD    float64
-	Error      string
+	TaskID       string
+	Content      string
+	Success      bool       // bridge call succeeded (compat)
+	Status       TaskStatus // approved, failed, skipped, unverified, escalated
+	Approved     bool       // validation passed (derived from Status)
+	Skipped      bool       // dependency/merge/preflight skip
+	Attempts     int        // number of execution attempts
+	ChangedFiles []string
+	Verify       *VerifyResult
+	DurationMs   int64
+	CostUSD      float64
+	Error        string
 }
 
 // WorkerEvent is emitted during execution for visual feedback.

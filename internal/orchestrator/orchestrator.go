@@ -30,9 +30,11 @@ type ExecutionContext struct {
 
 // OrchestratorConfig holds configuration for the orchestrator.
 type OrchestratorConfig struct {
-	MaxConcurrentWorkers int    // default: 3
-	DefaultMaxTurns      int    // default: 25
-	RepoRoot             string // project root path
+	MaxConcurrentWorkers int           // default: 3
+	DefaultMaxTurns      int           // default: 25
+	MaxValidationRetries int           // default: 3
+	RepoRoot             string        // project root path
+	VerifyTimeout        time.Duration // default: 2m
 }
 
 // Orchestrator coordinates the plan→execute→validate→consolidate cycle.
@@ -49,6 +51,12 @@ func NewOrchestrator(bridge BridgeExecutor, config OrchestratorConfig) *Orchestr
 	}
 	if config.DefaultMaxTurns <= 0 {
 		config.DefaultMaxTurns = 25
+	}
+	if config.MaxValidationRetries <= 0 {
+		config.MaxValidationRetries = 3
+	}
+	if config.VerifyTimeout <= 0 {
+		config.VerifyTimeout = 2 * time.Minute
 	}
 
 	var wm *WorktreeManager

@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-05-24
+
+### Added
+
+- **orchestration**: Close Orchestration Cycle — execution now closes end-to-end.
+  - `ExecutionContext` with `RunID`, `RepoRoot`, `BaseBranch`, `ChatID`, `ThreadID`, `Feature`, `CreatePR`.
+  - Git preflight validates clean base tree, correct branch, and `gh` availability.
+  - Worktree run namespace (`worker/<runID>/<task>`) with isolation across runs.
+  - Artifact collection per task: `git status`, `git diff --stat`, `git diff`, verify command.
+  - Fail-closed validation with artifact-aware prompt; bridge/parse errors return error.
+  - Per-task retry loop (up to 3 attempts) with feedback appended to user prompt.
+  - Dependency skip: dependents of failed/unverified/escalated tasks are marked `skipped`.
+  - Serial merge of approved worktrees in deterministic task-id order after each wave.
+  - Merge conflict stops the run and preserves worktree/branch for manual recovery.
+  - `ExecutionManifest` tracks task statuses: `pending`, `running`, `approved`, `failed`, `skipped`, `unverified`, `escalated`.
+  - `UpdateTasksStatus` marks checkboxes only for `TaskApproved`.
+  - `CommitChanges` stages only provided files; returns `ErrNothingToCommit`.
+  - Optional PR creation when `plan.CreatePR=true` and `gh` available; friendly note otherwise.
+  - Feature doc lookup via `plan.Feature` (`loadFeatureDocs`) instead of alphabetical glob.
+  - Integration smoke test: one-task plan in temp repo on non-main branch.
+- **plan schema**: `Plan` gains `Feature`, `CreatePR`, `Verify`; `Task` gains `Verify`.
+- **worker prompt**: `BuildWorkerPrompt` no longer embeds full task body; uses summaries only.
+- **orchestrator config**: `MaxValidationRetries` (default 3) and `VerifyTimeout` (default 2m).
+
+### Changed
+
+- `ExecutePlan` signature now accepts `ExecutionContext` and `Validator` callback, returning `(*ExecutionManifest, []TaskResult, error)`.
+- `Validate` signature now accepts `*ArtifactSnapshot`; bridge/parse failures return error.
+- `TaskResult` extended with `Status`, `Approved`, `Skipped`, `Attempts`, `ChangedFiles`, `Verify`.
+
+### Fixed
+
+- `BuildWorkerPrompt` duplicate task body removed (was wasting tokens and confusing log diffing).
+
 ## [0.15.0] - 2026-05-23
 
 ### Added

@@ -97,6 +97,33 @@ func TestExtractPlan_MultipleTasks(t *testing.T) {
 	}
 }
 
+func TestExtractPlan_WithFeatureCreatePRVerify(t *testing.T) {
+	response := "```aurelia-plan\n" + `{"feature":"my-feature","create_pr":true,"verify":"go test ./...","tasks":[{"id":"1","description":"do it","agent":"worker","prompt":"write code","needs_worktree":true,"verify":"go vet ./..."}]}` + "\n```"
+
+	plan, err := ExtractPlanFromText(response)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan == nil {
+		t.Fatal("expected plan")
+	}
+	if plan.Feature != "my-feature" {
+		t.Errorf("feature = %q, want my-feature", plan.Feature)
+	}
+	if !plan.CreatePR {
+		t.Error("expected create_pr = true")
+	}
+	if plan.Verify != "go test ./..." {
+		t.Errorf("verify = %q, want go test ./...", plan.Verify)
+	}
+	if len(plan.Tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(plan.Tasks))
+	}
+	if plan.Tasks[0].Verify != "go vet ./..." {
+		t.Errorf("task verify = %q, want go vet ./...", plan.Tasks[0].Verify)
+	}
+}
+
 func TestStripPlanBlock(t *testing.T) {
 	response := "Here is my plan:\n\n```aurelia-plan\n{\"tasks\":[]}\n```\n\nStarting now."
 	got := StripPlanBlock(response)
