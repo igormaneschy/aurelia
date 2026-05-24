@@ -18,7 +18,7 @@ func (bc *BotController) handlePlan(c telebot.Context) error {
 
 	senderID := safeSenderID(c.Sender())
 	if bc.userGate != nil && bc.userGate.Check(senderID) != UserGateOK {
-		return SendContextText(c, "Você precisa completar o onboarding primeiro.")
+		return SendContextText(c, "Você precisa completar o onboarding primeiro.", &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 
 	chatID := c.Chat().ID
@@ -30,15 +30,15 @@ func (bc *BotController) handlePlan(c telebot.Context) error {
 
 	existing, err := bc.planningStore.Get(ctx, key)
 	if err != nil {
-		return SendContextText(c, fmt.Sprintf("Erro ao verificar estado: %v", err))
+		return SendContextText(c, fmt.Sprintf("Erro ao verificar estado: %v", err), &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 	if existing != nil {
-		return SendContextText(c, fmt.Sprintf("Já existe um plano ativo (fase: %s). Use /plan status para ver.", existing.Phase))
+		return SendContextText(c, fmt.Sprintf("Já existe um plano ativo (fase: %s). Use /plan status para ver.", existing.Phase), &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 
 	cwd := bc.currentCwd(chatID, threadID)
 	if cwd == "" {
-		return SendContextText(c, "Use /cwd <path> para fixar um projeto antes de criar um plano.")
+		return SendContextText(c, "Use /cwd <path> para fixar um projeto antes de criar um plano.", &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 
 	projectCtx, err := planning.Discover(cwd)
@@ -59,14 +59,14 @@ func (bc *BotController) handlePlan(c telebot.Context) error {
 	}
 
 	if err := bc.planningStore.Save(ctx, state); err != nil {
-		return SendContextText(c, fmt.Sprintf("Erro ao criar plano: %v", err))
+		return SendContextText(c, fmt.Sprintf("Erro ao criar plano: %v", err), &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 
 	msg := fmt.Sprintf("Modo Plano ativado!\nFase: %s\nCWD: %s", state.Phase, cwd)
 	if projectCtx != nil && len(projectCtx.Layouts) > 0 {
 		msg += fmt.Sprintf("\nLayouts detectados: %v", projectCtx.Layouts)
 	}
-	return SendContextText(c, msg)
+	return SendContextText(c, msg, &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 }
 
 func (bc *BotController) handlePlanStatus(c telebot.Context) error {
@@ -74,7 +74,7 @@ func (bc *BotController) handlePlanStatus(c telebot.Context) error {
 
 	senderID := safeSenderID(c.Sender())
 	if bc.userGate != nil && bc.userGate.Check(senderID) != UserGateOK {
-		return SendContextText(c, "Você precisa completar o onboarding primeiro.")
+		return SendContextText(c, "Você precisa completar o onboarding primeiro.", &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 
 	key := session.SessionKey{ChatID: c.Chat().ID, ThreadID: c.Message().ThreadID, UserID: senderID}
@@ -84,10 +84,10 @@ func (bc *BotController) handlePlanStatus(c telebot.Context) error {
 
 	state, err := bc.planningStore.Get(ctx, key)
 	if err != nil {
-		return SendContextText(c, fmt.Sprintf("Erro ao buscar plano: %v", err))
+		return SendContextText(c, fmt.Sprintf("Erro ao buscar plano: %v", err), &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 	if state == nil {
-		return SendContextText(c, "Nenhum plano ativo. Use /plan para criar um.")
+		return SendContextText(c, "Nenhum plano ativo. Use /plan para criar um.", &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 
 	var b strings.Builder
@@ -116,7 +116,7 @@ func (bc *BotController) handlePlanStatus(c telebot.Context) error {
 		fmt.Fprintf(&b, "Último erro: %s\n", state.LastHandoffError)
 	}
 
-	return SendContextText(c, b.String())
+	return SendContextText(c, b.String(), &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 }
 
 func (bc *BotController) handlePlanList(c telebot.Context) error {
@@ -124,7 +124,7 @@ func (bc *BotController) handlePlanList(c telebot.Context) error {
 
 	senderID := safeSenderID(c.Sender())
 	if bc.userGate != nil && bc.userGate.Check(senderID) != UserGateOK {
-		return SendContextText(c, "Você precisa completar o onboarding primeiro.")
+		return SendContextText(c, "Você precisa completar o onboarding primeiro.", &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -132,11 +132,11 @@ func (bc *BotController) handlePlanList(c telebot.Context) error {
 
 	states, err := bc.planningStore.ListByUser(ctx, senderID)
 	if err != nil {
-		return SendContextText(c, fmt.Sprintf("Erro ao listar planos: %v", err))
+		return SendContextText(c, fmt.Sprintf("Erro ao listar planos: %v", err), &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 
 	if len(states) == 0 {
-		return SendContextText(c, "Nenhum plano encontrado.")
+		return SendContextText(c, "Nenhum plano encontrado.", &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 
 	var b strings.Builder
@@ -150,7 +150,7 @@ func (bc *BotController) handlePlanList(c telebot.Context) error {
 		fmt.Fprintf(&b, "• Chat %s · %s · %s (%s atrás)\n", chatLabel, s.Phase, s.Status, age)
 	}
 
-	return SendContextText(c, b.String())
+	return SendContextText(c, b.String(), &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 }
 
 func (bc *BotController) handlePlanCancel(c telebot.Context) error {
@@ -158,7 +158,7 @@ func (bc *BotController) handlePlanCancel(c telebot.Context) error {
 
 	senderID := safeSenderID(c.Sender())
 	if bc.userGate != nil && bc.userGate.Check(senderID) != UserGateOK {
-		return SendContextText(c, "Você precisa completar o onboarding primeiro.")
+		return SendContextText(c, "Você precisa completar o onboarding primeiro.", &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 
 	key := session.SessionKey{ChatID: c.Chat().ID, ThreadID: c.Message().ThreadID, UserID: senderID}
@@ -168,16 +168,16 @@ func (bc *BotController) handlePlanCancel(c telebot.Context) error {
 
 	state, err := bc.planningStore.Get(ctx, key)
 	if err != nil {
-		return SendContextText(c, fmt.Sprintf("Erro ao buscar plano: %v", err))
+		return SendContextText(c, fmt.Sprintf("Erro ao buscar plano: %v", err), &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 	if state == nil {
-		return SendContextText(c, "Nenhum plano ativo para cancelar.")
+		return SendContextText(c, "Nenhum plano ativo para cancelar.", &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 
 	artifacts := state.Materialized
 
 	if err := bc.planningStore.Delete(ctx, key); err != nil {
-		return SendContextText(c, fmt.Sprintf("Erro ao cancelar plano: %v", err))
+		return SendContextText(c, fmt.Sprintf("Erro ao cancelar plano: %v", err), &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 
 	msg := "Plano cancelado."
@@ -188,7 +188,7 @@ func (bc *BotController) handlePlanCancel(c telebot.Context) error {
 		}
 		msg += fmt.Sprintf("\nArtefatos preservados (%d):\n  %s", len(artifacts), strings.Join(paths, "\n  "))
 	}
-	return SendContextText(c, msg)
+	return SendContextText(c, msg, &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 }
 
 func (bc *BotController) handlePlanReset(c telebot.Context) error {
@@ -196,7 +196,7 @@ func (bc *BotController) handlePlanReset(c telebot.Context) error {
 
 	senderID := safeSenderID(c.Sender())
 	if bc.userGate != nil && bc.userGate.Check(senderID) != UserGateOK {
-		return SendContextText(c, "Você precisa completar o onboarding primeiro.")
+		return SendContextText(c, "Você precisa completar o onboarding primeiro.", &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 
 	chatID := c.Chat().ID
@@ -210,13 +210,13 @@ func (bc *BotController) handlePlanReset(c telebot.Context) error {
 	existing, _ := bc.planningStore.Get(ctx, key)
 	if existing != nil {
 		if err := bc.planningStore.Delete(ctx, key); err != nil {
-			return SendContextText(c, fmt.Sprintf("Erro ao remover plano anterior: %v", err))
+			return SendContextText(c, fmt.Sprintf("Erro ao remover plano anterior: %v", err), &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 		}
 	}
 
 	cwd := bc.currentCwd(chatID, threadID)
 	if cwd == "" {
-		return SendContextText(c, "Use /cwd <path> para fixar um projeto antes de criar um plano.")
+		return SendContextText(c, "Use /cwd <path> para fixar um projeto antes de criar um plano.", &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 
 	projectCtx, err := planning.Discover(cwd)
@@ -237,7 +237,7 @@ func (bc *BotController) handlePlanReset(c telebot.Context) error {
 	}
 
 	if err := bc.planningStore.Save(ctx, state); err != nil {
-		return SendContextText(c, fmt.Sprintf("Erro ao criar novo plano: %v", err))
+		return SendContextText(c, fmt.Sprintf("Erro ao criar novo plano: %v", err), &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 
 	msg := "Plano resetado!\nNovo modo Plano ativado."
@@ -245,7 +245,7 @@ func (bc *BotController) handlePlanReset(c telebot.Context) error {
 	if projectCtx != nil && len(projectCtx.Layouts) > 0 {
 		msg += fmt.Sprintf("\nLayouts detectados: %v", projectCtx.Layouts)
 	}
-	return SendContextText(c, msg)
+	return SendContextText(c, msg, &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 }
 
 func (bc *BotController) handleExecute(c telebot.Context) error {
@@ -253,7 +253,7 @@ func (bc *BotController) handleExecute(c telebot.Context) error {
 
 	senderID := safeSenderID(c.Sender())
 	if bc.userGate != nil && bc.userGate.Check(senderID) != UserGateOK {
-		return SendContextText(c, "Você precisa completar o onboarding primeiro.")
+		return SendContextText(c, "Você precisa completar o onboarding primeiro.", &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 
 	key := session.SessionKey{ChatID: c.Chat().ID, ThreadID: c.Message().ThreadID, UserID: senderID}
@@ -263,18 +263,18 @@ func (bc *BotController) handleExecute(c telebot.Context) error {
 
 	state, err := bc.planningStore.Get(ctx, key)
 	if err != nil {
-		return SendContextText(c, fmt.Sprintf("Erro ao buscar plano: %v", err))
+		return SendContextText(c, fmt.Sprintf("Erro ao buscar plano: %v", err), &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 	if state == nil {
-		return SendContextText(c, "Nenhum plano ativo. Use /plan para criar um.")
+		return SendContextText(c, "Nenhum plano ativo. Use /plan para criar um.", &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 
 	state.Status = planning.StatusAwaitingExec
 	state.UpdatedAt = time.Now()
 
 	if err := bc.planningStore.Save(ctx, state); err != nil {
-		return SendContextText(c, fmt.Sprintf("Erro ao marcar plano para execução: %v", err))
+		return SendContextText(c, fmt.Sprintf("Erro ao marcar plano para execução: %v", err), &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 	}
 
-	return SendContextText(c, "Plano marcado para execução! O pipeline irá processá-lo quando possível.")
+	return SendContextText(c, "Plano marcado para execução! O pipeline irá processá-lo quando possível.", &telebot.SendOptions{ThreadID: c.Message().ThreadID})
 }
