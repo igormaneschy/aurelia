@@ -1028,6 +1028,9 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 				default:
 				}
 			}
+
+			// Plan Mode: observe artifacts from tool_use events
+			s.observeToolUse(chatID, threadID, userID, ev)
 		case "tool_result":
 			// Append a truncated, redacted summary to the tool tracking state.
 			// Also show the summary in the live progress display.
@@ -1044,6 +1047,9 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 			// Record bridge_tool_result event.
 			s.recordPipelineEvent(chatID, threadID, observability.NewEvent("",
 				observability.PhaseBridgeToolResult, summary))
+
+			// Plan Mode: reconcile artifacts after tool_result
+			s.reconcileArtifacts(chatID, threadID, userID)
 		case "assistant":
 			delta := eventContent(ev)
 			assistantText.WriteString(delta)
@@ -1099,6 +1105,92 @@ func eventContent(ev bridge.Event) string {
 	return bridge.EventContent(ev)
 }
 
+// observeToolUse observes tool_use events and adds artifacts to planning state.
+// Does nothing if planning is not active for this session.
+func (s *Service) observeToolUse(chatID int64, threadID int, userID int64, ev bridge.Event) {
+	if s.planningStore == nil {
+		return
+	}
+	key := sessionKey(chatID, threadID, userID)
+	stateVal, ok := s.planningStates.Load(key)
+	if !ok {
+		return
+	}
+	state, ok := stateVal.(*planning.State)
+	if !ok || state.Status != planning.StatusActive {
+		return
+	}
+	observer := planning.NewObserver(state.CWD)
+	artifacts := observer.ObserveEvent(ev)
+	if len(artifacts) == 0 {
+		return
+	}
+	state.Materialized = append(state.Materialized, artifacts...)
+	// Save asynchronously — don't block event loop
+	go func(st *planning.State) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := s.planningStore.Save(ctx, st); err != nil {
+			log.Printf("planning: failed to save observed artifacts: %v", err)
+		}
+	}(state)
+}
+
+// reconcileArtifacts reconciles artifact confirmed status after tool_result.
+// Does nothing if planning is not active for this session or there are no artifacts.
+func (s *Service) reconcileArtifacts(chatID int64, threadID int, userID int64) {
+	if s.planningStore == nil {
+		return
+	}
+	key := sessionKey(chatID, threadID, userID)
+	stateVal, ok := s.planningStates.Load(key)
+	if !ok {
+		return
+	}
+	state, ok := stateVal.(*planning.State)
+	if !ok || len(state.Materialized) == 0 {
+		return
+	}
+	reconciled := planning.ReconcileArtifacts(state.Materialized)
+	if len(reconciled) == 0 {
+		return
+	}
+	state.Materialized = reconciled
+	// Save asynchronously
+	go func(st *planning.State) {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := s.planningStore.Save(ctx, st); err != nil {
+			log.Printf("planning: failed to save reconciled artifacts: %v", err)
+		}
+	}(state)
+}
+
+// savePlanningState performs a final reconciliation and save of planning state
+// at the end of a turn. Logs errors but does not fail the request.
+func (s *Service) savePlanningState(chatID int64, threadID int, userID int64) {
+	if s.planningStore == nil {
+		return
+	}
+	key := sessionKey(chatID, threadID, userID)
+	stateVal, ok := s.planningStates.Load(key)
+	if !ok {
+		return
+	}
+	state, ok := stateVal.(*planning.State)
+	if !ok {
+		return
+	}
+	if len(state.Materialized) > 0 {
+		state.Materialized = planning.ReconcileArtifacts(state.Materialized)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := s.planningStore.Save(ctx, state); err != nil {
+		log.Printf("planning: failed to save final state: %v", err)
+	}
+}
+
 func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, ev bridge.Event, assistantText *strings.Builder, userText string, userID int64) Outcome {
 	content := eventContent(ev)
 	if content != "" {
@@ -1152,6 +1244,8 @@ func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, e
 	s.recordPipelineEvent(chatID, threadID, observability.NewEvent("",
 		observability.PhaseRunCompleted, "status=completed"))
 
+	s.savePlanningState(chatID, threadID, userID)
+
 	if ok, outcome := s.handlePlanExecution(chatID, threadID, messageID, finalText, safeFinalText, successRunID, userText, userID); ok {
 		return outcome
 	}
@@ -1192,6 +1286,7 @@ func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, e
 		}
 	}
 
+	s.savePlanningState(chatID, threadID, userID)
 	s.output.ConfirmMessage(chatID, messageID)
 	return OutcomeLLMError
 }
