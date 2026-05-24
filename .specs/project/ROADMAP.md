@@ -306,6 +306,27 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 
 ---
 
+## 10. TUI (Terminal User Interface)
+
+**Spec:** `docs/aurelia-tui-roadmap.md`
+**Status:** 🔴 Proposta
+**Depende de:** Plan Mode (Sprint D) + User-Scoped Project Memory (Sprint E) + Wiki Memory Gateway (Sprint F)
+
+**Problem:** o Telegram é hoje o único ponto de entrada conversacional da Aurelia. Isso cria fricção no contexto de terminal, sessões não retomáveis cross-surface e dependência de conectividade externa.
+
+**Scope:**
+
+- abstração de transport (`Transport` interface) — Fase 0, pode ser feita antes;
+- IPC layer via Unix socket para comunicação com daemon;
+- TUI MVP com Bubble Tea: sidebar, viewport, input, streaming;
+- multi-sessão local + retomada de sessões Telegram;
+- Plan Mode visual com painel de artefatos;
+- polish: temas, mouse, resize, flags `--session`/`--attach`.
+
+**Decisão:** Unix socket + JSON lines no MVP; gRPC em P2. Bubble Tea v2 + Lipgloss + Bubbles + Glamour. Binary separado `aurelia-tui`.
+
+---
+
 ## Sequenciamento resumido
 
 ```text
@@ -340,8 +361,11 @@ D0. Memory Contract & Spec Hygiene ✅
       ▼
 8. Agent Comms
       │
-      ▼
+       ▼
 9. Auto-Skills
+       │
+       ▼
+10. TUI (Terminal User Interface)
 ```
 
 ## Mapa de implementação por sprint
@@ -433,6 +457,14 @@ Sprint I: Auto-Skills
   ├─ /skill save + generator
   ├─ validator de SKILL.md
   └─ registry per-user
+
+Sprint J: TUI
+  ├─ Fase 0: Transport Abstraction (2d) — pode antecipar
+  ├─ Fase 1: IPC Layer (3d)
+  ├─ Fase 2: TUI MVP (5d)
+  ├─ Fase 3: Multi-sessão (4d)
+  ├─ Fase 4: Plan Mode Visual (4d)
+  └─ Fase 5: Polish + Distribuição (3d)
 ```
 
 ## Nota de implementação incremental
@@ -459,7 +491,8 @@ O próximo trabalho deve assumir `user_id` real no handoff e evitar novos caminh
 - OS sandbox para Bridge
 - Project history/favorites para `/cwd`
 - Team memory sync via git
+- TUI: gRPC local para múltiplas surfaces (desktop app, VS Code extension)
 
 ## Notas de visão
 
-Aurelia ocupa o nicho de **personal agent persistente via Telegram**. Não é IDE, não é SaaS multi-tenant, não é apenas coding agent. PI SDK é o motor de inferência/execução; Go é a camada de orquestração, segurança, memória, persistência e UX Telegram.
+Aurelia ocupa o nicho de **personal agent persistente via Telegram**, com TUI como interface secundária local. Não é IDE, não é SaaS multi-tenant, não é apenas coding agent. PI SDK é o motor de inferência/execução; Go é a camada de orquestração, segurança, memória, persistência e UX (Telegram + TUI).
