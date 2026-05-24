@@ -16,6 +16,20 @@ import (
 func (bc *BotController) handlePlan(c telebot.Context) error {
 	defer bc.confirmMessage(c.Message())
 
+	// Route subcommands: /plan status, /plan list, /plan cancel, /plan reset
+	// Telegram sends these as /plan command with payload (e.g., "status").
+	payload := strings.TrimSpace(c.Message().Payload)
+	switch payload {
+	case "status":
+		return bc.handlePlanStatus(c)
+	case "list":
+		return bc.handlePlanList(c)
+	case "cancel":
+		return bc.handlePlanCancel(c)
+	case "reset":
+		return bc.handlePlanReset(c)
+	}
+
 	senderID := safeSenderID(c.Sender())
 	if bc.userGate != nil && bc.userGate.Check(senderID) != UserGateOK {
 		return SendContextText(c, "Você precisa completar o onboarding primeiro.", &telebot.SendOptions{ThreadID: c.Message().ThreadID})
