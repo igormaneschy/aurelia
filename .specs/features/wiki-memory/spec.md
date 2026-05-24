@@ -77,9 +77,21 @@ O MCP pode ser chamado por vários clientes, mas cada operação deve resolver e
 │   ├── memory/                       # user global
 │   ├── projects/<project_slug>/memory/ # user × project private
 │   └── skills/<slug>/SKILL.md        # procedural memory, user private
-├── projects/<project_slug>/team/     # project team Wiki
-└── topics/chat_<chat_id>/thread_<thread_id>/ # topic Wiki
+├── projects/
+│   └── <project_slug>/team/          # project team Wiki
+└── topics/
+    └── chat_<chat_id>/thread_<thread_id>/ # topic Wiki
 ```
+
+The canonical paths match the project-memory spec:
+
+| Scope | Canonical Path |
+|---|---|
+| Project team | `~/.aurelia/projects/<slug>/team/` |
+| Topic memory | `~/.aurelia/topics/chat_<id>/thread_<id>/` |
+| User global | `~/.aurelia/users/<id>/memory/` |
+| User project private | `~/.aurelia/users/<id>/projects/<slug>/memory/` |
+| Procedural skills | `~/.aurelia/users/<id>/skills/<slug>/SKILL.md` |
 
 | Scope | Purpose | Examples | Default visibility |
 |---|---|---|---|

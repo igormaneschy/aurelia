@@ -338,7 +338,7 @@ func TestProjectMemoryDirs(t *testing.T) {
 	}
 
 	gotTeam := r.ProjectTeamMemoryDir(cwd)
-	wantTeam := filepath.Join(wantPrivate, "team")
+	wantTeam := filepath.Join("/tmp/aurelia", "projects", "-home-user-myproject", "team")
 	if gotTeam != wantTeam {
 		t.Errorf("ProjectTeamMemoryDir() = %q, want %q", gotTeam, wantTeam)
 	}

@@ -68,10 +68,10 @@
 **Implementation:** `Service.Run()` accepts a chat-shaped input and orchestrates: prompt assembly → resilient bridge call (retry + circuit breaker) → user-scoped active-run tracking → event loop → plan dispatch.
 **Example:** `pipeline.go:tryExecutePlan` detects an `aurelia-plan` block and hands control to the orchestrator.
 
-### Agent Orchestration (Plan → Workers → Validate)
+### Agent Orchestration (Plan → Workers → Validate → Deliver)
 **Location:** `internal/orchestrator/`, dispatched from `internal/pipeline/pipeline.go` and `internal/telegram/orchestration.go`
 **Purpose:** When the model emits a structured execution plan, fan out atomic tasks to isolated workers, validate their output, and ship the result
-**Implementation:** `ExtractPlan` parses the `aurelia-plan` code block. `ExecutionOrder` topologically sorts tasks into waves. `ExecutePlan` spawns workers per wave with bounded concurrency, each in its own git worktree when `needs_worktree` is set. Validation, commit/PR, task-status updates and artifact manifests are partially scaffolded but not yet wired into a closed production cycle.
+**Implementation:** `ExtractPlan` parses the `aurelia-plan` code block. `ExecutionOrder` topologically sorts tasks into waves. `ExecutePlan` spawns workers per wave with bounded concurrency, each in its own git worktree when `needs_worktree` is set. Validation with artifact-aware retry, serial merge, commit, and optional PR creation form a closed production cycle since v0.16.0.
 **Example:** `pipeline.go:tryExecutePlan` → `BotController.executeApprovedPlan` → `Orchestrator.ExecutePlan`.
 
 ### Constructor Injection with Interfaces
@@ -118,9 +118,9 @@
 5. **Worker spawn:** For tasks with `needs_worktree`, `WorktreeManager.Create` cuts a git worktree on a `worker/<slug>` branch; otherwise the worker runs in the repo root
 6. **Worker prompt:** `BuildWorkerPrompt` layers agent base + `CLAUDE.md` + `AGENTS.md` + `spec.md` + `design.md` + task + sibling context
 7. **Streaming:** `ExecuteTask` opens a bridge request per worker, forwarding `tool_use` events as `WorkerEvent` updates to the status reporter
-8. **Quality gate:** `Validate` exists as scaffold, but fail-closed validation and retry are not fully wired into the live execution cycle yet
-9. **Merge:** Worktree merge/cleanup exists, but branch detection currently needs production hardening before autonomous use
-10. **Consolidate:** `BuildConsolidationPrompt`/`Consolidate` exist; commit/PR/task-status/artifact closure remains roadmap work
+8. **Quality gate:** Fail-closed validation with artifact-aware prompt, bridge/parse errors, and per-task retry (up to 3 attempts) with feedback appended to user prompt
+9. **Merge:** Serial merge of approved worktrees in deterministic task-id order after each wave; merge conflict stops the run and preserves worktree/branch for manual recovery
+10. **Consolidate:** `CommitChanges` stages only provided files, `UpdateTasksStatus` tracks all states (pending→approved/failed/skipped), optional PR creation, `ExecutionManifest` serialized for audit
 
 ### Cron Job Execution
 
@@ -139,17 +139,28 @@
 - `cmd/aurelia/` — CLI entry points, dependency wiring, lifecycle
 - `internal/telegram/` — Telegram I/O, message processing, rendering, command layer
 - `internal/pipeline/` — Reusable turn processor (prompt + bridge + plan dispatch + resilience + supervision)
-- `internal/orchestrator/` — Plan→workers→validate cycle, worktree management, quality gate, git/PR delivery
+- `internal/orchestrator/` — Plan→workers→validate→deliver cycle, worktree management, quality gate, git/PR
 - `internal/bridge/` — TypeScript process management, NDJSON protocol (PI SDK)
 - `internal/cron/` — Scheduler, store, runtime, delivery (self-contained with SQLite)
-- `internal/dream/` — Background memory consolidation and nudges
+- `internal/dream/` — Background memory consolidation (dream) and extraction (nudge)
+- `internal/memoryux/` — Memory layer status, checkpoints, receipts, formatting
 - `internal/agents/` — Agent definition loading, routing, classification
 - `internal/persona/` — Identity file parsing, system prompt building
-- `internal/session/` — PI `session_file` resume mapping, cwd tracking and nudge buffers
+- `internal/session/` — PI `session_file` resume mapping, conversation CWD state, nudge buffers
 - `internal/config/` — App configuration loading, provider management
-- `internal/runtime/` — Path resolution, directory bootstrapping
+- `internal/runtime/` — Path resolution, project memory dirs, instance bootstrapping
 - `internal/onboarding/` — Interactive setup wizard
 - `internal/deps/` — Runtime dependency checks (Node, npm, git, gh)
 - `internal/version/` — Build version constant
 - `pkg/stt/` — Speech-to-text client (Groq)
 - `bridge/` — TypeScript source for the PI SDK adapter (`@earendil-works/pi-coding-agent`)
+
+**Memory layers** (canonical paths as of D0):
+
+| Layer | Path | Scope |
+|---|---|---|
+| Global | `~/.aurelia/memory/` | Cross-project, deployment-level facts |
+| User | `~/.aurelia/users/<id>/memory/` | Personal facts per user |
+| Project Private | `~/.aurelia/users/<id>/projects/<slug>/memory/` | Per-user per-project notes |
+| Project Team | `~/.aurelia/projects/<slug>/team/` | Shared project conventions |
+| Topic | `~/.aurelia/topics/chat_<id>/thread_<id>/` | Conversation-scoped context |

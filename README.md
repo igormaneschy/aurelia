@@ -10,7 +10,7 @@ Telegram-native. PI-powered. Built to stay light.
 
 One persistent daemon, many projects, many agents.
 
-[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.26.3-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![Runtime](https://img.shields.io/badge/Runtime-Local--First-0F172A)](#runtime-model)
 [![Architecture](https://img.shields.io/badge/Architecture-Modular_Monolith-1F2937)](.specs/codebase/ARCHITECTURE.md)
 [![Storage](https://img.shields.io/badge/Storage-SQLite-003B57?logo=sqlite&logoColor=white)](https://sqlite.org/)
@@ -23,8 +23,8 @@ One persistent daemon, many projects, many agents.
 
 Before installing, ensure you have:
 
-- **Go** `1.25+` — [go.dev](https://go.dev/)
-- **Node.js** `18+` and **npm** `8+` — [nodejs.org](https://nodejs.org/)
+- **Go** `1.26.3` — [go.dev](https://go.dev/)
+- **Node.js** `>=20.6.0` and **npm** `9+` — [nodejs.org](https://nodejs.org/)
   - *The PI SDK (inference engine) installs automatically via npm on first run*
   - *No need to install the PI CLI (`pi`) or run `pi /login`*
 - **git** `2+`
@@ -84,7 +84,7 @@ The long-term differentiator is the **Wiki Memory Gateway**: a local-first, mark
 - **Natural conversation** via Telegram with text, photos, voice, and documents
 - **Autonomous coding** — reads, writes, edits files, runs commands, searches code
 - **Multi-project** — work on different projects simultaneously with isolated contexts
-- **Persistent memory** — scoped memory system (user, project/private, project-team, topic) that survives across sessions
+- **Persistent memory** — scoped memory system (global, user, project-private, project-team, topic) that survives across sessions
 - **Learning nudge** — automatic memory extraction from conversations on session reset
 - **Dream consolidation** — periodic background review that organizes and deduplicates memories
 - **Multi-provider** — OpenRouter (recommended), opencode-go, Anthropic, Kimi, Z.ai, Alibaba
@@ -243,19 +243,22 @@ Created automatically via `/start` on Telegram (choose "Coder" or "Assistant" pr
 
 ## Memory System
 
-Aurelia has a 3-layer persistent memory that survives across sessions:
+Aurelia has a scoped persistent memory that survives across sessions. Each scope isolates facts to the correct context:
 
 | Layer | Location | Purpose |
 |-------|----------|---------|
-| **Global** | `~/.aurelia/memory/` | Personal facts, preferences, communication style |
-| **Project Private** | `~/.aurelia/projects/<cwd>/memory/` | Personal notes, work log, task state |
-| **Project Team** | `~/.aurelia/projects/<cwd>/memory/team/` | Stack, conventions, architecture (shareable) |
+| **Global** | `~/.aurelia/memory/` | Cross-project facts, preferences, communication style |
+| **User** | `~/.aurelia/users/<id>/memory/` | Personal facts per user (cross-project) |
+| **Project Private** | `~/.aurelia/users/<id>/projects/<slug>/memory/` | Per-user per-project notes, work log (Sprint E — planned) |
+| **Project Team** | `~/.aurelia/projects/<slug>/team/` | Stack, conventions, architecture (shareable) |
+| **Topic** | `~/.aurelia/topics/chat_<id>/thread_<id>/` | Conversation-scoped context per Telegram topic |
+| **Procedural (future)** | `~/.aurelia/users/<id>/skills/<slug>/SKILL.md` | Reusable workflows via Auto-Skills |
 
 Memory is populated automatically:
 - **Nudge** — extracts facts from conversations when a session is explicitly reset or flushed
 - **Dream** — periodic background consolidation that organizes, deduplicates, and prunes memory files
 
-The model sees all memory layers in its system prompt and can read/write them during conversation.
+The model sees all relevant memory layers in its system prompt and can read/write them during conversation. Layers are injected by precedence: project-private and topic first, then user, then global, then team — so the most context-relevant facts survive token budget limits.
 
 ## Telegram Commands
 
@@ -306,8 +309,8 @@ aurelia debug last --json             # Machine-readable JSON output
 
 Requirements:
 
-- Go `1.25+`
-- Node.js `18+` and npm `8+` (the PI SDK installs automatically on first run)
+- Go `1.26.3`
+- Node.js `>=20.6.0` and npm `9+` (the PI SDK installs automatically on first run)
 - Telegram bot token
 - One LLM provider:
   - **OpenRouter** — recommended (multi-model proxy, one key for many models)
@@ -512,10 +515,10 @@ Full guide: [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Current State
 
-- **v0.13.x active development** — see [CHANGELOG.md](CHANGELOG.md)
+- **v0.16.x active development** — see [CHANGELOG.md](CHANGELOG.md)
 - Canonical repository: `https://github.com/igormaneschy/aurelia`
 - Go module: `github.com/igormaneschy/aurelia`
 - Go test suite is green
 - TypeScript Bridge compiles clean
 - Cross-platform: macOS, Windows, and Linux
-- Current architectural track: close the PI SDK boundary hardening, finish user isolation, then build orchestration, plan mode, user-scoped project memory, and Wiki MCP in that order
+- Current architectural track: close the PI SDK boundary hardening (✅), user isolation (✅), observability (✅), orchestration cycle (✅), then plan mode, user-scoped project memory, and Wiki MCP in that order

@@ -52,7 +52,13 @@ func New(memoryDir string, resolver *runtime.PathResolver) *Service {
 }
 
 func (s *Service) topicMemoryDir(chatID int64, threadID int) string {
-	return filepath.Join(s.MemoryDir, "topics", fmt.Sprintf("chat_%d", chatID), fmt.Sprintf("thread_%d", threadID))
+	if threadID <= 0 {
+		return ""
+	}
+	if s.Resolver == nil {
+		return ""
+	}
+	return filepath.Join(s.Resolver.Root(), "topics", fmt.Sprintf("chat_%d", chatID), fmt.Sprintf("thread_%d", threadID))
 }
 
 func (s *Service) projectMemoryDir(cwd string, chatID int64, threadID int) string {
