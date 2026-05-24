@@ -1295,8 +1295,12 @@ func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, e
 // plan and, if so, starts the orchestrator. Returns (true, outcome) when a plan
 // was executed, or (false, OutcomeSuccess) to continue with normal reply.
 func (s *Service) handlePlanExecution(chatID int64, threadID int, messageID int, finalText string, safeFinalText string, successRunID string, userText string, userID int64) (bool, Outcome) {
-	if !s.tryExecutePlan(chatID, threadID, messageID, finalText, userID) {
+	handled, outcome := s.tryExecutePlan(chatID, threadID, messageID, finalText, userID)
+	if !handled {
 		return false, OutcomeSuccess
+	}
+	if outcome != OutcomeSuccess {
+		return true, outcome
 	}
 
 	s.output.ConfirmMessage(chatID, messageID)
@@ -1325,30 +1329,50 @@ func (s *Service) recordUsage(chatID int64, threadID int, ev bridge.Event, userI
 		chatID, threadID, userID, ev.CostUSD, ev.NumTurns, ev.InputTokens, ev.OutputTokens)
 }
 
-func (s *Service) tryExecutePlan(chatID int64, threadID int, messageID int, finalText string, userID int64) bool {
+func (s *Service) tryExecutePlan(chatID int64, threadID int, messageID int, finalText string, userID int64) (bool, Outcome) {
 	if s.orchestrator == nil {
-		return false
+		return false, OutcomeSuccess
 	}
 	plan, err := s.orchestrator.ExtractPlan(finalText)
 	if err != nil {
 		if orchestrator.ContainsPlanMarker(finalText) {
 			log.Printf("Execution plan marker detected but plan was invalid: %v", err)
 			_ = s.output.SendError(chatID, threadID, "Plano de execução gerado, mas não consegui interpretar o JSON. Não vou enviar os prompts internos no chat.")
-			return true
+			return true, OutcomeSuccess
 		}
-		return false
+		return false, OutcomeSuccess
 	}
 	if plan == nil {
 		if orchestrator.ContainsPlanMarker(finalText) {
 			log.Printf("Execution plan marker detected but plan block was incomplete")
 			_ = s.output.SendError(chatID, threadID, "Plano de execução gerado, mas o bloco veio incompleto. Não vou enviar os prompts internos no chat.")
-			return true
+			return true, OutcomeSuccess
 		}
-		return false
+		return false, OutcomeSuccess
 	}
 	log.Printf("Execution plan detected with %d tasks", len(plan.Tasks))
 	if displayText := orchestrator.StripPlanBlock(finalText); displayText != "" {
 		_ = s.output.SendReply(chatID, threadID, displayText)
+	}
+
+	// Plan Mode guard: only execute if planning state is awaiting_exec
+	if s.planningStore != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		state, err := s.planningStore.Get(ctx, session.SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID})
+		cancel()
+
+		if err != nil {
+			log.Printf("plan: handoff error loading state: %v", err)
+			// Don't fail — fall through to legacy behavior
+		} else if state != nil {
+			if state.Status != planning.StatusAwaitingExec {
+				// Plan exists but not approved — inform user
+				_, _ = s.output.SendText(chatID, threadID,
+					"Você tem um plano ativo, mas ele ainda não foi aprovado. Use /execute para aprovar.")
+				return true, OutcomePlanBlocked
+			}
+			// State is awaiting_exec — proceed with handoff
+		}
 	}
 
 	// Resolve effective working directory — refuse execution without one
@@ -1356,7 +1380,7 @@ func (s *Service) tryExecutePlan(chatID int64, threadID int, messageID int, fina
 	if cwd == "" {
 		log.Printf("orchestration: refusing plan execution for chat=%d thread=%d: no cwd bound", chatID, threadID)
 		_ = s.output.SendError(chatID, threadID, "Não encontrei um diretório de trabalho (cwd) para executar o plano. Use /cwd para fixar um projeto e tente novamente.")
-		return true
+		return true, OutcomeSuccess
 	}
 
 	go func() {
@@ -1366,8 +1390,18 @@ func (s *Service) tryExecutePlan(chatID int64, threadID int, messageID int, fina
 			}
 		}()
 		s.output.ExecuteApprovedPlan(chatID, threadID, messageID, cwd, userID, plan)
+
+		// After executor accepts the plan, clean up planning state
+		if s.planningStore != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			key := session.SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID}
+			if err := s.planningStore.Delete(ctx, key); err != nil {
+				log.Printf("plan: failed to cleanup state after handoff: %v", err)
+			}
+		}
 	}()
-	return true
+	return true, OutcomeSuccess
 }
 
 func sanitizeExecutionPlanForChat(text string) string {

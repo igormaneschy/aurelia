@@ -98,7 +98,7 @@ func TestTryExecutePlan_RequiresCWD(t *testing.T) {
 	}
 
 	planText := "Here is the plan:\n```aurelia-plan\n{\"tasks\":[{\"id\":\"1\",\"description\":\"task 1\",\"prompt\":\"do it\",\"needs_worktree\":false}]}\n```\n"
-	handled := s.tryExecutePlan(1, 0, 100, planText, 42)
+	handled, _ := s.tryExecutePlan(1, 0, 100, planText, 42)
 	if !handled {
 		t.Fatal("expected true (plan found, execution refused)")
 	}
@@ -124,7 +124,7 @@ func TestTryExecutePlan_PassesThreadAndCWD(t *testing.T) {
 	}
 
 	planText := "Here is the plan:\n```aurelia-plan\n{\"tasks\":[{\"id\":\"1\",\"description\":\"task 1\",\"prompt\":\"do it\",\"needs_worktree\":false}]}\n```\n"
-	_ = s.tryExecutePlan(1, 5, 100, planText, 42)
+	_, _ = s.tryExecutePlan(1, 5, 100, planText, 42)
 
 	// Wait for async goroutine to set planExecuted
 	for i := 0; i < 100 && !fo.planExecuted; i++ {
