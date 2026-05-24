@@ -376,6 +376,16 @@ func (s *Service) processRun(input pipelineInput) {
 		return
 	}
 
+	// Plan Mode offer — offer-only heuristic, no silent prompt injection
+	planKey := session.SessionKey{ChatID: input.chatID, ThreadID: input.threadID, UserID: input.userID}
+	if offered, msg := s.maybeOfferPlanning(ctx, userText, planKey); offered {
+		if _, err := s.output.SendText(input.chatID, input.threadID, msg); err != nil {
+			log.Printf("pipeline: maybeOfferPlanning SendText failed for chat=%d: %v", input.chatID, err)
+		}
+		s.output.ConfirmMessage(input.chatID, input.messageID)
+		return
+	}
+
 	systemPrompt, err := s.buildSystemPrompt(userText, agent, input.chatID, input.messageID, input.threadID, input.userID)
 	if err != nil {
 		log.Printf("Failed to build system prompt: %s", redactSecrets(err.Error()))
