@@ -32,6 +32,7 @@ type runLogState struct {
 	runID        string
 	summary      strings.Builder
 	summaryCount int
+	wg           sync.WaitGroup // tracks in-flight DB updates
 }
 
 // pipelineInput carries a user message through processing.
@@ -350,7 +351,9 @@ func (s *Service) processRun(input pipelineInput) {
 	systemPrompt, err := s.buildSystemPrompt(userText, agent, input.chatID, input.messageID, input.threadID, input.userID)
 	if err != nil {
 		log.Printf("Failed to build system prompt: %s", redactSecrets(err.Error()))
-		_ = s.output.SendError(input.chatID, input.threadID, "Falha ao montar o prompt de sistema.")
+		if err := s.output.SendError(input.chatID, input.threadID, "Falha ao montar o prompt de sistema."); err != nil {
+			log.Printf("pipeline: SendError(system prompt) failed for chat=%d: %v", input.chatID, err)
+		}
 		s.output.ConfirmMessage(input.chatID, input.messageID)
 		return
 	}
@@ -364,7 +367,9 @@ func (s *Service) processRun(input pipelineInput) {
 	if lcResult := s.applyLifecycle(ctx, &req, input.chatID, input.threadID, input.userID); lcResult.SkipExecution {
 		log.Printf("lifecycle: execution skipped for chat=%d: %s", input.chatID, lcResult.ErrorMessage)
 		if lcResult.ErrorMessage != "" {
-			_ = s.output.SendError(input.chatID, input.threadID, lcResult.ErrorMessage)
+			if err := s.output.SendError(input.chatID, input.threadID, lcResult.ErrorMessage); err != nil {
+				log.Printf("pipeline: SendError(lifecycle) failed for chat=%d: %v", input.chatID, err)
+			}
 		}
 		s.output.ConfirmMessage(input.chatID, input.messageID)
 		return
@@ -681,7 +686,9 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	var usedFallback bool
 	if s.resilient != nil {
 		res := s.resilient.Execute(ctx, req, func(msg string) {
-			_, _ = s.output.SendText(chatID, threadID, msg)
+			if _, err := s.output.SendText(chatID, threadID, msg); err != nil {
+				log.Printf("pipeline: SendText(fallback status) failed for chat=%d: %v", chatID, err)
+			}
 		})
 		if res.Err != nil {
 			err = res.Err
@@ -780,12 +787,17 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	if s.bridgeFailures.inCooldown() {
 		remaining := s.bridgeFailures.cooldownRemaining()
 		log.Printf("bridge: in cooldown, skipping retry for chat=%d", chatID)
-		_ = s.output.SendError(chatID, threadID, bridgeCooldownMessage(remaining))
+		if err := s.output.SendError(chatID, threadID, bridgeCooldownMessage(remaining)); err != nil {
+			log.Printf("pipeline: SendError(cooldown) failed for chat=%d: %v", chatID, err)
+		}
 		s.output.ConfirmMessage(chatID, messageID)
 		return
 	}
 
-	reconnectMsg, _ := s.output.SendText(chatID, threadID, "⚡ Reconectando...")
+	reconnectMsg, sErr := s.output.SendText(chatID, threadID, "⚡ Reconectando...")
+	if sErr != nil {
+		log.Printf("pipeline: SendText(reconnect) failed for chat=%d: %v", chatID, sErr)
+	}
 
 	retryReq := req
 	retryReq.Options.Continue = false
@@ -804,7 +816,9 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 			s.recordPipelineEvent(chatID, threadID, observability.NewErrorEvent("",
 				observability.PhaseRetryFailed, "retry failed: process death persisted"))
 		}
-		_ = s.output.SendError(chatID, threadID, bridgeRetryFailedMessage)
+		if err := s.output.SendError(chatID, threadID, bridgeRetryFailedMessage); err != nil {
+			log.Printf("pipeline: SendError(retry failed) for chat=%d: %v", chatID, err)
+		}
 		s.output.ConfirmMessage(chatID, messageID)
 		return
 	}
@@ -866,7 +880,9 @@ func (s *Service) handleContextOutcome(parentCtx context.Context, ctx context.Co
 		if s.sessions != nil {
 			s.sessions.MarkFailure(chatID, threadID, userID, origin)
 		}
-		_ = s.output.SendError(chatID, threadID, buildTimeoutMessage(origin))
+		if err := s.output.SendError(chatID, threadID, buildTimeoutMessage(origin)); err != nil {
+			log.Printf("pipeline: SendError(timeout) failed for chat=%d: %v", chatID, err)
+		}
 		return true
 	}
 	return false
@@ -896,7 +912,9 @@ func (s *Service) handleRetryOutcome(chatID int64, threadID int, messageID int, 
 			s.sessions.MarkProcessDeath(chatID, threadID, userID)
 		}
 		s.patchContinuitySessionCold(chatID, threadID, "bridge retry process death")
-		_ = s.output.SendError(chatID, threadID, bridgeRetryFailedMessage)
+		if err := s.output.SendError(chatID, threadID, bridgeRetryFailedMessage); err != nil {
+			log.Printf("pipeline: SendError(retry outcome) failed for chat=%d: %v", chatID, err)
+		}
 		s.output.ConfirmMessage(chatID, messageID)
 	}
 }
@@ -1205,7 +1223,9 @@ func (s *Service) tryExecutePlan(chatID int64, threadID int, messageID int, fina
 	if err != nil {
 		if orchestrator.ContainsPlanMarker(finalText) {
 			log.Printf("Execution plan marker detected but plan was invalid: %v", err)
-			_ = s.output.SendError(chatID, threadID, "Plano de execução gerado, mas não consegui interpretar o JSON. Não vou enviar os prompts internos no chat.")
+			if err := s.output.SendError(chatID, threadID, "Plano de execução gerado, mas não consegui interpretar o JSON. Não vou enviar os prompts internos no chat."); err != nil {
+				log.Printf("pipeline: SendError(plan json parse) failed for chat=%d: %v", chatID, err)
+			}
 			return true, OutcomeSuccess
 		}
 		return false, OutcomeSuccess
@@ -1213,21 +1233,27 @@ func (s *Service) tryExecutePlan(chatID int64, threadID int, messageID int, fina
 	if plan == nil {
 		if orchestrator.ContainsPlanMarker(finalText) {
 			log.Printf("Execution plan marker detected but plan block was incomplete")
-			_ = s.output.SendError(chatID, threadID, "Plano de execução gerado, mas o bloco veio incompleto. Não vou enviar os prompts internos no chat.")
+			if err := s.output.SendError(chatID, threadID, "Plano de execução gerado, mas o bloco veio incompleto. Não vou enviar os prompts internos no chat."); err != nil {
+				log.Printf("pipeline: SendError(plan block) failed for chat=%d: %v", chatID, err)
+			}
 			return true, OutcomeSuccess
 		}
 		return false, OutcomeSuccess
 	}
 	log.Printf("Execution plan detected with %d tasks", len(plan.Tasks))
 	if displayText := orchestrator.StripPlanBlock(finalText); displayText != "" {
-		_ = s.output.SendReply(chatID, threadID, displayText)
+		if err := s.output.SendReply(chatID, threadID, displayText); err != nil {
+			log.Printf("pipeline: SendReply(plan display) failed for chat=%d: %v", chatID, err)
+		}
 	}
 
 	// Resolve effective working directory — refuse execution without one
 	cwd := s.effectiveCwd(nil, chatID, threadID)
 	if cwd == "" {
 		log.Printf("orchestration: refusing plan execution for chat=%d thread=%d: no cwd bound", chatID, threadID)
-		_ = s.output.SendError(chatID, threadID, "Não encontrei um diretório de trabalho (cwd) para executar o plano. Use /cwd para fixar um projeto e tente novamente.")
+		if err := s.output.SendError(chatID, threadID, "Não encontrei um diretório de trabalho (cwd) para executar o plano. Use /cwd para fixar um projeto e tente novamente."); err != nil {
+			log.Printf("pipeline: SendError(no cwd) failed for chat=%d: %v", chatID, err)
+		}
 		return true, OutcomeSuccess
 	}
 
@@ -1778,12 +1804,16 @@ func (s *Service) recordToolUse(chatID int64, threadID int, toolName string) {
 	state.mu.Unlock()
 
 	if needsUpdate {
-		if err := s.runLog.Update(context.Background(), runlog.RunUpdate{
-			RunID:       state.runID,
-			ToolSummary: &toolSummary,
-		}); err != nil {
-			log.Printf("runlog: failed to persist tool summary for %s: %v", state.runID, err)
-		}
+		state.wg.Add(1)
+		go func() {
+			defer state.wg.Done()
+			if err := s.runLog.Update(context.Background(), runlog.RunUpdate{
+				RunID:       state.runID,
+				ToolSummary: &toolSummary,
+			}); err != nil {
+				log.Printf("runlog: failed to persist tool summary for %s: %v", state.runID, err)
+			}
+		}()
 	}
 }
 
@@ -1839,6 +1869,10 @@ func (s *Service) completeRunLog(chatID int64, threadID int, status runlog.RunSt
 	} else {
 		checkpoint = buildCheckpoint(status, checkpoint, summary, errMsg)
 	}
+
+	// Wait for any in-flight DB updates (e.g., tool summary from recordToolUse)
+	// before completing the runlog entry, ensuring consistent ordering.
+	state.wg.Wait()
 
 	if err := s.runLog.Complete(context.Background(), state.runID, status, checkpoint, errMsg); err != nil {
 		log.Printf("runlog: failed to complete %s (status=%s): %v", state.runID, status, err)

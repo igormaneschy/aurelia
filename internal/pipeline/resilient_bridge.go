@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"time"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
@@ -253,6 +254,11 @@ func proxyChannel(prefix []bridge.Event, src <-chan bridge.Event) <-chan bridge.
 		out <- ev
 	}
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("resilient_bridge: panic in proxyChannel", "error", r)
+			}
+		}()
 		defer close(out)
 		for ev := range src {
 			out <- ev

@@ -77,6 +77,17 @@ func EnsureBridge(targetDir string, bundleJS []byte) (string, error) {
 					} else {
 						slog.Info("Linked auth.json from PI CLI")
 					}
+				} else {
+					// Symlink target path matches — verify target file actually exists.
+					if _, err := os.Stat(piCliAuthPath); err != nil {
+						slog.Error("bridge: auth symlink target does not exist", "target", piCliAuthPath, "error", err)
+						_ = os.Remove(aureliaAuthPath)
+						if linkErr := os.Symlink(piCliAuthPath, aureliaAuthPath); linkErr != nil {
+							slog.Warn("failed to recreate auth symlink after broken target", "error", linkErr)
+						} else {
+							slog.Info("Recreated auth.json symlink after broken target")
+						}
+					}
 				}
 			}
 		}

@@ -286,9 +286,25 @@ func (b *Bridge) Stop() {
 	// Ensure process is reaped.
 	if cmd != nil {
 		if cmd.Process != nil && (cmd.ProcessState == nil || !cmd.ProcessState.Exited()) {
-			_ = cmd.Process.Kill()
+			if err := cmd.Process.Kill(); err != nil {
+				slog.Error("bridge: failed to kill process", "error", err)
+			}
 		}
-		_ = cmd.Wait()
+		doneWait := make(chan struct{})
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("bridge: panic in Stop process wait", "error", r)
+				}
+			}()
+			_ = cmd.Wait()
+			close(doneWait)
+		}()
+		select {
+		case <-doneWait:
+		case <-time.After(5 * time.Second):
+			slog.Error("bridge: timeout waiting for process exit after kill")
+		}
 	}
 
 	// Reset state so the bridge can be restarted.
@@ -330,10 +346,26 @@ func (b *Bridge) cleanupAfterPanic() {
 
 	// Kill the OS process if still alive (prevents zombie processes).
 	if cmd != nil && cmd.Process != nil && (cmd.ProcessState == nil || !cmd.ProcessState.Exited()) {
-		_ = cmd.Process.Kill()
+		if err := cmd.Process.Kill(); err != nil {
+			slog.Error("bridge: failed to kill process in cleanupAfterPanic", "error", err)
+		}
 	}
 	if cmd != nil {
-		_ = cmd.Wait()
+		doneWait := make(chan struct{})
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("bridge: panic in cleanupAfterPanic process wait", "error", r)
+				}
+			}()
+			_ = cmd.Wait()
+			close(doneWait)
+		}()
+		select {
+		case <-doneWait:
+		case <-time.After(5 * time.Second):
+			slog.Error("bridge: timeout waiting for process exit in cleanupAfterPanic")
+		}
 	}
 
 	// Notify death listener only on unexpected panic (not during Stop).
@@ -419,6 +451,12 @@ func (b *Bridge) Execute(ctx context.Context, req Request) (<-chan Event, error)
 			}
 		}()
 		defer close(out)
+
+		// Hard timeout to prevent goroutine leak if bridge process hangs
+		// and never closes ch. Matches pipeline.bridgeExecutionTimeout (30m).
+		timer := time.NewTimer(30 * time.Minute)
+		defer timer.Stop()
+
 		for {
 			select {
 			case ev, ok := <-ch:
@@ -432,6 +470,11 @@ func (b *Bridge) Execute(ctx context.Context, req Request) (<-chan Event, error)
 					return
 				}
 			case <-ctx.Done():
+				cleanupPending()
+				return
+			case <-timer.C:
+				slog.Error("bridge: Execute proxy goroutine timed out after 30 minutes",
+					"request_id", req.RequestID)
 				cleanupPending()
 				return
 			}
@@ -476,7 +519,19 @@ func (b *Bridge) ExecuteSync(ctx context.Context, req Request) (*Event, error) {
 						slog.Error("bridge: panic in ExecuteSync drain", "error", r)
 					}
 				}()
-				for range ch { //nolint:revive
+				timer := time.NewTimer(30 * time.Second)
+				defer timer.Stop()
+				for {
+					select {
+					case _, ok := <-ch:
+						if !ok {
+							return
+						}
+					case <-timer.C:
+						slog.Warn("bridge: ExecuteSync drain timed out after 30s",
+							"request_id", req.RequestID)
+						return
+					}
 				}
 			}()
 			return last, nil

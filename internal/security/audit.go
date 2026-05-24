@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -90,14 +91,22 @@ func LogAudit(ev AuditEvent) {
 	data, err := json.Marshal(ev)
 	if err != nil {
 		line := []byte(`[security] {"error":"marshal_failed","reason":"` + err.Error() + `"}` + "\n")
-		_, _ = globalAuditLogger.w.Write(line)
-		_ = globalAuditLogger.writeAuditFile(line)
+		if _, err := globalAuditLogger.w.Write(line); err != nil {
+			log.Printf("audit: failed to write marshal error line: %v", err)
+		}
+		if err := globalAuditLogger.writeAuditFile(line); err != nil {
+			log.Printf("audit: failed to write audit file (marshal error): %v", err)
+		}
 		return
 	}
 
 	line := []byte("[security] " + string(data) + "\n")
-	_, _ = globalAuditLogger.w.Write(line)
-	_ = globalAuditLogger.writeAuditFile(line)
+	if _, err := globalAuditLogger.w.Write(line); err != nil {
+		log.Printf("audit: failed to write audit event: %v", err)
+	}
+	if err := globalAuditLogger.writeAuditFile(line); err != nil {
+		log.Printf("audit: failed to write audit file: %v", err)
+	}
 }
 
 func (l *auditLogger) writeAuditFile(line []byte) error {
@@ -114,7 +123,11 @@ func (l *auditLogger) writeAuditFile(line []byte) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = file.Close() }()
+	defer func() {
+		if err := file.Close(); err != nil {
+			log.Printf("audit: failed to close audit file: %v", err)
+		}
+	}()
 	_, err = file.Write(line)
 	return err
 }
@@ -140,7 +153,9 @@ func (l *auditLogger) rotateIfNeeded(incomingBytes int64) error {
 		oldPath := fmt.Sprintf("%s.%d", l.filePath, i)
 		newPath := fmt.Sprintf("%s.%d", l.filePath, i+1)
 		if _, err := os.Stat(oldPath); err == nil {
-			_ = os.Rename(oldPath, newPath)
+			if err := os.Rename(oldPath, newPath); err != nil {
+				log.Printf("audit: failed to rotate audit log %s -> %s: %v", oldPath, newPath, err)
+			}
 		}
 	}
 	return os.Rename(l.filePath, l.filePath+".1")
