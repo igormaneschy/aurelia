@@ -20,8 +20,10 @@ import (
 	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
+	"github.com/igormaneschy/aurelia/internal/planning"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/security"
+	"github.com/igormaneschy/aurelia/internal/session"
 )
 
 // runLogState tracks per-run state for the run journal.
@@ -335,6 +337,33 @@ func (s *Service) processRun(input pipelineInput) {
 	s.activeSessions.Store(key, cancel)
 	defer s.activeSessions.Delete(key)
 	defer cancel()
+
+	// Load planning state for this session (T7 wiring — not yet injected into prompt).
+	if s.planningStore != nil {
+		planKey := session.SessionKey{
+			ChatID:   input.chatID,
+			ThreadID: input.threadID,
+			UserID:   input.userID,
+		}
+		if planState, err := s.planningStore.Get(ctx, planKey); err != nil {
+			log.Printf("planning: failed to load state for %s: %v", key, err)
+		} else if planState != nil {
+			s.planningStates.Store(key, planState)
+			defer s.planningStates.Delete(key)
+
+			// Re-discover project context if stale or missing
+			if planState.Status == planning.StatusActive || planState.Status == planning.StatusAwaitingExec {
+				if planState.ProjectCtx == nil {
+					if pc, discErr := planning.Discover(planState.CWD); discErr == nil {
+						planState.ProjectCtx = pc
+						if saveErr := s.planningStore.Save(ctx, planState); saveErr != nil {
+							log.Printf("planning: failed to save discovered context for %s: %v", key, saveErr)
+						}
+					}
+				}
+			}
+		}
+	}
 
 	agent := s.routeAgent(input.text)
 	userText := stripAgentPrefix(input.text, agent)

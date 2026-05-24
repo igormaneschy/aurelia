@@ -335,6 +335,11 @@ func (s *SQLiteStore) GCOffers(ctx context.Context) error {
 	return nil
 }
 
+// Close releases the underlying database connection.
+func (s *SQLiteStore) Close() error {
+	return s.db.Close()
+}
+
 // marshalTimePtr converts a *time.Time to a nullable int64 for SQL storage.
 func marshalTimePtr(t *time.Time) *int64 {
 	if t == nil {

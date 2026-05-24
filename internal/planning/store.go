@@ -71,6 +71,8 @@ type Store interface {
 	Delete(ctx context.Context, key session.SessionKey) error
 	ListByUser(ctx context.Context, userID int64) ([]State, error)
 	GC(ctx context.Context, maxAge time.Duration) error
+	// Close releases the store's resources.
+	Close() error
 }
 
 // OfferStore tracks planning intent offers with TTL.

@@ -18,6 +18,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/persona"
 	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
+	"github.com/igormaneschy/aurelia/internal/planning"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
@@ -62,6 +63,7 @@ type BotController struct {
 	projectIndex       *runtime.ProjectIndex
 	bindings           projectbinding.Store
 	continuity         continuity.Store
+	planningStore      planning.Store
 	runLog             runlog.Store
 	pipeline           *pipelinepkg.Service
 
@@ -115,6 +117,7 @@ func NewBotController(
 	sessions *session.Store,
 	resolver *runtime.PathResolver,
 	bindings projectbinding.Store,
+	planningStore planning.Store,
 ) (*BotController, error) {
 
 	pref := telebot.Settings{
@@ -161,6 +164,7 @@ func NewBotController(
 		allowedUsers:     allowedUsers,
 		allowedGroups:    allowedGroups,
 		bindings:         bindings,
+		planningStore:    planningStore,
 	}
 	if bc.resolver != nil {
 		bc.userResolver = users.NewResolver(bc.resolver.Root())
@@ -169,21 +173,22 @@ func NewBotController(
 	userResolver := bc.userResolver
 	userStore := bc.userStore
 	bc.pipeline = pipelinepkg.NewService(pipelinepkg.Config{
-		AppConfig:    bc.config,
-		Bridge:       bc.bridge,
-		Agents:       bc.agents,
-		Persona:      bc.persona,
-		Sessions:     bc.sessions,
-		Resolver:     bc.resolver,
-		MemoryDir:    bc.memoryDir,
-		ExePath:      bc.exePath,
-		BotCwd:       bc.botCwd,
-		Output:       telegramPipelineOutput{bc: bc, tp: NewTelegramTransport(b)},
-		Bindings:     bc.bindings,
-		RunLog:       bc.runLog,
-		Continuity:   bc.continuity,
-		UsersStore:   userStore,
-		UserResolver: userResolver,
+		AppConfig:     bc.config,
+		Bridge:        bc.bridge,
+		Agents:        bc.agents,
+		Persona:       bc.persona,
+		Sessions:      bc.sessions,
+		Resolver:      bc.resolver,
+		MemoryDir:     bc.memoryDir,
+		ExePath:       bc.exePath,
+		BotCwd:        bc.botCwd,
+		Output:        telegramPipelineOutput{bc: bc, tp: NewTelegramTransport(b)},
+		Bindings:      bc.bindings,
+		RunLog:        bc.runLog,
+		Continuity:    bc.continuity,
+		PlanningStore: bc.planningStore,
+		UsersStore:    userStore,
+		UserResolver:  userResolver,
 	})
 	// nudgeBuffer is owned by the pipeline service; bot accesses via this alias
 	// so command handlers can flush it on reset/cancel.
