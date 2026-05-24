@@ -82,6 +82,6 @@ type OfferStore interface {
 	// HasRecentOffer checks if there's an unexpired offer for this key+intent.
 	HasRecentOffer(ctx context.Context, key session.SessionKey, intentHash string) (bool, error)
 
-	// GC removes expired offers.
-	GC(ctx context.Context) error
+	// GCOffers removes expired offers.
+	GCOffers(ctx context.Context) error
 }
