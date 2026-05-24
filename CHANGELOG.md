@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-05-24
+
+### Security
+- **H-01**: Fix topic memory containment root mismatch — topic memory writes now accepted under instance root.
+- **H-02**: Prevent PII leakage in system prompt — absolute filesystem paths replaced with aliases.
+- **M-01**: Cap memory file reads at 9000 bytes to prevent OOM.
+- **M-02**: Cap memory fact writes at 1MB to prevent disk exhaustion.
+
+### Changed
+- Canonicalize topic memory path to `~/.aurelia/topics/...`.
+- Canonicalize team memory path to `~/.aurelia/projects/<slug>/team/`.
+- Update Node.js prerequisite to `>=20.6.0`.
+- Refactor memory_writer.go and prompt_builder.go helpers for maintainability.
+
+### Added
+- `.specs/codebase/AGENT_RESPONSIBILITY_MODEL.md` — PI↔Aurelia responsibility boundary.
+- Updated specs: project-memory, wiki-memory, ARCHITECTURE, STACK, ROADMAP.
+- Updated README with 6-scope memory model.
+
 ## [0.16.0] - 2026-05-24
 
 ### Added
