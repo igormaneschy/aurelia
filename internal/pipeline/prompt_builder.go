@@ -12,7 +12,7 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/continuity"
-	"github.com/igormaneschy/aurelia/internal/orchestrator"
+	"github.com/igormaneschy/aurelia/internal/planning"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/security"
@@ -77,13 +77,15 @@ func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatI
 		sections = append(sections, agentSection)
 	}
 
-	// Orchestrator TLC methodology — only when user signals planning intent
-	// AND a working directory is set (planning without a project to act on
-	// just bloats the prompt with ~3-5k tokens of unused methodology).
-	if bc.orchestrator != nil && looksLikePlanningIntent(userText) && bc.effectiveCwd(agent, chatID, threadID) != "" {
-		agentSummaries := bc.buildAgentSummaries()
-		orchSection := orchestrator.BuildOrchestratorPrompt("", agentSummaries)
-		sections = append(sections, orchSection)
+	// Plan Mode prompt injection — only when active state exists
+	if bc.planningStore != nil {
+		key := sessionKey(chatID, threadID, userID)
+		if stateVal, ok := bc.planningStates.Load(key); ok {
+			if state, ok := stateVal.(*planning.State); ok && state.Status == planning.StatusActive {
+				planSection := planning.BuildPlanningPrompt(state)
+				sections = append(sections, planSection)
+			}
+		}
 	}
 
 	// Cron scheduling instructions

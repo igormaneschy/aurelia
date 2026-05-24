@@ -8,10 +8,9 @@ var planningKeywords = []string{
 	"planejar", "planeje", "planeja", "plano", "spec", "design", "tarefa",
 	"refatorar", "refatore", "migrar", "migre", "reescrever", "reescreva",
 	"adicionar", "adicione", "feature", "funcionalidade",
-	"aprovado", "pode fazer", "manda ver", "bora", "execute",
 	// English
 	"implement", "build", "create", "plan", "refactor", "migrate", "rewrite",
-	"add feature", "approved", "execute", "ship it",
+	"add feature",
 }
 
 // looksLikePlanningIntent returns true when the user message suggests they want
