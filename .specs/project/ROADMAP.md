@@ -192,6 +192,7 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 
 **Scope:**
 
+- **Fase 0 — Transport Abstraction (T-1):** extrair interface `Transport` do Telegram; desacoplar pipeline do transport específico; preparar base para TUI e outros surfaces;
 - `/plan`, `/plan status`, `/plan cancel`, `/plan list`;
 - state persistente em SQLite por `SessionKey`;
 - discovery baseado no project binding;
@@ -424,8 +425,9 @@ Sprint D0: Memory Contract & Spec Hygiene ✅ v0.16.1
   ├─ runtime: ProjectTeamMemoryDir → `~/.aurelia/projects/<slug>/team/`
   └─ README: memory layers updated, Node.js >=20.6.0
 
-Sprint D: Plan Mode (T0–T13 do tasks.md)
-  ├─ internal/planning/ types + SQLite store
+Sprint D: Plan Mode (T-1–T13 do tasks.md)
+  ├─ T-1: Transport Abstraction (2d) — pode antecipar; zero regressão
+  ├─ T0–T13: internal/planning/ types + SQLite store
   ├─ context discovery
   ├─ BuildPlanningPrompt + observer
   ├─ offer-only heuristic

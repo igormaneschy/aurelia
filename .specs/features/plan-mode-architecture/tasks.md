@@ -35,6 +35,42 @@ flowchart TD
 
 ## Task Breakdown
 
+### T-1: Transport Abstraction — extrair interface genérica do Telegram
+
+**What:** Criar `internal/transport/` com interface `Transport` e refactorizar `internal/telegram/` para implementar `TelegramTransport`, desacoplando o pipeline do Telegram como único surface.
+
+**Where:** `internal/transport/transport.go`, `internal/telegram/transport.go`, `internal/telegram/pipeline.go`, `internal/telegram/output.go`, `internal/telegram/send.go`, `internal/telegram/progress.go`, `internal/telegram/bot.go`
+
+**Depends on:** None (pode ser feita em paralelo com T0 ou antes)
+
+**Done when:**
+
+- [ ] `internal/transport/transport.go` define `Transport`, `IncomingMessage`, `OutgoingMessage`
+- [ ] `IncomingMessage` compatível com `session.SessionKey` (ChatID, ThreadID, UserID)
+- [ ] `OutgoingMessage` suporta markdown flag para rendering transport-specific
+- [ ] `internal/telegram/transport.go` implementa `TelegramTransport` com:
+  - `Name() string` → retorna `"telegram"`
+  - `Send()` → usa `telebot.Bot` com HTML parsing (reutiliza `MarkdownToHTML` + `splitHTML`)
+  - `SendError()` → formata como HTML e envia via bot
+  - `StartTyping()` → inicia `chatActionLoop` (typing indicator)
+  - `Receive()` → retorna canal vazio (Telegram usa handlers push, não pull)
+- [ ] `telegramPipelineOutput` refatorado para usar `TelegramTransport` via composição:
+  - `SendText`, `SendError`, `SendReply` delegam para `transport.Send()` / `transport.SendError()`
+  - `StartTyping` delega para `transport.StartTyping()`
+  - `NewProgress` continua a criar `progressReporter` (específico do Telegram)
+  - `DeleteMessage`, `ConfirmMessage`, `ExecuteApprovedPlan` permanecem no `Output` (UI-specific)
+- [ ] `BotController` cria `TelegramTransport` no `NewBotController` e injeta no `pipeline.Service`
+- [ ] `internal/transport/transport_test.go` com `MockTransport` para testes de pipeline
+- [ ] `go build ./...` limpo
+- [ ] `go test ./internal/telegram/...` limpo — zero regressões
+- [ ] `go test ./internal/pipeline/...` limpo — zero regressões
+
+**Verify:** `go test ./internal/transport/... ./internal/telegram/... ./internal/pipeline/... -v`
+
+**Nota de design:** O `Output` interface do pipeline é mantido intocado. O `Transport` é uma camada abaixo do `Output` — o `telegramPipelineOutput` usa `TelegramTransport` para operações de envio genéricas, mas mantém métodos UI-specific (reactions, delete, execute plan) que não fazem parte do `Transport`. Quando a TUI for implementada (Sprint J), criar-se-á `TUITransport` que implementa `Transport` e um `TUIPipelineOutput` que implementa `Output`.
+
+---
+
 ### T0: Confirmar contratos de prereq
 
 **What:** Travar os contratos mínimos vindos das specs dependentes antes de implementar.

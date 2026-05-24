@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"context"
 	"log"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
+	"github.com/igormaneschy/aurelia/internal/transport"
 	"github.com/igormaneschy/aurelia/internal/users"
 )
 
@@ -127,7 +129,7 @@ func (bc *BotController) ensurePipeline() *pipelinepkg.Service {
 		MemoryDir:    bc.memoryDir,
 		ExePath:      bc.exePath,
 		BotCwd:       bc.botCwd,
-		Output:       telegramPipelineOutput{bc: bc},
+		Output:       telegramPipelineOutput{bc: bc, tp: NewTelegramTransport(bc.bot)},
 		Orchestrator: bc.orchestrator,
 		Dreamer:      bc.dreamer,
 		ProjectIndex: bc.projectIndex,
@@ -143,13 +145,14 @@ func (bc *BotController) ensurePipeline() *pipelinepkg.Service {
 
 type telegramPipelineOutput struct {
 	bc *BotController
+	tp transport.Transport
 }
 
 func (o telegramPipelineOutput) StartTyping(chatID int64, threadID int) func() {
-	if o.bc == nil || o.bc.bot == nil {
+	if o.tp == nil {
 		return func() {}
 	}
-	return startChatActionLoop(o.bc.bot, &telebot.Chat{ID: chatID}, telebot.Typing, typingIndicatorInterval, threadID)
+	return o.tp.StartTyping(chatID, threadID)
 }
 
 func (o telegramPipelineOutput) NewProgress(chatID int64, threadID int) pipelinepkg.ProgressReporter {
@@ -160,24 +163,41 @@ func (o telegramPipelineOutput) NewProgress(chatID int64, threadID int) pipeline
 }
 
 func (o telegramPipelineOutput) SendError(chatID int64, threadID int, text string) error {
-	if o.bc == nil || o.bc.bot == nil {
+	if o.tp == nil {
 		return nil
 	}
-	return SendErrorWithThread(o.bc.bot, &telebot.Chat{ID: chatID}, text, threadID)
+	return o.tp.SendError(context.Background(), chatID, threadID, text)
 }
 
 func (o telegramPipelineOutput) SendReply(chatID int64, threadID int, text string) error {
-	if o.bc == nil || o.bc.bot == nil {
+	if o.tp == nil {
 		return nil
 	}
-	return SendTextReplyWithThread(o.bc.bot, &telebot.Chat{ID: chatID}, text, threadID)
+	return o.tp.Send(context.Background(), transport.OutgoingMessage{
+		ChatID:   chatID,
+		ThreadID: threadID,
+		Text:     text,
+		Markdown: true,
+	})
 }
 
 func (o telegramPipelineOutput) SendText(chatID int64, threadID int, text string) (any, error) {
-	if o.bc == nil || o.bc.bot == nil {
+	if o.tp == nil {
 		return nil, nil
 	}
-	return o.bc.bot.Send(&telebot.Chat{ID: chatID}, text, &telebot.SendOptions{ThreadID: threadID})
+	// Use TelegramTransport's SendText if available — it returns a message ref
+	// needed by DeleteMessage for the reconnect flow.
+	if tg, ok := o.tp.(*TelegramTransport); ok {
+		return tg.SendText(chatID, threadID, text)
+	}
+	// Generic fallback: send via the transport, return no ref (deletion no-op).
+	err := o.tp.Send(context.Background(), transport.OutgoingMessage{
+		ChatID:   chatID,
+		ThreadID: threadID,
+		Text:     text,
+		Markdown: false,
+	})
+	return nil, err
 }
 
 func (o telegramPipelineOutput) DeleteMessage(message any) {
