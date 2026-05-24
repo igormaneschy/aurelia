@@ -96,10 +96,6 @@ func (bc *BotController) registerSlashMenu() {
 		{Text: "users", Description: "Listar usuários autorizados (owner)"},
 		{Text: "forgetme", Description: "Apagar meus dados e recomeçar"},
 		{Text: "plan", Description: "Criar um plano de execução"},
-		{Text: "plan status", Description: "Ver status do plano ativo"},
-		{Text: "plan list", Description: "Listar planos"},
-		{Text: "plan cancel", Description: "Cancelar plano ativo"},
-		{Text: "plan reset", Description: "Reiniciar plano"},
 		{Text: "execute", Description: "Executar plano aprovado"},
 		{Text: "help", Description: "Mostrar comandos disponíveis"},
 	}
