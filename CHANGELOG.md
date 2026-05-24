@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.2] - 2026-05-24
+
+### Added
+- **Long execution protection**: `toolCallTracker` warns user+model at 20, 50, and
+  every 50 tool calls via `steer()` — prevents silent tool-call explosions
+- **Loop detection**: `loopDetector` detects consecutive repeats, ping-pong
+  patterns (A-B-A-B), and read-only spirals — breaks repetitive cycles with
+  steer intervention
+- **Timeout gradativo**: warns user at 25min and steers model to wrap up with
+  partial summary, 5min before the 30-min hard timeout
+- **Enhanced heartbeat**: includes tool call count every 8 beats
+  (`"⏱️ 5m0s — processando (35 chamadas de ferramenta)"`)
+
 ## [0.19.1] - 2026-05-24
 
 ### Fixed
