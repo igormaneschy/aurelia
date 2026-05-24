@@ -20,10 +20,8 @@ import (
 	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
-	"github.com/igormaneschy/aurelia/internal/planning"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/security"
-	"github.com/igormaneschy/aurelia/internal/session"
 )
 
 // runLogState tracks per-run state for the run journal.
@@ -338,33 +336,6 @@ func (s *Service) processRun(input pipelineInput) {
 	defer s.activeSessions.Delete(key)
 	defer cancel()
 
-	// Load planning state for this session (T7 wiring — not yet injected into prompt).
-	if s.planningStore != nil {
-		planKey := session.SessionKey{
-			ChatID:   input.chatID,
-			ThreadID: input.threadID,
-			UserID:   input.userID,
-		}
-		if planState, err := s.planningStore.Get(ctx, planKey); err != nil {
-			log.Printf("planning: failed to load state for %s: %v", key, err)
-		} else if planState != nil {
-			s.planningStates.Store(key, planState)
-			defer s.planningStates.Delete(key)
-
-			// Re-discover project context if stale or missing
-			if planState.Status == planning.StatusActive || planState.Status == planning.StatusAwaitingExec {
-				if planState.ProjectCtx == nil {
-					if pc, discErr := planning.Discover(planState.CWD); discErr == nil {
-						planState.ProjectCtx = pc
-						if saveErr := s.planningStore.Save(ctx, planState); saveErr != nil {
-							log.Printf("planning: failed to save discovered context for %s: %v", key, saveErr)
-						}
-					}
-				}
-			}
-		}
-	}
-
 	agent := s.routeAgent(input.text)
 	userText := stripAgentPrefix(input.text, agent)
 
@@ -373,16 +344,6 @@ func (s *Service) processRun(input pipelineInput) {
 	}
 
 	if s.checkProjectPreflight(input, agent, userText) {
-		return
-	}
-
-	// Plan Mode offer — offer-only heuristic, no silent prompt injection
-	planKey := session.SessionKey{ChatID: input.chatID, ThreadID: input.threadID, UserID: input.userID}
-	if offered, msg := s.maybeOfferPlanning(ctx, userText, planKey); offered {
-		if _, err := s.output.SendText(input.chatID, input.threadID, msg); err != nil {
-			log.Printf("pipeline: maybeOfferPlanning SendText failed for chat=%d: %v", input.chatID, err)
-		}
-		s.output.ConfirmMessage(input.chatID, input.messageID)
 		return
 	}
 
@@ -1029,9 +990,7 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 				}
 			}
 
-			// Plan Mode: observe artifacts from tool_use events
-			s.observeToolUse(chatID, threadID, userID, ev)
-		case "tool_result":
+			case "tool_result":
 			// Append a truncated, redacted summary to the tool tracking state.
 			// Also show the summary in the live progress display.
 			content := eventContent(ev)
@@ -1048,8 +1007,6 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 			s.recordPipelineEvent(chatID, threadID, observability.NewEvent("",
 				observability.PhaseBridgeToolResult, summary))
 
-			// Plan Mode: reconcile artifacts after tool_result
-			s.reconcileArtifacts(chatID, threadID, userID)
 		case "assistant":
 			delta := eventContent(ev)
 			assistantText.WriteString(delta)
@@ -1105,92 +1062,6 @@ func eventContent(ev bridge.Event) string {
 	return bridge.EventContent(ev)
 }
 
-// observeToolUse observes tool_use events and adds artifacts to planning state.
-// Does nothing if planning is not active for this session.
-func (s *Service) observeToolUse(chatID int64, threadID int, userID int64, ev bridge.Event) {
-	if s.planningStore == nil {
-		return
-	}
-	key := sessionKey(chatID, threadID, userID)
-	stateVal, ok := s.planningStates.Load(key)
-	if !ok {
-		return
-	}
-	state, ok := stateVal.(*planning.State)
-	if !ok || state.Status != planning.StatusActive {
-		return
-	}
-	observer := planning.NewObserver(state.CWD)
-	artifacts := observer.ObserveEvent(ev)
-	if len(artifacts) == 0 {
-		return
-	}
-	state.Materialized = append(state.Materialized, artifacts...)
-	// Save asynchronously — don't block event loop
-	go func(st *planning.State) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		if err := s.planningStore.Save(ctx, st); err != nil {
-			log.Printf("planning: failed to save observed artifacts: %v", err)
-		}
-	}(state)
-}
-
-// reconcileArtifacts reconciles artifact confirmed status after tool_result.
-// Does nothing if planning is not active for this session or there are no artifacts.
-func (s *Service) reconcileArtifacts(chatID int64, threadID int, userID int64) {
-	if s.planningStore == nil {
-		return
-	}
-	key := sessionKey(chatID, threadID, userID)
-	stateVal, ok := s.planningStates.Load(key)
-	if !ok {
-		return
-	}
-	state, ok := stateVal.(*planning.State)
-	if !ok || len(state.Materialized) == 0 {
-		return
-	}
-	reconciled := planning.ReconcileArtifacts(state.Materialized)
-	if len(reconciled) == 0 {
-		return
-	}
-	state.Materialized = reconciled
-	// Save asynchronously
-	go func(st *planning.State) {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		if err := s.planningStore.Save(ctx, st); err != nil {
-			log.Printf("planning: failed to save reconciled artifacts: %v", err)
-		}
-	}(state)
-}
-
-// savePlanningState performs a final reconciliation and save of planning state
-// at the end of a turn. Logs errors but does not fail the request.
-func (s *Service) savePlanningState(chatID int64, threadID int, userID int64) {
-	if s.planningStore == nil {
-		return
-	}
-	key := sessionKey(chatID, threadID, userID)
-	stateVal, ok := s.planningStates.Load(key)
-	if !ok {
-		return
-	}
-	state, ok := stateVal.(*planning.State)
-	if !ok {
-		return
-	}
-	if len(state.Materialized) > 0 {
-		state.Materialized = planning.ReconcileArtifacts(state.Materialized)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	if err := s.planningStore.Save(ctx, state); err != nil {
-		log.Printf("planning: failed to save final state: %v", err)
-	}
-}
-
 func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, ev bridge.Event, assistantText *strings.Builder, userText string, userID int64) Outcome {
 	content := eventContent(ev)
 	if content != "" {
@@ -1244,8 +1115,6 @@ func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, e
 	s.recordPipelineEvent(chatID, threadID, observability.NewEvent("",
 		observability.PhaseRunCompleted, "status=completed"))
 
-	s.savePlanningState(chatID, threadID, userID)
-
 	if ok, outcome := s.handlePlanExecution(chatID, threadID, messageID, finalText, safeFinalText, successRunID, userText, userID); ok {
 		return outcome
 	}
@@ -1286,7 +1155,6 @@ func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, e
 		}
 	}
 
-	s.savePlanningState(chatID, threadID, userID)
 	s.output.ConfirmMessage(chatID, messageID)
 	return OutcomeLLMError
 }
@@ -1355,26 +1223,6 @@ func (s *Service) tryExecutePlan(chatID int64, threadID int, messageID int, fina
 		_ = s.output.SendReply(chatID, threadID, displayText)
 	}
 
-	// Plan Mode guard: only execute if planning state is awaiting_exec
-	if s.planningStore != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		state, err := s.planningStore.Get(ctx, session.SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID})
-		cancel()
-
-		if err != nil {
-			log.Printf("plan: handoff error loading state: %v", err)
-			// Don't fail — fall through to legacy behavior
-		} else if state != nil {
-			if state.Status != planning.StatusAwaitingExec {
-				// Plan exists but not approved — inform user
-				_, _ = s.output.SendText(chatID, threadID,
-					"Você tem um plano ativo, mas ele ainda não foi aprovado. Use /execute para aprovar.")
-				return true, OutcomePlanBlocked
-			}
-			// State is awaiting_exec — proceed with handoff
-		}
-	}
-
 	// Resolve effective working directory — refuse execution without one
 	cwd := s.effectiveCwd(nil, chatID, threadID)
 	if cwd == "" {
@@ -1390,16 +1238,6 @@ func (s *Service) tryExecutePlan(chatID int64, threadID int, messageID int, fina
 			}
 		}()
 		s.output.ExecuteApprovedPlan(chatID, threadID, messageID, cwd, userID, plan)
-
-		// After executor accepts the plan, clean up planning state
-		if s.planningStore != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			key := session.SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID}
-			if err := s.planningStore.Delete(ctx, key); err != nil {
-				log.Printf("plan: failed to cleanup state after handoff: %v", err)
-			}
-		}
 	}()
 	return true, OutcomeSuccess
 }

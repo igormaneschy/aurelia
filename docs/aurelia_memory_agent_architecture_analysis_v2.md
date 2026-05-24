@@ -201,7 +201,7 @@ Sprint B+: Session Lifecycle Manager ✅ v0.15.0
 Sprint C: Close Orchestration Cycle ✅ v0.16.0
       │
       ▼
-Sprint D: Plan Mode Architecture 🟡 próximo
+Sprint D: ~~Plan Mode Architecture~~ 🗑️ Removido 2026-05-24
       │
       ▼
 Sprint E: User-Scoped Project Memory ← LACUNA 1 + LACUNA 2
@@ -220,8 +220,8 @@ Sprint I: Auto-Skills
 ```
 
 **Itens adicionais recomendados (sem sprint atribuído):**
-- `project_uuid` estável — pequeno o suficiente para antecipar para Sprint D ou início do E (Lacuna 2)
-- Harness de evals de memória — sprint independente, pode correr em paralelo com Sprint D (Lacuna 3)
+- `project_uuid` estável — pequeno o suficiente para antecipar para o início do Sprint E (Lacuna 2)
+- Harness de evals de memória — sprint independente, pode correr em paralelo com Sprint E (Lacuna 3)
 - `.specs/codebase/AGENT_RESPONSIBILITY_MODEL.md` — uma tarde de trabalho, elimina risco de drift crescente
 
 ---
@@ -230,7 +230,7 @@ Sprint I: Auto-Skills
 
 O Aurelia está numa posição sólida: os três sprints de fundação mais críticos para execução autónoma segura (Observability, Session Lifecycle, Orchestration Cycle) foram entregues. O sistema consegue agora executar workflows multi-tarefa com rastreabilidade completa por `run_id`, gitops correcto, e ciclo validar→commit→PR fechado.
 
-O próximo trabalho de alto impacto para o objectivo de **assistente pessoal** é o Sprint E. Mas antes de arrancar, há dois itens pequenos que valem a pena fazer ainda no Sprint D:
+O próximo trabalho de alto impacto para o objectivo de **assistente pessoal** é o Sprint E. Mas antes de arrancar, há dois itens pequenos que valem a pena fazer em paralelo:
 
 1. **`project_uuid` estável** — uma tarde de trabalho que elimina o risco silencioso de perda de memória por renomeação de directório. Quanto mais tarde for feito, mais dados de memória existem para migrar.
 

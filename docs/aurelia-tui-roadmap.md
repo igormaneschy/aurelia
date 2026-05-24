@@ -2,7 +2,7 @@
 
 **Sprint:** J (pós Auto-Skills)
 **Status:** 🔴 Proposta — aguarda aprovação para roadmap
-**Depende de:** Sprint D (Plan Mode), Sprint E (Project Memory), Sprint F (Wiki Memory Gateway)
+**Depende de:** Sprint E (Project Memory), Sprint F (Wiki Memory Gateway)
 **Desbloqueia:** Interface alternativa ao Telegram, onboarding sem bot, uso em contexto de terminal/IDE
 
 ---
@@ -12,7 +12,7 @@
 O Telegram é hoje o único ponto de entrada conversacional da Aurelia. Isso cria três fricções reais:
 
 1. **Contexto de terminal** — trabalhar num projecto no terminal e ter de trocar para o telemóvel (ou Telegram Desktop) para falar com a Aurelia quebra o fluxo de trabalho
-2. **Sessões não retomáveis cross-surface** — iniciar um Plan Mode no Telegram e querer retomá-lo num terminal (ou vice-versa) não é possível hoje
+2. **Sessões não retomáveis cross-surface** — iniciar uma sessão de trabalho no Telegram e querer retomá-la num terminal (ou vice-versa) não é possível hoje
 3. **Dependência de conectividade** — o Telegram requer ligação à internet e autenticação externa; uma TUI local comunica directamente com o daemon
 
 ---
@@ -68,7 +68,7 @@ Esta refactorização é **Fase 0** — pequena, localizada, sem risco de regres
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ ● aurelia  [project: aurelia @ main]  [Plan Mode: OFF]  │  ← Header bar
+│ ● aurelia  [project: aurelia @ main]                    │  ← Header bar
 ├──────────────┬──────────────────────────────────────────┤
 │              │                                          │
 │  CHATS       │  #aurelia-dev / General                  │  ← Thread title
@@ -84,7 +84,7 @@ Esta refactorização é **Fase 0** — pequena, localizada, sem risco de regres
 │              │  ──────────────────────────────────────  │
 │              │  > _                                     │  ← Input
 └──────────────┴──────────────────────────────────────────┘
-│ q:quit  tab:chats  ctrl+p:plan  ctrl+m:memory  ?:help  │  ← Status bar
+│ q:quit  tab:chats  ctrl+p:project  ctrl+m:memory  ?:help  │  ← Status bar
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -92,7 +92,7 @@ Esta refactorização é **Fase 0** — pequena, localizada, sem risco de regres
 - **Sidebar esquerda** — lista de "chats" mapeados para `ConversationKey` (DM = chat directo, grupos = chat com lista de tópicos)
 - **Painel principal** — histórico da conversa com markdown rendering, streaming de respostas em tempo real
 - **Input bar** — textarea com suporte a multi-linha (`shift+enter`)
-- **Header bar** — projecto activo (`/cwd`), agent activo, estado do Plan Mode
+- **Header bar** — projecto activo (`/cwd`), agent activo
 - **Status bar** — keybindings contextuais
 
 ---
@@ -105,8 +105,8 @@ Esta refactorização é **Fase 0** — pequena, localizada, sem risco de regres
 | Grupo com tópicos | Chat com sidebar de tópicos | `ConversationKey{chat_id: groupID, thread_id: topicID}` |
 | Mensagem de texto | Input da TUI | `IncomingMessage` via `TUITransport` |
 | Resposta do bot | Viewport renderizado | Stream de `OutgoingMessage` com glamour |
-| `/plan`, `/cwd`, etc. | Comandos idênticos no input | Parser de comandos reutilizado do pipeline |
-| Plan Mode activo | Indicador no header | Lê estado do SQLite do daemon |
+| `/cwd`, `/status`, etc. | Comandos idênticos no input | Parser de comandos reutilizado do pipeline |
+| Projecto activo | Indicador no header | Lê cwd do daemon |
 | Sessão persistente | Retoma por `ConversationKey` | Mesmas chaves, mesmo SQLite |
 
 ---
@@ -179,7 +179,7 @@ type IPCEvent struct {
 - [ ] Status bar com `cwd` activo e agent activo
 - [ ] Graceful degradation: se daemon não estiver a correr, mensagem clara
 
-**Critério de saída:** consegues ter uma conversa completa com a Aurelia pela TUI, incluindo `/cwd`, `/plan` e respostas em markdown
+**Critério de saída:** consegues ter uma conversa completa com a Aurelia pela TUI, incluindo `/cwd` e respostas em markdown
 
 ---
 
@@ -198,36 +198,44 @@ A TUI cria `ConversationKey` locais que coexistem com as do Telegram. Um `chat_i
 - [ ] Navegação: `↑↓` na sidebar, `enter` para abrir sessão
 - [ ] Criar nova sessão local: `n` na sidebar
 - [ ] Persistência de sessões TUI no SQLite do daemon
-- [ ] Header com nome da sessão, `cwd`, Plan Mode status
+- [ ] Header com nome da sessão, `cwd`, projecto activo
 - [ ] Histórico de mensagens por sessão (carregado do daemon ao abrir)
 
 ---
 
-### Fase 4 — Plan Mode Visual (3-4 dias)
-*Tirar partido do Plan Mode (Sprint D) na TUI.*
+### Fase 4 — Painel de Estado do Projeto (3 dias)
+*Painel informativo para o projecto activo: cwd, memória, contexto.*
 
-**Painel de Plan Mode (overlay ou painel direito):**
+O Plan Mode explícito foi removido (decisão 2026-05-24). Planejamento permanece conversacional.
+Em vez de um painel de plan mode, a TUI oferece um painel de estado do projecto activo sobrepondo-se
+ao chat, útil para ver contexto rápido sem sair da conversa.
+
+**Painel de Estado (overlay, `ctrl+p` para abrir/fechar):**
 
 ```
-┌─ PLAN MODE ──────────────────────────────────┐
-│ Feature: Sprint E — Project Memory           │
-│ Phase:   specify → design → tasks            │
-│ CWD:     ~/dev/aurelia                       │
+┌─ PROJECTO ───────────────────────────────────┐
+│ Projecto: ~/dev/aurelia                      │
+│ Binding: grupo → tópico Dev                  │
+│ Agente activo: @coder                        │
 │                                              │
-│ Artefacts:                                   │
-│  ✅ .specs/features/project-memory/spec.md   │
-│  ✅ .specs/features/project-memory/design.md │
-│  ⏳ .specs/features/project-memory/tasks.md  │
+│ Memória:                                     │
+│  🟢 Global: 14 facts                         │
+│  🟢 Projecto: 8 facts                        │
 │                                              │
-│ [/plan cancel]  [/execute — aprovar plano]   │
+│ Último checkpoint:                           │
+│  "Refactoring do pipeline concluído"         │
+│   - 3 ficheiros alterados                    │
+│                                              │
+│ [/cwd] [/status] [/memory]                   │
 └──────────────────────────────────────────────┘
 ```
 
 **Tasks:**
-- [ ] Overlay de Plan Mode (`ctrl+p` para abrir/fechar)
-- [ ] Lista de artefactos com estado (✅ confirmado / ⏳ pending / ❌ missing)
-- [ ] Botão de aprovação de plano (`/execute`) directo no painel
-- [ ] Sincronização em tempo real com estado do daemon (poll ou subscribe)
+- [ ] Overlay de estado (`ctrl+p` para abrir/fechar)
+- [ ] Informação do projecto activo (cwd, binding source)
+- [ ] Resumo de memória (camadas activas, contagem de facts)
+- [ ] Último checkpoint da conversa
+- [ ] Sincronização em tempo real com o daemon (poll ou subscribe)
 
 ---
 
@@ -248,7 +256,7 @@ A TUI cria `ConversationKey` locais que coexistem com as do Telegram. Um `chat_i
 ## Posicionamento no Roadmap
 
 ```
-Sprint D: Plan Mode                          🟡 próximo
+Sprint D: ~~Plan Mode~~ 🗑️ Removido 2026-05-24
 Sprint E: User-Scoped Project Memory         📐 spec completa
 Sprint F: Wiki Memory Gateway                📐 spec
 Sprint G: Nudge                              🔴 draft
@@ -259,12 +267,12 @@ Sprint J: TUI ← AQUI                        🔴 proposta
   ├─ Fase 1: IPC Layer (3d)
   ├─ Fase 2: TUI MVP (5d)
   ├─ Fase 3: Multi-sessão (4d)
-  ├─ Fase 4: Plan Mode Visual (4d)
+  ├─ Fase 4: Painel de Estado do Projeto (3d)
   └─ Fase 5: Polish + Distribuição (3d)
-     Total estimado: ~3 semanas
+     Total estimado: ~2.5 semanas
 ```
 
-**Nota:** A Fase 0 (Transport Abstraction) pode e deve ser feita **antes** do Sprint J — idealmente junto com o Sprint D ou E, porque não tem risco de regressão e a refactorização vai ser necessária de qualquer forma.
+**Nota:** A Fase 0 (Transport Abstraction) pode e deve ser feita **antes** do Sprint J — idealmente junto com o Sprint D0 ou E, porque não tem risco de regressão e a refactorização vai ser necessária de qualquer forma.
 
 ---
 
@@ -272,7 +280,7 @@ Sprint J: TUI ← AQUI                        🔴 proposta
 
 | Risco | Probabilidade | Mitigação |
 |---|---|---|
-| Bubble Tea ELM architecture difícil de manter em apps grandes | Médio | Dividir em sub-modelos por componente (sidebar model, chat model, plan model) com `tea.Cmd` para comunicação |
+| Bubble Tea ELM architecture difícil de manter em apps grandes | Médio | Dividir em sub-modelos por componente (sidebar model, chat model, project state model) com `tea.Cmd` para comunicação |
 | IPC unix socket não disponível em Windows | Baixo | Aurelia corre em macOS/Linux; named pipe como fallback futuro |
 | Divergência de estado entre TUI e Telegram | Médio | Toda a escrita passa pelo daemon — TUI nunca escreve directamente no SQLite |
 | Sessões TUI com `chat_id` local conflituarem com IDs Telegram | Baixo | Namespace separado: IDs locais negativos < -9000000, Telegram usa range diferente |
@@ -286,7 +294,7 @@ Sprint J: TUI ← AQUI                        🔴 proposta
 - [ ] Conversa completa com streaming funciona pela TUI
 - [ ] Sidebar mostra sessões locais e sessões Telegram (se autenticado)
 - [ ] Retomar sessão iniciada no Telegram funciona com `--attach`
-- [ ] Plan Mode mostra estado, fases e artefactos em tempo real
+- [ ] Painel de estado mostra cwd, binding source, resumo de memória
 - [ ] Nenhuma regressão no Telegram transport
 - [ ] `go build ./... && go vet ./... && go test ./...` limpo
 - [ ] Funciona em macOS (darwin/arm64) e Linux (amd64/arm64)

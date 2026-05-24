@@ -40,13 +40,6 @@ const (
 	CmdDebugLast
 	CmdDebugRun
 	CmdDebugErrors
-	// Plan mode commands — explicit /plan* and /execute
-	CmdPlan
-	CmdPlanStatus
-	CmdPlanList
-	CmdPlanCancel
-	CmdPlanReset
-	CmdExecute
 )
 
 // MatchedCommand represents a message that was identified as a system command.
@@ -152,13 +145,6 @@ var commandRules = []commandRule{
 		"/debug errors",
 		"ultimos erros", "últimos erros", "debug erros",
 	}, true},
-	// plan (exact match)
-	{CmdPlan, []string{"/plan"}, true},
-	{CmdPlanStatus, []string{"/plan status"}, true},
-	{CmdPlanList, []string{"/plan list"}, true},
-	{CmdPlanCancel, []string{"/plan cancel"}, true},
-	{CmdPlanReset, []string{"/plan reset"}, true},
-	{CmdExecute, []string{"/execute"}, true},
 }
 
 // accentReplacer maps common Portuguese diacritics to ASCII. Shared with the
@@ -297,19 +283,6 @@ func (bc *BotController) handleCommand(c telebot.Context, cmd *MatchedCommand) e
 			break
 		}
 		reply, err = bc.cmdDebugErrors()
-	// Plan mode commands — handlers send their own replies via SendContextText.
-	case CmdPlan:
-		return bc.handlePlan(c)
-	case CmdPlanStatus:
-		return bc.handlePlanStatus(c)
-	case CmdPlanList:
-		return bc.handlePlanList(c)
-	case CmdPlanCancel:
-		return bc.handlePlanCancel(c)
-	case CmdPlanReset:
-		return bc.handlePlanReset(c)
-	case CmdExecute:
-		return bc.handleExecute(c)
 	default:
 		return fmt.Errorf("unknown command type: %d", cmd.Type)
 	}

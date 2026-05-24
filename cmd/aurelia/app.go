@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -20,7 +19,6 @@ import (
 	"github.com/igormaneschy/aurelia/internal/dream"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/persona"
-	"github.com/igormaneschy/aurelia/internal/planning"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
@@ -39,7 +37,6 @@ type app struct {
 	bindings   projectbinding.Store
 	runLog     runlog.Store
 	continuity    continuity.Store
-	planningStore planning.Store
 	bot           *telegram.BotController
 	sessions   *session.Store
 	scheduler  *cron.Scheduler
@@ -155,52 +152,8 @@ func bootstrapApp() (*app, error) {
 		return nil, fmt.Errorf("initialize continuity store: %w", err)
 	}
 
-	// Create planning store
-	planningDBPath := resolver.DBPath("planning.db")
-	planningDB, err := sql.Open("sqlite", planningDBPath)
-	if err != nil {
-		if closeErr := continuityStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close continuity store: %v", closeErr)
-		}
-		if closeErr := runLogStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close runlog store: %v", closeErr)
-		}
-		if closeErr := bindings.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close project binding store: %v", closeErr)
-		}
-		if closeErr := cronStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close cron store: %v", closeErr)
-		}
-		return nil, fmt.Errorf("initialize planning db: %w", err)
-	}
-	if err := planning.RunMigrations(planningDB); err != nil {
-		planningDB.Close()
-		if closeErr := continuityStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close continuity store: %v", closeErr)
-		}
-		if closeErr := runLogStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close runlog store: %v", closeErr)
-		}
-		if closeErr := bindings.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close project binding store: %v", closeErr)
-		}
-		if closeErr := cronStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close cron store: %v", closeErr)
-		}
-		return nil, fmt.Errorf("run planning migrations: %w", err)
-	}
-	planningStore := planning.NewSQLiteStore(planningDB)
-
-	// Non-blocking GC on startup
-	gcCtx, gcCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	_ = planningStore.GC(gcCtx, 30*24*time.Hour) // 30 days
-	gcCancel()
-
 	onboardingStore, err := users.NewOnboardingStoreFromFile(resolver.DBPath("onboarding.db"))
 	if err != nil {
-		if closeErr := planningStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close planning store: %v", closeErr)
-		}
 		if closeErr := continuityStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close continuity store: %v", closeErr)
 		}
@@ -263,12 +216,8 @@ func bootstrapApp() (*app, error) {
 	bot, err := telegram.NewBotController(
 		cfg, br, agentReg, personaSvc, transcriber,
 		cronHandler, resolver.MemoryPersonas(), resolver.Memory(), exePath, sessions, resolver, bindings,
-		planningStore,
 	)
 	if err != nil {
-		if closeErr := planningStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close planning store: %v", closeErr)
-		}
 		if closeErr := onboardingStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close onboarding store: %v", closeErr)
 		}
@@ -293,9 +242,6 @@ func bootstrapApp() (*app, error) {
 	// Wire orchestrator — enables autonomous agent orchestration
 	cwd, err := os.Getwd()
 	if err != nil {
-		if closeErr := planningStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close planning store: %v", closeErr)
-		}
 		if closeErr := onboardingStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close onboarding store: %v", closeErr)
 		}
@@ -383,9 +329,6 @@ func bootstrapApp() (*app, error) {
 
 	scheduler, err := setupCronScheduler(cronStore, br, agentReg, personaSvc, bot, resolver.Memory(), cfg.DefaultProvider, exePath, users.NewResolver(resolver.Root()))
 	if err != nil {
-		if closeErr := planningStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close planning store: %v", closeErr)
-		}
 		if closeErr := onboardingStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close onboarding store: %v", closeErr)
 		}
@@ -415,7 +358,6 @@ func bootstrapApp() (*app, error) {
 		bindings:        bindings,
 		runLog:          runLogStore,
 		continuity:      continuityStore,
-		planningStore:   planningStore,
 		bot:             bot,
 		sessions:        sessions,
 		scheduler:       scheduler,
@@ -638,11 +580,6 @@ func (a *app) close() {
 	if a.continuity != nil {
 		if err := a.continuity.Close(); err != nil {
 			log.Printf("Warning: failed to close continuity store: %v", err)
-		}
-	}
-	if a.planningStore != nil {
-		if err := a.planningStore.Close(); err != nil {
-			log.Printf("Warning: failed to close planning store: %v", err)
 		}
 	}
 	if a.onboardingStore != nil {
