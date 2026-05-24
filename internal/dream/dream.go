@@ -333,6 +333,16 @@ func (d *Dreamer) tryStartNudge(key session.SessionKey) bool {
 }
 
 // memoryDirResolver implementation for Dreamer.
+func (d *Dreamer) Root() string {
+	if d.userResolver != nil {
+		return d.userResolver.Root()
+	}
+	if d.resolver != nil {
+		return d.resolver.Root()
+	}
+	return ""
+}
+
 func (d *Dreamer) TopicMemoryDir(chatID int64, threadID int) string {
 	if d.userResolver == nil {
 		return ""

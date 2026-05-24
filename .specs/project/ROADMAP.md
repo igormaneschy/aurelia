@@ -215,8 +215,8 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 
 - user global memory em `~/.aurelia/users/<id>/memory/`;
 - user × project private memory em `~/.aurelia/users/<id>/projects/<slug>/memory/`;
-- project team memory em `~/.aurelia/projects/<slug>/team/` (já existe);
-- topic memory em `~/.aurelia/topics/chat_<id>/thread_<id>/` (já existe);
+- project team memory em `~/.aurelia/projects/<slug>/team/` (✅ canonical desde D0);
+- topic memory em `~/.aurelia/topics/chat_<id>/thread_<id>/` (✅ canonical desde D0);
 - prompt assembly com camadas corretas por `TurnContext`;
 - runtime.PathResolver com métodos `User*`.
 
@@ -323,6 +323,9 @@ Foundation validada (Security Guard-Rails + Project Binding + Bridge Resilience)
 3. Close Orchestration Cycle ✅
       │
       ▼
+D0. Memory Contract & Spec Hygiene ✅
+      │
+      ▼
 4. Plan Mode Architecture
       │
       ▼
@@ -386,6 +389,16 @@ Sprint C: Close Orchestration Cycle (T0–T12 do tasks.md) ✅ v0.16.0
   ├─ ✅ commit + PR + tasks.md update
   ├─ ✅ orphan cleanup no startup
   └─ ✅ integration smoke test
+
+Sprint D0: Memory Contract & Spec Hygiene ✅ v0.16.1
+  ├─ AGENT_RESPONSIBILITY_MODEL.md — canonical PI↔Aurelia boundary
+  ├─ project-memory spec: topic path `~/.aurelia/topics/`, team path `~/.aurelia/projects/<slug>/team/`
+  ├─ wiki-memory spec: layers aligned with project-memory
+  ├─ ARCHITECTURE.md: remove stale orchestration statements (cycle wired since v0.16.0)
+  ├─ STACK.md: Go 1.26.3, Node >=20.6.0
+  ├─ memoryux/ + pipeline/ topic dirs canonicalized to `~/.aurelia/topics/`
+  ├─ runtime: ProjectTeamMemoryDir → `~/.aurelia/projects/<slug>/team/`
+  └─ README: memory layers updated, Node.js >=20.6.0
 
 Sprint D: Plan Mode (T0–T13 do tasks.md)
   ├─ internal/planning/ types + SQLite store

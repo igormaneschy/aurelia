@@ -8,6 +8,8 @@ import (
 	"strings"
 )
 
+const maxMemoryFileSize = 1 * 1024 * 1024 // 1MB hard limit for memory fact files
+
 var (
 	allowedLayers = map[string]bool{
 		"global":  true,
@@ -30,8 +32,10 @@ type safeMemoryWriter struct {
 	resolver    memoryDirResolver
 }
 
-// memoryDirResolver provides layer-specific subdirectories.
+// memoryDirResolver provides layer-specific subdirectories and the
+// instance root directory for containment boundary resolution.
 type memoryDirResolver interface {
+	Root() string
 	TopicMemoryDir(chatID int64, threadID int) string
 	ProjectMemoryDir(cwd string, chatID int64, threadID int) string
 	TeamMemoryDir(cwd string) string
@@ -69,7 +73,10 @@ func (w *safeMemoryWriter) resolveLayerTarget(layer string, chatID int64, thread
 		if dir == "" {
 			return layerTarget{}, fmt.Errorf("topic memory directory not available")
 		}
-		return layerTarget{base: dir, root: w.memoryDir, blocksPersonas: true}, nil
+		// Use instance root (~/.aurelia/) as containment root so that topic
+		// dirs (~/.aurelia/topics/...) pass the isSubDirLexical check.
+		instanceRoot := w.resolver.Root()
+		return layerTarget{base: dir, root: instanceRoot, blocksPersonas: true}, nil
 	case "project":
 		if cwd == "" || w.resolver == nil {
 			return layerTarget{}, fmt.Errorf("project layer requires cwd")
@@ -233,18 +240,9 @@ func (w *safeMemoryWriter) applyOne(u memoryUpdate, chatID int64, threadID int, 
 		return err
 	}
 
-	// 10. Write facts (append only unique)
-	if err := appendUniqueFacts(target, u.Facts); err != nil {
-		return fmt.Errorf("write facts: %w", err)
-	}
-
-	// 11. Update MEMORY.md index — use resolved base path so that
-	// updateMemoryIndex's internal symlink resolution matches correctly.
-	if err := w.checkTargetSymlink(lt, rootResolved, filepath.Join(baseResolved, "MEMORY.md")); err != nil {
-		return fmt.Errorf("MEMORY.md symlink: %w", err)
-	}
-	if err := updateMemoryIndex(baseResolved, u.Filename, u.Title); err != nil {
-		return fmt.Errorf("update MEMORY.md index: %w", err)
+	// 10-11. Write facts and update MEMORY.md index.
+	if err := writeFactsAndIndex(w, lt, target, u.Facts, u.Filename, u.Title, rootResolved); err != nil {
+		return err
 	}
 
 	return nil
@@ -271,13 +269,70 @@ func (w *safeMemoryWriter) checkTargetSymlink(lt layerTarget, rootResolved strin
 	return nil
 }
 
+// writeFactsAndIndex writes facts to the target file and updates the MEMORY.md index.
+// This combines steps 10-11 of applyOne to reduce its size.
+func writeFactsAndIndex(w *safeMemoryWriter, lt layerTarget, target string, facts []string, filename string, title string, rootResolved string) error {
+	if err := appendUniqueFacts(target, facts); err != nil {
+		return fmt.Errorf("write facts: %w", err)
+	}
+
+	baseResolved, err := filepath.EvalSymlinks(lt.base)
+	if err != nil {
+		return fmt.Errorf("resolve base symlinks: %w", err)
+	}
+	if err := w.checkTargetSymlink(lt, rootResolved, filepath.Join(baseResolved, "MEMORY.md")); err != nil {
+		return fmt.Errorf("MEMORY.md symlink: %w", err)
+	}
+	if err := updateMemoryIndex(baseResolved, filename, title); err != nil {
+		return fmt.Errorf("update MEMORY.md index: %w", err)
+	}
+	return nil
+}
+
 // isPersonasRelPath checks if a relative path starts with "personas/".
 func isPersonasRelPath(rel string) bool {
 	return strings.HasPrefix(rel, "personas") && (len(rel) == 8 || rel[8] == filepath.Separator)
 }
 
+// needsLeadingNewline checks if an open file needs a leading newline before appending content.
+func needsLeadingNewline(f *os.File) (bool, error) {
+	stat, err := f.Stat()
+	if err != nil {
+		return false, err
+	}
+	if stat.Size() == 0 {
+		return false, nil
+	}
+	buf := make([]byte, 1)
+	if _, err := f.ReadAt(buf, stat.Size()-1); err != nil {
+		return false, err
+	}
+	return buf[0] != '\n', nil
+}
+
+// calculateWriteBudget checks whether appending newContentSize bytes to a file of existingSize
+// would exceed the hard size limit. If needsNewline is true, the leading newline byte is
+// included in the budget.
+func calculateWriteBudget(existingSize int64, newContentSize int64, needsNewline bool, path string) error {
+	total := existingSize + newContentSize
+	if needsNewline {
+		total++
+	}
+	if total > maxMemoryFileSize {
+		return fmt.Errorf("memory file size limit exceeded: %s (%d bytes)", filepath.Base(path), existingSize)
+	}
+	return nil
+}
+
 // appendUniqueFacts appends facts to a file only if not already present.
+// Enforces a hard size limit (maxMemoryFileSize) to prevent unbounded writes.
 func appendUniqueFacts(path string, facts []string) error {
+	// Pre-check: file already exceeds the limit.
+	fi, err := os.Stat(path)
+	if err == nil && fi.Size() > maxMemoryFileSize {
+		return fmt.Errorf("memory file size limit exceeded: %s (%d bytes)", filepath.Base(path), fi.Size())
+	}
+
 	existing := readLines(path)
 	existingSet := make(map[string]struct{}, len(existing))
 	for _, l := range existing {
@@ -285,15 +340,38 @@ func appendUniqueFacts(path string, facts []string) error {
 	}
 
 	var toWrite []string
+	var newSize int64
 	for _, f := range facts {
 		line := "- " + f
 		if _, seen := existingSet[line]; !seen {
 			toWrite = append(toWrite, line)
+			newSize += int64(len(line) + 1) // +1 for trailing newline
 		}
 	}
 
 	if len(toWrite) == 0 {
 		return nil
+	}
+
+	// Determine if a leading newline separator will be needed,
+	// so the budget check can include the extra byte.
+	needsNL := false
+	if fi != nil && fi.Size() > 0 {
+		fd, fderr := os.Open(path)
+		if fderr == nil {
+			buf := make([]byte, 1)
+			if _, rerr := fd.ReadAt(buf, fi.Size()-1); rerr == nil && buf[0] != '\n' {
+				needsNL = true
+			}
+			fd.Close()
+		}
+	}
+
+	// Budget check including possible leading newline.
+	if fi != nil {
+		if err := calculateWriteBudget(fi.Size(), newSize, needsNL, path); err != nil {
+			return err
+		}
 	}
 
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
@@ -302,19 +380,9 @@ func appendUniqueFacts(path string, facts []string) error {
 	}
 	defer func() { _ = f.Close() }()
 
-	// If the file is new or empty, no leading newline needed
-	stat, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	if stat.Size() > 0 {
-		// Check if last byte is already a newline
-		buf := make([]byte, 1)
-		_, _ = f.ReadAt(buf, stat.Size()-1)
-		if buf[0] != '\n' {
-			if _, err := f.WriteString("\n"); err != nil {
-				return err
-			}
+	if needsNL {
+		if _, err := f.WriteString("\n"); err != nil {
+			return err
 		}
 	}
 

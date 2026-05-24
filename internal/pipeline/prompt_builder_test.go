@@ -194,7 +194,13 @@ func TestLoadMemoryContents_TriggersCompactModeAtThreshold(t *testing.T) {
 		}
 	}
 
-	bc := &Service{memoryDir: dir, memoryCache: newMemoryCache(), sessions: session.NewStore()}
+	// Set up resolver so topicMemoryDirCanonical resolves the correct path.
+	t.Setenv("AURELIA_HOME", dir)
+	resolver, err := runtime.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bc := &Service{memoryDir: dir, resolver: resolver, memoryCache: newMemoryCache(), sessions: session.NewStore()}
 	got := bc.loadMemoryContents(1, 2, 0, nil)
 
 	// Total should be within budget
@@ -260,6 +266,36 @@ func TestLoadMemoryContents_ProjectPrivateSurvivesWhenGlobalIsHuge(t *testing.T)
 	// Total must be within budget
 	if len(got) > maxMemoryTotalChars {
 		t.Fatalf("memory content length = %d, want <= %d", len(got), maxMemoryTotalChars)
+	}
+}
+
+func TestTopicMemoryDirCanonical_ResolvesViaUserResolver(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AURELIA_HOME", root)
+	resolver, err := runtime.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Without userResolver or resolver — should return ""
+	bc := &Service{}
+	got := bc.topicMemoryDirCanonical(42, 7)
+	if got != "" {
+		t.Fatalf("expected empty string without resolver, got %q", got)
+	}
+
+	// With runtime resolver — should use resolver.Root() + topics/...
+	bc2 := &Service{resolver: resolver}
+	got2 := bc2.topicMemoryDirCanonical(42, 7)
+	want2 := filepath.Join(root, "topics", "chat_42", "thread_7")
+	if got2 != want2 {
+		t.Fatalf("topicMemoryDirCanonical() = %q, want %q", got2, want2)
+	}
+
+	// threadID <= 0 should return empty
+	got3 := bc2.topicMemoryDirCanonical(42, 0)
+	if got3 != "" {
+		t.Fatalf("expected empty string for threadID=0, got %q", got3)
 	}
 }
 
@@ -932,5 +968,145 @@ func TestBuildSystemPrompt_NoContinuityWhenNilStore(t *testing.T) {
 	}
 	if strings.Contains(prompt, "Conversation Continuity") {
 		t.Fatal("expected no continuity section when store is nil")
+	}
+}
+
+// --- Fix 2: H-02 — system prompt does not leak absolute paths ---
+
+// TestBuildMemoryInstructions_NoAbsolutePathLeak verifies that the memory
+// instructions section aliases absolute paths instead of exposing real
+// filesystem paths that could contain usernames or home directories.
+func TestBuildMemoryInstructions_NoAbsolutePathLeak(t *testing.T) {
+	// Simulate a home directory path that looks like a real user
+	memoryDir := filepath.Join("/Users", "janedoe", ".aurelia", "memory")
+	rootDir := filepath.Join("/Users", "janedoe", ".aurelia")
+	cwd := filepath.Join("/Users", "janedoe", "projects", "my-app")
+
+	bc := &Service{
+		memoryDir:   memoryDir,
+		memoryCache: newMemoryCache(),
+	}
+
+	// Call buildMemoryInstructions with no project context (hasProject=false)
+	got := bc.buildMemoryInstructions(42, 0, 0, nil)
+	if got == "" {
+		t.Fatal("expected non-empty memory instructions")
+	}
+	// Must NOT contain the absolute path with username
+	if strings.Contains(got, "/Users/janedoe") {
+		t.Fatal("system prompt leaks absolute home directory path (H-02)")
+	}
+	// Must use the aliased global path
+	if !strings.Contains(got, "~/.aurelia/memory/") {
+		t.Fatal("expected aliased global path ~/.aurelia/memory/ in prompt")
+	}
+
+	// Now test with project context (hasProject=true)
+	t.Setenv("AURELIA_HOME", rootDir)
+	resolver, err := runtime.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bc2 := &Service{
+		memoryDir:   memoryDir,
+		resolver:    resolver,
+		memoryCache: newMemoryCache(),
+		sessions:    session.NewStore(),
+	}
+	bc2.sessions.SetCwd(42, 0, cwd)
+
+	got2 := bc2.buildMemoryInstructions(42, 0, 0, nil)
+	if got2 == "" {
+		t.Fatal("expected non-empty memory instructions with cwd")
+	}
+	// Must NOT contain the absolute path with username
+	if strings.Contains(got2, "/Users/janedoe") {
+		t.Fatal("system prompt with project leaks absolute home directory path (H-02)")
+	}
+	// Must use alias format for project private
+	if !strings.Contains(got2, "project-private://my-app") {
+		t.Fatalf("expected project-private://my-app alias in prompt, got: %s", got2)
+	}
+	if !strings.Contains(got2, "project-team://my-app") {
+		t.Fatalf("expected project-team://my-app alias in prompt, got: %s", got2)
+	}
+}
+
+// --- Fix 3: M-01 — oversized files are skipped in loadMemoryDir ---
+
+// TestLoadMemoryDir_SkipsOversizedFile verifies that files larger than
+// maxMemoryFileBytes are skipped instead of being read into memory.
+func TestLoadMemoryDir_SkipsOversizedFile(t *testing.T) {
+	dir := t.TempDir()
+
+	// Normal-sized file that should be loaded
+	if err := os.WriteFile(filepath.Join(dir, "normal.md"), []byte("normal content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Oversized file (> maxMemoryFileBytes = 9000 bytes)
+	oversized := strings.Repeat("x", maxMemoryFileBytes+100)
+	if err := os.WriteFile(filepath.Join(dir, "oversized.md"), []byte(oversized), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	bc := &Service{memoryDir: dir, memoryCache: newMemoryCache()}
+	got := bc.loadMemoryDir(dir)
+
+	// Normal file should be loaded
+	if !strings.Contains(got, "normal.md") || !strings.Contains(got, "normal content") {
+		t.Fatal("expected normal.md to be loaded")
+	}
+	// Oversized file should NOT appear in output
+	if strings.Contains(got, "oversized.md") {
+		t.Fatal("oversized.md should be skipped (M-01)")
+	}
+}
+
+// TestLoadMemoryDirCompact_SkipsOversizedFile verifies the same for compact mode.
+func TestLoadMemoryDirCompact_SkipsOversizedFile(t *testing.T) {
+	dir := t.TempDir()
+
+	// Normal-sized file
+	if err := os.WriteFile(filepath.Join(dir, "normal.md"), []byte("normal content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Oversized file (> maxMemoryFileBytes = 9000 bytes)
+	oversized := strings.Repeat("x", maxMemoryFileBytes+100)
+	if err := os.WriteFile(filepath.Join(dir, "oversized.md"), []byte(oversized), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	bc := &Service{memoryDir: dir, memoryCache: newMemoryCache()}
+	got := bc.loadMemoryDirCompact(dir)
+
+	// Normal file should be loaded
+	if !strings.Contains(got, "normal.md") || !strings.Contains(got, "normal content") {
+		t.Fatal("expected normal.md to be loaded in compact mode")
+	}
+	// Oversized file should NOT appear in output
+	if strings.Contains(got, "oversized.md") {
+		t.Fatal("oversized.md should be skipped in compact mode (M-01)")
+	}
+}
+
+// TestLoadMemoryDir_SkipsOversizedMEMORYMd verifies that even MEMORY.md
+// is subject to the size limit.
+func TestLoadMemoryDir_SkipsOversizedMEMORYMd(t *testing.T) {
+	dir := t.TempDir()
+
+	// Oversized MEMORY.md
+	oversized := strings.Repeat("x", maxMemoryFileBytes+100)
+	if err := os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte(oversized), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	bc := &Service{memoryDir: dir, memoryCache: newMemoryCache()}
+	got := bc.loadMemoryDir(dir)
+
+	// MEMORY.md content should not appear
+	if strings.Contains(got, strings.Repeat("x", 100)) {
+		t.Fatal("oversized MEMORY.md content should be skipped (M-01)")
 	}
 }

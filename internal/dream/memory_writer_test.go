@@ -13,6 +13,14 @@ type testResolver struct {
 	topicDir    string
 	projectDir  string
 	teamDir     string
+	root        string // instance root for containment boundary
+}
+
+func (r *testResolver) Root() string {
+	if r.root != "" {
+		return r.root
+	}
+	return r.memoryDir
 }
 
 func (r *testResolver) TopicMemoryDir(chatID int64, threadID int) string {
@@ -906,5 +914,147 @@ func TestUpdateMemoryIndex_AcceptsNormalFile(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "[Test](test.md)") {
 		t.Fatal("expected MEMORY.md to have entry")
+	}
+}
+
+// --- Fix 1: H-01 topic memory write under instance root ---
+
+// TestSafeWriter_TopicLayerUnderInstanceRoot verifies that topic memory
+// writes succeed when the topic dir is under the instance root but outside
+// the user memory dir. Before the fix, resolveLayerTarget used w.memoryDir
+// as the containment root for topic, causing every topic write to be
+// rejected with errPathTraversal.
+func TestSafeWriter_TopicLayerUnderInstanceRoot(t *testing.T) {
+	instanceRoot := t.TempDir()
+	userMemoryDir := filepath.Join(instanceRoot, "users", "42", "memory")
+	topicDir := filepath.Join(instanceRoot, "topics", "chat_1", "thread_2")
+
+	// Create the user memory dir so newSafeMemoryWriter's EvalSymlinks succeeds.
+	if err := os.MkdirAll(userMemoryDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Resolver with root=instanceRoot (different from user memoryDir)
+	resolver := &testResolver{memoryDir: userMemoryDir, topicDir: topicDir, root: instanceRoot}
+	w, err := newSafeMemoryWriter(userMemoryDir, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	applied := w.applyUpdates([]memoryUpdate{
+		{Layer: "topic", Filename: "topic_facts.md", Title: "Topic", Facts: []string{"topic fact under instance root"}},
+	}, 1, 2, "")
+	if applied != 1 {
+		t.Fatalf("expected 1 applied update (topic under instance root), got %d", applied)
+	}
+
+	data, err := os.ReadFile(filepath.Join(topicDir, "topic_facts.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "- topic fact under instance root") {
+		t.Fatal("missing topic fact")
+	}
+}
+
+// TestSafeWriter_TopicLayerBlocksPersonasUnderInstanceRoot verifies that
+// personas blocking still works when the topic layer uses instance root
+// as containment boundary.
+func TestSafeWriter_TopicLayerBlocksPersonasUnderInstanceRoot(t *testing.T) {
+	instanceRoot := t.TempDir()
+	userMemoryDir := filepath.Join(instanceRoot, "users", "42", "memory")
+	topicDir := filepath.Join(instanceRoot, "topics", "chat_1", "thread_2")
+	personasTopicDir := filepath.Join(topicDir, "personas")
+
+	// Create both the user memory dir and the personas subdir
+	if err := os.MkdirAll(userMemoryDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(personasTopicDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	resolver := &testResolver{memoryDir: userMemoryDir, topicDir: topicDir, root: instanceRoot}
+	w, err := newSafeMemoryWriter(userMemoryDir, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Write to personas subdirectory within topic (should be rejected)
+	applied := w.applyUpdates([]memoryUpdate{
+		{Layer: "topic", Filename: "../topic/personas/evil.md", Facts: []string{"should fail"}},
+	}, 1, 2, "")
+	if applied != 0 {
+		t.Fatal("expected topic layer personas write under instance root to be rejected")
+	}
+}
+
+// --- Fix 4: M-02 — unbounded fact writes rejection ---
+
+// TestAppendUniqueFacts_RejectsNearMaxFileSize verifies that appending facts
+// to a file near the 1MB limit is rejected with the appropriate error.
+func TestAppendUniqueFacts_RejectsNearMaxFileSize(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.md")
+
+	// Create a file just under the 1MB limit (maxMemoryFileSize = 1048576)
+	// Fill it to maxMemoryFileSize - 100 bytes (leaving 100 bytes of headroom)
+	fillSize := maxMemoryFileSize - 100
+	var fillBuf strings.Builder
+	for fillBuf.Len() < fillSize {
+		fillBuf.WriteString("x\n")
+	}
+	fill := fillBuf.String()[:fillSize]
+	if err := os.WriteFile(path, []byte(fill), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify the file is near the limit
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Size() >= maxMemoryFileSize {
+		t.Fatalf("test setup: file too large: %d >= %d", fi.Size(), maxMemoryFileSize)
+	}
+
+	// Add a fact that would push it over the limit (needs more than 100 bytes)
+	longFact := strings.Repeat("a", 200)
+	err = appendUniqueFacts(path, []string{longFact})
+	if err == nil {
+		t.Fatal("expected error when appending facts to near-limit file (M-02)")
+	}
+	if !strings.Contains(err.Error(), "memory file size limit exceeded") {
+		t.Fatalf("expected 'memory file size limit exceeded' error, got: %v", err)
+	}
+
+	// Verify file was NOT modified (content unchanged)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != fill {
+		t.Fatal("file content changed despite rejection")
+	}
+}
+
+// TestAppendUniqueFacts_RejectsAlreadyOversizedFile verifies that files
+// already over the 1MB limit are rejected immediately.
+func TestAppendUniqueFacts_RejectsAlreadyOversizedFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.md")
+
+	// Create a file already over the limit
+	oversized := strings.Repeat("x\n", maxMemoryFileSize/2+1)
+	if err := os.WriteFile(path, []byte(oversized), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := appendUniqueFacts(path, []string{"new fact"})
+	if err == nil {
+		t.Fatal("expected error when appending to already oversized file (M-02)")
+	}
+	if !strings.Contains(err.Error(), "memory file size limit exceeded") {
+		t.Fatalf("expected 'memory file size limit exceeded' error, got: %v", err)
 	}
 }

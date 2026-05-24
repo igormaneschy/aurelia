@@ -243,7 +243,7 @@ func (r *PathResolver) ConversationProjectMemoryDir(cwd string, chatID int64, th
 }
 
 // ProjectTeamMemoryDir returns the per-project team (shared) memory directory:
-// ~/.aurelia/projects/<sanitized-cwd>/memory/team/
+// ~/.aurelia/projects/<sanitized-cwd>/team/
 func (r *PathResolver) ProjectTeamMemoryDir(cwd string) string {
-	return filepath.Join(r.ProjectMemoryDir(cwd), "team")
+	return filepath.Join(r.root, "projects", ProjectSlug(cwd), "team")
 }

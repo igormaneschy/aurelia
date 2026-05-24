@@ -1,10 +1,10 @@
 # Tech Stack
 
-**Analyzed:** 2026-03-26
+**Analyzed:** 2026-05-24
 
 ## Core
 
-- Language: Go 1.25.0
+- Language: Go 1.26.3
 - Module: `github.com/igormaneschy/aurelia`
 - Package manager: Go modules
 - Build: `go build -trimpath -ldflags "-s -w" -o ./build/aurelia ./cmd/aurelia`
@@ -23,8 +23,8 @@
 
 ## Bridge (TypeScript)
 
-- Runtime: Node.js with `tsx` or `--experimental-strip-types`
-- SDK: `@earendil-works/pi-coding-agent` (latest)
+- Runtime: Node.js `>=20.6.0` with `tsx` or `--experimental-strip-types`
+- SDK: `@earendil-works/pi-coding-agent` (latest, requires Node >=20.6.0 via engine field)
 - TypeScript: ^5.7.0
 - Target: ES2022, ESNext modules
 
@@ -33,7 +33,7 @@
 - Unit/Integration: Standard `testing` package (no testify assertions)
 - Mocking: Hand-written fakes (e.g., `fakeCronStore`)
 - E2E: `e2e/` directory with bridge integration tests
-- CI: `go test ./...` on Windows Latest, Go 1.25.8
+- CI: `go test ./...` on Windows Latest, Go 1.26.3
 
 ## External Services
 

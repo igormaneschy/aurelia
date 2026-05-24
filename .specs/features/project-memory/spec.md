@@ -99,7 +99,7 @@ Esta spec define o **modelo de escopos e diretórios**. A spec `wiki-memory` pro
 ### Layer semantics
 
 | Layer | Path | Scope | Examples |
-|---|---|---|---|
+|---|---|---|---|---|
 | Aurelia persona | `~/.aurelia/memory/personas/` | deployment global | IDENTITY, SOUL |
 | User global | `~/.aurelia/users/<id>/memory/` | user cross-project | nome, idioma, preferências |
 | User project private | `~/.aurelia/users/<id>/projects/<slug>/memory/` | user × project | work log, notas pessoais |
@@ -261,3 +261,64 @@ Essas camadas são o contrato de escopo para a Wiki. Qualquer gateway MCP ou cli
 - [ ] Wiki/MCP pode consumir o mesmo layout sem bypass de isolamento
 - [ ] Migração single-user preserva dados e é dry-run friendly
 - [ ] `go build ./... && go vet ./... && go test ./...` limpo quando implementado
+
+---
+
+## Project UUID Schema (Document Only — No Migration Yet)
+
+### Motivation
+
+The current project path uses `ProjectSlug(cwd)` — a deterministic, filesystem-safe encoding of the working directory path. This is sufficient for single-deployment scenarios but has limitations:
+
+- **Renaming/relocating a project** changes the slug and breaks all existing memory associations.
+- **Same project accessed via different paths** (symlinks, mounts, different checkout directories) creates duplicate project entries.
+- **Cross-referencing** between project memory and other Aurelia stores (bindings, runlog, cron) requires a stable key that survives directory moves.
+
+### Proposed Schema
+
+Add a `project_uuid` column to the `project_bindings` table and a new `project_registry` table:
+
+```sql
+-- Registry: canonical project identity
+CREATE TABLE IF NOT EXISTS project_registry (
+    project_uuid TEXT PRIMARY KEY,        -- v7 UUID, generated on first /cwd
+    project_slug TEXT NOT NULL,           -- current slug (may change on rename)
+    cwd TEXT NOT NULL,                    -- current resolved path
+    display_name TEXT,                    -- human-readable name (e.g., repo name)
+    first_seen_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Bindings point to project_uuid, not slug directly
+ALTER TABLE project_bindings ADD COLUMN project_uuid TEXT REFERENCES project_registry(project_uuid);
+```
+
+### Memory Path Resolution with project_uuid
+
+Once the registry exists, memory paths would resolve via `project_uuid`:
+
+```text
+~/.aurelia/projects/<project_uuid>/team/          # team memory (stable)
+~/.aurelia/users/<user_id>/projects/<project_uuid>/memory/  # user×project private (stable)
+```
+
+The slug-based path would remain as a compatibility alias during migration:
+
+```text
+~/.aurelia/projects/<project_slug>/team/          # legacy alias (symlink or migration)
+```
+
+### Migration Strategy (Future Sprint)
+
+1. Add `project_registry` table and `project_uuid` column to `project_bindings`.
+2. On first `/cwd` resolution, generate a UUID and register the project.
+3. Add a migration command to backfill existing bindings.
+4. After all bindings have UUIDs, switch memory path resolution to use UUID.
+5. Add a compatibility layer (symlinks or redirect) for existing slug-based paths.
+6. Remove slug-based fallback after a deprecation period.
+
+### Non-Goals for This Document
+
+- Implementing the migration — documented here for architecture alignment.
+- Changing the current `ProjectMemoryDir` / `ProjectTeamMemoryDir` path resolution.
+- Database schema changes in this sprint.
