@@ -58,3 +58,7 @@
 - [anti-pattern] telegram-handler-wiring-checklist
 - [anti-pattern] telegram-setcommands-validation
 - [anti-pattern] telegram-threadid-explicit
+
+## Change gap-remediation-2026-05-24 (2026-05-24)
+- [anti-pattern] rlock-readonly-only
+- [process] review-false-positive-verify-build
