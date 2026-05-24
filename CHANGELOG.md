@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.1] - 2026-05-24
+
+### Fixed
+- **Goroutine recovery**: Added `defer recover()` to proxyChannel, album flush timer, and cmd.Wait() wrappers — prevents daemon crash on panic
+- **Nil pointer safety**: Added nil bridge checks in `Cancel()` and `WorkStatus()` — prevents panic when called before bridge initialization
+- **Process hang**: Added 5-second timeout to `cmd.Wait()` in `Stop()` and `cleanupAfterPanic()` — prevents infinite daemon hang on zombie processes
+- **Mutex contention**: Released session mutex during disk I/O in `persistLocked()` — prevents cascading latency on all session operations
+- **Race condition**: Fixed data race between `recordToolUse` and `completeRunLog` — prevents runlog corruption on concurrent tool updates
+- **Goroutine leaks**: Added 30-min timeout to bridge Execute proxy and 30s timeout to ExecuteSync drain — prevents unbounded goroutine leaks
+- **Audit reliability**: Logged audit write, file close, and rename errors instead of silently dropping them
+- **Auth reliability**: Validated auth symlink target existence on startup — recreates broken symlink automatically
+- **Secret redaction**: Applied redaction before truncation in 7 locations (cron memory loading, dream consolidation, prompt builder, document upload) — prevents secret leakage through truncated data
+- **Secret leakage**: Added `RedactSecrets()` to 6 additional `log.Printf` calls in Telegram bootstrap and command handlers
+- **Error visibility**: Logged 12 swallowed `SendError`/`SendText` failures — prevents silent message delivery failures
+- **Session locking**: Reverted RLock to Lock in 5 session read methods that mutate `lastSeen` — prevents data races on concurrent reads
+
+### Added
+- **Regression tests**: 5 new tests for nil bridge guards and runLog WaitGroup correctness
+
 ## [0.19.0] - 2026-05-24
 
 ### Removed
