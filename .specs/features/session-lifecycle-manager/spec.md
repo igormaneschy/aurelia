@@ -1,6 +1,6 @@
 # Session Lifecycle Manager — Especificação
 
-**Status:** Draft
+**Status:** ✅ Implementado em v0.15.0 (2026-05-23)
 **Data:** 2026-05-23
 
 ## Problem Statement

@@ -2,7 +2,7 @@
 
 **Design:** `.specs/features/agent-orchestration-execution/design.md`
 **Roadmap step:** 3 — Close Orchestration Cycle
-**Status:** 🟡 Sprint B em andamento — T0/T1/T2 concluídas
+**Status:** ✅ Implementado em v0.16.0 (2026-05-24)
 **Depende de:** User Isolation runtime hardening (✅) + Project Binding (✅ done) + Operational Observability
 
 > Foundational components from the prior iteration are already implemented: plan parsing, wave ordering, basic worktrees, worker execution, validator, prompt builders, status reporter, `UpdateTasksStatus`, and git/PR helpers. This task list closes correctness and safety gaps before autonomous execution can commit.
