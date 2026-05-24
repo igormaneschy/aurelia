@@ -79,13 +79,21 @@ flowchart TD
 
 **Done when:**
 
-- [ ] `TurnContext`/`SessionKey` definido ou mapeado para o input real da pipeline
-- [ ] `UserGate` definido como etapa antes de comandos protegidos
-- [ ] `ExecutionContext` definido com `chatID`, `threadID`, `userID`, `cwd`
-- [ ] contrato de “executor aceitou o plano” definido para cleanup do planning state
-- [ ] decisão documentada sobre comportamento legado de `aurelia-plan` fora do Plan Mode
+- [x] `TurnContext`/`SessionKey` definido ou mapeado para o input real da pipeline
+  - `TurnContext` em `internal/pipeline/turn_context.go` com `SessionKey()` e `ConversationKey()`
+  - `SessionKey` em `internal/session/store.go` com `ChatID`, `ThreadID`, `UserID`
+- [x] `UserGate` definido como etapa antes de comandos protegidos
+  - `UserGate` em `internal/telegram/user_gate.go` com `Check()`, `Begin()`, `Step()`, `Complete()`
+  - Estados: `UserGateOK`, `UserGateNeedsOnboarding`, `UserGateOnboarding`
+- [x] `ExecutionContext` definido com `chatID`, `threadID`, `userID`, `cwd`
+  - `ExecutionContext` em `internal/orchestrator/orchestrator.go` com `ChatID`, `ThreadID`, `UserID`, `RepoRoot`
+- [x] contrato de "executor aceitou o plano" definido para cleanup do planning state
+  - `ExecutePlan` retorna `ExecutionManifest` com status por task; cleanup só após `TaskApproved`
+- [x] decisão documentada sobre comportamento legado de `aurelia-plan` fora do Plan Mode
+  - Comportamento legado (`tryExecutePlan` em `pipeline.go`) continua a funcionar fora do Plan Mode
+  - Plan Mode não cria state retroativo; `aurelia-plan` fora do Plan Mode segue fluxo atual
 
-**Verify:** Review das specs dependentes; sem código ainda.
+**Verify:** Review das specs dependentes; contratos confirmados no código existente.
 
 ---
 
