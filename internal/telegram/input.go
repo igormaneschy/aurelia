@@ -17,6 +17,7 @@ import (
 	"gopkg.in/telebot.v3"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
+	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
 )
 
 func (bc *BotController) handleText(c telebot.Context) error {
@@ -53,6 +54,11 @@ func (bc *BotController) handlePhotoAlbum(c telebot.Context, photo *telebot.Phot
 
 	// Schedule async flush after 900ms window — handler returns immediately
 	time.AfterFunc(900*time.Millisecond, func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("telegram: panic in album flush timer: %v", r)
+			}
+		}()
 		bc.flushAlbumAndProcess(chatID, albumID)
 	})
 
@@ -402,10 +408,11 @@ func readDocumentPromptContent(filePath string, maxBytes int64) (string, bool, e
 	if err != nil {
 		return "", false, fmt.Errorf("read document %q: %w", filePath, err)
 	}
-	if int64(len(content)) > maxBytes {
-		return string(content[:maxBytes]), true, nil
+	contentStr := pipelinepkg.RedactSecrets(string(content))
+	if int64(len(contentStr)) > maxBytes {
+		return contentStr[:maxBytes], true, nil
 	}
-	return string(content), false, nil
+	return contentStr, false, nil
 }
 
 // albumKey returns a scoped key combining chatID and albumID.

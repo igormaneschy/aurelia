@@ -11,6 +11,7 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/persona"
+	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
 	"gopkg.in/telebot.v3"
 )
 
@@ -76,16 +77,16 @@ func (bc *BotController) completeBootstrapAssistant(c telebot.Context, state boo
 	prompt := buildAssistantGeneratePrompt(preset, text)
 	generated, err := bc.bootstrapGenerate(prompt)
 	if err != nil {
-		log.Printf("Bootstrap assistant LLM error: %v", err)
+		log.Printf("Bootstrap assistant LLM error: %v", pipelinepkg.RedactSecrets(err.Error()))
 		bc.setPendingBootstrap(c.Sender().ID, bootstrapState{Choice: state.Choice, Step: bootstrapStepProfile})
 		return SendContextText(c, bootstrapProfileMessage())
 	}
 
-	log.Printf("Bootstrap assistant LLM output (%d chars): %.500s", len(generated), generated)
+	log.Printf("Bootstrap assistant LLM output (%d chars): %.500s", len(generated), pipelinepkg.RedactSecrets(generated))
 
 	identity, soul, err := parseGeneratedPersona(generated)
 	if err != nil {
-		log.Printf("Bootstrap assistant parse error: %v — raw output: %.300s", err, generated)
+		log.Printf("Bootstrap assistant parse error: %v — raw output: %.300s", err, pipelinepkg.RedactSecrets(generated))
 		bc.setPendingBootstrap(c.Sender().ID, bootstrapState{Choice: state.Choice, Step: bootstrapStepProfile})
 		return SendContextText(c, bootstrapProfileMessage())
 	}
@@ -109,7 +110,7 @@ func (bc *BotController) completeBootstrapProfile(c telebot.Context, state boots
 	prompt := buildUserGeneratePrompt(text, fallbackName)
 	generated, err := bc.bootstrapGenerate(prompt)
 	if err != nil {
-		log.Printf("Bootstrap profile LLM error: %v — using template fallback", err)
+		log.Printf("Bootstrap profile LLM error: %v — using template fallback", pipelinepkg.RedactSecrets(err.Error()))
 		generated = buildUserTemplateFromProfile(text, fallbackName)
 	}
 

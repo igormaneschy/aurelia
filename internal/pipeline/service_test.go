@@ -2,7 +2,12 @@ package pipeline
 
 import (
 	"context"
+	"sync"
 	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/igormaneschy/aurelia/internal/runlog"
 )
 
 func TestParseSessionKey_Valid(t *testing.T) {
@@ -282,5 +287,89 @@ func TestCancelAllForUser_EmptyMap(t *testing.T) {
 	s := &Service{}
 	if s.CancelAllForUser(42) {
 		t.Error("CancelAllForUser on empty map returned true, want false")
+	}
+}
+
+func TestCancel_NilService(t *testing.T) {
+	if (*Service)(nil).Cancel(1, 0) {
+		t.Error("Cancel on nil service returned true, want false")
+	}
+}
+
+func TestCancel_NilBridge(t *testing.T) {
+	s := &Service{}
+	if s.Cancel(1, 0) {
+		t.Error("Cancel with nil bridge returned true, want false")
+	}
+}
+
+func TestWorkStatus_NilService(t *testing.T) {
+	text, turns := (*Service)(nil).WorkStatus(1, 0)
+	if text != "" {
+		t.Errorf("WorkStatus on nil service returned text=%q, want empty", text)
+	}
+	if turns != 0 {
+		t.Errorf("WorkStatus on nil service returned turns=%d, want 0", turns)
+	}
+}
+
+func TestWorkStatus_NilBridge(t *testing.T) {
+	s := &Service{}
+	text, turns := s.WorkStatus(1, 0)
+	if text != "" {
+		t.Errorf("WorkStatus with nil bridge returned text=%q, want empty", text)
+	}
+	if turns != 0 {
+		t.Errorf("WorkStatus with nil bridge returned turns=%d, want 0", turns)
+	}
+}
+
+func TestRecordToolUse_NoDeadlockWithCompleteRunLog(t *testing.T) {
+	// This test ensures the WaitGroup added to runLogState prevents
+	// race conditions between recordToolUse async DB update and
+	// completeRunLog cleanup, without causing deadlocks.
+
+	// Create a minimal Service with a mock runLog
+	s := &Service{
+		runLog:       &fakeRunLogStore{},
+		runLogStates: make(map[string]*runLogState),
+		runLogMu:     sync.Mutex{},
+	}
+
+	// Simulate startRunLog by creating a minimal state
+	runID := uuid.NewString()
+	key := runLogKey(42, 7)
+	s.runLogMu.Lock()
+	s.runLogStates[key] = &runLogState{
+		runID: runID,
+	}
+	s.runLogMu.Unlock()
+
+	// Verify initial state
+	s.runLogMu.Lock()
+	state := s.runLogStates[key]
+	s.runLogMu.Unlock()
+	if state == nil {
+		t.Fatal("expected runLogState to exist")
+	}
+
+	// Simulate what recordToolUse does
+	state.mu.Lock()
+	state.summaryCount = 5 // Force an update
+	state.summary.WriteString("Read")
+	state.mu.Unlock()
+
+	// Now completeRunLog should work without hanging
+	done := make(chan struct{})
+	go func() {
+		s.completeRunLog(42, 7, runlog.RunCompleted, "", "")
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// success — no deadlock
+	case <-time.After(3 * time.Second):
+		t.Fatal("completeRunLog deadlocked or hung")
 	}
 }

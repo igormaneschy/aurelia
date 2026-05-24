@@ -11,6 +11,7 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
+	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
 )
 
 // BridgeCronRuntime executes cron jobs via the Claude Code bridge,
@@ -196,7 +197,7 @@ func (r *BridgeCronRuntime) loadGlobalMemory() string {
 
 	if data, err := os.ReadFile(filepath.Join(r.memoryDir, "MEMORY.md")); err == nil && len(data) > 0 {
 		sb.WriteString("\n**MEMORY.md (index):**\n")
-		sb.WriteString(cap8k(string(data), perFileCap))
+		sb.WriteString(cap8k(pipelinepkg.RedactSecrets(string(data)), perFileCap))
 		wrote++
 	}
 
@@ -209,7 +210,7 @@ func (r *BridgeCronRuntime) loadGlobalMemory() string {
 		if err != nil || len(data) == 0 {
 			continue
 		}
-		fmt.Fprintf(&sb, "\n**%s:**\n%s", name, cap8k(strings.TrimSpace(string(data)), perFileCap))
+		fmt.Fprintf(&sb, "\n**%s:**\n%s", name, cap8k(pipelinepkg.RedactSecrets(strings.TrimSpace(string(data))), perFileCap))
 		wrote++
 	}
 

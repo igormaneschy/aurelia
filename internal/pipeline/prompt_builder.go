@@ -595,7 +595,10 @@ func readMemoryFile(path, name string) (string, error) {
 }
 
 // truncateContent truncates content to maxMemoryFileChars and appends a notice.
+// Redaction is applied before truncation to prevent secret leakage from
+// truncated data that evades downstream redaction patterns.
 func truncateContent(content, filename string) string {
+	content = RedactSecrets(content)
 	if len(content) <= maxMemoryFileChars {
 		return content
 	}
@@ -604,6 +607,7 @@ func truncateContent(content, filename string) string {
 }
 
 func truncateToBudget(content string, budget int) string {
+	content = RedactSecrets(content)
 	if len(content) <= budget {
 		return content
 	}

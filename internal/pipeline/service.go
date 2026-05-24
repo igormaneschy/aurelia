@@ -171,6 +171,9 @@ func (s *Service) Cancel(chatID int64, threadID int, userID ...int64) bool {
 	if s == nil {
 		return false
 	}
+	if s.bridge == nil {
+		return false
+	}
 	uid := firstUserID(userID)
 	key := sessionKey(chatID, threadID, uid)
 
@@ -260,6 +263,9 @@ func (s *Service) sendScopedAbort(chatID int64, threadID int, userID int64) {
 // Returns a description string and the pending message count.
 func (s *Service) WorkStatus(chatID int64, threadID int, userID ...int64) (string, int) {
 	if s == nil {
+		return "", 0
+	}
+	if s.bridge == nil {
 		return "", 0
 	}
 	uid := firstUserID(userID)

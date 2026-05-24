@@ -14,6 +14,7 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/memoryux"
+	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/security"
 	"github.com/igormaneschy/aurelia/internal/session"
@@ -437,6 +438,7 @@ func loadMemoryForConsolidation(dir string) string {
 			continue
 		}
 		content := strings.TrimSpace(string(data))
+		content = pipelinepkg.RedactSecrets(content)
 		if len(content) > maxDreamFileChars {
 			content = content[:maxDreamFileChars] + "\n[...truncated]"
 		}

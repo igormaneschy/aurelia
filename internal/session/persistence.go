@@ -97,12 +97,21 @@ func (s *Store) persistLocked() {
 	if s.persistPath == "" {
 		return
 	}
-	if err := s.writeSnapshotLocked(); err != nil {
+	data, err := s.serializeLocked()
+	if err != nil {
+		log.Printf("Warning: failed to serialize session snapshot: %v", err)
+		return
+	}
+	// Release lock during disk I/O to avoid blocking other session operations.
+	s.mu.Unlock()
+	err = s.writeSnapshot(data)
+	s.mu.Lock()
+	if err != nil {
 		log.Printf("Warning: failed to persist session snapshot: %v", err)
 	}
 }
 
-func (s *Store) writeSnapshotLocked() error {
+func (s *Store) serializeLocked() ([]byte, error) {
 	snap := snapshot{}
 	for key, item := range s.sessions {
 		if item == nil || item.sessionFile == "" {
@@ -133,11 +142,10 @@ func (s *Store) writeSnapshotLocked() error {
 			LastSeen: s.cwdSeen[key],
 		})
 	}
+	return json.MarshalIndent(snap, "", "  ")
+}
 
-	data, err := json.MarshalIndent(snap, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal session snapshot: %w", err)
-	}
+func (s *Store) writeSnapshot(data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(s.persistPath), 0o700); err != nil {
 		return fmt.Errorf("create session snapshot dir: %w", err)
 	}

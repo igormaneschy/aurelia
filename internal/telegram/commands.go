@@ -16,6 +16,7 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	memoryuxpkg "github.com/igormaneschy/aurelia/internal/memoryux"
+	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/session"
@@ -230,7 +231,8 @@ func (bc *BotController) handleCommand(c telebot.Context, cmd *MatchedCommand) e
 	chatID := c.Chat().ID
 	threadID := c.Message().ThreadID
 	userID := safeSenderID(c.Sender())
-	log.Printf("command: type=%d chat=%d thread=%d user=%d text=%q", cmd.Type, chatID, threadID, userID, cmd.Text)
+	redactedText := pipelinepkg.RedactSecrets(cmd.Text)
+	log.Printf("command: type=%d chat=%d thread=%d user=%d text=%q", cmd.Type, chatID, threadID, userID, redactedText)
 	defer bc.confirmMessage(c.Message())
 
 	var reply string
@@ -288,7 +290,7 @@ func (bc *BotController) handleCommand(c telebot.Context, cmd *MatchedCommand) e
 	}
 
 	if err != nil {
-		log.Printf("command error: type=%d err=%v", cmd.Type, err)
+		log.Printf("command error: type=%d err=%v", cmd.Type, pipelinepkg.RedactSecrets(err.Error()))
 		return SendErrorWithThread(bc.bot, c.Chat(), fmt.Sprintf("Erro ao executar comando: %v", err), threadID)
 	}
 
@@ -495,7 +497,7 @@ func (bc *BotController) parseCronWithLLM(text string) (*cronCreateParsed, error
 
 	parsed, parseErr := parseCronCreateResponse(result.Content)
 	if parseErr != nil {
-		log.Printf("command: cron_create LLM parse error: %v (raw: %q)", parseErr, result.Content)
+		log.Printf("command: cron_create LLM parse error: %v (raw: %q)", parseErr, pipelinepkg.RedactSecrets(result.Content))
 		return nil, nil
 	}
 	return parsed, nil
