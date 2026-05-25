@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.19.5 - 2026-05-25
+
+### Security
+- Hardened Bridge Bash tool policy to fail closed for non-allowlisted commands.
+- Blocked command-composition and sensitive-path bypasses in safe Git/build/test commands.
+- Added Bridge policy regression tests and CI coverage for typecheck, build, and policy tests.
+- Redacted sensitive tokens and paths before audit log persistence in Bridge and Go audit paths.
+
+### Reliability
+- Added panic recovery and bounded timeout handling for async runtime/pipeline paths.
+- Ensured project index rebuild state resets after recovered panics.
+
 ## [0.19.4] - 2026-05-25
 
 ### Added
