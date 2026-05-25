@@ -50,8 +50,9 @@ func newToolCallTracker(chatID int64, threadID int, output Output, steerFunc fun
 
 // increment records one tool call and emits progressive warnings when
 // thresholds are crossed. At each threshold:
-//   1. A Telegram message is sent to the user
-//   2. A steer command is sent to the bridge asking the model to consolidate
+//  1. A Telegram message is sent to the user
+//  2. A steer command is sent to the bridge asking the model to consolidate
+//
 // This dual approach ensures both the user and the model know about the explosion.
 func (t *toolCallTracker) increment(toolName string) {
 	if t == nil {
@@ -114,23 +115,13 @@ func (t *toolCallTracker) countLocked() int {
 	return t.count
 }
 
-// elapsed returns the duration since the tracker was created.
-func (t *toolCallTracker) elapsed() time.Duration {
-	if t == nil {
-		return 0
-	}
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return time.Since(t.startedAt)
-}
-
 // ── Loop detection ────────────────────────────────────────────────────────
 
 const (
-	loopDetectorWindow   = 12 // track last N tool calls for pattern detection
-	loopRepeatThreshold  = 3  // same tool+input repeated N times → loop
-	loopPingPongLength   = 4  // A-B-A-B pattern detected after this many calls
-	loopOnlyReadLength   = 8  // only "read" calls in window → read spiral
+	loopDetectorWindow  = 12 // track last N tool calls for pattern detection
+	loopRepeatThreshold = 3  // same tool+input repeated N times → loop
+	loopPingPongLength  = 4  // A-B-A-B pattern detected after this many calls
+	loopOnlyReadLength  = 8  // only "read" calls in window → read spiral
 )
 
 // toolCallSnapshot fingerprints one tool_use event for pattern matching.
@@ -144,10 +135,10 @@ type toolCallSnapshot struct {
 // break the cycle and present findings so far.
 type loopDetector struct {
 	mu        sync.Mutex
-	ring      []toolCallSnapshot     // circular buffer of recent calls
-	next      int                    // next write position in ring
-	count     int                    // total calls seen (for ring-fill tracking)
-	warned    bool                   // prevent repeated steer during same loop
+	ring      []toolCallSnapshot // circular buffer of recent calls
+	next      int                // next write position in ring
+	count     int                // total calls seen (for ring-fill tracking)
+	warned    bool               // prevent repeated steer during same loop
 	chatID    int64
 	threadID  int
 	output    Output
@@ -356,7 +347,7 @@ const (
 	defaultIdleTimeout     = 15 * time.Minute // fallback when config not available
 
 	// tool call explosion thresholds
-	toolCallWarningThreshold  = 20  // warn user after this many tool calls without result
+	toolCallWarningThreshold  = 20 // warn user after this many tool calls without result
 	toolCallCriticalThreshold = 50 // critical warning after this many tool calls
 
 	// timeout warning: warn N minutes before hard 30-min timeout
@@ -1386,7 +1377,7 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 				}
 			}
 
-			case "tool_result":
+		case "tool_result":
 			// Append a truncated, redacted summary to the tool tracking state.
 			// Also show the summary in the live progress display.
 			content := eventContent(ev)

@@ -72,7 +72,8 @@ check: lint sec test vet
 	@echo "✅ All checks passed"
 
 bridge:
-	cd bridge && npx esbuild index.ts --bundle --platform=node --target=node18 --outfile=bundle.js --format=esm
+	cd bridge && npm run build
+	cp bridge/index.ts internal/bridge/bundle.ts
 	cp bridge/bundle.js internal/bridge/bundle.js
 
 # --- Service (launchd) ---

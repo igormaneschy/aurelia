@@ -116,7 +116,7 @@ func TestBridgeSettingsManager_inMemoryCompaction(t *testing.T) {
 // beforeToolCall hook, not the legacy Claude SDK session event pattern.
 func TestBridgeSecurityHook_usesBeforeToolCall(t *testing.T) {
 	// 1. Assignment: the hook is actively wrapped by assigning a new function.
-	if !activeCodeContains("session.agent.beforeToolCall = async") {
+	if !activeCodeContains("liveSession.agent.beforeToolCall = async") {
 		t.Fatal("PI boundary violation: Security preflight must wrap " +
 			"session.agent.beforeToolCall (the PI SDK tool preflight hook) in active code, " +
 			"not merely mention it in comments. " +
@@ -125,14 +125,14 @@ func TestBridgeSecurityHook_usesBeforeToolCall(t *testing.T) {
 	}
 
 	// 2. Save: the original hook is captured before wrapping.
-	if !activeCodeContains("const origBeforeToolCall = session.agent.beforeToolCall") {
+	if !activeCodeContains("const origBeforeToolCall = liveSession.agent.beforeToolCall") {
 		t.Fatal("PI boundary violation: Security preflight must save the original " +
 			"session.agent.beforeToolCall into const origBeforeToolCall before wrapping. " +
 			"Without this, the extension-runner hook cannot be restored on teardown.")
 	}
 
 	// 3. Restore: the original hook is restored when the security wrapper is torn down.
-	if !activeCodeContains("session.agent.beforeToolCall = origBeforeToolCall") {
+	if !activeCodeContains("liveSession.agent.beforeToolCall = origBeforeToolCall") {
 		t.Fatal("PI boundary violation: Security preflight must restore the original " +
 			"session.agent.beforeToolCall from origBeforeToolCall on teardown. " +
 			"Without this, PI extensions remain bypassed after security is removed.")
@@ -177,7 +177,7 @@ func TestBridgeHealthTimer_visibleToFinally(t *testing.T) {
 // Architecture decision: Session tracking runs through bridge-emitted
 // session_file references, not direct file-system access.
 func TestBridgeSessionFile_emitted(t *testing.T) {
-	const target = "session_file: session.sessionFile"
+	const target = "session_file: liveSession.sessionFile"
 
 	// Must appear within the system event emission block (event: "system").
 	if !activeCodeWindowContains(`event: "system"`, target, 10) {
