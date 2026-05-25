@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.3] - 2026-05-25
+
+### Fixed
+- Enforce Bridge source sync between `bridge/index.ts` and embedded `internal/bridge/bundle.ts`.
+- Fix Bridge TypeScript type errors and add CI typecheck.
+- Fix `make bridge` to use the canonical build script with `createRequire` banner.
+- Resolve golangci-lint findings from review hardening.
+
 ## [0.19.2] - 2026-05-24
 
 ### Added
