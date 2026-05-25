@@ -23,6 +23,10 @@ type ProjectIndex struct {
 	rebuilding         bool
 	jsonPath           string // path to persistent cache file
 	roots              []string
+
+	// rebuildFn is a test seam. When non-nil, ScheduleRebuild calls this
+	// instead of Rebuild. Used to inject panics for recovery testing.
+	rebuildFn func(context.Context) error
 }
 
 // NewProjectIndex creates an index that scans the given roots and persists
@@ -63,14 +67,30 @@ func (p *ProjectIndex) ScheduleRebuild(debounce time.Duration) bool {
 	p.mu.Unlock()
 
 	go func() {
+		// Reset rebuilding in a defer so it always runs, even on panic.
+		// Must be registered FIRST (runs LAST in LIFO defer order) so the
+		// recovery defer runs first and the reset runs after recovery.
+		defer func() {
+			p.mu.Lock()
+			p.rebuilding = false
+			p.mu.Unlock()
+		}()
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("project index: panic in scheduled rebuild: %v", r)
+			}
+		}()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
-		if err := p.Rebuild(ctx); err != nil {
+		var err error
+		if p.rebuildFn != nil {
+			err = p.rebuildFn(ctx)
+		} else {
+			err = p.Rebuild(ctx)
+		}
+		if err != nil {
 			log.Printf("project index: scheduled rebuild error: %v", err)
 		}
-		p.mu.Lock()
-		p.rebuilding = false
-		p.mu.Unlock()
 	}()
 	return true
 }

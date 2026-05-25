@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -88,6 +89,14 @@ func LogAudit(ev AuditEvent) {
 	defer globalAuditLogger.mu.Unlock()
 
 	ev.Redacted = true
+
+	// Redact sensitive fields BEFORE serialization so credentials in
+	// reason/cwd/agent_name/request_id are not leaked to audit output.
+	ev.Reason = redactAuditSensitive(ev.Reason)
+	ev.CWD = redactAuditSensitive(ev.CWD)
+	ev.AgentName = redactAuditSensitive(ev.AgentName)
+	ev.RequestID = redactAuditSensitive(ev.RequestID)
+
 	data, err := json.Marshal(ev)
 	if err != nil {
 		line := []byte(`[security] {"error":"marshal_failed","reason":"` + err.Error() + `"}` + "\n")
@@ -159,6 +168,93 @@ func (l *auditLogger) rotateIfNeeded(incomingBytes int64) error {
 		}
 	}
 	return os.Rename(l.filePath, l.filePath+".1")
+}
+
+// Pre-compiled redaction regexes for credential patterns in audit output.
+var (
+	apiKeyRE       = regexp.MustCompile(`\bsk-[A-Za-z0-9]{20,}`)
+	pkKeyRE        = regexp.MustCompile(`\bpk-[A-Za-z0-9]{20,}`)
+	skAntKeyRE     = regexp.MustCompile(`\bsk-ant-[A-Za-z0-9]{20,}`)
+	skProjKeyRE    = regexp.MustCompile(`\bsk-proj-[A-Za-z0-9]{20,}`)
+	stripeLiveRE   = regexp.MustCompile(`\bsk_live_[A-Za-z0-9]+`)
+	stripeTestRE   = regexp.MustCompile(`\bsk_test_[A-Za-z0-9]+`)
+	awsKeyRE       = regexp.MustCompile(`\bAKIA[A-Z0-9]{16}`)
+	gcpKeyRE       = regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}`)
+	ghTokenRE      = regexp.MustCompile(`\bgh[puosr]_[A-Za-z0-9]{36}`)
+	ghPatRE        = regexp.MustCompile(`\bgithub_pat_[0-9A-Za-z_-]+`)
+	jwtRE          = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+`)
+	xaiKeyRE       = regexp.MustCompile(`\bxai-[A-Za-z0-9]{20,}`)
+	glTokenRE      = regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{20,}`)
+	hfTokenRE      = regexp.MustCompile(`\bhf_[A-Za-z0-9]{20,}`)
+	npmTokenRE     = regexp.MustCompile(`\bnpm_[A-Za-z0-9]{36}`)
+	slackTokenRE   = regexp.MustCompile(`\bxox[bpasa]-[A-Za-z0-9-]{20,}`)
+	slackAppRE     = regexp.MustCompile(`\bxapp-[A-Za-z0-9-]{20,}`)
+	privateKeyRE   = regexp.MustCompile(`(?s)-----BEGIN (?:OPENSSH |RSA |DSA |EC |PGP )?PRIVATE KEY-----.*?-----END (?:OPENSSH |RSA |DSA |EC |PGP )?PRIVATE KEY-----`)
+	authHeaderRE   = regexp.MustCompile(`(?i)(Authorization:\s*(?:Bearer|Basic)\s+)\S+`)
+	credValueRE    = regexp.MustCompile(`(?i)(password|secret|token|api_key|api-key|apikey|client_secret|access_token|refresh_token)\s*[=:]\s*\S+`)
+	jsonCredValueRE = regexp.MustCompile(`"(?:apiKey|api_key|clientSecret|client_secret|accessToken|access_token|refreshToken|refresh_token|token)"\s*:\s*"[^"]{4,}"`)
+
+	// Sensitive path patterns for audit redaction. These match path references
+	// that would leak information about secret locations, credential files, or
+	// config directories. Each pattern requires a preceding / or ~ or start of
+	// string to avoid false positives on unrelated words (e.g. .gitignore).
+	// The entire match is replaced, not just the directory name.
+	envFileRE    = regexp.MustCompile(`(?:^|[/~])\.env(?:\b|/|$)`)
+	sshPathRE    = regexp.MustCompile(`(?:^|[/~])\.ssh(?:/|$)`)
+	piPathRE     = regexp.MustCompile(`(?:^|[/~])\.pi(?:/|$)`)
+	aureliaCfgRE = regexp.MustCompile(`(?:^|[/~])\.aurelia/config(?:/|$)`)
+	gitCfgRE     = regexp.MustCompile(`(?:^|[/~])\.git/config(?:\b|/|$)`)
+)
+
+// redactAuditSensitive replaces common credential patterns in a string with
+// [REDACTED] markers. Applied to audit event text fields before JSON marshal.
+func redactAuditSensitive(s string) string {
+	if s == "" {
+		return s
+	}
+	result := s
+
+	// Prefix-pattern API keys and tokens (most selective first)
+	for _, re := range []*regexp.Regexp{
+		privateKeyRE, // multiline blocks first
+		skProjKeyRE, skAntKeyRE, apiKeyRE, pkKeyRE,
+		stripeLiveRE, stripeTestRE,
+		awsKeyRE, gcpKeyRE,
+		ghPatRE, ghTokenRE,
+		jwtRE,
+		xaiKeyRE, glTokenRE, hfTokenRE, npmTokenRE,
+		slackTokenRE, slackAppRE,
+	} {
+		result = re.ReplaceAllString(result, "[REDACTED]")
+	}
+
+	// Authorization headers
+	result = authHeaderRE.ReplaceAllString(result, "$1[REDACTED]")
+
+	// Sensitive file/directory paths — replaces the entire path reference
+	// (e.g. "/home/user/.ssh/id_rsa" → "[SENSITIVE_PATH_REDACTED]")
+	// so that credential locations are not leaked in audit output.
+	for _, re := range []*regexp.Regexp{
+		sshPathRE, piPathRE, aureliaCfgRE, gitCfgRE, envFileRE,
+	} {
+		result = re.ReplaceAllString(result, "[SENSITIVE_PATH_REDACTED]")
+	}
+
+	// Line-based credential key=value patterns
+	lines := strings.Split(result, "\n")
+	var filtered []string
+	for _, line := range lines {
+		if credValueRE.MatchString(line) {
+			filtered = append(filtered, "[CREDENTIAL_REDACTED]")
+			continue
+		}
+		if jsonCredValueRE.MatchString(line) {
+			filtered = append(filtered, "[CREDENTIAL_REDACTED]")
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	return strings.Join(filtered, "\n")
 }
 
 func defaultAuditLogPath() string {

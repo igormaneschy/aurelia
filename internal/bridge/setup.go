@@ -18,7 +18,7 @@ const bridgePackageJSON = `{
     "build": "esbuild index.ts --bundle --platform=node --target=node18 --outfile=bundle.js --format=esm --banner:js=\"import { createRequire as __piCreateRequire } from 'module';const require = __piCreateRequire(import.meta.url);\""
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "latest",
+    "@earendil-works/pi-coding-agent": "0.74.0",
     "esbuild": "^0.28.0"
   }
 }
