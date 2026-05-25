@@ -228,9 +228,40 @@ func (b *Bridge) readLoop() {
 	b.pendingMu.Unlock()
 
 	b.mu.Lock()
+	cmd := b.cmd
+	stoppedDuringWait := b.stopping
 	b.started = false
 	b.cmd = nil
+	b.stdin = nil
+	b.reader = nil
 	b.mu.Unlock()
+
+	// Kill the child process if still alive on unexpected exit, then reap it.
+	// This handles the case where stdout closed (e.g. scanner error) but the
+	// Node process did not exit, preventing zombies.
+	// During intentional Stop(), the Stop() method already handles kill + Wait.
+	if cmd != nil && !stoppedDuringWait {
+		if cmd.Process != nil && (cmd.ProcessState == nil || !cmd.ProcessState.Exited()) {
+			if err := cmd.Process.Kill(); err != nil {
+				slog.Error("bridge: failed to kill process in readLoop exit", "error", err)
+			}
+		}
+		doneWait := make(chan struct{}, 1)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("bridge: panic in readLoop process wait", "error", r)
+				}
+			}()
+			_ = cmd.Wait()
+			doneWait <- struct{}{}
+		}()
+		select {
+		case <-doneWait:
+		case <-time.After(5 * time.Second):
+			slog.Error("bridge: timeout waiting for process exit in readLoop")
+		}
+	}
 }
 
 func (b *Bridge) sendTerminalEvent(ch chan Event, ev Event, rid string) {

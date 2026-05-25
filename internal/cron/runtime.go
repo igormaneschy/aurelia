@@ -12,6 +12,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
+	"github.com/igormaneschy/aurelia/internal/security"
 )
 
 // BridgeCronRuntime executes cron jobs via the Claude Code bridge,
@@ -122,9 +123,84 @@ func (r *BridgeCronRuntime) ExecuteJob(ctx context.Context, job CronJob) (*Execu
 		opts.DisallowedTools = agent.DisallowedTools
 	}
 
+	// Scrub auth keys before sending to bridge — the TS bridge redacts log output
+	// but the prompt itself (injected as the initial user message) should not
+	// contain raw keys from persona or agent definitions.
+	scrubbedPrompt := pipelinepkg.RedactSecrets(job.Prompt)
+
+	// Attach security context so the bridge enforces tool-use policies.
+	ownerNumeric, _ := parseInt64(job.OwnerUserID)
+	cwd := ""
+	if agent != nil {
+		cwd = agent.Cwd
+	}
+
+	// Determine effective capability profile for cron execution.
+	// Without an explicit agent/cwd, default to observe (no tools) or read_only
+	// to prevent arbitrary tool access. Only allow execute_safe when the agent
+	// and cwd both support it.
+	var profileStr string
+	var allowedTools []string
+	if agent != nil && agent.CapabilityProfile != "" {
+		profileStr = agent.CapabilityProfile
+		allowedTools = agent.AllowedTools
+	} else if cwd != "" {
+		// Has a working directory but no explicit profile — safe read-only.
+		profileStr = string(security.ProfileReadOnly)
+		allowedTools = security.ProfileTools(security.ProfileReadOnly)
+	} else {
+		// No agent, no cwd — observe only (no tools at all).
+		profileStr = string(security.ProfileObserve)
+		allowedTools = security.ProfileTools(security.ProfileObserve)
+	}
+
+	// If no explicit AllowedTools from agent, derive from effective profile.
+	// Always pass explicit tools so the bridge never falls back to SDK defaults.
+	if allowedTools == nil {
+		allowedTools = security.ProfileTools(security.CapabilityProfile(profileStr))
+	}
+
+	// When cwd is empty, strip write/bash tools regardless of profile.
+	if cwd == "" {
+		var safe []string
+		for _, t := range allowedTools {
+			if t != "Write" && t != "Edit" && t != "Bash" {
+				safe = append(safe, t)
+			}
+		}
+		allowedTools = safe
+		if profileStr != string(security.ProfileObserve) {
+			profileStr = string(security.ProfileReadOnly)
+		}
+	}
+
+	// Ensure AllowedTools is a non-empty safe list when no agent/cwd is configured.
+	// A nil slice is omitted by omitempty, causing the bridge to fall back to SDK
+	// defaults (which may include Write/Edit/Bash). An empty slice is also omitted.
+	// Use a minimal metadata-only set that cannot read or write file content.
+	if allowedTools == nil {
+		allowedTools = []string{"Glob", "LS"}
+		profileStr = string(security.ProfileReadOnly)
+	}
+
+	opts.Security = &bridge.SecurityContext{
+		Enabled:   true,
+		Profile:   profileStr,
+		Mode:      "block",
+		Cwd:       cwd,
+		ChatID:    job.TargetChatID,
+		ThreadID:  job.TargetThreadID,
+		UserID:    ownerNumeric,
+		AgentName: job.AgentName,
+	}
+	opts.ChatID = job.TargetChatID
+	opts.ThreadID = job.TargetThreadID
+	opts.UserID = ownerNumeric
+	opts.AllowedTools = allowedTools
+
 	ev, err := r.bridge.Execute(ctx, bridge.Request{
 		Command: "query",
-		Prompt:  job.Prompt,
+		Prompt:  scrubbedPrompt,
 		Options: opts,
 	})
 	if err != nil {

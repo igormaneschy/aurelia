@@ -10,21 +10,22 @@ import (
 
 // CronJob represents a scheduled job.
 type CronJob struct {
-	ID           string
-	OwnerUserID  string
-	TargetChatID int64
-	AgentName    string // agent from registry to execute this job
-	ScheduleType string
-	CronExpr     string
-	RunAt        *time.Time
-	Prompt       string
-	Active       bool
-	LastRunAt    *time.Time
-	NextRunAt    *time.Time
-	LastStatus   string
-	LastError    string
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID              string
+	OwnerUserID     string
+	TargetChatID    int64
+	TargetThreadID  int   // 0 for non-forum chats (backward-compatible default)
+	AgentName       string // agent from registry to execute this job
+	ScheduleType    string
+	CronExpr        string
+	RunAt           *time.Time
+	Prompt          string
+	Active          bool
+	LastRunAt       *time.Time
+	NextRunAt       *time.Time
+	LastStatus      string
+	LastError       string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
 }
 
 // CronExecution records the result of a job run.

@@ -78,7 +78,7 @@ go test ./internal/cron/...      # Package-specific
 go test -run TestScheduler ./... # Specific test
 ```
 
-**CI:** GitHub Actions on Windows Latest with Go 1.25.8
+**CI:** GitHub Actions on Windows Latest (Go version per `.github/workflows/ci.yml` or `go.mod`)
 - Caching: `~/.cache/go-build` + `~/go/pkg/mod`
 - Single step: `go test ./...`
 

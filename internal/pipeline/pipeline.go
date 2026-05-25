@@ -330,6 +330,30 @@ type runLogState struct {
 	partialAssistant string         // last partial assistant text, for checkpoint on timeout
 }
 
+// activeRun is stored in activeSessions to carry both a cancel function
+// and an ownership token. Cancel/supersede paths extract the cancel func
+// via extractCancelFn; the token is used for ownership-safe cleanup.
+type activeRun struct {
+	token  any
+	cancel context.CancelFunc
+}
+
+func newActiveRun() *activeRun {
+	return &activeRun{token: &activeRun{}}
+}
+
+// extractCancelFn returns the cancel func from an activeSessions value.
+// Handles *activeRun (new path) and context.CancelFunc (legacy path).
+func extractCancelFn(v any) context.CancelFunc {
+	switch val := v.(type) {
+	case *activeRun:
+		return val.cancel
+	case context.CancelFunc:
+		return val
+	}
+	return nil
+}
+
 // pipelineInput carries a user message through processing.
 type pipelineInput struct {
 	chatID    int64
@@ -521,27 +545,41 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 	key := sessionKey(chatID, threadID, userID)
 	input := pipelineInput{chatID: chatID, threadID: threadID, messageID: messageID, userID: userID, text: text, images: images}
 
-	_, active := s.activeSessions.Load(key)
-	if !active {
-		// No active session — start new query in a goroutine
+	// Create a real cancelable context BEFORE atomic reservation so cancel/supersede
+	// arriving during the reservation window actually cancel the run, not a no-op sentinel.
+	// Store an *activeRun that carries both the cancel func and an ownership token.
+	// All cancel/supersede paths extract the cancel func from *activeRun.
+	run := newActiveRun()
+	reservedCtx, reservedCancel := context.WithCancel(context.Background())
+	run.cancel = reservedCancel
+
+	_, loaded := s.activeSessions.LoadOrStore(key, run)
+	if !loaded {
+		// We reserved the slot — start the run.
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
 					log.Printf("pipeline: panic in processRun: %v", r)
 				}
 			}()
-			s.processRun(input)
+			s.processRunWithCancel(input, run, reservedCtx, reservedCancel)
 		}()
 		return nil
 	}
 
-	// Active session — classify and send appropriate bridge command
+	// Reservation failed: cancel the unused reservation context only.
+	// Do NOT cancel the existing active run — that depends on the message type.
+	reservedCancel()
+
+	// Active session — classify and send appropriate bridge command.
+	// Only concurrentCancel and concurrentSupersede cancel/delete the stored run;
+	// concurrentEnqueue and concurrentStatus must leave it intact.
 	switch classifyConcurrentMessage(text) {
 	case concurrentCancel:
 		// Stop the old goroutine so it doesn't retry after abort
-		if cancelVal, loaded := s.activeSessions.LoadAndDelete(key); loaded {
-			if cancel, ok := cancelVal.(context.CancelFunc); ok {
-				cancel()
+		if val, loaded := s.activeSessions.LoadAndDelete(key); loaded {
+			if cancelFn := extractCancelFn(val); cancelFn != nil {
+				cancelFn()
 			}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), bridgeCommandTimeout)
@@ -560,9 +598,9 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 
 	case concurrentSupersede:
 		// Stop the old goroutine; the superseding message starts fresh
-		if cancelVal, loaded := s.activeSessions.LoadAndDelete(key); loaded {
-			if cancel, ok := cancelVal.(context.CancelFunc); ok {
-				cancel()
+		if val, loaded := s.activeSessions.LoadAndDelete(key); loaded {
+			if cancelFn := extractCancelFn(val); cancelFn != nil {
+				cancelFn()
 			}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), bridgeCommandTimeout)
@@ -579,14 +617,28 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 			log.Printf("pipeline: SendText(supersede) failed for chat=%d: %v", chatID, err)
 		}
 		s.output.ConfirmMessage(chatID, messageID)
-		// Start a new goroutine to process the steered session
+		// Start a new goroutine to process the steered session.
+		// Store a fresh activeRun atomically before launching so the run is
+		// tracked from the start; if another goroutine raced in, cancel and abort.
+		supersedeRun := newActiveRun()
+		supersedeCtx, supersedeCancel := context.WithCancel(context.Background())
+		supersedeRun.cancel = supersedeCancel
+		if _, loaded := s.activeSessions.LoadOrStore(key, supersedeRun); loaded {
+			// Another run appeared before we could store ours — rare race.
+			supersedeCancel()
+			log.Printf("pipeline: supersede raced with another run for key=%s", key)
+			if _, err := s.output.SendText(chatID, threadID, "⚠️ Outra solicitação já está em andamento. Tente novamente."); err != nil {
+				log.Printf("pipeline: SendText(supersede race) failed for chat=%d: %v", chatID, err)
+			}
+			break
+		}
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
 					log.Printf("pipeline: panic in processRun(supersede): %v", r)
 				}
 			}()
-			s.processRun(input)
+			s.processRunWithCancel(input, supersedeRun, supersedeCtx, supersedeCancel)
 		}()
 
 	case concurrentEnqueue:
@@ -631,6 +683,62 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 	}
 
 	return nil
+}
+
+// processRunWithCancel starts a run with a pre-created cancel func and token-based
+// ownership of the activeSessions slot. The reserved cancel func is used to cancel
+// the run. On cleanup, the map entry is only deleted if it still belongs to this run
+// (checked via Load + pointer comparison on the ownership token).
+func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, reservedCtx context.Context, reservedCancel context.CancelFunc) {
+	key := sessionKey(input.chatID, input.threadID, input.userID)
+	defer func() {
+		// Atomic ownership check: only delete if the stored value still points to
+		// our run. This prevents a cancel/supersede-then-new-run cycle from
+		// nuking the new run's entry. CompareAndDelete is atomic in sync.Map.
+		s.activeSessions.CompareAndDelete(key, run)
+	}()
+	defer reservedCancel()
+	_ = reservedCtx // available for cancellation via reservedCancel
+
+	agent := s.routeAgent(input.text)
+	userText := stripAgentPrefix(input.text, agent)
+
+	if _, active := s.sessions.GetSessionWithState(input.chatID, input.threadID, input.userID); !active {
+		s.autoDetectProject(input.chatID, input.threadID, userText)
+	}
+
+	if s.checkProjectPreflight(input, agent, userText) {
+		return
+	}
+
+	systemPrompt, err := s.buildSystemPrompt(userText, agent, input.chatID, input.messageID, input.threadID, input.userID)
+	if err != nil {
+		log.Printf("Failed to build system prompt: %s", redactSecrets(err.Error()))
+		if err := s.output.SendError(input.chatID, input.threadID, "Falha ao montar o prompt de sistema."); err != nil {
+			log.Printf("pipeline: SendError(system prompt) failed for chat=%d: %v", input.chatID, err)
+		}
+		s.output.ConfirmMessage(input.chatID, input.messageID)
+		return
+	}
+
+	req := s.buildBridgeRequest(userText, systemPrompt, agent, input.chatID, input.threadID, input.userID)
+	req.RequestID = fmt.Sprintf("run-%d", time.Now().UnixNano())
+	req.Options.Images = input.images
+	s.applyVisionFallback(&req, input.images)
+
+	// Apply session lifecycle decision before executing
+	if lcResult := s.applyLifecycle(reservedCtx, &req, input.chatID, input.threadID, input.userID); lcResult.SkipExecution {
+		log.Printf("lifecycle: execution skipped for chat=%d: %s", input.chatID, lcResult.ErrorMessage)
+		if lcResult.ErrorMessage != "" {
+			if err := s.output.SendError(input.chatID, input.threadID, lcResult.ErrorMessage); err != nil {
+				log.Printf("pipeline: SendError(lifecycle) failed for chat=%d: %v", input.chatID, err)
+			}
+		}
+		s.output.ConfirmMessage(input.chatID, input.messageID)
+		return
+	}
+
+	s.executeAsync(reservedCtx, input.chatID, input.threadID, input.messageID, req, userText, input.userID)
 }
 
 func (s *Service) processRun(input pipelineInput) {

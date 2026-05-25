@@ -170,8 +170,8 @@ func TestCmdCronList_WithJobs(t *testing.T) {
 
 	service := &fakeCronCommandService{
 		jobs: []cron.CronJob{
-			{ID: "abc12345-full-uuid", ScheduleType: "cron", CronExpr: "0 9 * * *", Prompt: "bom dia", Active: true, LastStatus: "idle"},
-			{ID: "def67890-full-uuid", ScheduleType: "once", Prompt: "lembrete", Active: true, LastStatus: "pending"},
+			{ID: "abc12345-full-uuid", TargetChatID: 42, ScheduleType: "cron", CronExpr: "0 9 * * *", Prompt: "bom dia", Active: true, LastStatus: "idle"},
+			{ID: "def67890-full-uuid", TargetChatID: 42, ScheduleType: "once", Prompt: "lembrete", Active: true, LastStatus: "pending"},
 		},
 	}
 
@@ -180,7 +180,7 @@ func TestCmdCronList_WithJobs(t *testing.T) {
 		cronHandler: NewCronCommandHandler(service),
 	}
 
-	reply, err := bc.cmdCronList(42)
+	reply, err := bc.cmdCronList(42, 0, 1001)
 	if err != nil {
 		t.Fatalf("cmdCronList() error = %v", err)
 	}
@@ -191,6 +191,13 @@ func TestCmdCronList_WithJobs(t *testing.T) {
 	// Should contain job info
 	if !contains(reply, "abc12345") || !contains(reply, "bom dia") {
 		t.Fatalf("reply should contain job info, got %q", reply)
+	}
+	// Must use owner-scoped method, not unscoped ListJobs
+	if len(service.listByOwnerCalls) != 1 {
+		t.Fatalf("expected 1 ListJobsByOwner call, got %d", len(service.listByOwnerCalls))
+	}
+	if service.listByOwnerCalls[0] != "1001" {
+		t.Fatalf("expected ListJobsByOwner for user 1001, got %q", service.listByOwnerCalls[0])
 	}
 }
 
@@ -203,7 +210,7 @@ func TestCmdCronList_Empty(t *testing.T) {
 		cronHandler: NewCronCommandHandler(service),
 	}
 
-	reply, err := bc.cmdCronList(42)
+	reply, err := bc.cmdCronList(42, 0, 1001)
 	if err != nil {
 		t.Fatalf("cmdCronList() error = %v", err)
 	}
@@ -212,30 +219,121 @@ func TestCmdCronList_Empty(t *testing.T) {
 	}
 }
 
-// --- T6: cron_cancel tests ---
-
-func TestCmdCronCancel_WithID(t *testing.T) {
+func TestCmdCronList_FiltersByChat(t *testing.T) {
 	t.Parallel()
 
-	service := &fakeCronCommandService{}
+	// Jobs from another chat should not appear.
+	service := &fakeCronCommandService{
+		jobs: []cron.CronJob{
+			{ID: "job-chat-42", TargetChatID: 42, ScheduleType: "cron", CronExpr: "0 9 * * *", Prompt: "chat 42 job", Active: true, LastStatus: "idle"},
+			{ID: "job-chat-99", TargetChatID: 99, ScheduleType: "cron", CronExpr: "0 9 * * *", Prompt: "chat 99 job", Active: true, LastStatus: "idle"},
+		},
+	}
 	bc := &BotController{
 		config:      &config.AppConfig{Providers: map[string]config.ProviderConfig{}},
 		cronHandler: NewCronCommandHandler(service),
 	}
 
-	reply, err := bc.cmdCronCancel(42, "cancela agendamento abc123")
+	reply, err := bc.cmdCronList(42, 0, 1001)
+	if err != nil {
+		t.Fatalf("cmdCronList() error = %v", err)
+	}
+	// Should only show the chat 42 job
+	if !contains(reply, "chat 42 job") {
+		t.Fatalf("expected chat 42 job in reply, got %q", reply)
+	}
+	if contains(reply, "chat 99 job") {
+		t.Fatal("expected chat 99 job to be filtered out")
+	}
+}
+
+func TestCmdCronList_FiltersByThread(t *testing.T) {
+	t.Parallel()
+
+	// Job in thread 1 should not appear when listing thread 0.
+	service := &fakeCronCommandService{
+		jobs: []cron.CronJob{
+			{ID: "aaa-thread-0", TargetChatID: 42, TargetThreadID: 0, ScheduleType: "cron", CronExpr: "0 9 * * *", Prompt: "thread 0 job", Active: true, LastStatus: "idle"},
+			{ID: "bbb-thread-1", TargetChatID: 42, TargetThreadID: 1, ScheduleType: "cron", CronExpr: "0 9 * * *", Prompt: "thread 1 job", Active: true, LastStatus: "idle"},
+		},
+	}
+	bc := &BotController{
+		config:      &config.AppConfig{Providers: map[string]config.ProviderConfig{}},
+		cronHandler: NewCronCommandHandler(service),
+	}
+
+	reply, err := bc.cmdCronList(42, 0, 1001)
+	if err != nil {
+		t.Fatalf("cmdCronList() error = %v", err)
+	}
+	if !contains(reply, "thread 0 job") {
+		t.Fatalf("expected thread 0 job in reply, got %q", reply)
+	}
+	if contains(reply, "thread 1 job") {
+		t.Fatal("expected thread 1 job to be filtered out")
+	}
+}
+
+// --- T6: cron_cancel tests ---
+
+func TestCmdCronCancel_WithID(t *testing.T) {
+	t.Parallel()
+
+	service := &fakeCronCommandService{
+		jobs: []cron.CronJob{
+			{ID: "abc12345-full-uuid", TargetChatID: 42, TargetThreadID: 0, OwnerUserID: "1001", ScheduleType: "cron", CronExpr: "0 9 * * *", Prompt: "test", Active: true, LastStatus: "idle"},
+		},
+	}
+	bc := &BotController{
+		config:      &config.AppConfig{Providers: map[string]config.ProviderConfig{}},
+		cronHandler: NewCronCommandHandler(service),
+	}
+
+	reply, err := bc.cmdCronCancel(42, 0, 1001, "cancela agendamento abc12345")
 	if err != nil {
 		t.Fatalf("cmdCronCancel() error = %v", err)
 	}
 
-	if len(service.deleteCalls) != 1 {
-		t.Fatalf("expected 1 delete call, got %d", len(service.deleteCalls))
+	// Must use owner-scoped method, not unscoped DeleteJob
+	if len(service.deleteByOwnerCalls) != 1 {
+		t.Fatalf("expected 1 DeleteJobByOwner call, got %d", len(service.deleteByOwnerCalls))
 	}
-	if service.deleteCalls[0] != "abc123" {
-		t.Fatalf("expected delete of 'abc123', got %q", service.deleteCalls[0])
+	if service.deleteByOwnerCalls[0].userID != "1001" || service.deleteByOwnerCalls[0].jobID != "abc12345-full-uuid" {
+		t.Fatalf("expected DeleteJobByOwner(1001, abc12345-full-uuid), got %#v", service.deleteByOwnerCalls[0])
+	}
+	if len(service.deleteCalls) != 0 {
+		t.Fatalf("expected 0 unscoped DeleteJob calls, got %d — user-facing path must use owner-scoped method", len(service.deleteCalls))
 	}
 	if reply == "" {
 		t.Fatal("expected non-empty reply")
+	}
+}
+
+func TestCmdCronCancel_CrossChatAndThread(t *testing.T) {
+	t.Parallel()
+
+	// Job in chat 99 thread 1 should not be cancelable from chat 42 thread 0.
+	service := &fakeCronCommandService{
+		jobs: []cron.CronJob{
+			{ID: "deadbeef-1234-5678-9abc", TargetChatID: 99, TargetThreadID: 1, OwnerUserID: "1001", ScheduleType: "cron", CronExpr: "0 9 * * *", Prompt: "other", Active: true, LastStatus: "idle"},
+		},
+	}
+	bc := &BotController{
+		config:      &config.AppConfig{Providers: map[string]config.ProviderConfig{}},
+		cronHandler: NewCronCommandHandler(service),
+	}
+
+	reply, err := bc.cmdCronCancel(42, 0, 1001, "cancela agendamento deadbeef-1234-5678-9abc")
+	if err != nil {
+		t.Fatalf("cmdCronCancel() error = %v", err)
+	}
+
+	// Should NOT call DeleteJobByOwner — job doesn't match chat/thread
+	if len(service.deleteByOwnerCalls) != 0 {
+		t.Fatalf("expected 0 DeleteJobByOwner calls for cross-chat job, got %d", len(service.deleteByOwnerCalls))
+	}
+	if !contains(reply, "não encontrado") && !contains(reply, "Nenhum") {
+		t.Fatalf("expected 'not found' message for cross-chat job, got %q", reply)
 	}
 }
 
@@ -248,14 +346,14 @@ func TestCmdCronCancel_NoID(t *testing.T) {
 		cronHandler: NewCronCommandHandler(service),
 	}
 
-	reply, err := bc.cmdCronCancel(42, "cancela agendamento")
+	reply, err := bc.cmdCronCancel(42, 0, 1001, "cancela agendamento")
 	if err != nil {
 		t.Fatalf("cmdCronCancel() error = %v", err)
 	}
 
 	// Should not attempt delete without an ID
-	if len(service.deleteCalls) != 0 {
-		t.Fatalf("expected no delete calls, got %d", len(service.deleteCalls))
+	if len(service.deleteByOwnerCalls) != 0 {
+		t.Fatalf("expected no DeleteJobByOwner calls, got %d", len(service.deleteByOwnerCalls))
 	}
 	if reply == "" {
 		t.Fatal("expected guidance reply")

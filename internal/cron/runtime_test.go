@@ -186,6 +186,18 @@ func TestBridgeCronRuntime_NoAgent(t *testing.T) {
 	if result.Output != "done without agent" {
 		t.Fatalf("output = %q", result.Output)
 	}
+
+	// No-agent/no-cwd cron must send an explicit non-empty safe AllowedTools
+	// list (nil or empty is omitted by omitempty, causing SDK default fallback).
+	req := executor.lastReq
+	if len(req.Options.AllowedTools) == 0 {
+		t.Fatal("AllowedTools must be non-empty for no-agent/no-cwd cron (nil/empty is omitted by omitempty)")
+	}
+	for _, tool := range req.Options.AllowedTools {
+		if tool == "Read" || tool == "Write" || tool == "Edit" || tool == "Bash" {
+			t.Fatalf("no-agent/no-cwd cron must not include tool %q in AllowedTools", tool)
+		}
+	}
 }
 
 func TestBridgeCronRuntime_BridgeError(t *testing.T) {

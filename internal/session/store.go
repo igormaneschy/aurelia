@@ -3,6 +3,7 @@ package session
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -36,6 +37,13 @@ type Store struct {
 	cwds        map[ConversationKey]string
 	cwdSeen     map[ConversationKey]time.Time
 	persistPath string
+
+	// persistMu serialises snapshot writes so that when persistLocked releases
+	// s.mu during disk I/O, the final rename cannot regress to an older snapshot.
+	// persistGen is incremented before each serialise under s.mu; the atomic read
+	// under persistMu is race-free.
+	persistMu   sync.Mutex
+	persistGen  atomic.Int64
 }
 
 type entry struct {

@@ -15,6 +15,7 @@ import (
 	"gopkg.in/telebot.v3"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
+	"github.com/igormaneschy/aurelia/internal/cron"
 	memoryuxpkg "github.com/igormaneschy/aurelia/internal/memoryux"
 	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
 	"github.com/igormaneschy/aurelia/internal/runlog"
@@ -242,9 +243,9 @@ func (bc *BotController) handleCommand(c telebot.Context, cmd *MatchedCommand) e
 	case CmdSessionReset:
 		reply, err = bc.cmdSessionReset(chatID, threadID, userID)
 	case CmdCronList:
-		reply, err = bc.cmdCronList(chatID)
+		reply, err = bc.cmdCronList(chatID, threadID, userID)
 	case CmdCronCancel:
-		reply, err = bc.cmdCronCancel(chatID, cmd.Text)
+		reply, err = bc.cmdCronCancel(chatID, threadID, userID, cmd.Text)
 	case CmdCronCreate:
 		reply, err = bc.cmdCronCreate(c, cmd.Text)
 	case CmdStatus:
@@ -347,22 +348,31 @@ func formatTokenCount(u session.Usage) string {
 	return fmt.Sprintf("%d", total)
 }
 
-func (bc *BotController) cmdCronList(chatID int64) (string, error) {
+func (bc *BotController) cmdCronList(chatID int64, threadID int, userID int64) (string, error) {
 	if bc.cronHandler == nil {
 		return "Sistema de agendamentos não disponível.", nil
 	}
 	ctx := context.Background()
-	jobs, err := bc.cronHandler.service.ListJobs(ctx, chatID)
+	userIDStr := fmt.Sprintf("%d", userID)
+	jobs, err := bc.cronHandler.service.ListJobsByOwner(ctx, userIDStr)
 	if err != nil {
 		return "", fmt.Errorf("falha ao listar agendamentos: %w", err)
 	}
-	if len(jobs) == 0 {
-		return "Nenhum agendamento encontrado.", nil
+	// Filter by current chat and thread so jobs from other groups/topics
+	// or different threads are not exposed.
+	var filtered []cron.CronJob
+	for _, j := range jobs {
+		if j.TargetChatID == chatID && j.TargetThreadID == threadID {
+			filtered = append(filtered, j)
+		}
 	}
-	return formatCronJobs(jobs), nil
+	if len(filtered) == 0 {
+		return "Nenhum agendamento encontrado neste chat.", nil
+	}
+	return formatCronJobs(filtered), nil
 }
 
-func (bc *BotController) cmdCronCancel(chatID int64, text string) (string, error) {
+func (bc *BotController) cmdCronCancel(chatID int64, threadID int, userID int64, text string) (string, error) {
 	if bc.cronHandler == nil {
 		return "Sistema de agendamentos não disponível.", nil
 	}
@@ -373,11 +383,28 @@ func (bc *BotController) cmdCronCancel(chatID int64, text string) (string, error
 	}
 
 	ctx := context.Background()
-	if err := bc.cronHandler.service.DeleteJob(ctx, jobID); err != nil {
-		// Distinguish "not found" (user typo / cancelled already) from infra error so the
-		// user gets actionable feedback instead of a generic stack trace.
+	userIDStr := fmt.Sprintf("%d", userID)
+
+	// Verify the job belongs to this owner + current chat + thread before deletion.
+	// Fetch owner's jobs and find the matching ID that is in this chat+thread.
+	ownerJobs, err := bc.cronHandler.service.ListJobsByOwner(ctx, userIDStr)
+	if err != nil {
+		return "", fmt.Errorf("falha ao buscar agendamentos: %w", err)
+	}
+	var match *cron.CronJob
+	for _, j := range ownerJobs {
+		if (j.ID == jobID || strings.HasPrefix(j.ID, jobID)) && j.TargetChatID == chatID && j.TargetThreadID == threadID {
+			match = &j
+			break
+		}
+	}
+	if match == nil {
+		return fmt.Sprintf("Nenhum agendamento com ID `%s` foi encontrado neste chat.", jobID), nil
+	}
+
+	if err := bc.cronHandler.service.DeleteJobByOwner(ctx, userIDStr, match.ID); err != nil {
 		if errMsg := err.Error(); strings.Contains(strings.ToLower(errMsg), "not found") {
-			return fmt.Sprintf("Nenhum agendamento com ID `%s` foi encontrado. Use 'meus agendamentos' para ver os IDs ativos.", jobID), nil
+			return fmt.Sprintf("Nenhum agendamento com ID `%s` foi encontrado.", jobID), nil
 		}
 		return "", fmt.Errorf("falha ao cancelar agendamento: %w", err)
 	}
@@ -529,6 +556,7 @@ func (bc *BotController) cmdCronCreate(c telebot.Context, text string) (string, 
 
 	ctx := context.Background()
 	chatID := c.Chat().ID
+	threadID := c.Message().ThreadID
 	userID := fmt.Sprintf("%d", c.Sender().ID)
 
 	var (
@@ -537,9 +565,9 @@ func (bc *BotController) cmdCronCreate(c telebot.Context, text string) (string, 
 	)
 	switch parsed.Type {
 	case "cron":
-		jobID, err = bc.cronHandler.service.AddRecurringJob(ctx, userID, chatID, parsed.CronExpr, parsed.Prompt)
+		jobID, err = bc.cronHandler.service.AddRecurringJob(ctx, userID, chatID, threadID, parsed.CronExpr, parsed.Prompt)
 	case "once":
-		jobID, err = bc.cronHandler.service.AddOnceJob(ctx, userID, chatID, parsed.RunAt, parsed.Prompt)
+		jobID, err = bc.cronHandler.service.AddOnceJob(ctx, userID, chatID, threadID, parsed.RunAt, parsed.Prompt)
 	default:
 		return "Não consegui determinar o tipo de agendamento.", nil
 	}

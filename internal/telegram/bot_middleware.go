@@ -292,14 +292,15 @@ func (bc *BotController) handleCronCommand(c telebot.Context) error {
 	}
 	userID := fmt.Sprintf("%d", c.Sender().ID)
 	chatID := c.Chat().ID
+	threadID := c.Message().ThreadID
 	text := c.Message().Text
 
-	reply, err := bc.cronHandler.HandleText(context.Background(), userID, chatID, text)
+	reply, err := bc.cronHandler.HandleText(context.Background(), userID, chatID, threadID, text)
 	if err != nil {
-		return SendErrorWithThread(bc.bot, c.Chat(), err.Error(), c.Message().ThreadID)
+		return SendErrorWithThread(bc.bot, c.Chat(), err.Error(), threadID)
 	}
 	if reply != "" {
-		return SendTextWithThread(bc.bot, c.Chat(), reply, c.Message().ThreadID)
+		return SendTextWithThread(bc.bot, c.Chat(), reply, threadID)
 	}
 	return nil
 }

@@ -11,14 +11,16 @@ import (
 
 type fakeCronCommandService struct {
 	addRecurringCalls []struct {
-		userID string
-		chatID int64
-		expr   string
-		prompt string
+		userID   string
+		chatID   int64
+		threadID int
+		expr     string
+		prompt   string
 	}
 	addOnceCalls []struct {
 		userID    string
 		chatID    int64
+		threadID  int
 		timestamp string
 		prompt    string
 	}
@@ -42,26 +44,28 @@ type fakeCronCommandService struct {
 	listErr error
 }
 
-func (f *fakeCronCommandService) AddRecurringJob(ctx context.Context, userID string, chatID int64, expr, prompt string) (string, error) {
+func (f *fakeCronCommandService) AddRecurringJob(ctx context.Context, userID string, chatID int64, threadID int, expr, prompt string) (string, error) {
 	f.addRecurringCalls = append(f.addRecurringCalls, struct {
-		userID string
-		chatID int64
-		expr   string
-		prompt string
-	}{userID: userID, chatID: chatID, expr: expr, prompt: prompt})
+		userID   string
+		chatID   int64
+		threadID int
+		expr     string
+		prompt   string
+	}{userID: userID, chatID: chatID, threadID: threadID, expr: expr, prompt: prompt})
 	if f.addErr != nil {
 		return "", f.addErr
 	}
 	return "job-recurring-1", nil
 }
 
-func (f *fakeCronCommandService) AddOnceJob(ctx context.Context, userID string, chatID int64, timestamp, prompt string) (string, error) {
+func (f *fakeCronCommandService) AddOnceJob(ctx context.Context, userID string, chatID int64, threadID int, timestamp, prompt string) (string, error) {
 	f.addOnceCalls = append(f.addOnceCalls, struct {
 		userID    string
 		chatID    int64
+		threadID  int
 		timestamp string
 		prompt    string
-	}{userID: userID, chatID: chatID, timestamp: timestamp, prompt: prompt})
+	}{userID: userID, chatID: chatID, threadID: threadID, timestamp: timestamp, prompt: prompt})
 	if f.addErr != nil {
 		return "", f.addErr
 	}
@@ -126,7 +130,7 @@ func TestCronCommandHandler_HandleText_AddRecurring(t *testing.T) {
 	service := &fakeCronCommandService{}
 	handler := NewCronCommandHandler(service)
 
-	reply, err := handler.HandleText(context.Background(), "user-1", 12345, `/cron add "0 8 * * 1-5" "Me mande o resumo da manha"`)
+	reply, err := handler.HandleText(context.Background(), "user-1", 12345, 0, `/cron add "0 8 * * 1-5" "Me mande o resumo da manha"`)
 	if err != nil {
 		t.Fatalf("HandleText() error = %v", err)
 	}
@@ -148,7 +152,7 @@ func TestCronCommandHandler_HandleText_AddOnce(t *testing.T) {
 	service := &fakeCronCommandService{}
 	handler := NewCronCommandHandler(service)
 
-	reply, err := handler.HandleText(context.Background(), "user-1", 12345, `/cron once "2026-03-12T09:00:00-03:00" "Lembre-me da daily"`)
+	reply, err := handler.HandleText(context.Background(), "user-1", 12345, 0, `/cron once "2026-03-12T09:00:00-03:00" "Lembre-me da daily"`)
 	if err != nil {
 		t.Fatalf("HandleText() error = %v", err)
 	}
@@ -175,7 +179,7 @@ func TestCronCommandHandler_HandleText_ListJobs(t *testing.T) {
 	}
 	handler := NewCronCommandHandler(service)
 
-	reply, err := handler.HandleText(context.Background(), "user-1", 12345, `/cron list`)
+	reply, err := handler.HandleText(context.Background(), "user-1", 12345, 0, `/cron list`)
 	if err != nil {
 		t.Fatalf("HandleText() error = %v", err)
 	}
@@ -193,13 +197,13 @@ func TestCronCommandHandler_HandleText_PauseResumeDelete(t *testing.T) {
 	service := &fakeCronCommandService{}
 	handler := NewCronCommandHandler(service)
 
-	if _, err := handler.HandleText(context.Background(), "user-1", 12345, `/cron pause job-a`); err != nil {
+	if _, err := handler.HandleText(context.Background(), "user-1", 12345, 0, `/cron pause job-a`); err != nil {
 		t.Fatalf("pause HandleText() error = %v", err)
 	}
-	if _, err := handler.HandleText(context.Background(), "user-1", 12345, `/cron resume job-a`); err != nil {
+	if _, err := handler.HandleText(context.Background(), "user-1", 12345, 0, `/cron resume job-a`); err != nil {
 		t.Fatalf("resume HandleText() error = %v", err)
 	}
-	if _, err := handler.HandleText(context.Background(), "user-1", 12345, `/cron del job-a`); err != nil {
+	if _, err := handler.HandleText(context.Background(), "user-1", 12345, 0, `/cron del job-a`); err != nil {
 		t.Fatalf("delete HandleText() error = %v", err)
 	}
 
@@ -219,7 +223,7 @@ func TestCronCommandHandler_HandleText_ReturnsUsageForInvalidCommand(t *testing.
 
 	handler := NewCronCommandHandler(&fakeCronCommandService{})
 
-	reply, err := handler.HandleText(context.Background(), "user-1", 12345, `/cron unknown`)
+	reply, err := handler.HandleText(context.Background(), "user-1", 12345, 0, `/cron unknown`)
 	if err != nil {
 		t.Fatalf("HandleText() error = %v", err)
 	}
@@ -235,7 +239,7 @@ func TestCronCommandHandler_HandleText_PropagatesServiceError(t *testing.T) {
 	service := &fakeCronCommandService{addErr: expectedErr}
 	handler := NewCronCommandHandler(service)
 
-	_, err := handler.HandleText(context.Background(), "user-1", 12345, `/cron add "bad expr" "prompt"`)
+	_, err := handler.HandleText(context.Background(), "user-1", 12345, 0, `/cron add "bad expr" "prompt"`)
 	if !errors.Is(err, expectedErr) {
 		t.Fatalf("expected service error %v, got %v", expectedErr, err)
 	}
