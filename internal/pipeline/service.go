@@ -142,12 +142,14 @@ func NewService(cfg Config) *Service {
 		s.resilient = NewResilientBridge(cfg.Bridge, rbCfg)
 		s.resilient.ContinuitySnapshot = s.continuitySnapshot
 		s.resilient.OnEvent = func(phase, level, message string) {
+			s.runLogMu.Lock()
 			for _, state := range s.runLogStates {
-				// Match any active run for this bridge's events.
 				if state != nil && state.runID != "" {
+					runID := state.runID
+					s.runLogMu.Unlock()
 					ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 					_ = s.runLog.RecordEvent(ctx, runlog.RunEvent{
-						RunID:   state.runID,
+						RunID:   runID,
 						Phase:   phase,
 						Level:   level,
 						Message: message,
@@ -156,6 +158,7 @@ func NewService(cfg Config) *Service {
 					return
 				}
 			}
+			s.runLogMu.Unlock()
 		}
 	}
 
@@ -178,9 +181,9 @@ func (s *Service) Cancel(chatID int64, threadID int, userID ...int64) bool {
 	key := sessionKey(chatID, threadID, uid)
 
 	// Stop the old goroutine so it doesn't retry after abort
-	if cancelVal, loaded := s.activeSessions.LoadAndDelete(key); loaded {
-		if cancel, ok := cancelVal.(context.CancelFunc); ok {
-			cancel()
+	if val, loaded := s.activeSessions.LoadAndDelete(key); loaded {
+		if cancelFn := extractCancelFn(val); cancelFn != nil {
+			cancelFn()
 		}
 	} else {
 		return false
@@ -223,9 +226,9 @@ func (s *Service) CancelAllForUser(userID int64) bool {
 		}
 
 		// Cancel the local goroutine context and remove from active sessions.
-		if cancelVal, loaded := s.activeSessions.LoadAndDelete(key); loaded {
-			if cancel, ok := cancelVal.(context.CancelFunc); ok {
-				cancel()
+		if val, loaded := s.activeSessions.LoadAndDelete(key); loaded {
+			if cancelFn := extractCancelFn(val); cancelFn != nil {
+				cancelFn()
 				cancelled = true
 			}
 		}

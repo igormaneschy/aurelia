@@ -97,14 +97,27 @@ func (s *Store) persistLocked() {
 	if s.persistPath == "" {
 		return
 	}
+	// Capture a generation for this snapshot while holding s.mu (the only writer).
+	// The atomic read later under persistMu is race-free.
+	gen := s.persistGen.Add(1)
 	data, err := s.serializeLocked()
 	if err != nil {
 		log.Printf("Warning: failed to serialize session snapshot: %v", err)
 		return
 	}
-	// Release lock during disk I/O to avoid blocking other session operations.
+	// Release main lock during disk I/O to avoid blocking other session operations.
 	s.mu.Unlock()
+	// Serialise via persistMu so only one write at a time reaches the filesystem.
+	// The generation guard prevents an older snapshot from overwriting a newer one.
+	s.persistMu.Lock()
+	if s.persistGen.Load() != gen {
+		// A newer persistLocked already committed; skip this stale write.
+		s.persistMu.Unlock()
+		s.mu.Lock()
+		return
+	}
 	err = s.writeSnapshot(data)
+	s.persistMu.Unlock()
 	s.mu.Lock()
 	if err != nil {
 		log.Printf("Warning: failed to persist session snapshot: %v", err)
@@ -149,9 +162,21 @@ func (s *Store) writeSnapshot(data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(s.persistPath), 0o700); err != nil {
 		return fmt.Errorf("create session snapshot dir: %w", err)
 	}
-	tmpPath := s.persistPath + ".tmp"
-	if err := os.WriteFile(tmpPath, data, 0o600); err != nil {
+	// Use os.CreateTemp for unique temp files so concurrent
+	// persistLocked calls do not race on the same fixed temp path.
+	tmpFile, err := os.CreateTemp(filepath.Dir(s.persistPath), "session-*.tmp")
+	if err != nil {
+		return fmt.Errorf("create session snapshot temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	if _, err := tmpFile.Write(data); err != nil {
+		_ = tmpFile.Close()
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("write session snapshot temp file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("close session snapshot temp file: %w", err)
 	}
 	if err := os.Rename(tmpPath, s.persistPath); err != nil {
 		_ = os.Remove(tmpPath)

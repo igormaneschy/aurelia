@@ -44,6 +44,7 @@ func (s *SQLiteCronStore) initialize() error {
 		"ALTER TABLE cron_executions ADD COLUMN session_id TEXT DEFAULT ''",
 		"ALTER TABLE cron_executions ADD COLUMN cost_usd REAL DEFAULT 0",
 		"ALTER TABLE cron_executions ADD COLUMN tokens_used INTEGER DEFAULT 0",
+		"ALTER TABLE cron_jobs ADD COLUMN target_thread_id INTEGER NOT NULL DEFAULT 0",
 	} {
 		_, err := s.db.Exec(col)
 		if err != nil && !strings.Contains(err.Error(), "duplicate column") {

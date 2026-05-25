@@ -10,8 +10,8 @@ import (
 )
 
 type CronCommandService interface {
-	AddRecurringJob(ctx context.Context, userID string, chatID int64, expr, prompt string) (string, error)
-	AddOnceJob(ctx context.Context, userID string, chatID int64, timestamp, prompt string) (string, error)
+	AddRecurringJob(ctx context.Context, userID string, chatID int64, threadID int, expr, prompt string) (string, error)
+	AddOnceJob(ctx context.Context, userID string, chatID int64, threadID int, timestamp, prompt string) (string, error)
 	ListJobs(ctx context.Context, chatID int64) ([]cron.CronJob, error)
 	ListJobsByOwner(ctx context.Context, ownerUserID string) ([]cron.CronJob, error)
 	PauseJob(ctx context.Context, jobID string) error
@@ -30,7 +30,7 @@ func NewCronCommandHandler(service CronCommandService) *CronCommandHandler {
 	return &CronCommandHandler{service: service}
 }
 
-func (h *CronCommandHandler) HandleText(ctx context.Context, userID string, chatID int64, text string) (string, error) {
+func (h *CronCommandHandler) HandleText(ctx context.Context, userID string, chatID int64, threadID int, text string) (string, error) {
 	text = strings.TrimSpace(text)
 	if !strings.HasPrefix(text, "/cron") {
 		return cronUsage(), nil
@@ -53,7 +53,7 @@ func (h *CronCommandHandler) HandleText(ctx context.Context, userID string, chat
 		if len(args) != 2 {
 			return cronUsage(), nil
 		}
-		jobID, err := h.service.AddRecurringJob(ctx, userID, chatID, args[0], args[1])
+		jobID, err := h.service.AddRecurringJob(ctx, userID, chatID, threadID, args[0], args[1])
 		if err != nil {
 			return "", err
 		}
@@ -63,7 +63,7 @@ func (h *CronCommandHandler) HandleText(ctx context.Context, userID string, chat
 		if len(args) != 2 {
 			return cronUsage(), nil
 		}
-		jobID, err := h.service.AddOnceJob(ctx, userID, chatID, args[0], args[1])
+		jobID, err := h.service.AddOnceJob(ctx, userID, chatID, threadID, args[0], args[1])
 		if err != nil {
 			return "", err
 		}

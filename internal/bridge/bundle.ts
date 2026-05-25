@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline";
 import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, truncateSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   AuthStorage,
   createAgentSession,
@@ -419,13 +419,55 @@ function isDangerousGit(command: string): boolean {
   return dangerous.some((d) => lower.includes(d));
 }
 
+// Safe make targets: only check-only/build/test operations that are
+// low risk. Operational targets like install, deploy, run, dev, clean
+// are excluded because they can side-effect the system or modify state
+// beyond the workspace.
+const SAFE_MAKE_TARGETS = new Set([
+  "build", "test", "check",
+  "lint", "vet", "typecheck", "generate",
+]);
+
+function isSafeMakeCommand(command: string): boolean {
+  const lower = command.trim().toLowerCase();
+
+  // Reject variable assignments (make VAR=value) and shell metacharacters
+  // that can inject arbitrary commands: ; && || ` $( < > |
+  const hasMetachar = /[;&|`$]/.test(lower) || /[<>]/.test(lower);
+  if (hasMetachar) return false;
+
+  // "make" with no args runs the default target (typically build/test).
+  if (/^make$/.test(lower)) return true;
+
+  // Split into tokens after "make" and check EVERY token.
+  // No flags (-f, --file, -C, etc.), no variable assignments, and
+  // every target must be a known safe target or safe-X compound.
+  const rest = lower.slice(5).trim();
+  if (!rest) return true; // just "make "
+  const tokens = rest.split(/\s+/);
+
+  for (const tok of tokens) {
+    // Reject flag-style tokens (-f, --file, -C, --directory, etc.)
+    if (tok.startsWith("-")) return false;
+    // Reject variable assignments (VAR=value)
+    if (tok.includes("=")) return false;
+    // Check if token is a safe target or compound variant.
+    let ok = false;
+    for (const safe of SAFE_MAKE_TARGETS) {
+      if (tok === safe) { ok = true; break; }
+      if (tok.startsWith(safe + "-") || tok.startsWith(safe + "_")) { ok = true; break; }
+    }
+    if (!ok) return false;
+  }
+  return true;
+}
+
 function matchesBuildOrTest(command: string): boolean {
   const lower = command.trim().toLowerCase();
   const buildPatterns = [
     /^go\s+(build|install|mod)/,
     /^npm\s+run\s+(build|prod|compile)/,
     /^npx\s+(tsc|esbuild|webpack)/,
-    /^make(\s|$)/,
     /^cargo\s+(build|check)/,
     /^dotnet\s+(build|publish)/,
     /^(gradle\s+build|mvn\s+(compile|package))/,
@@ -447,6 +489,10 @@ function matchesBuildOrTest(command: string): boolean {
     /^rspec/,
     /^rails\s+test/,
   ];
+  // Restrict make to safe targets only.
+  if (/^make(\s|$)/.test(lower) && !isSafeMakeCommand(command)) {
+    return false;
+  }
   return [...buildPatterns, ...testPatterns].some((p) => p.test(lower));
 }
 
@@ -466,7 +512,7 @@ function matchesSafeGit(command: string): boolean {
 function isPathInsideCwd(path: string, cwd: string, allowedOutside: string[]): boolean {
   if (!path || !cwd) return true;
   const clean = path.replace(/\\/g, "/");
-  const cwdNorm = cwd.replace(/\\/g, "/");
+  const cwdNorm = cwd.replace(/\\/g, "/").replace(/\/+$/, "");
 
   // Relative path starting with .. is outside.
   if (clean === ".." || clean.startsWith("../")) return false;
@@ -474,20 +520,44 @@ function isPathInsideCwd(path: string, cwd: string, allowedOutside: string[]): b
   // "." is the CWD itself — always allowed.
   if (clean === ".") return true;
 
-  // Absolute path: must be within cwd.
-  if (clean.startsWith("/")) {
-    if (clean.startsWith(cwdNorm)) {
-      const rel = clean.slice(cwdNorm.length);
-      if (!rel.startsWith("/..") && rel !== "") return true;
+  if (!clean.startsWith("/")) {
+    // Relative path (not starting with ..): resolve against cwd, then apply
+    // boundary comparison. This catches nested traversal like
+    // "subdir/../../outside" that resolves outside cwd.
+    const resolved = resolve(cwdNorm, clean);
+    const cwdResolved = resolve(cwdNorm);
+    if (resolved.startsWith(cwdResolved + "/") || resolved === cwdResolved) {
+      return true;
     }
     // Check allowlist.
     for (const allowed of allowedOutside) {
-      if (clean.startsWith(allowed)) return true;
+      const allowedResolved = resolve(allowed.replace(/\\/g, "/"));
+      if (resolved.startsWith(allowedResolved + "/") || resolved === allowedResolved) {
+        return true;
+      }
     }
     return false;
   }
 
-  // Relative path (e.g. "src/main.go") is assumed to be inside cwd.
+  // Normalize with path.resolve to collapse "..", ".", and redundant segments
+  // before boundary comparison. This prevents traversal via
+  // /repo/subdir/../../secret from bypassing the check.
+  const resolved = resolve(clean);
+  const cwdResolved = resolve(cwdNorm);
+
+  // Reject if resolved path falls outside cwd.
+  if (!resolved.startsWith(cwdResolved + "/") && resolved !== cwdResolved) {
+    // Not under cwd — check allowlist.
+    for (const allowed of allowedOutside) {
+      // Normalize allowed paths too to avoid /tmp/foo vs /tmp/foobar prefix bypass.
+      const allowedResolved = resolve(allowed.replace(/\\/g, "/"));
+      if (resolved.startsWith(allowedResolved + "/") || resolved === allowedResolved) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   return true;
 }
 
@@ -551,42 +621,54 @@ function evaluateToolPolicy(
       const command = (input.command as string) || "";
       if (!command) return { decision: "allow" };
 
-      // Build and test commands are always allowed.
-      if (matchesBuildOrTest(command)) {
-        return { decision: "allow", reason: "build/test command allowed" };
-      }
-
-      // Safe git commands allowed.
-      if (matchesSafeGit(command)) {
-        return { decision: "allow", reason: "safe git command allowed" };
-      }
-
-      // Check destructive commands.
+      // Security-critical checks run FIRST, before any broad allowlist,
+      // so destructive/exfil patterns cannot hide behind build/test matches.
+      //
+      // 1. Destructive commands (rm -rf /, sudo, mkfs, etc.)
       if (isDestructiveCommand(command)) {
         const reason = `destructive command blocked: ${command.slice(0, 80)}`;
         if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
         return { decision: "block", reason };
       }
 
-      // Check env access.
-      if (matchesEnvAccess(command)) {
-        const reason = "environment access blocked: command reads env vars or secrets";
-        if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
-        return { decision: "block", reason };
-      }
-
-      // Check exfiltration.
+      // 2. Exfiltration (network tools reading sensitive files)
       if (isExfiltrationCommand(command)) {
         const reason = `exfiltration blocked: ${command.slice(0, 80)}`;
         if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
         return { decision: "block", reason };
       }
 
-      // Dangerous git operations.
+      // 3. Environment access (env, printenv, secret patterns)
+      if (matchesEnvAccess(command)) {
+        const reason = "environment access blocked: command reads env vars or secrets";
+        if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
+        return { decision: "block", reason };
+      }
+
+      // 4. Dangerous git operations
       if (isDangerousGit(command)) {
         const reason = "dangerous git operation blocked";
         if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
         return { decision: "block", reason };
+      }
+
+      // 5. Unsafe make commands — blocked explicitly so they don't fall
+      // through to the default allow below. Safe make commands (check-only
+      // build/test targets, no metacharacters) pass through to build/test.
+      if (/^make(\s|$)/.test(command) && !isSafeMakeCommand(command)) {
+        const reason = `unsafe make blocked: ${command.slice(0, 80)}`;
+        if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
+        return { decision: "block", reason };
+      }
+
+      // 6. Safe git commands allowed.
+      if (matchesSafeGit(command)) {
+        return { decision: "allow", reason: "safe git command allowed" };
+      }
+
+      // 7. Build and test commands — safe subset only.
+      if (matchesBuildOrTest(command)) {
+        return { decision: "allow", reason: "build/test command allowed" };
       }
 
       return { decision: "allow" };
@@ -760,8 +842,11 @@ async function handleQuery(req: Request): Promise<void> {
   const cKey = chatKey(chatID, threadID, userID);
   const emitReq = (obj: OutEvent) => emit({ ...obj, request_id: reqId });
 
+  // Redact BEFORE truncation so secrets straddling the boundary aren't
+  // sliced in half (see redaction-before-truncation.md).
+  const redactedPrompt = redactSDKError(req.prompt);
   redactedLog(
-    `query start — rid=${reqId} chat=${chatID} thread=${threadID} user=${userID} provider=${opts?.provider ?? "default"} model=${opts?.model ?? "default"} resume=${opts?.resume ?? "none"} prompt="${req.prompt.slice(0, 80)}..."`,
+    `query start — rid=${reqId} chat=${chatID} thread=${threadID} user=${userID} provider=${opts?.provider ?? "default"} model=${opts?.model ?? "default"} resume=${opts?.resume ?? "none"} prompt="${redactedPrompt.slice(0, 80)}..."`,
   );
 
   const timeoutMs = 30 * 60 * 1000;
@@ -1419,7 +1504,7 @@ async function handleRequest(line: string): Promise<void> {
   try {
     req = JSON.parse(line) as Request;
   } catch {
-    emit({ event: "error", message: `invalid JSON: ${redactSDKError(line.slice(0, 200))}` });
+    emit({ event: "error", message: `invalid JSON: ${redactSDKError(line).slice(0, 200)}` });
     return;
   }
 

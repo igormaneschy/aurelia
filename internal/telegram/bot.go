@@ -255,8 +255,11 @@ type botChatSender struct {
 }
 
 func (s *botChatSender) Send(chatID int64, text string) error {
-	_, err := s.bot.Send(&telebot.Chat{ID: chatID}, text, &telebot.SendOptions{DisableWebPagePreview: true})
-	return err
+	return s.SendWithThread(chatID, 0, text)
+}
+
+func (s *botChatSender) SendWithThread(chatID int64, threadID int, text string) error {
+	return SendTextWithThread(s.bot, &telebot.Chat{ID: chatID}, text, threadID)
 }
 
 // getModels returns cached models or fetches from bridge with 5-minute TTL.

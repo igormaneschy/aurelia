@@ -13,6 +13,10 @@ type mockSender struct {
 }
 
 func (m *mockSender) Send(chatID int64, text string) error {
+	return m.SendWithThread(chatID, 0, text)
+}
+
+func (m *mockSender) SendWithThread(chatID int64, threadID int, text string) error {
 	m.lastChatID = chatID
 	m.lastText = text
 	return m.err

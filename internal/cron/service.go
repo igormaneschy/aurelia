@@ -134,30 +134,32 @@ func (s *Service) DeleteJob(ctx context.Context, jobID string) error {
 	return s.store.DeleteJob(ctx, fullID)
 }
 
-// AddRecurringJob creates a cron-scheduled job for the given chat.
-func (s *Service) AddRecurringJob(ctx context.Context, userID string, chatID int64, expr, prompt string) (string, error) {
+// AddRecurringJob creates a cron-scheduled job for the given chat/thread.
+func (s *Service) AddRecurringJob(ctx context.Context, userID string, chatID int64, threadID int, expr, prompt string) (string, error) {
 	return s.CreateJob(ctx, CronJob{
-		ID:           uuid.NewString(),
-		OwnerUserID:  userID,
-		TargetChatID: chatID,
-		ScheduleType: "cron",
-		CronExpr:     expr,
-		Prompt:       prompt,
+		ID:              uuid.NewString(),
+		OwnerUserID:     userID,
+		TargetChatID:    chatID,
+		TargetThreadID:  threadID,
+		ScheduleType:    "cron",
+		CronExpr:        expr,
+		Prompt:          prompt,
 	})
 }
 
-// AddOnceJob creates a one-shot job scheduled at the given timestamp for the given chat.
-func (s *Service) AddOnceJob(ctx context.Context, userID string, chatID int64, timestamp, prompt string) (string, error) {
+// AddOnceJob creates a one-shot job scheduled at the given timestamp for the given chat/thread.
+func (s *Service) AddOnceJob(ctx context.Context, userID string, chatID int64, threadID int, timestamp, prompt string) (string, error) {
 	t, err := time.Parse(time.RFC3339, timestamp)
 	if err != nil {
 		return "", fmt.Errorf("invalid timestamp %q: %w", timestamp, err)
 	}
 	return s.CreateJob(ctx, CronJob{
-		ID:           uuid.NewString(),
-		OwnerUserID:  userID,
-		TargetChatID: chatID,
-		ScheduleType: "once",
-		RunAt:        &t,
-		Prompt:       prompt,
+		ID:              uuid.NewString(),
+		OwnerUserID:     userID,
+		TargetChatID:    chatID,
+		TargetThreadID:  threadID,
+		ScheduleType:    "once",
+		RunAt:           &t,
+		Prompt:          prompt,
 	})
 }
