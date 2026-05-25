@@ -21,6 +21,15 @@ type lifecycleDecisionResult struct {
 	ErrorMessage  string          // user-facing message when SkipExecution
 }
 
+func (s *Service) sendLifecycleNotice(chatID int64, threadID int, message string) {
+	if s.output == nil {
+		return
+	}
+	if _, err := s.output.SendText(chatID, threadID, message); err != nil {
+		log.Printf("lifecycle: send notice failed chat=%d thread=%d: %v", chatID, threadID, err)
+	}
+}
+
 // applyLifecycle evaluates session health and applies the lifecycle decision
 // to the bridge request. It modifies req in-place when action is taken.
 //
@@ -93,16 +102,12 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 
 	case session.ActionCompact:
 		// Notify user about proactive compaction
-		if s.output != nil {
-			s.output.SendText(chatID, threadID, "🧠 Compactando histórico longo para continuar com segurança...")
-		}
+		s.sendLifecycleNotice(chatID, threadID, "🧠 Compactando histórico longo para continuar com segurança...")
 
 		result, err := s.compactSession(ctx, chatID, threadID, userID, req.Options)
 		if err != nil {
 			log.Printf("lifecycle: compaction failed for chat=%d: %v — falling back to cold resume", chatID, err)
-			if s.output != nil {
-				s.output.SendText(chatID, threadID, "⚠️ Compactação automática falhou. Retomando sessão com segurança.")
-			}
+			s.sendLifecycleNotice(chatID, threadID, "⚠️ Compactação automática falhou. Retomando sessão com segurança.")
 			if s.sessions != nil {
 				s.sessions.MarkFailure(chatID, threadID, userID, "compaction failed")
 			}
@@ -147,16 +152,12 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 
 	case session.ActionRotate:
 		// Notify user about session rotation
-		if s.output != nil {
-			s.output.SendText(chatID, threadID, "🔄 Histórico muito longo. Criando nova sessão com resumo do contexto anterior...")
-		}
+		s.sendLifecycleNotice(chatID, threadID, "🔄 Histórico muito longo. Criando nova sessão com resumo do contexto anterior...")
 
 		result, err := s.rotateSession(ctx, chatID, threadID, userID, req.Options)
 		if err != nil {
 			log.Printf("lifecycle: rotation failed for chat=%d: %v — falling back to cold resume", chatID, err)
-			if s.output != nil {
-				s.output.SendText(chatID, threadID, "⚠️ Rotação automática falhou. Retomando sessão anterior com segurança.")
-			}
+			s.sendLifecycleNotice(chatID, threadID, "⚠️ Rotação automática falhou. Retomando sessão anterior com segurança.")
 			if s.sessions != nil {
 				s.sessions.MarkFailure(chatID, threadID, userID, "rotation failed")
 			}
@@ -190,9 +191,7 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 		log.Printf("lifecycle: rotation succeeded for chat=%d old=%s new=%s",
 			chatID, filepath.Base(result.OldSessionFile), filepath.Base(result.NewSessionFile))
 
-		if s.output != nil {
-			s.output.SendText(chatID, threadID, "✅ Nova sessão criada com resumo do contexto anterior. Continuando com segurança.")
-		}
+		s.sendLifecycleNotice(chatID, threadID, "✅ Nova sessão criada com resumo do contexto anterior. Continuando com segurança.")
 
 		// Update session store with new session file
 		if s.sessions != nil {

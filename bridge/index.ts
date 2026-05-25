@@ -11,6 +11,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import type { ImageContent, TextContent } from "@earendil-works/pi-ai";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -666,8 +667,10 @@ function resolveModel(
   const mappedModel = mapModelForProvider(mappedProvider, modelID);
 
   // Native PI SDK resolution
-  const found = registry.find(mappedProvider, mappedModel);
-  if (found) return found;
+  if (mappedProvider) {
+    const found = registry.find(mappedProvider, mappedModel);
+    if (found) return found;
+  }
 
   // Fallback: exact ID match among all models
   return registry.getAll().find((m) => m.id === mappedModel);
@@ -796,28 +799,29 @@ async function handleQuery(req: Request): Promise<void> {
     cleanupChatSession(cKey);
 
     const piSession = await createPiSession(opts);
-    session = piSession.session;
+    const liveSession = piSession.session;
+    session = liveSession;
     if (canceled) {
-      session.dispose();
+      liveSession.dispose();
       throw new Error("request canceled");
     }
 
-    const sessionID = session.sessionId;
+    const sessionID = liveSession.sessionId;
     lastSessionID = sessionID;
-    rememberSession(sessionID, { id: sessionID, file: session.sessionFile });
+    rememberSession(sessionID, { id: sessionID, file: liveSession.sessionFile });
 
     emitReq({
       event: "system",
       session_id: sessionID,
-      session_file: session.sessionFile,
-      tools: session.getActiveToolNames(),
-      model: session.model ? `${session.model.provider}/${session.model.id}` : "",
+      session_file: liveSession.sessionFile,
+      tools: liveSession.getActiveToolNames(),
+      model: liveSession.model ? `${liveSession.model.provider}/${liveSession.model.id}` : "",
     });
 
     // Set up persistent subscription for this session
     // Counts events for health diagnostics (logged after 30s of silence).
     let lastEventTime = Date.now();
-    const unsubPersistent = session.subscribe((event) => {
+    const unsubPersistent = liveSession.subscribe((event) => {
       lastEventTime = Date.now();
       if (terminalEmitted) return;
       const rid = chatSessions.get(cKey)?.currentReqId || reqId;
@@ -926,7 +930,7 @@ async function handleQuery(req: Request): Promise<void> {
       }
       if (silent >= 60_000 && !stallSteerSent) {
         stallSteerSent = true;
-        session.steer(
+        liveSession.steer(
           "Continue please. You have been silent for over a minute. " +
           "If you have finished your current task, present your findings."
         ).catch((err: unknown) => {
@@ -935,7 +939,7 @@ async function handleQuery(req: Request): Promise<void> {
       }
       if (silent >= 120_000 && !stallUrgentSent) {
         stallUrgentSent = true;
-        session.steer(
+        liveSession.steer(
           "You have been silent for over 2 minutes. " +
           "Stop your current activity and present a summary of what you have done so far."
         ).catch((err: unknown) => {
@@ -951,8 +955,8 @@ async function handleQuery(req: Request): Promise<void> {
     // the extension runner. We wrap the existing hook to chain security before extensions.
     let unsubHook: (() => void) | undefined;
     if (opts?.security?.enabled) {
-      if (typeof session.agent?.beforeToolCall !== "function") {
-        session.dispose();
+      if (typeof liveSession.agent?.beforeToolCall !== "function") {
+        liveSession.dispose();
         throw new Error("security hook not available: PI SDK version too old");
       }
       // Snapshot security config at install time so policy doesn't change mid-session.
@@ -962,15 +966,15 @@ async function handleQuery(req: Request): Promise<void> {
         profile,
         cwd,
       } = opts.security!;
-      const origBeforeToolCall = session.agent.beforeToolCall;
+      const origBeforeToolCall = liveSession.agent.beforeToolCall;
       // The extension-runner hook installed by AgentSession._installAgentToolHooks()
       // is always a function at this point (confirmed by the typeof guard above).
       // We wrap it with a safe fallback so tools are never blocked by a missing hook.
       const chainOrigHook: typeof origBeforeToolCall =
         typeof origBeforeToolCall === "function"
           ? (ctx, signal) => origBeforeToolCall(ctx, signal)
-          : () => undefined;
-      session.agent.beforeToolCall = async (ctx, signal) => {
+          : async () => undefined;
+      liveSession.agent.beforeToolCall = async (ctx, signal) => {
         const decision = evaluateToolPolicy(
           ctx.toolCall.name,
           ctx.args as Record<string, unknown>,
@@ -1016,15 +1020,15 @@ async function handleQuery(req: Request): Promise<void> {
       };
 
       unsubHook = () => {
-        session.agent.beforeToolCall = origBeforeToolCall;
+        liveSession.agent.beforeToolCall = origBeforeToolCall;
       };
     }
 
     // Store the chat session
     const cs: ChatSessionState = {
-      session,
+      session: liveSession,
       sessionId: sessionID,
-      sessionFile: session.sessionFile,
+      sessionFile: liveSession.sessionFile,
       currentReqId: reqId,
       unsubPersistent,
       unsubHook,
@@ -1041,17 +1045,21 @@ async function handleQuery(req: Request): Promise<void> {
     try {
       const images = opts?.images;
       if (images && images.length > 0) {
-        const contentBlocks: Record<string, unknown>[] = [{ type: "text", text: req.prompt }];
+        const contentBlocks: Array<TextContent | ImageContent> = [{ type: "text", text: req.prompt }];
         for (const img of images) {
+          if (!img.data || !img.media_type) {
+            redactedLog(`query image skipped: missing inline data or media type rid=${reqId}`);
+            continue;
+          }
           contentBlocks.push({
             type: "image",
             data: img.data,
             mimeType: img.media_type,
           });
         }
-        await session.sendUserMessage(contentBlocks);
+        await liveSession.sendUserMessage(contentBlocks);
       } else {
-        await session.prompt(req.prompt, { source: "rpc" });
+        await liveSession.prompt(req.prompt, { source: "rpc" });
       }
     } finally {
       // Keep subscription alive — session stays for steer/followUp/abort
@@ -1059,15 +1067,15 @@ async function handleQuery(req: Request): Promise<void> {
     }
 
     if (!terminalEmitted && !canceled) {
-      const stats = session.getSessionStats();
-      const content = session.getLastAssistantText() ?? "";
+      const stats = liveSession.getSessionStats();
+      const content = liveSession.getLastAssistantText() ?? "";
       terminalEmitted = true;
       emitReq({
         event: "result",
         content,
         cost_usd: stats.cost,
         session_id: sessionID,
-        session_file: session.sessionFile,
+        session_file: liveSession.sessionFile,
         duration_ms: Date.now() - startedAt,
         num_turns: turnCount || stats.assistantMessages,
         input_tokens: stats.tokens.input,
@@ -1244,7 +1252,7 @@ async function handleGetSessionStats(req: Request): Promise<void> {
         cache_write_tokens: stats.tokens.cacheWrite,
         total_tokens: stats.tokens.total,
         cost: stats.cost,
-        context_usage_pct: usage?.usagePercentage ?? 0,
+        context_usage_pct: usage?.percent ?? 0,
       }),
     });
 
@@ -1476,7 +1484,7 @@ async function handleRequest(line: string): Promise<void> {
           provider: m.provider,
           id: m.id,
           name: m.name ?? m.id,
-          supportsImages: m.supportsImageInput ?? false,
+          supportsImages: m.input?.includes("image") ?? false,
         }));
         emitReq({ event: "result", content: JSON.stringify(summary) });
       } catch (err: unknown) {

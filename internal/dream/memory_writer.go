@@ -359,11 +359,13 @@ func appendUniqueFacts(path string, facts []string) error {
 	if fi != nil && fi.Size() > 0 {
 		fd, fderr := os.Open(path)
 		if fderr == nil {
-			buf := make([]byte, 1)
-			if _, rerr := fd.ReadAt(buf, fi.Size()-1); rerr == nil && buf[0] != '\n' {
-				needsNL = true
+			needsNL, fderr = needsLeadingNewline(fd)
+			if closeErr := fd.Close(); closeErr != nil && fderr == nil {
+				fderr = closeErr
 			}
-			fd.Close()
+		}
+		if fderr != nil {
+			log.Printf("memory writer: failed to inspect trailing newline for %s: %v", filepath.Base(path), fderr)
 		}
 	}
 

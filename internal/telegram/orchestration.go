@@ -218,15 +218,6 @@ func (bc *BotController) executeApprovedPlan(chat *telebot.Chat, threadID int, m
 	}
 }
 
-func findTaskInPlan(plan *orchestrator.Plan, taskID string) orchestrator.Task {
-	for _, t := range plan.Tasks {
-		if t.ID == taskID {
-			return t
-		}
-	}
-	return orchestrator.Task{ID: taskID}
-}
-
 func buildFallbackConsolidation(results []orchestrator.TaskResult) string {
 	var sb strings.Builder
 	sb.WriteString("**Resultado da execução:**\n\n")

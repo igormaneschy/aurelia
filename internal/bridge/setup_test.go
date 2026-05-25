@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -14,6 +15,16 @@ func TestEmbeddedBridgeSourcePresent(t *testing.T) {
 	}
 	if !strings.Contains(string(EmbeddedBridgeTS), "createAgentSession") {
 		t.Fatal("embedded bridge source does not look like the PI SDK bridge")
+	}
+}
+
+func TestEmbeddedBridgeSourceMatchesEditableSource(t *testing.T) {
+	source, err := os.ReadFile(filepath.Join("..", "..", "bridge", "index.ts"))
+	if err != nil {
+		t.Fatalf("read editable bridge source: %v", err)
+	}
+	if !bytes.Equal(bytes.TrimSpace(EmbeddedBridgeTS), bytes.TrimSpace(source)) {
+		t.Fatal("internal/bridge/bundle.ts is out of sync with bridge/index.ts; run make bridge")
 	}
 }
 
