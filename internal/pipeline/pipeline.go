@@ -2252,7 +2252,9 @@ func (s *Service) updateRunLogSession(chatID int64, threadID int, sessionID stri
 		return
 	}
 
-	if err := s.runLog.Update(context.Background(), runlog.RunUpdate{
+	updateCtx, updateCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer updateCancel()
+	if err := s.runLog.Update(updateCtx, runlog.RunUpdate{
 		RunID:     state.runID,
 		SessionID: &sessionID,
 	}); err != nil {
@@ -2293,8 +2295,15 @@ func (s *Service) recordToolUse(chatID int64, threadID int, toolName string) {
 	if needsUpdate {
 		state.wg.Add(1)
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("pipeline: panic in recordToolUse update: %v", r)
+				}
+			}()
 			defer state.wg.Done()
-			if err := s.runLog.Update(context.Background(), runlog.RunUpdate{
+			updateCtx, updateCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer updateCancel()
+			if err := s.runLog.Update(updateCtx, runlog.RunUpdate{
 				RunID:       state.runID,
 				ToolSummary: &toolSummary,
 			}); err != nil {
@@ -2380,13 +2389,17 @@ func (s *Service) completeRunLog(chatID int64, threadID int, status runlog.RunSt
 	// before completing the runlog entry, ensuring consistent ordering.
 	state.wg.Wait()
 
-	if err := s.runLog.Complete(context.Background(), state.runID, status, checkpoint, errMsg); err != nil {
+	completeCtx, completeCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer completeCancel()
+	if err := s.runLog.Complete(completeCtx, state.runID, status, checkpoint, errMsg); err != nil {
 		log.Printf("runlog: failed to complete %s (status=%s): %v", state.runID, status, err)
 	}
 
 	// Flush session update with final summary
 	if summary != "" {
-		if err := s.runLog.Update(context.Background(), runlog.RunUpdate{
+		flushCtx, flushCancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer flushCancel()
+		if err := s.runLog.Update(flushCtx, runlog.RunUpdate{
 			RunID:       state.runID,
 			ToolSummary: &summary,
 		}); err != nil {

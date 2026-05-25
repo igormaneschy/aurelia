@@ -22,7 +22,7 @@ interface ImageAttachment {
 }
 
 // Mirrors SecurityContext in internal/bridge/protocol.go.
-interface SecurityContext {
+export interface SecurityContext {
   enabled: boolean;
   profile: "observe" | "read_only" | "edit_project" | "execute_safe" | "privileged";
   mode: "warn" | "block";
@@ -146,7 +146,7 @@ function log(msg: string): void {
 
 // Redact common credential patterns from log/error messages to prevent leaking
 // sensitive content (API keys, tokens, auth headers, private keys) through logs.
-function redactSDKError(msg: string): string {
+export function redactSDKError(msg: string): string {
   return msg
     // API keys: sk-*, pk-*, sk-ant-*, sk-proj-*
     .replace(/\bsk-[A-Za-z0-9]{20,}/g, "[API_KEY_REDACTED]")
@@ -188,6 +188,32 @@ function redactSDKError(msg: string): string {
 
 function redactedLog(msg: string): void {
   log(redactSDKError(msg));
+}
+
+// Redact then truncate: ensures secrets in the command excerpt are always
+// redacted BEFORE slicing, so a secret straddling the truncation boundary
+// isn't sliced in half and leaked (see redaction-before-truncation.md).
+export function redactedCommandExcerpt(command: string, maxLen: number): string {
+  const redacted = redactSDKError(command);
+  if (redacted.length <= maxLen) return redacted;
+  return redacted.slice(0, maxLen) + "...";
+}
+
+// Redact sensitive file/directory path references from audit text fields
+// so that credential locations are not leaked in persisted output.
+// Applied AFTER redactSDKError so token patterns are already removed.
+export function redactAuditPath(text: string): string {
+  return text
+    // .env files (as path component, e.g. /path/.env, ~/.env, .env.local)
+    .replace(/(?:^|[/~])\.env(?:\b|\/|$)/g, "[SENSITIVE_PATH_REDACTED]")
+    // .ssh/ directory paths
+    .replace(/(?:^|[/~])\.ssh(?:\/|$)/g, "[SENSITIVE_PATH_REDACTED]")
+    // .pi/ directory paths
+    .replace(/(?:^|[/~])\.pi(?:\/|$)/g, "[SENSITIVE_PATH_REDACTED]")
+    // .aurelia/config/ directory paths
+    .replace(/(?:^|[/~])\.aurelia\/config(?:\/|$)/g, "[SENSITIVE_PATH_REDACTED]")
+    // .git/config file paths
+    .replace(/(?:^|[/~])\.git\/config(?:\b|\/|$)/g, "[SENSITIVE_PATH_REDACTED]");
 }
 
 function escapeUntrustedSummary(text: string): string {
@@ -282,13 +308,13 @@ function translateAllowedTools(
 
 // ── Security Policy Evaluation ──────────────────────────────────────────────
 
-interface PolicyDecision {
+export interface PolicyDecision {
   decision: "allow" | "block" | "rewrite";
   reason?: string;
   input?: Record<string, unknown>;
 }
 
-interface AuditEntry {
+export interface AuditEntry {
   timestamp?: string;
   decision: string;
   tool_name: string;
@@ -301,7 +327,7 @@ interface AuditEntry {
   redacted: boolean;
 }
 
-const DEFAULT_SENSITIVE_PATTERNS = [
+export const DEFAULT_SENSITIVE_PATTERNS = [
   ".env", ".env.*", "*.pem", "*.key",
   "id_rsa", "id_ed25519",
   "config.json", "credentials.json", "*.credentials",
@@ -323,7 +349,7 @@ function matchesGlob(pattern: string, name: string): boolean {
   }
 }
 
-function isSensitivePath(path: string, patterns: string[]): boolean {
+export function isSensitivePath(path: string, patterns: string[]): boolean {
   const clean = path.replace(/\\/g, "/");
   const parts = clean.split("/");
   const base = parts[parts.length - 1] || "";
@@ -343,7 +369,7 @@ function isSensitivePath(path: string, patterns: string[]): boolean {
   return false;
 }
 
-function isDestructiveCommand(command: string): boolean {
+export function isDestructiveCommand(command: string): boolean {
   const lower = command.trim().toLowerCase();
 
   // rm -rf with absolute/system paths.
@@ -379,7 +405,7 @@ function isDestructiveCommand(command: string): boolean {
   return false;
 }
 
-function isExfiltrationCommand(command: string): boolean {
+export function isExfiltrationCommand(command: string): boolean {
   const lower = command.trim().toLowerCase();
 
   const hasNetworkTool = ["curl ", "wget ", "nc ", "ncat ", "scp ", "rsync "].some(
@@ -397,12 +423,34 @@ function isExfiltrationCommand(command: string): boolean {
   return suspicious.some((s) => lower.includes(s));
 }
 
-function matchesEnvAccess(command: string): boolean {
+export function matchesEnvAccess(command: string): boolean {
   const lower = command.trim().toLowerCase();
   if (/^env$/.test(lower) || /^printenv/.test(lower) || /^export($|\s)/.test(lower)) return true;
   if (lower.includes(".aurelia/config")) return true;
   if (/echo\s+\$/.test(lower) || /echo \${/.test(lower)) return true;
   if (lower.includes("cat ~/.aurelia")) return true;
+  return false;
+}
+
+// hasShellComposition checks for shell control operators that compose
+// multiple commands (&&, ||, ;, |, backticks, $(, >, <, newlines).
+// This prevents safe-command prefix bypasses like "git status && whoami"
+// or "go test ./... ; curl evil.com".  Must be called BEFORE safe git/build
+// /test allow decisions so composed-command attacks are denied even when
+// the prefix matches an allowlist entry.
+function hasShellComposition(command: string): boolean {
+  const lower = command.trim().toLowerCase();
+  // Only check the portion after the first word — we don't want to flag
+  // make targets themselves, since isSafeMakeCommand handles them.
+  if (/^make(\s|$)/.test(lower)) return false; // handled by isSafeMakeCommand
+  if (lower.includes("&&")) return true;
+  if (lower.includes("||")) return true;
+  if (lower.includes(";")) return true;
+  if (lower.includes("|")) return true;
+  if (lower.includes("`")) return true;
+  if (lower.includes("$(")) return true;
+  if (/[<>]/.test(lower)) return true;
+  if (lower.includes("\n")) return true;
   return false;
 }
 
@@ -428,12 +476,12 @@ const SAFE_MAKE_TARGETS = new Set([
   "lint", "vet", "typecheck", "generate",
 ]);
 
-function isSafeMakeCommand(command: string): boolean {
+export function isSafeMakeCommand(command: string): boolean {
   const lower = command.trim().toLowerCase();
 
   // Reject variable assignments (make VAR=value) and shell metacharacters
-  // that can inject arbitrary commands: ; && || ` $( < > |
-  const hasMetachar = /[;&|`$]/.test(lower) || /[<>]/.test(lower);
+  // that can inject arbitrary commands: ; && || ` $( < > | \n \r
+  const hasMetachar = /[;&|`$]/.test(lower) || /[<>]/.test(lower) || lower.includes("\n") || lower.includes("\r");
   if (hasMetachar) return false;
 
   // "make" with no args runs the default target (typically build/test).
@@ -462,11 +510,11 @@ function isSafeMakeCommand(command: string): boolean {
   return true;
 }
 
-function matchesBuildOrTest(command: string): boolean {
+export function matchesBuildOrTest(command: string): boolean {
   const lower = command.trim().toLowerCase();
   const buildPatterns = [
     /^go\s+(build|install|mod)/,
-    /^npm\s+run\s+(build|prod|compile)/,
+    /^npm\s+run\s+(build|prod|compile|typecheck|check)/,
     /^npx\s+(tsc|esbuild|webpack)/,
     /^cargo\s+(build|check)/,
     /^dotnet\s+(build|publish)/,
@@ -490,19 +538,52 @@ function matchesBuildOrTest(command: string): boolean {
     /^rails\s+test/,
   ];
   // Restrict make to safe targets only.
-  if (/^make(\s|$)/.test(lower) && !isSafeMakeCommand(command)) {
-    return false;
+  if (/^make(\s|$)/.test(lower)) {
+    if (!isSafeMakeCommand(command)) return false;
+    return true; // safe make (including bare `make`) is allowed
   }
   return [...buildPatterns, ...testPatterns].some((p) => p.test(lower));
 }
 
-function matchesSafeGit(command: string): boolean {
+// gitHasSensitiveArgs checks whether a git command references sensitive
+// file paths in its arguments (e.g. .env, .ssh/*, .pi/*, .aurelia/config/*,
+// .git/config) or uses --no-index which can read arbitrary files.
+// Must be called BEFORE matchesSafeGit so that even "git diff" or "git show"
+// commands are denied when their arguments reference sensitive data.
+export function gitHasSensitiveArgs(command: string): boolean {
+  const lower = command.trim().toLowerCase();
+  if (!lower.startsWith("git ")) return false;
+
+  // git diff --no-index compares arbitrary files outside the repo.
+  if (lower.includes("--no-index")) return true;
+
+  // Check ref-based paths: HEAD:.env, HEAD:.git/config, etc.
+  // These show file contents from git history which may contain secrets.
+  if (/HEAD\s*:\s*\.(env|ssh|git\/config)\b/i.test(command)) return true;
+
+  // Check explicit file arguments for sensitive path patterns.
+  // Note: (?:^|\s) prefix so ".env" is matched after space separator, not
+  // \b (word boundary) — because '.' is non-word, \b fails between space and ..
+  const args = command.slice(3).trim(); // everything after "git"
+  if (/(?:^|\s)\.env(?:\b|$)/.test(args)) return true;
+  if (/\.ssh(?:\/|$)/.test(args)) return true;
+  if (/\.pi(?:\/|$)/.test(args)) return true;
+  if (/\.aurelia\/config(?:\/|$)/.test(args)) return true;
+  if (/\.git\/config(?:\b|$)/.test(args)) return true;
+  if (/~\/\./.test(args)) return true; // ~/. pattern indicates home-dir access
+
+  return false;
+}
+
+export function matchesSafeGit(command: string): boolean {
   const lower = command.trim().toLowerCase();
   const safePrefixes = [
     "git status", "git diff", "git log", "git show",
     "git branch", "git checkout", "git stash list",
     "git describe", "git rev-parse", "git rev-list",
-    "git config", "git ls-files", "git ls-tree",
+    // Intentionally excludes "git config": reveals remote tokens, credential
+    // helpers, emails, and .git/config contents. Use /cwd or Read instead.
+    "git ls-files", "git ls-tree",
     "git tag", "git blame", "git shortlog",
     "git cherry", "git cherry-pick --abort",
   ];
@@ -561,7 +642,7 @@ function isPathInsideCwd(path: string, cwd: string, allowedOutside: string[]): b
   return true;
 }
 
-function evaluateToolPolicy(
+export function evaluateToolPolicy(
   toolName: string,
   input: Record<string, unknown>,
   security: SecurityContext,
@@ -626,14 +707,14 @@ function evaluateToolPolicy(
       //
       // 1. Destructive commands (rm -rf /, sudo, mkfs, etc.)
       if (isDestructiveCommand(command)) {
-        const reason = `destructive command blocked: ${command.slice(0, 80)}`;
+        const reason = `destructive command blocked: ${redactedCommandExcerpt(command, 80)}`;
         if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
         return { decision: "block", reason };
       }
 
       // 2. Exfiltration (network tools reading sensitive files)
       if (isExfiltrationCommand(command)) {
-        const reason = `exfiltration blocked: ${command.slice(0, 80)}`;
+        const reason = `exfiltration blocked: ${redactedCommandExcerpt(command, 80)}`;
         if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
         return { decision: "block", reason };
       }
@@ -656,19 +737,47 @@ function evaluateToolPolicy(
       // through to the default allow below. Safe make commands (check-only
       // build/test targets, no metacharacters) pass through to build/test.
       if (/^make(\s|$)/.test(command) && !isSafeMakeCommand(command)) {
-        const reason = `unsafe make blocked: ${command.slice(0, 80)}`;
+        const reason = `unsafe make blocked: ${redactedCommandExcerpt(command, 80)}`;
         if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
         return { decision: "block", reason };
       }
 
-      // 6. Safe git commands allowed.
+      // 6. Shell composition check — deny multi-command composition (&&, ||,
+      //    ;, |, backticks, $(, >, <, \n) BEFORE safe git/build/test matching.
+      //    This prevents bypasses like "git status && whoami" or "go test ./...; curl".
+      if (hasShellComposition(command)) {
+        const reason = `shell composition blocked: ${redactedCommandExcerpt(command, 120)}`;
+        if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
+        return { decision: "block", reason };
+      }
+
+      // 7. Git sensitive args check — deny even safe git subcommands when
+      //    their arguments reference sensitive paths (.env, .ssh, .pi,
+      //    .aurelia/config, .git/config) or use --no-index. This prevents
+      //    "git show HEAD:.env" and "git diff --no-index ~/.ssh/id_rsa /tmp/x".
+      if (/^git\s/.test(command.trim()) && gitHasSensitiveArgs(command)) {
+        const reason = `git sensitive args blocked: ${redactedCommandExcerpt(command, 120)}`;
+        if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
+        return { decision: "block", reason };
+      }
+
+      // 8. Safe git commands allowed.
       if (matchesSafeGit(command)) {
         return { decision: "allow", reason: "safe git command allowed" };
       }
 
-      // 7. Build and test commands — safe subset only.
+      // 8. Build and test commands — safe subset only.
       if (matchesBuildOrTest(command)) {
         return { decision: "allow", reason: "build/test command allowed" };
+      }
+
+      // 9. Fail-closed: execute_safe profile denies all non-allowlisted Bash.
+      //    Shell composition (step 6) has already been checked, so any
+      //    command reaching here is a single command with no shell chaining.
+      if (cfg.profile === "execute_safe") {
+        const reason = `command not on allowlist: ${redactedCommandExcerpt(command, 120)}`;
+        if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
+        return { decision: "block", reason };
       }
 
       return { decision: "allow" };
@@ -721,6 +830,12 @@ function writeAuditFile(line: string): void {
 function logAudit(entry: AuditEntry): void {
   entry.timestamp = new Date().toISOString();
   entry.redacted = true;
+  // Redact BEFORE serialization so secrets in reason/cwd/agent_name
+  // are caught (see redaction-before-truncation.md).
+  // Token redaction first, then path redaction, so both are caught.
+  entry.reason = redactAuditPath(redactSDKError(entry.reason));
+  entry.cwd = redactAuditPath(redactSDKError(entry.cwd));
+  if (entry.agent_name) entry.agent_name = redactAuditPath(redactSDKError(entry.agent_name));
   const line = "[security] " + JSON.stringify(entry) + "\n";
   process.stderr.write(line);
   writeAuditFile(line);

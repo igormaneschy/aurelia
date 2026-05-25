@@ -472,7 +472,14 @@ func (ab *albumBuffer) store(albumID string, messageID int, caption string, phot
 		}
 		ab.pending[key] = album
 		// Schedule GC: if album owner never arrives, clean up after 5 minutes
-		time.AfterFunc(5*time.Minute, func() { ab.gcExpired(chatID, albumID) })
+		time.AfterFunc(5*time.Minute, func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("telegram: panic in album gc timer: %v", r)
+				}
+			}()
+			ab.gcExpired(chatID, albumID)
+		})
 	}
 	if caption != "" && album.caption == "" {
 		album.caption = caption
