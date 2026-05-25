@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.19.4] - 2026-05-25
+
+### Added
+- **Cron thread isolation**: `TargetThreadID` for topic-thread delivery; jobs
+  list/cancel scoped by owner+chat+thread
+- **Cron SecurityContext**: attach enabled block-mode context with explicit
+  safe `AllowedTools` (non-empty, excluding Read/Write/Edit/Bash for no-agent)
+
+### Fixed
+- **Bridge path traversal**: normalize relative/absolute paths before resolving;
+  nested traversal via `subdir/../../outside` blocked
+- **Bridge Bash/make policy**: block deploy/install/run; reject `-f`/`--file`/`-C`
+  flags, variable assignments, and shell metacharacters in any position after `make`
+- **Bridge orphan process**: kill/reap child on readLoop unexpected exit
+- **Pipeline activeSessions race**: replace noop CancelFunc with real cancel
+  context; `activeRun` struct + `CompareAndDelete` for race-free ownership
+- **Pipeline runLogStates**: protect map iteration with mutex
+- **Session persistence lost-update**: os.CreateTemp + atomic generation counter
+  to prevent stale snapshots on concurrent persists
+- **Cron no-agent/no-cwd**: defaults to observe profile with safe metadata-only
+  tools instead of nil slice (avoid bridge SDK default fallback)
+
+### Security
+- **Cron security defaults**: always pass explicit non-nil `AllowedTools` to
+  prevent bridge from applying SDK defaults (which may include Write/Edit/Bash)
+
 ## [0.19.3] - 2026-05-25
 
 ### Fixed
