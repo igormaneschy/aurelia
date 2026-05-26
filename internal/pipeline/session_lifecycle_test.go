@@ -8,6 +8,7 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
+	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/session"
 )
 
@@ -95,8 +96,9 @@ func TestApplyLifecycle_SuspectDueToEmptyResult(t *testing.T) {
 
 	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
-	// MarkEmptyResult sets active=false, so the cold priority wins.
-	// The action (cold_resume) is the same for both cold and suspect.
+	// MarkEmptyResult sets active=false with 1 empty result. Under default
+	// MaxEmptyResultsBeforeRotate=2, NeedsRotation is not triggered; the
+	// cold/inactive check catches it with HealthCold/ActionColdResume.
 	if result.Decision.Action != session.ActionColdResume {
 		t.Fatalf("expected cold_resume after empty result, got %s (state=%s)", result.Decision.Action, result.Decision.State)
 	}
@@ -118,8 +120,9 @@ func TestApplyLifecycle_SuspectDueToProcessDeath(t *testing.T) {
 
 	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
-	// MarkProcessDeath sets active=false, so cold priority wins.
-	// The action (cold_resume) is the same for both.
+	// MarkProcessDeath sets active=false with 1 death. Under default
+	// MaxProcessDeathsBeforeRotate=2, NeedsRotation is not triggered; the
+	// cold/inactive check catches it with HealthCold/ActionColdResume.
 	if result.Decision.Action != session.ActionColdResume {
 		t.Fatalf("expected cold_resume after process death, got %s (state=%s)", result.Decision.Action, result.Decision.State)
 	}
@@ -345,6 +348,154 @@ func TestLifecycleMessages_NoOldCompactPhrase(t *testing.T) {
 				t.Fatalf("lifecycle message must not contain old phrase %q: %q", forbid, msg)
 			}
 		}
+	}
+}
+
+func TestLifecycleMessages_NoOldRotatePhrases(t *testing.T) {
+	t.Parallel()
+
+	// Ensure the user-visible rotate messages do not contain any old technical
+	// lifecycle phrases per Long Flow UX v2. Use exact old strings so a revert
+	// of the message constants is caught regardless of case or accent differences.
+	forbidden := []string{
+		"Histórico muito longo",
+		"Criando nova sessão",
+		"Nova sessão criada",
+		"resumo do contexto anterior",
+		"Rotação automática",
+		"compactação",
+		"Compactando",
+		"calls",
+		"ferramentas",
+		"chamadas",
+	}
+	for _, msg := range []string{lifecycleRotateMessage, lifecycleRotateSuccessMessage, lifecycleRotateFailedMessage} {
+		for _, forbid := range forbidden {
+			if strings.Contains(msg, forbid) {
+				t.Fatalf("lifecycle rotate message must not contain old phrase %q: %q", forbid, msg)
+			}
+		}
+	}
+}
+
+// recordingOutput implements Output and records all SendText calls for
+// multi-message assertion. Does not affect captureOutput used by other tests.
+type recordingOutput struct {
+	texts []string
+}
+
+func (r *recordingOutput) StartTyping(_ int64, _ int) func() { return func() {} }
+func (r *recordingOutput) NewProgress(_ int64, _ int) ProgressReporter { return &fakeProgress{} }
+func (r *recordingOutput) SendError(_ int64, _ int, text string) error { return nil }
+func (r *recordingOutput) SendReply(_ int64, _ int, text string) error { return nil }
+func (r *recordingOutput) SendText(_ int64, _ int, text string) (any, error) {
+	r.texts = append(r.texts, text)
+	return nil, nil
+}
+func (r *recordingOutput) DeleteMessage(_ any)                              {}
+func (r *recordingOutput) ConfirmMessage(_ int64, _ int)                    {}
+func (r *recordingOutput) ExecuteApprovedPlan(_ int64, _ int, _ int, _ string, _ int64, _ *orchestrator.Plan) {}
+
+func TestApplyLifecycle_ColdStoreSendsNoRotateNotices(t *testing.T) {
+	// Cold/inactive sessions without suspect failures go directly to
+	// cold_resume without any lifecycle notices. This verifies cold wins
+	// over token-based decisions, preventing unnecessary rotate+summary
+	// cycles when a user returns from idle.
+	recOut := &recordingOutput{}
+	s := &Service{
+		config:   &config.AppConfig{SessionLifecycle: config.DefaultSessionLifecycleConfig()},
+		sessions: session.NewStore(),
+		bridge:   nil,
+		output:   recOut,
+	}
+
+	// Use DeactivateSession to set Active=false without suspect signals.
+	// (MarkEmptyResult would also set Active=false but adds suspect signals
+	// that hit NeedsRotation before the cold check.)
+	s.sessions.SetSession(1, 2, 100, "/tmp/test.jsonl")
+	s.sessions.DeactivateSession(1, 2, 100)
+
+	req := &bridge.Request{
+		Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"},
+	}
+
+	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
+
+	// Must cold-resume, not rotate
+	if result.Decision.State != session.HealthCold {
+		t.Fatalf("expected cold for inactive session, got %s", result.Decision.State)
+	}
+	if result.Decision.Action != session.ActionColdResume {
+		t.Fatalf("expected cold_resume, got %s", result.Decision.Action)
+	}
+	if req.Options.Continue != false {
+		t.Fatal("request continue should be false for cold session")
+	}
+
+	// Cold_resume must not send lifecycle notices (unlike rotate/compact)
+	if len(recOut.texts) != 0 {
+		t.Fatalf("expected 0 lifecycle notices for cold_resume, got %d: %v", len(recOut.texts), recOut.texts)
+	}
+}
+
+func TestApplyLifecycle_SingleEmptyResultDoesNotRotate(t *testing.T) {
+	// A single empty result under default MaxEmptyResultsBeforeRotate=2 must
+	// not enter the rotate branch: no lifecycle notices sent, and the final
+	// decision is cold_resume (MarkEmptyResult sets Active=false, cold wins
+	// over single-suspect; the key is no rotate attempt).
+	recOut := &recordingOutput{}
+	s := &Service{
+		config:   &config.AppConfig{SessionLifecycle: config.DefaultSessionLifecycleConfig()},
+		sessions: session.NewStore(),
+		bridge:   nil,
+		output:   recOut,
+	}
+
+	s.sessions.SetSession(1, 2, 100, "/tmp/test.jsonl")
+	s.sessions.MarkEmptyResult(1, 2, 100)
+
+	req := &bridge.Request{
+		Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"},
+	}
+
+	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
+
+	// Decision must be cold_resume (not rotate)
+	if result.Decision.Action != session.ActionColdResume {
+		t.Fatalf("expected cold_resume for single empty result, got %s", result.Decision.Action)
+	}
+	if req.Options.Continue != false {
+		t.Fatal("request continue should be false for single empty result")
+	}
+
+	// No lifecycle notices → rotate branch was not entered
+	if len(recOut.texts) != 0 {
+		t.Fatalf("expected 0 lifecycle notices (no rotate branch), got %d: %v", len(recOut.texts), recOut.texts)
+	}
+}
+
+func TestColdStoreCompositeSignalsDontRotate(t *testing.T) {
+	// Decision-level composite-signal test: the signal combination that
+	// results from a cold session store (Active=false) plus enriched bridge
+	// stats (InputTokens above rotate threshold) must produce cold_resume.
+	// This covers the production case: user returns from >1h idle with no
+	// suspect failures, session store is cold, bridge reports 317k tokens.
+	// Cold wins over token-based decisions for sessions without suspect
+	// failures.
+	policy := config.DefaultSessionLifecycleConfig().LifecyclePolicy()
+
+	signals := session.HealthSignals{
+		Active:      false,   // from session store
+		InputTokens: 300000,  // from bridge enrichment
+	}
+
+	dec := session.EvaluateLifecycle(signals, policy)
+
+	if dec.State != session.HealthCold {
+		t.Fatalf("expected cold (inactive overrides rotate threshold), got %s", dec.State)
+	}
+	if dec.Action != session.ActionColdResume {
+		t.Fatalf("expected cold_resume for inactive session with high tokens, got %s", dec.Action)
 	}
 }
 

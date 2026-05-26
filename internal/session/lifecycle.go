@@ -70,8 +70,8 @@ func DefaultLifecyclePolicy() LifecyclePolicy {
 		Enabled:                      true,
 		CompactAfterInputTokens:      120000,
 		RotateAfterInputTokens:       250000,
-		MaxEmptyResultsBeforeRotate:  1,
-		MaxProcessDeathsBeforeRotate: 1,
+		MaxEmptyResultsBeforeRotate:  2,
+		MaxProcessDeathsBeforeRotate: 2,
 		IdleTimeoutMinutes:           20,
 		KeepRecentTokens:             8000,
 		ReserveTokens:                32768,
@@ -81,32 +81,44 @@ func DefaultLifecyclePolicy() LifecyclePolicy {
 // EvaluateLifecycle assesses session health signals against policy and returns
 // a decision. This function is pure: no I/O, no side effects.
 //
-// Priority order (per Long Flow UX v2 spec):
-//  1. Dangerous token threshold → rotate
-//  2. Repeated suspect failures → rotate
+// Priority order:
+//  1. Repeated suspect failures → rotate. Suspect counters can be set while
+//     the session is inactive (e.g. MarkEmptyResult sets Active=false), so
+//     NeedsRotation must run before the cold/inactive check to preserve the
+//     documented priority "repeated suspect failures → rotate".
+//  2. Cold/inactive session → cold resume. Inactive sessions without suspect
+//     failures resume cold, regardless of enriched token stats. This prevents
+//     stale large sessions (e.g. user returned after a day) from triggering
+//     a rotate + summary cycle on the first message.
 //  3. Single suspect failures → cold resume / safe recovery
-//  4. Cold/inactive session → cold resume
+//  4. Dangerous token threshold → rotate (active sessions only)
 //  5. Large but healthy → continue (PI SDK manages compaction)
 //  6. Healthy → continue
 //
 // ActionCompact is reserved for explicit/manual/fallback use only, not the
 // default healthy path. The PI SDK owns normal session compaction.
 func EvaluateLifecycle(signals HealthSignals, policy LifecyclePolicy) Decision {
-	// 1. Dangerous: input tokens exceed rotate threshold.
-	if signals.InputTokens >= policy.RotateAfterInputTokens {
-		return Decision{
-			State:  HealthDangerous,
-			Action: ActionRotate,
-			Reason: fmt.Sprintf("input_tokens=%d >= rotate_after=%d", signals.InputTokens, policy.RotateAfterInputTokens),
-		}
-	}
-
-	// 2. Repeated suspect signals are dangerous enough to rotate.
+	// 1. Repeated suspect signals are dangerous enough to rotate.
+	// Checked before cold/inactive because store failure markers (MarkEmptyResult,
+	// MarkProcessDeath) set Active=false as a side effect. Moving cold before
+	// NeedsRotation would silently demote repeated suspect failures to cold_resume.
 	if policy.NeedsRotation(signals) {
 		return Decision{
 			State:  HealthDangerous,
 			Action: ActionRotate,
 			Reason: fmt.Sprintf("suspect threshold reached: empty_results=%d process_deaths=%d", signals.RecentEmptyResults, signals.RecentProcessDeaths),
+		}
+	}
+
+	// 2. Cold/inactive: session is not active (e.g. restored from disk after
+	// restart or user returned after a long idle). Cold wins over token-based
+	// decisions to avoid unnecessary rotate/compact on the first user message
+	// from an inactive session without suspect failures.
+	if !signals.Active {
+		return Decision{
+			State:  HealthCold,
+			Action: ActionColdResume,
+			Reason: "session is inactive (cold)",
 		}
 	}
 
@@ -126,12 +138,12 @@ func EvaluateLifecycle(signals HealthSignals, policy LifecyclePolicy) Decision {
 		}
 	}
 
-	// 4. Cold: session is not active (e.g. restored from disk after restart).
-	if !signals.Active {
+	// 4. Dangerous: active session with input tokens exceeding rotate threshold.
+	if signals.InputTokens >= policy.RotateAfterInputTokens {
 		return Decision{
-			State:  HealthCold,
-			Action: ActionColdResume,
-			Reason: "session is inactive (cold)",
+			State:  HealthDangerous,
+			Action: ActionRotate,
+			Reason: fmt.Sprintf("input_tokens=%d >= rotate_after=%d", signals.InputTokens, policy.RotateAfterInputTokens),
 		}
 	}
 

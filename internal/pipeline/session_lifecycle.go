@@ -15,8 +15,11 @@ import (
 // User-visible lifecycle messages. These must avoid technical terms like
 // "compactação", "calls", "ferramentas" per Long Flow UX v2 spec.
 const (
-	lifecycleCompactMessage       = "🧠 Preparando o contexto da conversa antes de continuar..."
-	lifecycleCompactFailedMessage = "⚠️ Preparação do contexto não concluída. Retomando sessão com segurança."
+	lifecycleCompactMessage         = "🧠 Preparando o contexto da conversa antes de continuar..."
+	lifecycleCompactFailedMessage   = "⚠️ Preparação do contexto não concluída. Retomando sessão com segurança."
+	lifecycleRotateMessage          = "🔄 Preparando uma retomada segura da conversa..."
+	lifecycleRotateSuccessMessage   = "✅ Contexto preparado. Continuando com segurança."
+	lifecycleRotateFailedMessage    = "⚠️ Preparação do contexto não concluída. Retomando sessão com segurança."
 )
 
 // lifecycleDecisionResult captures the outcome of a lifecycle evaluation
@@ -159,13 +162,14 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 		}
 
 	case session.ActionRotate:
-		// Notify user about session rotation
-		s.sendLifecycleNotice(chatID, threadID, "🔄 Histórico muito longo. Criando nova sessão com resumo do contexto anterior...")
+		// Notify user about session rotation (per Long Flow UX v2, avoid
+		// technical terms and old lifecycle language in user-facing messages).
+		s.sendLifecycleNotice(chatID, threadID, lifecycleRotateMessage)
 
 		result, err := s.rotateSession(ctx, chatID, threadID, userID, req.Options)
 		if err != nil {
 			log.Printf("lifecycle: rotation failed for chat=%d: %v — falling back to cold resume", chatID, err)
-			s.sendLifecycleNotice(chatID, threadID, "⚠️ Rotação automática falhou. Retomando sessão anterior com segurança.")
+			s.sendLifecycleNotice(chatID, threadID, lifecycleRotateFailedMessage)
 			if s.sessions != nil {
 				s.sessions.MarkFailure(chatID, threadID, userID, "rotation failed")
 			}
@@ -199,7 +203,7 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 		log.Printf("lifecycle: rotation succeeded for chat=%d old=%s new=%s",
 			chatID, filepath.Base(result.OldSessionFile), filepath.Base(result.NewSessionFile))
 
-		s.sendLifecycleNotice(chatID, threadID, "✅ Nova sessão criada com resumo do contexto anterior. Continuando com segurança.")
+		s.sendLifecycleNotice(chatID, threadID, lifecycleRotateSuccessMessage)
 
 		// Update session store with new session file
 		if s.sessions != nil {
