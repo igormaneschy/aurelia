@@ -80,9 +80,18 @@ func DefaultLifecyclePolicy() LifecyclePolicy {
 
 // EvaluateLifecycle assesses session health signals against policy and returns
 // a decision. This function is pure: no I/O, no side effects.
+//
+// Priority order (per Long Flow UX v2 spec):
+//  1. Dangerous token threshold → rotate
+//  2. Repeated suspect failures → rotate
+//  3. Single suspect failures → cold resume / safe recovery
+//  4. Cold/inactive session → cold resume
+//  5. Large but healthy → continue (PI SDK manages compaction)
+//  6. Healthy → continue
+//
+// ActionCompact is reserved for explicit/manual/fallback use only, not the
+// default healthy path. The PI SDK owns normal session compaction.
 func EvaluateLifecycle(signals HealthSignals, policy LifecyclePolicy) Decision {
-	// Priority order: check most consequential states first.
-
 	// 1. Dangerous: input tokens exceed rotate threshold.
 	if signals.InputTokens >= policy.RotateAfterInputTokens {
 		return Decision{
@@ -117,21 +126,23 @@ func EvaluateLifecycle(signals HealthSignals, policy LifecyclePolicy) Decision {
 		}
 	}
 
-	// 4. Large: input tokens above compact threshold.
-	if signals.InputTokens >= policy.CompactAfterInputTokens {
-		return Decision{
-			State:  HealthLarge,
-			Action: ActionCompact,
-			Reason: fmt.Sprintf("input_tokens=%d >= compact_after=%d", signals.InputTokens, policy.CompactAfterInputTokens),
-		}
-	}
-
-	// 5. Cold: session is not active (e.g. restored from disk after restart).
+	// 4. Cold: session is not active (e.g. restored from disk after restart).
 	if !signals.Active {
 		return Decision{
 			State:  HealthCold,
 			Action: ActionColdResume,
 			Reason: "session is inactive (cold)",
+		}
+	}
+
+	// 5. Large but healthy: input tokens above the old compact threshold.
+	//    PI SDK manages normal compaction internally; Go continues the session
+	//    without proactive compaction.
+	if signals.InputTokens >= policy.CompactAfterInputTokens {
+		return Decision{
+			State:  HealthLarge,
+			Action: ActionContinue,
+			Reason: fmt.Sprintf("input_tokens=%d >= compact_after=%d (PI SDK manages compaction)", signals.InputTokens, policy.CompactAfterInputTokens),
 		}
 	}
 

@@ -132,21 +132,21 @@ func TestApplyLifecycle_LargeTokens(t *testing.T) {
 	s := newLifecycleTestService(t)
 	s.config.SessionLifecycle = config.DefaultSessionLifecycleConfig()
 
-	// For large state, we need compact — but compact requires a bridge.
-	// Without bridge, the fallback should be cold resume.
+	// Large-token decision (input_tokens >= CompactAfterInputTokens) requires
+	// bridge stats enrichment (GetSessionStats). In this test env without a
+	// real bridge, the signals never carry InputTokens, so the decision falls
+	// through to the healthy/continue path. The unit-level decision logic is
+	// covered in session.EvaluateLifecycle tests (see lifecycle_test.go).
 	s.sessions.SetSession(1, 2, 100, "/tmp/test.jsonl")
-	// Session is active, but we can't inject InputTokens into health signals
-	// since they're read from the store and we can't set them directly.
-	// We test the compact fallback via the bridge-less code path.
 
 	req := &bridge.Request{
 		Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"},
 	}
 
 	_ = s.applyLifecycle(context.Background(), req, 1, 2, 100)
-	// Without a real bridge, large tokens decision can't be reached via store signals
-	// (GetHealthSignals doesn't include InputTokens). This test is a placeholder
-	// for when bridge stats are fully integrated.
+	// No assertion needed here: session.EvaluateLifecycle (unit-tested in
+	// lifecycle_test.go) covers the active+large→continue decision. This
+	// test exists to ensure applyLifecycle does not panic or hang.
 }
 
 func TestApplyLifecycle_NoSession(t *testing.T) {
@@ -328,6 +328,29 @@ func TestGetIdleTimeout_ZeroMinutes(t *testing.T) {
 	}
 }
 
+func TestLifecycleMessages_NoOldCompactPhrase(t *testing.T) {
+	t.Parallel()
+
+	// Ensure the user-visible compact messages (reachable only as fallback/
+	// manual path per Long Flow UX v2) do not contain any of the old
+	// technical phrases. Use exact old strings so a revert of the message
+	// constants is caught regardless of case or accent differences.
+	oldForbidden := []string{
+		"Compactando histórico longo",
+		"Compactação automática falhou",
+	}
+	for _, msg := range []string{lifecycleCompactMessage, lifecycleCompactFailedMessage} {
+		for _, forbid := range oldForbidden {
+			if strings.Contains(msg, forbid) {
+				t.Fatalf("lifecycle message must not contain old phrase %q: %q", forbid, msg)
+			}
+		}
+	}
+}
+
+// TestBuildTimeoutMessage_AllOrigins checks that each known timeout origin
+// produces a user-visible message that includes a relevant human-readable
+// substring so the user understands what happened.
 func TestBuildTimeoutMessage_AllOrigins(t *testing.T) {
 	tests := []struct {
 		origin string

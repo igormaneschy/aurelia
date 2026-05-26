@@ -65,24 +65,17 @@ func (t *toolCallTracker) increment(toolName string) {
 
 	switch count {
 	case toolCallWarningThreshold:
-		t.sendWarning(fmt.Sprintf(
-			"🔧 Já usei ferramentas %d vezes (%s). Vou consolidar em breve.",
-			count, toolName))
+		t.sendWarning("🔍 Estou analisando bastante contexto. Vou consolidar os achados antes de continuar.")
 		t.steer("Você já usou ferramentas %d vezes (%s). "+
 			"Consolide o que já descobriu e apresente um resumo parcial agora.", count, toolName)
 	case toolCallCriticalThreshold:
-		t.sendWarning(fmt.Sprintf(
-			"⚠️ Estou usando muitas ferramentas (%d calls — último: %s). "+
-				"Vou tentar acelerar e apresentar um resumo parcial em breve.",
-			count, toolName))
+		t.sendWarning("⚠️ A análise está ficando extensa. Vou consolidar o progresso e apresentar um resumo parcial.")
 		t.steer("Você já usou ferramentas %d vezes (%s). "+
 			"Conclua imediatamente o que está fazendo e apresente um resumo parcial. "+
 			"O limite de tempo está próximo.", count, toolName)
 	default:
 		if count > toolCallCriticalThreshold && count%toolCallCriticalThreshold == 0 {
-			t.sendWarning(fmt.Sprintf(
-				"⚠️ %d chamadas de ferramenta. Vou concluir o que tenho e resumir.",
-				count))
+			t.sendWarning("⏳ Continuo analisando. Vou concluir em breve com um resumo dos resultados.")
 			t.steer("Você já usou ferramentas %d vezes. "+
 				"Conclua e apresente um resumo parcial imediatamente.", count)
 		}
@@ -172,10 +165,7 @@ func (d *loopDetector) record(toolName string, input any) bool {
 
 	if isLoop && !d.warned {
 		d.warned = true
-		msg := fmt.Sprintf(
-			"🔁 Detectei um padrão repetitivo de ferramentas (%s). "+
-				"Pare o que está fazendo e apresente um resumo do que já descobriu.",
-			toolName)
+		msg := "🔁 Vou consolidar o que já encontrei para evitar repetição."
 		d.sendWarning(msg)
 		d.steerLoop(msg, toolName)
 		return true
@@ -1378,10 +1368,19 @@ func (s *Service) handleRetryOutcome(chatID int64, threadID int, messageID int, 
 	}
 }
 
+// buildHeartbeatMessage formats the user-visible heartbeat message.
+// Per Long Flow UX v2: human progress language, no technical terms like
+// "chamadas de ferramenta" or tool counts.
+func buildHeartbeatMessage(elapsed time.Duration, beatCount, toolCount int) string {
+	if toolCount > 0 && beatCount%heartbeatToolThreshold == 0 {
+		return fmt.Sprintf("⏱️ %s — Ainda estou trabalhando no pedido. Vou consolidar o progresso em breve.", elapsed)
+	}
+	return fmt.Sprintf("⏱️ %s — Ainda estou processando.", elapsed)
+}
+
 // heartbeatMonitor sends a "still thinking" update when no tool_use event
 // arrives within heartbeatThreshold. It resets on each tool_use event so the
 // user only sees the message when the model is thinking without tools.
-// Includes tool call count from toolTracker in the status message.
 // Stopped by doneCh (e.g., ctx.Done()).
 func heartbeatMonitor(doneCh <-chan struct{}, toolUseSignal <-chan struct{}, toolTracker *toolCallTracker, chatID int64, threadID int, output Output) {
 	defer func() {
@@ -1407,13 +1406,8 @@ func heartbeatMonitor(doneCh <-chan struct{}, toolUseSignal <-chan struct{}, too
 			if time.Since(lastTool) >= heartbeatThreshold && !beatSent {
 				elapsed := time.Since(lastTool).Round(time.Second)
 				beatCount++
-				var msg string
 				toolCount := toolTracker.countLocked()
-				if toolCount > 0 && beatCount%heartbeatToolThreshold == 0 {
-					msg = fmt.Sprintf("⏱️ %s — processando (%d chamadas de ferramenta)", elapsed, toolCount)
-				} else {
-					msg = fmt.Sprintf("⏱️ %s — processando sem ferramentas ativas no momento", elapsed)
-				}
+				msg := buildHeartbeatMessage(elapsed, beatCount, toolCount)
 				if _, err := output.SendText(chatID, threadID, msg); err != nil {
 					log.Printf("pipeline: heartbeat SendText failed for chat=%d: %v", chatID, err)
 				}

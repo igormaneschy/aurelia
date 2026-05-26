@@ -4,6 +4,37 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Added
+- **Long Flow UX v2**: Lifecycle decision order updated so active healthy large
+  sessions continue without Go-triggered compaction (PI SDK owns normal compaction).
+  Cold/inactive sessions cold-resume before any compact decision. Dangerous
+  sessions still rotate or recover safely.
+- **UX message cleanup**: Tool-call tracker warnings, loop detector messages,
+  and heartbeat updates now use human progress language without technical terms
+  (`calls`, `ferramentas`, tool names, or raw counts).
+- **Lifecycle tests**: Added `TestEvaluateLifecycle_InactiveAboveCompactThreshold`
+  verifying cold resume takes priority over compaction for inactive sessions.
+- **UX tests**: Added `TestToolCallTracker_WarningMessageOmitsTechnicalTerms`,
+  `TestToolCallTracker_CriticalMessageOmitsTechnicalTerms`,
+  `TestToolCallTracker_EveryNMessageOmitsTechnicalTerms`,
+  `TestLoopDetector_UserMessageIsNeutral`,
+  `TestHeartbeatMessage_OmitsChamadasDeFerramenta`, and
+  `TestHeartbeatMessage_NormalModeOmitsToolCounts`.
+
+### Changed
+- `EvaluateLifecycle` no longer returns `ActionCompact` for sessions above
+  `CompactAfterInputTokens`. Active healthy large sessions return `ActionContinue`.
+- Cold/inactive check moved before the large-token check in `EvaluateLifecycle`
+  priority order, ensuring cold sessions resume before any compaction decision.
+- `toolCallTracker` user-facing messages: removed `calls`, `ferramentas`, tool
+  name, and raw count; replaced with consolidation-focused progress language.
+- `loopDetector` user-facing message: replaced "Pare o que está fazendo" with
+  neutral "consolidar" wording; steer retains imperative instructions.
+- `heartbeatMonitor` messages: removed `chamadas de ferramenta` and `ferramentas
+  ativas`; normal mode shows simple "processando" notice.
+
 ## v0.19.5 - 2026-05-25
 
 ### Security
