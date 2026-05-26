@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.19.7 - 2026-05-26
+
+### Fixed
+- **Cold/inactive priority**: Sessions inactive without suspect failures now
+  cold-resume regardless of enriched token stats, preventing unnecessary
+  rotate+summary cycles on first message after idle.
+- **Suspect thresholds**: Single empty result or process death no longer
+  triggers rotation. Default thresholds increased from 1 to 2; only
+  repeated suspect failures (≥2) cause rotation.
+- **ActionRotate UX messages**: Replaced technical lifecycle phrases with
+  neutral human-readable messages per Long Flow UX v2.
+
 ## v0.19.6 - 2026-05-26
 
 ### Added
