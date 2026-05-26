@@ -118,7 +118,9 @@ func TestEvaluateLifecycle_SuspectDueToProcessDeaths(t *testing.T) {
 }
 
 func TestEvaluateLifecycle_PriorityDangerousOverSuspect(t *testing.T) {
-	// Dangerous (input tokens > rotate) should take priority over suspect.
+	// For active sessions, dangerous (suspect + rotate threshold) takes
+	// priority over single-suspect cold-resume. NeedsRotation catches
+	// this before the single-suspect step.
 	signals := HealthSignals{
 		Active:              true,
 		InputTokens:         300000,
@@ -126,6 +128,8 @@ func TestEvaluateLifecycle_PriorityDangerousOverSuspect(t *testing.T) {
 		RecentProcessDeaths: 1,
 	}
 	policy := DefaultLifecyclePolicy()
+	policy.MaxEmptyResultsBeforeRotate = 1
+	policy.MaxProcessDeathsBeforeRotate = 1
 
 	dec := EvaluateLifecycle(signals, policy)
 
@@ -187,20 +191,20 @@ func TestEvaluateLifecycle_InputTokenBelowCompact(t *testing.T) {
 func TestNeedsRotation_EmptyResultExceedsThreshold(t *testing.T) {
 	policy := DefaultLifecyclePolicy()
 	signals := HealthSignals{
-		RecentEmptyResults: 1,
+		RecentEmptyResults: 2, // default MaxEmptyResultsBeforeRotate=2
 	}
 	if !policy.NeedsRotation(signals) {
-		t.Fatal("expected needs rotation for empty results >= 1")
+		t.Fatal("expected needs rotation for empty results >= 2")
 	}
 }
 
 func TestNeedsRotation_ProcessDeathExceedsThreshold(t *testing.T) {
 	policy := DefaultLifecyclePolicy()
 	signals := HealthSignals{
-		RecentProcessDeaths: 1,
+		RecentProcessDeaths: 2, // default MaxProcessDeathsBeforeRotate=2
 	}
 	if !policy.NeedsRotation(signals) {
-		t.Fatal("expected needs rotation for process deaths >= 1")
+		t.Fatal("expected needs rotation for process deaths >= 2")
 	}
 }
 
@@ -255,9 +259,10 @@ func TestEvaluateLifecycle_InactiveAboveCompactThreshold(t *testing.T) {
 	}
 }
 
-func TestEvaluateLifecycle_InactiveEvenWithLargeTokens(t *testing.T) {
-	// Fresh stats are authoritative: dangerous token counts rotate even if the
-	// session is currently cold after a daemon restart.
+func TestEvaluateLifecycle_ColdOverridesDangerousTokens(t *testing.T) {
+	// Inactive/cold sessions must resume cold regardless of token counts.
+	// This prevents a stale large session from triggering a rotate + summary
+	// cycle on the first user message after returning from idle.
 	signals := HealthSignals{
 		Active:      false,
 		InputTokens: 300000,
@@ -266,11 +271,131 @@ func TestEvaluateLifecycle_InactiveEvenWithLargeTokens(t *testing.T) {
 
 	dec := EvaluateLifecycle(signals, policy)
 
+	if dec.State != HealthCold {
+		t.Fatalf("expected cold (inactive wins over rotate threshold), got %s", dec.State)
+	}
+	if dec.Action != ActionColdResume {
+		t.Fatalf("expected cold_resume for inactive session, got %s", dec.Action)
+	}
+}
+
+func TestEvaluateLifecycle_ActiveDangerousStillRotates(t *testing.T) {
+	// Active sessions with tokens above rotate threshold still rotate.
+	// This ensures the dangerous token policy still applies to active sessions.
+	signals := HealthSignals{
+		Active:      true,
+		InputTokens: 300000,
+	}
+	policy := DefaultLifecyclePolicy()
+
+	dec := EvaluateLifecycle(signals, policy)
+
 	if dec.State != HealthDangerous {
-		t.Fatalf("expected dangerous for inactive session with high tokens, got %s", dec.State)
+		t.Fatalf("expected dangerous for active session with high tokens, got %s", dec.State)
 	}
 	if dec.Action != ActionRotate {
-		t.Fatalf("expected rotate for inactive session with high tokens, got %s", dec.Action)
+		t.Fatalf("expected rotate for active session with high tokens, got %s", dec.Action)
+	}
+}
+
+func TestEvaluateLifecycle_SingleEmptyResultSuspects(t *testing.T) {
+	// A single empty result under default policy should produce
+	// suspect/cold_resume, not rotate.
+	signals := HealthSignals{
+		Active:             true,
+		InputTokens:        1000,
+		RecentEmptyResults: 1, // below MaxEmptyResultsBeforeRotate (default=2)
+	}
+	policy := DefaultLifecyclePolicy()
+
+	dec := EvaluateLifecycle(signals, policy)
+
+	if dec.State != HealthSuspect {
+		t.Fatalf("expected suspect for 1 empty result, got %s", dec.State)
+	}
+	if dec.Action != ActionColdResume {
+		t.Fatalf("expected cold_resume for 1 empty result, got %s", dec.Action)
+	}
+}
+
+func TestEvaluateLifecycle_TwoEmptyResultsRotate(t *testing.T) {
+	// Two empty results under default policy should hit NeedsRotation
+	// and produce dangerous/rotate.
+	signals := HealthSignals{
+		Active:             true,
+		InputTokens:        1000,
+		RecentEmptyResults: 2, // >= MaxEmptyResultsBeforeRotate (default=2)
+	}
+	policy := DefaultLifecyclePolicy()
+
+	dec := EvaluateLifecycle(signals, policy)
+
+	if dec.State != HealthDangerous {
+		t.Fatalf("expected dangerous for 2 empty results, got %s", dec.State)
+	}
+	if dec.Action != ActionRotate {
+		t.Fatalf("expected rotate for 2 empty results, got %s", dec.Action)
+	}
+}
+
+func TestEvaluateLifecycle_SingleProcessDeathSuspects(t *testing.T) {
+	// A single process death under default policy should produce
+	// suspect/cold_resume, not rotate.
+	signals := HealthSignals{
+		Active:              true,
+		InputTokens:         1000,
+		RecentProcessDeaths: 1, // below MaxProcessDeathsBeforeRotate (default=2)
+	}
+	policy := DefaultLifecyclePolicy()
+
+	dec := EvaluateLifecycle(signals, policy)
+
+	if dec.State != HealthSuspect {
+		t.Fatalf("expected suspect for 1 process death, got %s", dec.State)
+	}
+	if dec.Action != ActionColdResume {
+		t.Fatalf("expected cold_resume for 1 process death, got %s", dec.Action)
+	}
+}
+
+func TestEvaluateLifecycle_TwoProcessDeathsRotate(t *testing.T) {
+	// Two process deaths under default policy should hit NeedsRotation
+	// and produce dangerous/rotate.
+	signals := HealthSignals{
+		Active:              true,
+		InputTokens:         1000,
+		RecentProcessDeaths: 2, // >= MaxProcessDeathsBeforeRotate (default=2)
+	}
+	policy := DefaultLifecyclePolicy()
+
+	dec := EvaluateLifecycle(signals, policy)
+
+	if dec.State != HealthDangerous {
+		t.Fatalf("expected dangerous for 2 process deaths, got %s", dec.State)
+	}
+	if dec.Action != ActionRotate {
+		t.Fatalf("expected rotate for 2 process deaths, got %s", dec.Action)
+	}
+}
+
+func TestEvaluateLifecycle_InactiveWithSuspectFailuresRotates(t *testing.T) {
+	// Inactive sessions with suspect failures reaching the rotation threshold
+	// must still rotate. NeedsRotation runs before the cold/inactive check
+	// because store failure markers (MarkEmptyResult, MarkProcessDeath) set
+	// Active=false as a side effect.
+	signals := HealthSignals{
+		Active:             false,
+		RecentEmptyResults: 2, // >= MaxEmptyResultsBeforeRotate (default=2)
+	}
+	policy := DefaultLifecyclePolicy()
+
+	dec := EvaluateLifecycle(signals, policy)
+
+	if dec.State != HealthDangerous {
+		t.Fatalf("expected dangerous for inactive session with suspect failures, got %s", dec.State)
+	}
+	if dec.Action != ActionRotate {
+		t.Fatalf("expected rotate for inactive session with suspect failures, got %s", dec.Action)
 	}
 }
 
