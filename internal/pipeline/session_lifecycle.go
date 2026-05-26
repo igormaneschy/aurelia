@@ -12,6 +12,13 @@ import (
 	"github.com/igormaneschy/aurelia/internal/session"
 )
 
+// User-visible lifecycle messages. These must avoid technical terms like
+// "compactação", "calls", "ferramentas" per Long Flow UX v2 spec.
+const (
+	lifecycleCompactMessage       = "🧠 Preparando o contexto da conversa antes de continuar..."
+	lifecycleCompactFailedMessage = "⚠️ Preparação do contexto não concluída. Retomando sessão com segurança."
+)
+
 // lifecycleDecisionResult captures the outcome of a lifecycle evaluation
 // and any modifications to apply to the bridge request.
 type lifecycleDecisionResult struct {
@@ -101,13 +108,14 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 		}
 
 	case session.ActionCompact:
-		// Notify user about proactive compaction
-		s.sendLifecycleNotice(chatID, threadID, "🧠 Compactando histórico longo para continuar com segurança...")
+		// Notify user about context preparation (per Long Flow UX v2, avoid
+		// technical compaction language in user-facing messages).
+		s.sendLifecycleNotice(chatID, threadID, lifecycleCompactMessage)
 
 		result, err := s.compactSession(ctx, chatID, threadID, userID, req.Options)
 		if err != nil {
 			log.Printf("lifecycle: compaction failed for chat=%d: %v — falling back to cold resume", chatID, err)
-			s.sendLifecycleNotice(chatID, threadID, "⚠️ Compactação automática falhou. Retomando sessão com segurança.")
+			s.sendLifecycleNotice(chatID, threadID, lifecycleCompactFailedMessage)
 			if s.sessions != nil {
 				s.sessions.MarkFailure(chatID, threadID, userID, "compaction failed")
 			}

@@ -48,7 +48,7 @@ func TestEvaluateLifecycle_InactiveSession(t *testing.T) {
 func TestEvaluateLifecycle_LargeInputTokens(t *testing.T) {
 	signals := HealthSignals{
 		Active:      true,
-		InputTokens: 150000, // above compact (120k)
+		InputTokens: 150000, // above compact (120k), below rotate (250k)
 	}
 	policy := DefaultLifecyclePolicy()
 
@@ -57,8 +57,8 @@ func TestEvaluateLifecycle_LargeInputTokens(t *testing.T) {
 	if dec.State != HealthLarge {
 		t.Fatalf("expected large, got %s", dec.State)
 	}
-	if dec.Action != ActionCompact {
-		t.Fatalf("expected compact, got %s", dec.Action)
+	if dec.Action != ActionContinue {
+		t.Fatalf("expected continue (PI SDK manages compaction), got %s", dec.Action)
 	}
 }
 
@@ -152,7 +152,7 @@ func TestEvaluateLifecycle_PrioritySuspectOverHealthy(t *testing.T) {
 }
 
 func TestEvaluateLifecycle_InputTokenBoundary(t *testing.T) {
-	// Exactly at compact threshold should trigger compact.
+	// Exactly at compact threshold should continue (PI SDK manages compaction).
 	signals := HealthSignals{
 		Active:      true,
 		InputTokens: 120000,
@@ -163,6 +163,9 @@ func TestEvaluateLifecycle_InputTokenBoundary(t *testing.T) {
 
 	if dec.State != HealthLarge {
 		t.Fatalf("expected large at boundary, got %s", dec.State)
+	}
+	if dec.Action != ActionContinue {
+		t.Fatalf("expected continue at boundary, got %s", dec.Action)
 	}
 }
 
@@ -230,6 +233,25 @@ func TestDecision_String(t *testing.T) {
 	s := d.String()
 	if s != "large/compact: input_tokens=150000" {
 		t.Fatalf("unexpected string: %q", s)
+	}
+}
+
+func TestEvaluateLifecycle_InactiveAboveCompactThreshold(t *testing.T) {
+	// Inactive session with tokens above compact but below rotate should
+	// cold-resume, not compact. Cold takes priority over large.
+	signals := HealthSignals{
+		Active:      false,
+		InputTokens: 150000, // above compact (120k), below rotate (250k)
+	}
+	policy := DefaultLifecyclePolicy()
+
+	dec := EvaluateLifecycle(signals, policy)
+
+	if dec.State != HealthCold {
+		t.Fatalf("expected cold, got %s", dec.State)
+	}
+	if dec.Action != ActionColdResume {
+		t.Fatalf("expected cold_resume, got %s", dec.Action)
 	}
 }
 
