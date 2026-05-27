@@ -1266,22 +1266,46 @@ async function handleQuery(req: Request): Promise<void> {
       // Only clean up if canceled (disposed via cancelActive or canceled guard)
     }
 
-    // Check for PI SDK error state after prompt completes
-    // The state.errorMessage is set by the SDK when the stream returns an error
-    // encoded in the response (non-throwing API errors).
+    // Check for PI SDK error state after prompt completes.
+    // The SDK clears state.errorMessage at run start, so we also check:
+    // 1. state.errorMessage (set during current run failures)
+    // 2. Last message stopReason (set on API errors)
+    // 3. Heuristic: 0 tokens with work claimed = silent failure
     if (!terminalEmitted && !canceled) {
+      const stats = liveSession.getSessionStats();
       const piError = liveSession.state.errorMessage;
-      const lastMessages = liveSession.state.messages;
+      const lastMessages = liveSession.state.messages ?? [];
       let stopReason: string | undefined;
+      let lastErrorMsg: string | undefined;
       if (lastMessages.length > 0) {
         const lastMsg = lastMessages[lastMessages.length - 1];
         if (lastMsg.role === "assistant") {
           stopReason = (lastMsg as any).stopReason;
+          lastErrorMsg = (lastMsg as any).errorMessage;
         }
       }
-      if (piError || stopReason === "error") {
-        const errMsg = piError || `PI SDK returned error state with no content (stopReason=${stopReason})`;
-        redactedLog(`query PI SDK error: rid=${reqId} stopReason=${stopReason ?? "unknown"} ${piError ?? ""}`);
+
+      // Diagnostic logging (temporary — remove after confirming detection works)
+      redactedLog(`query done: rid=${reqId} stopReason=${stopReason ?? "none"} piError=${piError ?? "none"} lastErrorMsg=${lastErrorMsg ?? "none"} msgs=${lastMessages.length} tokens=${stats.tokens.input}+${stats.tokens.output} cost=${stats.cost} turns=${turnCount} assistantMsgs=${stats.assistantMessages}`);
+
+      const hasExplicitError = piError || stopReason === "error" || lastErrorMsg;
+      const zeroTokens = stats.tokens.input === 0
+        && stats.tokens.output === 0
+        && stats.cost === 0;
+      const silentFailure = zeroTokens
+        && (turnCount > 0 || stats.assistantMessages > 0);
+      const noWorkDone = zeroTokens
+        && stats.assistantMessages === 0
+        && turnCount === 0;
+
+      if (hasExplicitError || silentFailure || noWorkDone) {
+        const errMsg = piError
+          || lastErrorMsg
+          || (stopReason === "error" ? `PI SDK error (stopReason=error, 0 tokens)` : '')
+          || (silentFailure ? `PI SDK completed with 0 tokens — possible API error (check provider credits/auth)` : '')
+          || (noWorkDone ? `PI SDK completed with no work done` : '')
+          || `PI SDK returned error state`;
+        redactedLog(`query PI SDK error: rid=${reqId} stopReason=${stopReason ?? "unknown"} ${errMsg}`);
         emitTerminalError(errMsg);
       }
     }
