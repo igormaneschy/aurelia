@@ -286379,14 +286379,12 @@ async function handleQuery(req) {
     });
     let lastEventTime = Date.now();
     const unsubPersistent = liveSession.subscribe((event) => {
+      lastEventTime = Date.now();
       if (terminalEmitted) return;
       const rid = chatSessions.get(cKey)?.currentReqId || reqId;
       const eReq = (obj) => emit({ ...obj, request_id: rid });
       switch (event.type) {
-        // lastEventTime is only updated on content-producing events so lifecycle
-        // events (turn_start/end, compactions, retries) don't mask real stalls.
         case "message_update": {
-          lastEventTime = Date.now();
           const update = event.assistantMessageEvent;
           if (update.type === "text_delta") {
             eReq({ event: "assistant", text: update.delta });
@@ -286394,7 +286392,6 @@ async function handleQuery(req) {
           break;
         }
         case "tool_execution_start": {
-          lastEventTime = Date.now();
           redactedLog(
             `tool: ${event.toolName} id=${event.toolCallId.slice(0, 8)} rid=${rid}`
           );
@@ -286407,7 +286404,6 @@ async function handleQuery(req) {
           break;
         }
         case "tool_execution_end": {
-          lastEventTime = Date.now();
           eReq({
             event: "tool_result",
             content: textFromContent(event.result?.content)
@@ -286478,10 +286474,6 @@ async function handleQuery(req) {
         return;
       }
       const silent = Date.now() - lastEventTime;
-      if (silent < 3e4) {
-        stallSteerSent = false;
-        stallUrgentSent = false;
-      }
       if (silent >= 3e4) {
         redactedLog(
           `streaming stall: no PI SDK events for ${Math.round(silent / 1e3)}s (rid=${reqId})`
@@ -286489,31 +286481,19 @@ async function handleQuery(req) {
       }
       if (silent >= 6e4 && !stallSteerSent) {
         stallSteerSent = true;
-        try {
-          liveSession.steer(
-            "Continue please. You have been silent for over a minute. If you have finished your current task, present your findings."
-          ).then(() => {
-            redactedLog(`stall steer sent at ${Math.round(silent / 1e3)}s (rid=${reqId})`);
-          }).catch((err) => {
-            redactedLog(`stall steer failed: ${err instanceof Error ? err.message : String(err)}`);
-          });
-        } catch (err) {
-          redactedLog(`stall steer failed (sync): ${err instanceof Error ? err.message : String(err)}`);
-        }
+        liveSession.steer(
+          "Continue please. You have been silent for over a minute. If you have finished your current task, present your findings."
+        ).catch((err) => {
+          redactedLog(`stall steer failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
       }
       if (silent >= 12e4 && !stallUrgentSent) {
         stallUrgentSent = true;
-        try {
-          liveSession.steer(
-            "You have been silent for over 2 minutes. Stop your current activity and present a summary of what you have done so far."
-          ).then(() => {
-            redactedLog(`stall urgent steer sent at ${Math.round(silent / 1e3)}s (rid=${reqId})`);
-          }).catch((err) => {
-            redactedLog(`stall urgent steer failed: ${err instanceof Error ? err.message : String(err)}`);
-          });
-        } catch (err) {
-          redactedLog(`stall urgent steer failed (sync): ${err instanceof Error ? err.message : String(err)}`);
-        }
+        liveSession.steer(
+          "You have been silent for over 2 minutes. Stop your current activity and present a summary of what you have done so far."
+        ).catch((err) => {
+          redactedLog(`stall urgent steer failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
       }
     }, 15e3);
     let unsubHook;
@@ -286602,6 +286582,22 @@ async function handleQuery(req) {
         await liveSession.prompt(req.prompt, { source: "rpc" });
       }
     } finally {
+    }
+    if (!terminalEmitted && !canceled) {
+      const piError = liveSession.state.errorMessage;
+      const lastMessages = liveSession.state.messages;
+      let stopReason;
+      if (lastMessages.length > 0) {
+        const lastMsg = lastMessages[lastMessages.length - 1];
+        if (lastMsg.role === "assistant") {
+          stopReason = lastMsg.stopReason;
+        }
+      }
+      if (piError || stopReason === "error") {
+        const errMsg = piError || `PI SDK returned error state with no content (stopReason=${stopReason})`;
+        redactedLog(`query PI SDK error: rid=${reqId} stopReason=${stopReason ?? "unknown"} ${piError ?? ""}`);
+        emitTerminalError(errMsg);
+      }
     }
     if (!terminalEmitted && !canceled) {
       const stats = liveSession.getSessionStats();

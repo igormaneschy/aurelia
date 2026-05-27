@@ -1287,6 +1287,26 @@ async function handleQuery(req: Request): Promise<void> {
       // Only clean up if canceled (disposed via cancelActive or canceled guard)
     }
 
+    // Check for PI SDK error state after prompt completes
+    // The state.errorMessage is set by the SDK when the stream returns an error
+    // encoded in the response (non-throwing API errors).
+    if (!terminalEmitted && !canceled) {
+      const piError = liveSession.state.errorMessage;
+      const lastMessages = liveSession.state.messages;
+      let stopReason: string | undefined;
+      if (lastMessages.length > 0) {
+        const lastMsg = lastMessages[lastMessages.length - 1];
+        if (lastMsg.role === "assistant") {
+          stopReason = (lastMsg as any).stopReason;
+        }
+      }
+      if (piError || stopReason === "error") {
+        const errMsg = piError || `PI SDK returned error state with no content (stopReason=${stopReason})`;
+        redactedLog(`query PI SDK error: rid=${reqId} stopReason=${stopReason ?? "unknown"} ${piError ?? ""}`);
+        emitTerminalError(errMsg);
+      }
+    }
+
     if (!terminalEmitted && !canceled) {
       const stats = liveSession.getSessionStats();
       const content = liveSession.getLastAssistantText() ?? "";
