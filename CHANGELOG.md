@@ -18,6 +18,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   bridge crash on synchronous steer throw.
 - **Stall observability**: Steer success now logged; urgent steer
   differentiated from regular steer in logs.
+- **Silent PI SDK failure detection**: Added three detection paths for errors
+  that the PI SDK clears from `state.errorMessage` between runs:
+  `errorMessage`, last message `stopReason`/error fields, and a 0-token
+  heuristic (session has prior work but returned no tokens). Previously
+  sessions with API errors (e.g., 401 billing) would silently complete with
+  zero tokens and contaminate suspect counters.
+- **Billing error detection**: Added `isBillingError()` in Bridge to detect
+  PI SDK credit/balance errors and surface a user-friendly Portuguese message
+  ("Troque o modelo com /model ou adicione créditos"). Billing errors are
+  flagged as `ACTION_REQUIRED` in the pipeline to prevent infinite rotation
+  and noisy retries.
 
 ## v0.19.7 - 2026-05-26
 
