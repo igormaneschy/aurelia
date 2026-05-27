@@ -266,3 +266,116 @@ func TestStore_MarkEmptyResultDoesNotCreateNewEntry(t *testing.T) {
 		t.Fatal("MarkEmptyResult should not create a session entry")
 	}
 }
+
+func TestStore_SetSession_PreservesEmptyResults(t *testing.T) {
+	s := NewStore()
+	s.SetSession(1, 2, 100, "sess-abc")
+
+	s.MarkEmptyResult(1, 2, 100)
+
+	// SetSession again — should preserve emptyResults=1
+	s.SetSession(1, 2, 100, "sess-updated")
+
+	signals := s.GetHealthSignals(1, 2, 100)
+	if signals.RecentEmptyResults != 1 {
+		t.Fatalf("expected emptyResults=1 after SetSession, got %d", signals.RecentEmptyResults)
+	}
+	if signals.LastError != "empty result after work" {
+		t.Fatalf("expected lastError to be preserved after SetSession, got %q", signals.LastError)
+	}
+}
+
+func TestStore_SetSession_PreservesProcessDeaths(t *testing.T) {
+	s := NewStore()
+	s.SetSession(1, 2, 100, "sess-abc")
+
+	s.MarkProcessDeath(1, 2, 100)
+	s.MarkProcessDeath(1, 2, 100)
+
+	// SetSession again — should preserve processDeaths=2
+	s.SetSession(1, 2, 100, "sess-updated")
+
+	signals := s.GetHealthSignals(1, 2, 100)
+	if signals.RecentProcessDeaths != 2 {
+		t.Fatalf("expected processDeaths=2 after SetSession, got %d", signals.RecentProcessDeaths)
+	}
+}
+
+func TestStore_SetSession_PreservesSuspectCount(t *testing.T) {
+	s := NewStore()
+	s.SetSession(1, 2, 100, "sess-abc")
+
+	s.MarkFailure(1, 2, 100, "timeout")
+
+	// SetSession again — should preserve suspectCount=1 and lastFailure
+	s.SetSession(1, 2, 100, "sess-updated")
+
+	signals := s.GetHealthSignals(1, 2, 100)
+	if signals.LastError != "timeout" {
+		t.Fatalf("expected lastError=timeout after SetSession, got %q", signals.LastError)
+	}
+	if count := s.GetSuspectCount(1, 2, 100); count != 1 {
+		t.Fatalf("expected suspectCount=1 after SetSession, got %d", count)
+	}
+}
+
+func TestStore_SetSession_NewEntryCreatesZeroed(t *testing.T) {
+	s := NewStore()
+	s.SetSession(99, 88, 77, "sess-new")
+
+	// Fresh entry should have zeroed counters; active=true because SetSession sets it
+	signals := s.GetHealthSignals(99, 88, 77)
+	if !signals.Active {
+		t.Fatal("expected active=true for fresh SetSession entry")
+	}
+	if signals.LastError != "" {
+		t.Fatalf("expected empty lastError for new entry, got %q", signals.LastError)
+	}
+	if signals.RecentEmptyResults != 0 {
+		t.Fatalf("expected 0 emptyResults for new entry, got %d", signals.RecentEmptyResults)
+	}
+	if signals.RecentProcessDeaths != 0 {
+		t.Fatalf("expected 0 processDeaths for new entry, got %d", signals.RecentProcessDeaths)
+	}
+	if count := s.GetSuspectCount(99, 88, 77); count != 0 {
+		t.Fatalf("expected 0 suspectCount for new entry, got %d", count)
+	}
+}
+
+func TestStore_Set_PreservesCounters(t *testing.T) {
+	s := NewStore()
+	s.Set(1, 2, "sess-abc")
+
+	// Mark failure via userID=0 (Set uses UserID=0 internally)
+	s.MarkFailure(1, 2, 0, "timeout")
+
+	// Set again — should preserve counters
+	s.Set(1, 2, "sess-updated")
+
+	signals := s.GetHealthSignals(1, 2, 0)
+	if signals.LastError != "timeout" {
+		t.Fatalf("expected lastError=timeout after Set, got %q", signals.LastError)
+	}
+	if count := s.GetSuspectCount(1, 2, 0); count != 1 {
+		t.Fatalf("expected suspectCount=1 after Set, got %d", count)
+	}
+}
+
+func TestStore_SetSession_UpdatesSessionFileAndActive(t *testing.T) {
+	s := NewStore()
+	s.SetSession(1, 2, 100, "sess-original")
+
+	// Deactivate to verify SetSession reactivates
+	s.MarkFailure(1, 2, 100, "some error")
+
+	// SetSession with new file — should update file and set active=true
+	s.SetSession(1, 2, 100, "sess-new")
+
+	file, active := s.GetSessionWithState(1, 2, 100)
+	if file != "sess-new" {
+		t.Fatalf("expected sessionFile=sess-new, got %q", file)
+	}
+	if !active {
+		t.Fatal("expected active=true after SetSession")
+	}
+}
