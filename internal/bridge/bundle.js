@@ -286584,18 +286584,26 @@ async function handleQuery(req) {
     } finally {
     }
     if (!terminalEmitted && !canceled) {
+      const stats = liveSession.getSessionStats();
       const piError = liveSession.state.errorMessage;
-      const lastMessages = liveSession.state.messages;
+      const lastMessages = liveSession.state.messages ?? [];
       let stopReason;
+      let lastErrorMsg;
       if (lastMessages.length > 0) {
         const lastMsg = lastMessages[lastMessages.length - 1];
         if (lastMsg.role === "assistant") {
           stopReason = lastMsg.stopReason;
+          lastErrorMsg = lastMsg.errorMessage;
         }
       }
-      if (piError || stopReason === "error") {
-        const errMsg = piError || `PI SDK returned error state with no content (stopReason=${stopReason})`;
-        redactedLog(`query PI SDK error: rid=${reqId} stopReason=${stopReason ?? "unknown"} ${piError ?? ""}`);
+      redactedLog(`query done: rid=${reqId} stopReason=${stopReason ?? "none"} piError=${piError ?? "none"} lastErrorMsg=${lastErrorMsg ?? "none"} msgs=${lastMessages.length} tokens=${stats.tokens.input}+${stats.tokens.output} cost=${stats.cost} turns=${turnCount} assistantMsgs=${stats.assistantMessages}`);
+      const hasExplicitError = piError || stopReason === "error" || lastErrorMsg;
+      const zeroTokens = stats.tokens.input === 0 && stats.tokens.output === 0 && stats.cost === 0;
+      const silentFailure = zeroTokens && (turnCount > 0 || stats.assistantMessages > 0);
+      const noWorkDone = zeroTokens && stats.assistantMessages === 0 && turnCount === 0;
+      if (hasExplicitError || silentFailure || noWorkDone) {
+        const errMsg = piError || lastErrorMsg || (stopReason === "error" ? `PI SDK error (stopReason=error, 0 tokens)` : "") || (silentFailure ? `PI SDK completed with 0 tokens \u2014 possible API error (check provider credits/auth)` : "") || (noWorkDone ? `PI SDK completed with no work done` : "") || `PI SDK returned error state`;
+        redactedLog(`query PI SDK error: rid=${reqId} stopReason=${stopReason ?? "unknown"} ${errMsg}`);
         emitTerminalError(errMsg);
       }
     }
