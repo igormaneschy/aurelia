@@ -117,7 +117,13 @@ func (s *Store) Set(chatID int64, threadID int, sessionFile string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := SessionKeyFor(chatID, threadID, 0)
-	s.sessions[key] = &entry{sessionFile: sessionFile, active: true, lastSeen: time.Now()}
+	if e, ok := s.sessions[key]; ok {
+		e.sessionFile = sessionFile
+		e.active = true
+		e.lastSeen = time.Now()
+	} else {
+		s.sessions[key] = &entry{sessionFile: sessionFile, active: true, lastSeen: time.Now()}
+	}
 	s.persistLocked()
 }
 
@@ -301,11 +307,19 @@ func (s *Store) RecentColdSessions(maxAge time.Duration) []Info {
 }
 
 // SetSession creates or updates a session for a specific chat, thread, and user.
+// If a session already exists, only sessionFile, active, and lastSeen are updated;
+// all failure/suspect counters are preserved.
 func (s *Store) SetSession(chatID int64, threadID int, userID int64, sessionFile string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID}
-	s.sessions[key] = &entry{sessionFile: sessionFile, active: true, lastSeen: time.Now()}
+	if e, ok := s.sessions[key]; ok {
+		e.sessionFile = sessionFile
+		e.active = true
+		e.lastSeen = time.Now()
+	} else {
+		s.sessions[key] = &entry{sessionFile: sessionFile, active: true, lastSeen: time.Now()}
+	}
 	s.persistLocked()
 }
 
