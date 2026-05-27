@@ -1022,13 +1022,15 @@ async function handleQuery(req: Request): Promise<void> {
     // Counts events for health diagnostics (logged after 30s of silence).
     let lastEventTime = Date.now();
     const unsubPersistent = liveSession.subscribe((event) => {
-      lastEventTime = Date.now();
       if (terminalEmitted) return;
       const rid = chatSessions.get(cKey)?.currentReqId || reqId;
       const eReq = (obj: OutEvent) => emit({ ...obj, request_id: rid });
 
       switch (event.type) {
+        // lastEventTime is only updated on content-producing events so lifecycle
+        // events (turn_start/end, compactions, retries) don't mask real stalls.
         case "message_update": {
+          lastEventTime = Date.now();
           const update = event.assistantMessageEvent;
           if (update.type === "text_delta") {
             eReq({ event: "assistant", text: update.delta });
@@ -1036,6 +1038,7 @@ async function handleQuery(req: Request): Promise<void> {
           break;
         }
         case "tool_execution_start": {
+          lastEventTime = Date.now();
           redactedLog(
             `tool: ${event.toolName} id=${event.toolCallId.slice(0, 8)} rid=${rid}`,
           );
@@ -1048,6 +1051,7 @@ async function handleQuery(req: Request): Promise<void> {
           break;
         }
         case "tool_execution_end": {
+          lastEventTime = Date.now();
           eReq({
             event: "tool_result",
             content: textFromContent(event.result?.content),
@@ -1123,6 +1127,11 @@ async function handleQuery(req: Request): Promise<void> {
         return;
       }
       const silent = Date.now() - lastEventTime;
+      // Reset steer flags when activity resumes (content events arrived).
+      if (silent < 30_000) {
+        stallSteerSent = false;
+        stallUrgentSent = false;
+      }
       if (silent >= 30_000) {
         redactedLog(
           `streaming stall: no PI SDK events for ${Math.round(silent / 1000)}s (rid=${reqId})`,
@@ -1130,21 +1139,33 @@ async function handleQuery(req: Request): Promise<void> {
       }
       if (silent >= 60_000 && !stallSteerSent) {
         stallSteerSent = true;
-        liveSession.steer(
-          "Continue please. You have been silent for over a minute. " +
-          "If you have finished your current task, present your findings."
-        ).catch((err: unknown) => {
-          redactedLog(`stall steer failed: ${err instanceof Error ? err.message : String(err)}`);
-        });
+        try {
+          liveSession.steer(
+            "Continue please. You have been silent for over a minute. " +
+            "If you have finished your current task, present your findings."
+          ).then(() => {
+            redactedLog(`stall steer sent at ${Math.round(silent / 1000)}s (rid=${reqId})`);
+          }).catch((err: unknown) => {
+            redactedLog(`stall steer failed: ${err instanceof Error ? err.message : String(err)}`);
+          });
+        } catch (err: unknown) {
+          redactedLog(`stall steer failed (sync): ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
       if (silent >= 120_000 && !stallUrgentSent) {
         stallUrgentSent = true;
-        liveSession.steer(
-          "You have been silent for over 2 minutes. " +
-          "Stop your current activity and present a summary of what you have done so far."
-        ).catch((err: unknown) => {
-          redactedLog(`stall urgent steer failed: ${err instanceof Error ? err.message : String(err)}`);
-        });
+        try {
+          liveSession.steer(
+            "You have been silent for over 2 minutes. " +
+            "Stop your current activity and present a summary of what you have done so far."
+          ).then(() => {
+            redactedLog(`stall urgent steer sent at ${Math.round(silent / 1000)}s (rid=${reqId})`);
+          }).catch((err: unknown) => {
+            redactedLog(`stall urgent steer failed: ${err instanceof Error ? err.message : String(err)}`);
+          });
+        } catch (err: unknown) {
+          redactedLog(`stall urgent steer failed (sync): ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
     }, 15_000);
 
