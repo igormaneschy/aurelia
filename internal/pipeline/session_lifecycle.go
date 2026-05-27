@@ -169,9 +169,16 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 		result, err := s.rotateSession(ctx, chatID, threadID, userID, req.Options)
 		if err != nil {
 			log.Printf("lifecycle: rotation failed for chat=%d: %v — falling back to cold resume", chatID, err)
-			s.sendLifecycleNotice(chatID, threadID, lifecycleRotateFailedMessage)
-			if s.sessions != nil {
-				s.sessions.MarkFailure(chatID, threadID, userID, "rotation failed")
+
+			// Show billing-specific message if provider is out of credits.
+			// Skip MarkFailure for billing errors — they're provider issues, not session failures.
+			if isBillingError(err.Error()) {
+				s.sendLifecycleNotice(chatID, threadID, "⚠️ Provider sem créditos. Troque com `/model`.")
+			} else {
+				s.sendLifecycleNotice(chatID, threadID, lifecycleRotateFailedMessage)
+				if s.sessions != nil {
+					s.sessions.MarkFailure(chatID, threadID, userID, "rotation failed")
+				}
 			}
 			req.Options.Continue = false
 			return lifecycleDecisionResult{

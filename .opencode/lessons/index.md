@@ -62,3 +62,7 @@
 ## Change gap-remediation-2026-05-24 (2026-05-24)
 - [anti-pattern] rlock-readonly-only
 - [process] review-false-positive-verify-build
+
+## Change fix/billing-error-handling (2026-05-27)
+- [pattern] billing-error-defensive-layers
+- [process] verify-current-state-before-impl

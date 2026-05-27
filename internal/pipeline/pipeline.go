@@ -1620,8 +1620,9 @@ func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, e
 		log.Printf("bridge: empty result after work chat=%d thread=%d request=%s turns=%d cost=$%.4f in=%d out=%d",
 			chatID, threadID, ev.RequestID, ev.NumTurns, ev.CostUSD, ev.InputTokens, ev.OutputTokens)
 
-		// Mark empty result so next turn does not Continue into a suspect session
-		if s.sessions != nil {
+		// Mark empty result so next turn does not Continue into a suspect session.
+		// Skip billing errors — they're provider issues, not session failures.
+		if s.sessions != nil && !isBillingError(ev.Message) && !isBillingError(ev.Content) {
 			s.sessions.MarkEmptyResult(chatID, threadID, userID)
 		}
 
@@ -2106,6 +2107,17 @@ func (s *Service) continuitySnapshot(ctx context.Context, chatID int64, threadID
 	return body
 }
 
+// isBillingError detects PI SDK billing/credit errors so we can:
+// - surface clear user-facing messages (bridge)
+// - avoid contaminating session suspect counters (pipeline)
+// - suppress misleading lifecycle UX messages (session_lifecycle)
+func isBillingError(message string) bool {
+	lower := strings.ToLower(message)
+	return strings.Contains(lower, "insufficient balance") ||
+		strings.Contains(lower, "insufficient credits") ||
+		(strings.Contains(lower, "401") && strings.Contains(lower, "billing"))
+}
+
 func classifyBridgeErrorOutcome(message string) (string, runlog.RunStatus, string) {
 	lower := strings.ToLower(message)
 	if strings.Contains(lower, "query timeout") {
@@ -2134,8 +2146,9 @@ func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev
 	s.recordPipelineEvent(chatID, threadID, observability.NewErrorEvent("",
 		observability.PhaseRunFailed, reason))
 
-	// Mark failure for timeout/provider errors so lifecycle manager marks session suspect
-	if s.sessions != nil && status == "timed_out" {
+	// Mark failure for timeout/provider errors so lifecycle manager marks session suspect.
+	// Skip billing errors — they're provider issues, not session failures.
+	if s.sessions != nil && status == "timed_out" && !isBillingError(redacted) {
 		s.sessions.MarkFailure(chatID, threadID, uid, reason)
 	}
 

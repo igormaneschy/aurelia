@@ -285751,6 +285751,10 @@ function redactSDKError(msg) {
 function redactedLog(msg) {
   log(redactSDKError(msg));
 }
+function isBillingError(msg) {
+  const lower2 = msg.toLowerCase();
+  return lower2.includes("insufficient balance") || lower2.includes("insufficient credits") || lower2.includes("401") && lower2.includes("billing") || lower2.includes("billing error");
+}
 function redactedCommandExcerpt(command, maxLen) {
   const redacted = redactSDKError(command);
   if (redacted.length <= maxLen) return redacted;
@@ -286585,30 +286589,6 @@ async function handleQuery(req) {
     }
     if (!terminalEmitted && !canceled) {
       const stats = liveSession.getSessionStats();
-      const piError = liveSession.state.errorMessage;
-      const lastMessages = liveSession.state.messages ?? [];
-      let stopReason;
-      let lastErrorMsg;
-      if (lastMessages.length > 0) {
-        const lastMsg = lastMessages[lastMessages.length - 1];
-        if (lastMsg.role === "assistant") {
-          stopReason = lastMsg.stopReason;
-          lastErrorMsg = lastMsg.errorMessage;
-        }
-      }
-      redactedLog(`query done: rid=${reqId} stopReason=${stopReason ?? "none"} piError=${piError ?? "none"} lastErrorMsg=${lastErrorMsg ?? "none"} msgs=${lastMessages.length} tokens=${stats.tokens.input}+${stats.tokens.output} cost=${stats.cost} turns=${turnCount} assistantMsgs=${stats.assistantMessages}`);
-      const hasExplicitError = piError || stopReason === "error" || lastErrorMsg;
-      const zeroTokens = stats.tokens.input === 0 && stats.tokens.output === 0 && stats.cost === 0;
-      const silentFailure = zeroTokens && (turnCount > 0 || stats.assistantMessages > 0);
-      const noWorkDone = zeroTokens && stats.assistantMessages === 0 && turnCount === 0;
-      if (hasExplicitError || silentFailure || noWorkDone) {
-        const errMsg = piError || lastErrorMsg || (stopReason === "error" ? `PI SDK error (stopReason=error, 0 tokens)` : "") || (silentFailure ? `PI SDK completed with 0 tokens \u2014 possible API error (check provider credits/auth)` : "") || (noWorkDone ? `PI SDK completed with no work done` : "") || `PI SDK returned error state`;
-        redactedLog(`query PI SDK error: rid=${reqId} stopReason=${stopReason ?? "unknown"} ${errMsg}`);
-        emitTerminalError(errMsg);
-      }
-    }
-    if (!terminalEmitted && !canceled) {
-      const stats = liveSession.getSessionStats();
       const content = liveSession.getLastAssistantText() ?? "";
       terminalEmitted = true;
       emitReq({
@@ -286635,9 +286615,11 @@ async function handleQuery(req) {
       }
     }
     if (!terminalEmitted) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      redactedLog(`query error: rid=${reqId} ${errMsg}`);
-      emitTerminalError(errMsg);
+      const rawErrMsg = err instanceof Error ? err.message : String(err);
+      const isBilling = isBillingError(rawErrMsg);
+      const userFriendlyMsg = isBilling ? "Provider sem cr\xE9ditos suficientes. Troque o modelo com /model ou adicione cr\xE9ditos." : rawErrMsg;
+      redactedLog(`query error: rid=${reqId} ${rawErrMsg}`);
+      emitTerminalError(userFriendlyMsg);
     }
   } finally {
     if (timeout) clearTimeout(timeout);
