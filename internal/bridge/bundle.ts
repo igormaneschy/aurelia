@@ -190,6 +190,16 @@ function redactedLog(msg: string): void {
   log(redactSDKError(msg));
 }
 
+// Detect billing/credit errors from the PI SDK so we can surface clear messages
+// and avoid contaminating session suspect counters.
+function isBillingError(msg: string): boolean {
+  const lower = msg.toLowerCase();
+  return lower.includes("insufficient balance")
+    || lower.includes("insufficient credits")
+    || (lower.includes("401") && lower.includes("billing"))
+    || lower.includes("billing error");
+}
+
 // Redact then truncate: ensures secrets in the command excerpt are always
 // redacted BEFORE slicing, so a secret straddling the truncation boundary
 // isn't sliced in half and leaked (see redaction-before-truncation.md).
@@ -1294,9 +1304,13 @@ async function handleQuery(req: Request): Promise<void> {
       try { session.dispose(); } catch {}
     }
     if (!terminalEmitted) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      redactedLog(`query error: rid=${reqId} ${errMsg}`);
-      emitTerminalError(errMsg);
+      const rawErrMsg = err instanceof Error ? err.message : String(err);
+      const isBilling = isBillingError(rawErrMsg);
+      const userFriendlyMsg = isBilling
+        ? "Provider sem créditos suficientes. Troque o modelo com /model ou adicione créditos."
+        : rawErrMsg;
+      redactedLog(`query error: rid=${reqId} ${rawErrMsg}`);
+      emitTerminalError(userFriendlyMsg);
     }
   } finally {
     if (timeout) clearTimeout(timeout);

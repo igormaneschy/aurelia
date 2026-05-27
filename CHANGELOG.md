@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.19.8 - 2026-05-27
+
+### Fixed
+- **Session counter preservation**: `SetSession()` and `Set()` now use upsert
+  pattern — suspect counters (emptyResults, processDeaths, suspectCount) and
+  failure metadata are preserved when updating existing sessions. Fixes
+  infinite cold-resume loop where rotation threshold could never be reached.
+- **Streaming stall recovery**: `lastEventTime` now only updates on
+  content-producing events (text deltas, tool execution), not lifecycle events
+  (turn/compaction/retry). Steer flags reset when activity resumes, allowing
+  repeated intervention on subsequent stalls. Added try/catch to prevent
+  bridge crash on synchronous steer throw.
+- **Stall observability**: Steer success now logged; urgent steer
+  differentiated from regular steer in logs.
+
 ## v0.19.7 - 2026-05-26
 
 ### Fixed
