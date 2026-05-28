@@ -14,6 +14,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
+	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/security"
 )
 
@@ -415,6 +416,17 @@ func (bc *Service) loadMemoryContents(chatID int64, threadID int, userID int64, 
 		privateDir := bc.resolver.ConversationProjectMemoryDir(cwd, chatID, threadID)
 		header := fmt.Sprintf("#### Project: %s (private)\n\n", projectName)
 		appendLayer(header, privateDir)
+	}
+
+	// User × Project private — user-specific notes for this project only
+	if bc.userResolver != nil && userID != 0 && hasProject {
+		slug := runtime.ProjectSlug(cwd)
+		upDir := bc.userResolver.ProjectMemoryDir(userID, slug)
+		if upDir != "" {
+			projectName := filepath.Base(cwd)
+			header := fmt.Sprintf("#### %s (user × project)\n\n", projectName)
+			appendLayer(header, upDir)
+		}
 	}
 
 	// Per-user memory — user-specific facts from nudge/dream (v0.11.0+)

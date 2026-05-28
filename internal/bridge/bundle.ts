@@ -1032,13 +1032,15 @@ async function handleQuery(req: Request): Promise<void> {
     // Counts events for health diagnostics (logged after 30s of silence).
     let lastEventTime = Date.now();
     const unsubPersistent = liveSession.subscribe((event) => {
-      lastEventTime = Date.now();
       if (terminalEmitted) return;
       const rid = chatSessions.get(cKey)?.currentReqId || reqId;
       const eReq = (obj: OutEvent) => emit({ ...obj, request_id: rid });
 
       switch (event.type) {
+        // lastEventTime is only updated on content-producing events so lifecycle
+        // events (turn_start/end, compactions, retries) don't mask real stalls.
         case "message_update": {
+          lastEventTime = Date.now();
           const update = event.assistantMessageEvent;
           if (update.type === "text_delta") {
             eReq({ event: "assistant", text: update.delta });
@@ -1046,6 +1048,7 @@ async function handleQuery(req: Request): Promise<void> {
           break;
         }
         case "tool_execution_start": {
+          lastEventTime = Date.now();
           redactedLog(
             `tool: ${event.toolName} id=${event.toolCallId.slice(0, 8)} rid=${rid}`,
           );
@@ -1058,6 +1061,7 @@ async function handleQuery(req: Request): Promise<void> {
           break;
         }
         case "tool_execution_end": {
+          lastEventTime = Date.now();
           eReq({
             event: "tool_result",
             content: textFromContent(event.result?.content),
@@ -1133,6 +1137,11 @@ async function handleQuery(req: Request): Promise<void> {
         return;
       }
       const silent = Date.now() - lastEventTime;
+      // Reset steer flags when activity resumes (content events arrived).
+      if (silent < 30_000) {
+        stallSteerSent = false;
+        stallUrgentSent = false;
+      }
       if (silent >= 30_000) {
         redactedLog(
           `streaming stall: no PI SDK events for ${Math.round(silent / 1000)}s (rid=${reqId})`,
@@ -1140,21 +1149,33 @@ async function handleQuery(req: Request): Promise<void> {
       }
       if (silent >= 60_000 && !stallSteerSent) {
         stallSteerSent = true;
-        liveSession.steer(
-          "Continue please. You have been silent for over a minute. " +
-          "If you have finished your current task, present your findings."
-        ).catch((err: unknown) => {
-          redactedLog(`stall steer failed: ${err instanceof Error ? err.message : String(err)}`);
-        });
+        try {
+          liveSession.steer(
+            "Continue please. You have been silent for over a minute. " +
+            "If you have finished your current task, present your findings."
+          ).then(() => {
+            redactedLog(`stall steer sent at ${Math.round(silent / 1000)}s (rid=${reqId})`);
+          }).catch((err: unknown) => {
+            redactedLog(`stall steer failed: ${err instanceof Error ? err.message : String(err)}`);
+          });
+        } catch (err: unknown) {
+          redactedLog(`stall steer failed (sync): ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
       if (silent >= 120_000 && !stallUrgentSent) {
         stallUrgentSent = true;
-        liveSession.steer(
-          "You have been silent for over 2 minutes. " +
-          "Stop your current activity and present a summary of what you have done so far."
-        ).catch((err: unknown) => {
-          redactedLog(`stall urgent steer failed: ${err instanceof Error ? err.message : String(err)}`);
-        });
+        try {
+          liveSession.steer(
+            "You have been silent for over 2 minutes. " +
+            "Stop your current activity and present a summary of what you have done so far."
+          ).then(() => {
+            redactedLog(`stall urgent steer sent at ${Math.round(silent / 1000)}s (rid=${reqId})`);
+          }).catch((err: unknown) => {
+            redactedLog(`stall urgent steer failed: ${err instanceof Error ? err.message : String(err)}`);
+          });
+        } catch (err: unknown) {
+          redactedLog(`stall urgent steer failed (sync): ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
     }, 15_000);
 
@@ -1274,6 +1295,50 @@ async function handleQuery(req: Request): Promise<void> {
     } finally {
       // Keep subscription alive — session stays for steer/followUp/abort
       // Only clean up if canceled (disposed via cancelActive or canceled guard)
+    }
+
+    // Check for PI SDK error state after prompt completes.
+    // The SDK clears state.errorMessage at run start, so we also check:
+    // 1. state.errorMessage (set during current run failures)
+    // 2. Last message stopReason (set on API errors)
+    // 3. Heuristic: 0 tokens with work claimed = silent failure
+    if (!terminalEmitted && !canceled) {
+      const stats = liveSession.getSessionStats();
+      const piError = liveSession.state.errorMessage;
+      const lastMessages = liveSession.state.messages ?? [];
+      let stopReason: string | undefined;
+      let lastErrorMsg: string | undefined;
+      if (lastMessages.length > 0) {
+        const lastMsg = lastMessages[lastMessages.length - 1];
+        if (lastMsg.role === "assistant") {
+          stopReason = (lastMsg as any).stopReason;
+          lastErrorMsg = (lastMsg as any).errorMessage;
+        }
+      }
+
+      // Diagnostic logging (temporary — remove after confirming detection works)
+      redactedLog(`query done: rid=${reqId} stopReason=${stopReason ?? "none"} piError=${piError ?? "none"} lastErrorMsg=${lastErrorMsg ?? "none"} msgs=${lastMessages.length} tokens=${stats.tokens.input}+${stats.tokens.output} cost=${stats.cost} turns=${turnCount} assistantMsgs=${stats.assistantMessages}`);
+
+      const hasExplicitError = piError || stopReason === "error" || lastErrorMsg;
+      const zeroTokens = stats.tokens.input === 0
+        && stats.tokens.output === 0
+        && stats.cost === 0;
+      const silentFailure = zeroTokens
+        && (turnCount > 0 || stats.assistantMessages > 0);
+      const noWorkDone = zeroTokens
+        && stats.assistantMessages === 0
+        && turnCount === 0;
+
+      if (hasExplicitError || silentFailure || noWorkDone) {
+        const errMsg = piError
+          || lastErrorMsg
+          || (stopReason === "error" ? `PI SDK error (stopReason=error, 0 tokens)` : '')
+          || (silentFailure ? `PI SDK completed with 0 tokens — possible API error (check provider credits/auth)` : '')
+          || (noWorkDone ? `PI SDK completed with no work done` : '')
+          || `PI SDK returned error state`;
+        redactedLog(`query PI SDK error: rid=${reqId} stopReason=${stopReason ?? "unknown"} ${errMsg}`);
+        emitTerminalError(errMsg);
+      }
     }
 
     if (!terminalEmitted && !canceled) {
