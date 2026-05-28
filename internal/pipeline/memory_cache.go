@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/users"
 )
 
@@ -166,6 +167,14 @@ func (bc *Service) InvalidateMemoryDirs(chatID int64, threadID int, userID int64
 		}
 		if teamDir := bc.resolver.ProjectTeamMemoryDir(cwd); teamDir != "" {
 			bc.memoryCache.invalidate(teamDir)
+		}
+		// User × Project private memory
+		if bc.userResolver != nil && userID != 0 {
+			slug := runtime.ProjectSlug(cwd)
+			upDir := bc.userResolver.ProjectMemoryDir(userID, slug)
+			if upDir != "" {
+				bc.memoryCache.invalidate(upDir)
+			}
 		}
 	}
 }
