@@ -10,12 +10,13 @@ LOG_DIR       := $(HOME)/.aurelia/logs
 STDERR_LOG    := $(LOG_DIR)/aurelia.stderr.log
 STDOUT_LOG    := $(LOG_DIR)/aurelia.stdout.log
 
-.PHONY: help build test vet lint sec check bridge install install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
+.PHONY: help build test vet lint sec cover check bridge install install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
 
 help:
 	@echo "Common targets:"
 	@echo "  make build            Compile the binary to $(BINARY)"
 	@echo "  make test             Run go test ./... -short"
+	@echo "  make cover            Run go test with coverage profile"
 	@echo "  make vet              Run go vet ./..."
 	@echo "  make lint             Run golangci-lint"
 	@echo "  make sec              Run gosec and govulncheck"
@@ -55,6 +56,10 @@ install:
 
 test:
 	go test ./... -short -count=1
+
+cover:
+	go test -coverprofile=coverage.out ./...
+	go tool cover -func=coverage.out | tail -1
 
 vet:
 	go vet ./...
