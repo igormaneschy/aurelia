@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.20.0 - 2026-05-28
+
+### Added
+- **User × Project memory isolation**: `loadMemoryContents` now loads a
+  user-scoped project memory layer between conversation project memory and
+  user personal memory. Two users in the same project no longer share project
+  memory. Cache invalidation covers the new directory.
+  Closes Sprint E: user-scoped project memory is now wired end-to-end.
+
+### Changed
+- **Pipeline decomposition**: `pipeline.go` split into 4 cohesive files
+  (`tool_monitoring.go`, `concurrent_message.go`, `redaction.go`,
+  `turn_lifecycle.go`), reducing the file from 2586 to 1706 lines.
+- **Bridge bundle sync**: `internal/bridge/bundle.ts` and compiled bundles
+  synced with stall-steer fix and enhanced billing error detection.
+
+### Fixed
+- **Bridge billing error detection**: Added zero-token heuristic and
+  diagnostic logging to detect silent PI SDK API errors (e.g., expired
+  credits, auth failures) that previously returned empty unhelpful results.
+
 ## v0.19.8 - 2026-05-27
 
 ### Fixed
