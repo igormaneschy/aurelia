@@ -68,6 +68,30 @@ func (r *BridgeCronRuntime) SetUserResolver(ur interface{ UserMdPath(userID int6
 	r.userResolver = ur
 }
 
+// extractCwdFromPrompt parses "Set cwd to <path>" from the prompt text.
+// Returns the path if found, empty string otherwise.
+// Matches format: "Set cwd to /some/path. Run: ..." or "Set cwd to /some/path\n..."
+func extractCwdFromPrompt(prompt string) string {
+	const prefix = "Set cwd to "
+	idx := strings.Index(prompt, prefix)
+	if idx < 0 {
+		return ""
+	}
+	rest := prompt[idx+len(prefix):]
+
+	// Path ends at ". Run:" delimiter, newline, or end of string.
+	var end int
+	if runIdx := strings.Index(rest, ". Run:"); runIdx >= 0 {
+		end = runIdx
+	} else if nlIdx := strings.IndexAny(rest, "\n\r"); nlIdx >= 0 {
+		end = nlIdx
+	} else {
+		end = len(rest)
+	}
+
+	return strings.TrimSpace(rest[:end])
+}
+
 // ExecuteJob builds the system prompt with persona, agent, scheduling
 // instructions and global memory, then executes via Bridge.
 func (r *BridgeCronRuntime) ExecuteJob(ctx context.Context, job CronJob) (*ExecutionResult, error) {
@@ -135,6 +159,18 @@ func (r *BridgeCronRuntime) ExecuteJob(ctx context.Context, job CronJob) (*Execu
 		cwd = agent.Cwd
 	}
 
+	// When no agent provides a cwd, try to extract "Set cwd to <path>" from the
+	// prompt itself. This allows cron instructions like "Set cwd to /project. Run: script"
+	// to actually give the LLM the working directory and execution tools it needs.
+	extractedCwd := false
+	if cwd == "" {
+		if extracted := extractCwdFromPrompt(job.Prompt); extracted != "" {
+			cwd = extracted
+			opts.Cwd = extracted
+			extractedCwd = true
+		}
+	}
+
 	// Determine effective capability profile for cron execution.
 	// Without an explicit agent/cwd, default to observe (no tools) or read_only
 	// to prevent arbitrary tool access. Only allow execute_safe when the agent
@@ -145,9 +181,15 @@ func (r *BridgeCronRuntime) ExecuteJob(ctx context.Context, job CronJob) (*Execu
 		profileStr = agent.CapabilityProfile
 		allowedTools = agent.AllowedTools
 	} else if cwd != "" {
-		// Has a working directory but no explicit profile — safe read-only.
-		profileStr = string(security.ProfileReadOnly)
-		allowedTools = security.ProfileTools(security.ProfileReadOnly)
+		if extractedCwd {
+			// Cwd was extracted from prompt — the job implies execution ("Run: script").
+			// Elevate to execute_safe so the LLM has Bash/Read/Write tools.
+			profileStr = string(security.ProfileExecuteSafe)
+		} else {
+			// Has a working directory but no explicit profile — safe read-only.
+			profileStr = string(security.ProfileReadOnly)
+		}
+		allowedTools = security.ProfileTools(security.CapabilityProfile(profileStr))
 	} else {
 		// No agent, no cwd — observe only (no tools at all).
 		profileStr = string(security.ProfileObserve)

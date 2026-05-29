@@ -200,6 +200,111 @@ func TestBridgeCronRuntime_NoAgent(t *testing.T) {
 	}
 }
 
+func TestExtractCwdFromPrompt(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		prompt string
+		want   string
+	}{
+		{
+			name:   "standard format with . Run:",
+			prompt: "Set cwd to /Volumes/Dados/Workspaces/AutoTradersOMQS. Run: python script.py",
+			want:   "/Volumes/Dados/Workspaces/AutoTradersOMQS",
+		},
+		{
+			name:   "with newline after path",
+			prompt: "Set cwd to /home/project\nRun the analysis script",
+			want:   "/home/project",
+		},
+		{
+			name:   "path at end of string",
+			prompt: "Set cwd to /tmp/test",
+			want:   "/tmp/test",
+		},
+		{
+			name:   "no Set cwd to prefix",
+			prompt: "Run: python script.py",
+			want:   "",
+		},
+		{
+			name:   "empty prompt",
+			prompt: "",
+			want:   "",
+		},
+		{
+			name:   "path with trailing space",
+			prompt: "Set cwd to /some/path. Run: test",
+			want:   "/some/path",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractCwdFromPrompt(tt.prompt)
+			if got != tt.want {
+				t.Fatalf("extractCwdFromPrompt() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestBridgeCronRuntime_NoAgentWithCwdInPrompt(t *testing.T) {
+	t.Parallel()
+
+	executor := &fakeBridgeExecutor{
+		result: &bridge.Event{Type: "result", Content: "executed with cwd from prompt"},
+	}
+	registry := &fakeRegistry{agents: map[string]*agents.Agent{}}
+	persona := &fakePersona{prompt: "base"}
+
+	runtime := NewBridgeCronRuntime(executor, registry, persona, "/tmp/test-memory", "")
+
+	job := CronJob{
+		ID:     "job-cwd",
+		Prompt: "Set cwd to /Volumes/Dados/Workspaces/AutoTradersOMQS. Run: python funnel_analysis.py",
+	}
+
+	result, err := runtime.ExecuteJob(context.Background(), job)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Output != "executed with cwd from prompt" {
+		t.Fatalf("output = %q", result.Output)
+	}
+
+	req := executor.lastReq
+
+	// Cwd must be set from the prompt
+	if req.Options.Security.Cwd != "/Volumes/Dados/Workspaces/AutoTradersOMQS" {
+		t.Fatalf("Security.Cwd = %q, want %q", req.Options.Security.Cwd, "/Volumes/Dados/Workspaces/AutoTradersOMQS")
+	}
+
+	// Profile must be execute_safe (not observe) so the LLM has Bash/Read/Write
+	if req.Options.Security.Profile != "execute_safe" {
+		t.Fatalf("Security.Profile = %q, want %q", req.Options.Security.Profile, "execute_safe")
+	}
+
+	// Verify execute_safe tools are present
+	hasBash := false
+	hasRead := false
+	for _, t := range req.Options.AllowedTools {
+		if t == "Bash" {
+			hasBash = true
+		}
+		if t == "Read" {
+			hasRead = true
+		}
+	}
+	if !hasBash {
+		t.Fatal("AllowedTools must include Bash for cwd-from-prompt cron")
+	}
+	if !hasRead {
+		t.Fatal("AllowedTools must include Read for cwd-from-prompt cron")
+	}
+}
+
 func TestBridgeCronRuntime_BridgeError(t *testing.T) {
 	t.Parallel()
 

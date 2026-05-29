@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.20.1 - 2026-05-29
+
+### Fixed
+- **Cron jobs without agent**: `BridgeCronRuntime` now extracts
+  `Set cwd to <path>` from the cron prompt and elevates the capability
+  profile to `execute_safe`, giving the LLM Bash/Read/Write tools.
+  Previously, cron jobs without an explicit `AgentName` would run in
+  `observe` mode (only Glob + LS) and fail to execute scripts.
+
 ## v0.20.0 - 2026-05-28
 
 ### Added
