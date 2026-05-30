@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -221,7 +222,15 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 		}
 
 		req.Options.Resume = result.NewSessionFile
-		req.Options.Continue = true // continue from compacted session, avoid cold_resume cascade
+		// Validate the new session file exists before setting Continue=true.
+		// A missing/corrupt file with Continue=true would cause the PI SDK
+		// to fail silently. Fall back to cold resume in that case.
+		if fi, err := os.Stat(result.NewSessionFile); err == nil && fi.Size() > 0 {
+			req.Options.Continue = true
+		} else {
+			log.Printf("lifecycle: rotated session file missing or empty (%s), falling back to cold resume", result.NewSessionFile)
+			req.Options.Continue = false
+		}
 		return lifecycleDecisionResult{
 			Decision:    dec,
 			ModifiedReq: req,

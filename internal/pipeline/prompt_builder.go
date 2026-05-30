@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -588,25 +589,28 @@ func (bc *Service) loadMemoryDirCompact(dir string) string {
 }
 
 // dedupMemoryIndex removes duplicate entries from a MEMORY.md index.
-// Entries are identified by the filename in parentheses: "- [Title](file.md)".
-// Only the first occurrence of each filename is kept, preserving order.
-// Lines that don't match the markdown link pattern are passed through unchanged.
+// Entries are identified by the first markdown link's filename:
+// "- [Title](file.md)". Only the first occurrence of each filename is kept,
+// preserving insertion order. Lines without a markdown link pass through unchanged.
+//
+// Uses regexp for robust extraction: matches `](<filename>)` where filename
+// contains no closing paren (standard MEMORY.md entries don't have parens in
+// filenames). Lines with multiple links only use the first for dedup — the
+// MEMORY.md format is one entry per line, so this is intentional.
+var dedupMemLinkRe = regexp.MustCompile(`\]\(([^)]+)\)`)
+
 func dedupMemoryIndex(content string) string {
 	lines := strings.Split(content, "\n")
 	seen := make(map[string]bool, len(lines))
 	var result []string
 	for _, line := range lines {
-		// Extract filename from markdown link: "- [Title](file.md)"
-		start := strings.Index(line, "](")
-		if start >= 0 {
-			end := strings.Index(line[start:], ")")
-			if end >= 0 {
-				filename := line[start+2 : start+end]
-				if seen[filename] {
-					continue // skip duplicate
-				}
-				seen[filename] = true
+		matches := dedupMemLinkRe.FindStringSubmatch(line)
+		if len(matches) >= 2 {
+			filename := matches[1]
+			if seen[filename] {
+				continue // skip duplicate entry
 			}
+			seen[filename] = true
 		}
 		result = append(result, line)
 	}

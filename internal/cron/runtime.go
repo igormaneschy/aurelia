@@ -70,7 +70,11 @@ func (r *BridgeCronRuntime) SetUserResolver(ur interface{ UserMdPath(userID int6
 
 // extractCwdFromPrompt parses "Set cwd to <path>" from the prompt text.
 // Returns the path if found, empty string otherwise.
-// Matches format: "Set cwd to /some/path. Run: ..." or "Set cwd to /some/path\n..."
+// Matches variants:
+//   - "Set cwd to /some/path. Run: ..."
+//   - "Set cwd to /some/path. Run both: ..."
+//   - "Set cwd to /some/path. Run these three sequentially: ..."
+//   - "Set cwd to /some/path\n..."
 func extractCwdFromPrompt(prompt string) string {
 	const prefix = "Set cwd to "
 	idx := strings.Index(prompt, prefix)
@@ -79,9 +83,10 @@ func extractCwdFromPrompt(prompt string) string {
 	}
 	rest := prompt[idx+len(prefix):]
 
-	// Path ends at ". Run:" delimiter, newline, or end of string.
+	// Path ends at any ". Run" variant, newline, or end of string.
+	// This covers ". Run:", ". Run both:", ". Run these three sequentially:", etc.
 	var end int
-	if runIdx := strings.Index(rest, ". Run:"); runIdx >= 0 {
+	if runIdx := strings.Index(rest, ". Run"); runIdx >= 0 {
 		end = runIdx
 	} else if nlIdx := strings.IndexAny(rest, "\n\r"); nlIdx >= 0 {
 		end = nlIdx
@@ -162,12 +167,22 @@ func (r *BridgeCronRuntime) ExecuteJob(ctx context.Context, job CronJob) (*Execu
 	// When no agent provides a cwd, try to extract "Set cwd to <path>" from the
 	// prompt itself. This allows cron instructions like "Set cwd to /project. Run: script"
 	// to actually give the LLM the working directory and execution tools it needs.
+	// The extracted path is validated (must exist, be a directory, be absolute) before
+	// being trusted; invalid paths are discarded and the job falls back to observe mode.
 	extractedCwd := false
 	if cwd == "" {
 		if extracted := extractCwdFromPrompt(job.Prompt); extracted != "" {
-			cwd = extracted
-			opts.Cwd = extracted
-			extractedCwd = true
+			if abs, err := filepath.Abs(extracted); err == nil {
+				if info, statErr := os.Stat(abs); statErr == nil && info.IsDir() {
+					cwd = abs
+					opts.Cwd = abs
+					extractedCwd = true
+				} else {
+					log.Printf("cron: cwd %q extracted from prompt but invalid (stat: %v), ignoring", extracted, statErr)
+				}
+			} else {
+				log.Printf("cron: cwd %q extracted from prompt but not absolute, ignoring", extracted)
+			}
 		}
 	}
 
