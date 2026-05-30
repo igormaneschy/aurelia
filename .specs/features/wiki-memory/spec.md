@@ -23,7 +23,7 @@ opencode       ───┘
 
 - [ ] Definir Wiki como fonte canônica de memória textual do Aurelia
 - [ ] Expor operações MCP para query/save/ingest/lint/status sem acoplar ao Telegram
-- [ ] Preservar escopos fortes: user, user×project private, project team, topic e procedural skills
+- [ ] Preservar escopos fortes: user_global, topic, cwd_overlay, project_team e procedural skills
 - [ ] Permitir uso transversal por Aurelia, PI direto, PI Code/opencode e futuros agentes MCP
 - [ ] Manter markdown como formato auditável/human-readable
 - [ ] Adicionar metadata/search incremental sem substituir markdown como fonte humana
@@ -36,7 +36,7 @@ opencode       ───┘
 - Substituir o PI SDK ou o pipeline do Aurelia
 - Sincronização cloud ou multi-device no MVP
 - Vector DB externo obrigatório
-- Escrita livre sem `user_id`/`scope`/`project_slug` validáveis
+- Escrita livre sem `user_id`/`scope`/`chat_id+thread_id` (para cwd_overlay) ou `project_slug` (para project_team) validáveis
 - Compartilhar memória privada entre usuários
 - Criar Auto-Skills automaticamente sem confirmação
 - UI web completa para edição de Wiki
@@ -68,37 +68,41 @@ O MCP pode ser chamado por vários clientes, mas cada operação deve resolver e
 
 ## Wiki Layer Model
 
+> **Alinhado com project-memory spec (Sprint E, reformulação 2026-05-30):** o modelo `(user_id, project_slug)` foi substituído por `(user_id, context_key)`. A memória privada de utilizador em contexto de trabalho vive em `cwd_overlay` (escopada por tópico), não em `users/<id>/projects/<slug>/memory/`.
+
 ```text
 ~/.aurelia/
 ├── memory/
 │   ├── personas/                     # deployment global: IDENTITY/SOUL
 │   └── policy/                       # deployment policies, future
 ├── users/<user_id>/
-│   ├── memory/                       # user global
-│   ├── projects/<project_slug>/memory/ # user × project private
+│   ├── memory/                       # user global (cross-context)
 │   └── skills/<slug>/SKILL.md        # procedural memory, user private
 ├── projects/
-│   └── <project_slug>/team/          # project team Wiki
+│   └── <project_slug>/team/          # project team Wiki (compartilhado)
 └── topics/
-    └── chat_<chat_id>/thread_<thread_id>/ # topic Wiki
+    └── chat_<chat_id>/thread_<thread_id>/
+        ├── MEMORY.md                 # topic Wiki
+        └── cwd_overlay/              # user × cwd (só quando /cwd declarado)
+            └── MEMORY.md
 ```
 
 The canonical paths match the project-memory spec:
 
 | Scope | Canonical Path |
 |---|---|
-| Project team | `~/.aurelia/projects/<slug>/team/` |
-| Topic memory | `~/.aurelia/topics/chat_<id>/thread_<id>/` |
 | User global | `~/.aurelia/users/<id>/memory/` |
-| User project private | `~/.aurelia/users/<id>/projects/<slug>/memory/` |
+| Topic memory | `~/.aurelia/topics/chat_<id>/thread_<id>/` |
+| CWD overlay | `~/.aurelia/topics/chat_<id>/thread_<id>/cwd_overlay/` |
+| Project team | `~/.aurelia/projects/<slug>/team/` |
 | Procedural skills | `~/.aurelia/users/<id>/skills/<slug>/SKILL.md` |
 
 | Scope | Purpose | Examples | Default visibility |
 |---|---|---|---|
-| `user` | Personal cross-project memory | preferences, personal facts | private |
-| `user_project` | Personal project memory | work log, TODOs, private decisions | private |
-| `project_team` | Shared project knowledge | stack, architecture, conventions | shared among authorized users |
+| `user_global` | Personal cross-context memory | preferences, personal facts | private |
 | `topic` | Conversation/topic context | meeting decisions, temporary context | shared within conversation |
+| `cwd_overlay` | User × cwd work context (per-topic) | work log, "today I implemented X", private decisions | private (scoped by `chat_id + thread_id`) |
+| `project_team` | Shared project knowledge | stack, architecture, conventions | shared among authorized users |
 | `procedural` | Reusable workflows | Auto-Skills | private unless exported later |
 
 ---
@@ -115,8 +119,7 @@ Search scoped memory.
 {
   "query": "why did we reject Redis?",
   "user_id": "12345",
-  "project_slug": "-Users-igor-aurelia",
-  "scopes": ["user", "user_project", "project_team", "topic"],
+  "scopes": ["user_global", "cwd_overlay", "project_team", "topic"],
   "chat_id": 123,
   "thread_id": 456,
   "limit": 8
@@ -133,14 +136,17 @@ Save durable facts or decisions to a validated scope.
 {
   "user_id": "12345",
   "scope": "project_team",
-  "project_slug": "-Users-igor-aurelia",
   "title": "Memory architecture decision",
   "facts": [
     "Wiki should be transversal in access but scoped in storage."
   ],
+  "chat_id": 123,
+  "thread_id": 456,
   "source": "opencode"
 }
 ```
+
+> **Nota:** `cwd_overlay` usa `chat_id + thread_id` para resolver o path (não `project_slug`). `project_team` continua a exigir `project_slug` resolvível (via binding ou explícito).
 
 ### `wiki_ingest`
 
@@ -166,7 +172,7 @@ Return active layers, file counts, latest receipts, search index health and last
 
 1. WHEN uma operação Wiki chega via MCP THEN ela SHALL declarar `user_id` ou usar um contexto autenticado equivalente.
 2. WHEN `scope=user` THEN leitura/escrita SHALL usar apenas `~/.aurelia/users/<user_id>/memory/`.
-3. WHEN `scope=user_project` THEN leitura/escrita SHALL exigir `user_id` e `project_slug` validável.
+3. WHEN `scope=cwd_overlay` THEN leitura/escrita SHALL exigir `user_id`, `chat_id` e `thread_id` para resolver o path do tópico com `/cwd` activo.
 4. WHEN `scope=project_team` THEN escrita SHALL exigir classificação explícita como compartilhável.
 5. WHEN dados pessoais ou ambíguos aparecem em escrita team THEN operação SHALL recusar ou redirecionar para private.
 6. WHEN escopo não pode ser resolvido THEN operação SHALL fail-closed.

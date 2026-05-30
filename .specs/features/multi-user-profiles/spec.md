@@ -29,7 +29,7 @@ Esta spec resolve **isolamento interno de dados entre os users já autorizados p
 ## Goals — status auditado
 
 - [x] Memória pessoal base (fatos, `USER.md`, dream output) isolada por `user_id`.
-- [ ] Project memory privada por `(user_id, project_slug)` — movida para Sprint E.
+- [ ] ~~Project memory privada por `(user_id, project_slug)`~~ — **reformulada para `cwd_overlay` por tópico** (Sprint E, `.specs/features/project-memory/`). A memória privada de utilizador em contexto de trabalho vive em `topics/.../cwd_overlay/`, escopada por `(chat_id, thread_id)`, não por `(user_id, project_slug)`.
 - [x] IDENTITY.md e SOUL.md continuam globais — Aurelia é uma só.
 - [x] Cron jobs têm `owner_user_id` normalizado; user só vê/cancela seus próprios.
 
@@ -171,19 +171,9 @@ Esta spec resolve **isolamento interno de dados entre os users já autorizados p
 
 ---
 
-### P1: Project memory por user × projeto ⭐ MVP
+### P1: Project memory por user × projeto ⭐ MVP — 🟡 Movida para Sprint E
 
-**User Story**: Como user trabalhando num repo X, minhas anotações de projeto SHALL ser minhas — outro user no mesmo repo tem as dele.
-
-**Why P1**: Coerente com isolamento de memória pessoal.
-
-**Acceptance Criteria**:
-
-1. WHEN project memory é gravada pra (user_id, project_slug) THEN SHALL ir pra `~/.aurelia/users/<user_id>/projects/<project_slug>/`
-2. WHEN o mesmo user volta ao mesmo projeto THEN SHALL recuperar suas anotações
-3. WHEN user diferente trabalha no mesmo projeto THEN SHALL ter sua própria memória de projeto independente
-
-**Independent Test**: User A em `/Users/igor/foo` grava memória "todo: refatorar X". User B em `/Users/igor/foo` lista memória de projeto — não vê.
+> **Reformulada em 2026-05-30:** Esta user story foi movida para Sprint E (`.specs/features/project-memory/`). O modelo original `(user_id, project_slug)` com path `users/<id>/projects/<slug>/memory/` foi substituído por `cwd_overlay` escopado por `(chat_id, thread_id)`. A memória privada de utilizador em contexto de trabalho vive em `topics/.../cwd_overlay/`, que é criada apenas quando `/cwd` é declarado no tópico. Ver `.specs/features/project-memory/spec.md` para a spec completa.
 
 ---
 
@@ -218,7 +208,7 @@ Esta spec resolve **isolamento interno de dados entre os users já autorizados p
 1. WHEN comando é rodado THEN SHALL mover `~/.aurelia/memory/<arquivos pessoais>` pra `~/.aurelia/users/<target_id>/memory/`
 2. WHEN comando é rodado THEN `~/.aurelia/memory/personas/IDENTITY.md` e `SOUL.md` SHALL permanecer onde estão (são globais)
 3. WHEN comando é rodado THEN `~/.aurelia/memory/personas/USER.md` SHALL mover pra `~/.aurelia/users/<target_id>/personas/USER.md`
-4. WHEN comando é rodado THEN `~/.aurelia/projects/` SHALL mover pra `~/.aurelia/users/<target_id>/projects/`
+4. ~~WHEN comando é rodado THEN `~/.aurelia/projects/` SHALL mover pra `~/.aurelia/users/<target_id>/projects/`~~ — **REMOVIDO (2026-05-30):** project team memory permanece em `~/.aurelia/projects/<slug>/team/` (compartilhado). Memória privada contextualizada vai para `topics/.../cwd_overlay/` (ver Sprint E). O passo de migração `projects/` → `users/<id>/projects/` não se aplica ao novo modelo.
 5. WHEN comando é rodado THEN cron_jobs com owner ausente/vazio/legado SHALL receber `<target_id>`
 6. WHEN `--user-id <id>` é passado THEN `<target_id> = id`; senão SHALL usar `default_owner_user_id` se existir, ou o primeiro da `TelegramAllowedUserIDs`
 7. WHEN `--dry-run` é passado THEN SHALL imprimir o que faria sem alterar nada
