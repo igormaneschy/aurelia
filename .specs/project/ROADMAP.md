@@ -19,7 +19,7 @@ Estas features já foram implementadas ou têm validação registrada. Elas são
 
 ## Current Evolution Track
 
-Aurelia continua sendo um **personal agent persistente via Telegram**, com PI como motor de execução e Go como camada de produto: Telegram UX, identidade/persona, memória, scheduling, project binding, governança e orquestração.
+Aurelia continua sendo um **personal agent persistente via Telegram**, com PI como motor de execução e Go como camada de produto: Telegram UX, identidade/persona, memória, scheduling, project binding, governância e orquestração.
 
 O conceito central está fechado assim:
 
@@ -49,7 +49,7 @@ A próxima onda foca em tornar o sistema seguro e estável para trabalho autôno
 2. criar base de observabilidade operacional antes de ampliar execução autônoma;
 3. usar a base de User Isolation já auditada para fechar o ciclo de execução orquestrada;
 4. planejamento permanece conversacional, sem Plan Mode explícito (removido em 2026-05-24);
-5. escopar memória por usuário/projeto com semântica estável;
+5. escopar memória por utilizador e contexto conversacional — **topic/thread como eixo primário, `/cwd` como overlay declarativo opt-in** (reformulado em 2026-05-30; ver Sprint 5);
 6. promover a memória para uma Wiki transversal via MCP;
 7. só então ativar nudge profundo, agent comms e auto-skills.
 
@@ -126,7 +126,7 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 
 **Fora deste sprint:**
 
-- Memória privada de projeto por `(user_id, project_slug)` continua no Sprint E (`User-Scoped Project Memory`). Hoje há memória pessoal por usuário, mas `runtime.ProjectMemoryDir/ConversationProjectMemoryDir` ainda é principalmente cwd/chat/thread-scoped.
+- Memória escopada por contexto conversacional movida para Sprint E (`Context-Scoped Memory`). Hoje há memória pessoal por usuário, mas `runtime.TopicMemoryDir/CwdOverlayDir` ainda não existem.
 - O `continuity.Store` permanece `ConversationKey{chat_id, thread_id}` por semântica atual de conversa/tópico. Os patches usam o `session_file` user-scoped correto; continuidade privada por usuário fica como decisão futura antes de Nudge profundo, se necessário.
 
 **Por que era P0:** sem `user_id` propagado integralmente, Auto-Skills, memória e nudge poderiam vazar estado entre usuários autorizados. O caminho crítico de sessão/runtime está fechado.
@@ -197,32 +197,47 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 
 ---
 
-## 5. User-Scoped Project Memory
+## 5. Context-Scoped Memory
 
-**Spec:** `.specs/features/project-memory/`
-**Status:** 🟡 Parcial (70% — layers existem, mas não são isoladas por usuário)
+**Spec:** `.specs/features/project-memory/`  
+**Status:** 🟡 Parcial (70% — camadas existem, paths não são per-user; modelo reformulado em 2026-05-30)  
 **Depende de:** User Isolation (para paths `users/<id>/`)
 
-**Problem:** a versão atual de memória por projeto é global por `cwd`. Com User Isolation, precisa ser escopada por `(user_id, project_slug)`. As camadas já existem (global, topic, project-private, team), mas os paths não são per-user.
+> **Decisão de design (2026-05-30):** O modelo original `(user_id, project_slug)` foi substituido por `(user_id, context_key)`. O `project_slug` como eixo central da memória impunha uma estrutura de "projeto" que o Aurelia deliberadamente não quer impor — pela mesma razão que o Plan Mode foi removido. A memória deve emergir do contexto conversacional, não de uma entidade formal.
+
+**Problem:** a memória atual é global por `cwd` com detecção automática via `scanForProject`. Com User Isolation, precisa ser escopada por utilizador — mas o eixo correto é o **topic/thread** como escopamento primário natural, com `/cwd` como overlay declarativo e opt-in quando o utilizador quer ancorar a sessão a um diretório de trabalho.
+
+**Modelo de camadas:**
+
+```text
+Prompt assembly por TurnContext:
+  1. Aurelia persona (IDENTITY + SOUL)     — sempre
+  2. User global                           — sempre
+  3. Topic memory                          — sempre
+  4. CWD overlay (se /cwd declarado)       — opt-in, por tópico
+  5. Project team (se /cwd declarado)      — opt-in, compartilhado
+```
 
 **Scope:**
 
-- user global memory em `~/.aurelia/users/<id>/memory/`;
-- user × project private memory em `~/.aurelia/users/<id>/projects/<slug>/memory/`;
-- project team memory em `~/.aurelia/projects/<slug>/team/` (✅ canonical desde D0);
+- `runtime.PathResolver` com métodos `UserMemoryDir`, `TopicMemoryDir`, `TopicCwdOverlayDir`;
+- **remover `scanForProject`** e qualquer travessia automática do filesystem;
+- `/cwd` como overlay declarativo persistido por `ConversationKey{chat_id, thread_id}`;
 - topic memory em `~/.aurelia/topics/chat_<id>/thread_<id>/` (✅ canonical desde D0);
+- cwd overlay em `~/.aurelia/topics/chat_<id>/thread_<id>/cwd_overlay/`;
+- project team memory em `~/.aurelia/projects/<slug>/team/` (✅ canonical desde D0) — opcional, só quando `/cwd` ativo;
 - prompt assembly com camadas corretas por `TurnContext`;
-- runtime.PathResolver com métodos `User*`.
+- dream/nudge com targets escopados por camada.
 
-**Por que antes da Wiki:** a Wiki MCP vai expor as mesmas camadas; precisa estar correta primeiro.
+**Por que antes da Wiki:** a Wiki MCP vai expor as mesmas camadas; precisa estar correta e sem heurísticas primeiro.
 
 ---
 
 ## 6. Wiki Memory Gateway
 
-**Spec:** `.specs/features/wiki-memory/`
-**Status:** 🔴 Spec arquitetural apenas
-**Depende de:** User Isolation + Project Memory
+**Spec:** `.specs/features/wiki-memory/`  
+**Status:** 🔴 Spec arquitetural apenas  
+**Depende de:** User Isolation + Context-Scoped Memory
 
 **Problem:** a memória atual é útil dentro do Aurelia, mas não é transversal para outros pontos de entrada como PI/PI Code/opencode.
 
@@ -231,7 +246,7 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 - Wiki como LLM Wiki local-first do Aurelia;
 - MCP gateway para query/save/ingest/lint/status;
 - markdown como fonte auditável, SQLite/FTS como índice opcional;
-- escopos fortes: user, user×project private, project team, topic, procedural;
+- escopos alinhados com Context-Scoped Memory: `user_global`, `topic`, `cwd_overlay`, `project_team`, `procedural`;
 - query-before-inject para reduzir prompt bloat;
 - receipts/audit para escritas externas.
 
@@ -241,26 +256,26 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 
 ## 7. Learning Nudge — Scoped Memory Review
 
-**Spec:** `.specs/features/learning-nudge/`
-**Status:** 🔴 Draft revisado
-**Depende de:** User Isolation + Project Memory + Security Guard-Rails + Wiki Memory Gateway
+**Spec:** `.specs/features/learning-nudge/`  
+**Status:** 🔴 Draft revisado  
+**Depende de:** User Isolation + Context-Scoped Memory + Security Guard-Rails + Wiki Memory Gateway
 
-**Problem:** extração por-turn/snippet perde contexto; nudge profundo precisa ser escopado para não vazar entre usuários/projetos e deve escrever através da Wiki.
+**Problem:** extração por-turn/snippet perde contexto; nudge profundo precisa ser escopado para não vazar entre usuários/contextos e deve escrever através da Wiki.
 
 **Scope:**
 
 - transcript recorder por `SessionKey`;
 - redaction antes de chamar PI;
 - `CapabilityProfile=edit_project`, sem `Bash`;
-- escrita nas camadas de memória corretas via Wiki;
+- escrita nas camadas de memória corretas via Wiki (topic, cwd_overlay ou user_global);
 - sugestões de Auto-Skills, sem criar skills automaticamente.
 
 ---
 
 ## 8. Agent Comms
 
-**Spec:** `.specs/features/agent-comms/`
-**Status:** 🔴 Draft
+**Spec:** `.specs/features/agent-comms/`  
+**Status:** 🔴 Draft  
 **Depende de:** Orchestration Cycle + Security Guard-Rails
 
 **Problem:** workers especializados ganham qualidade quando podem consultar peers, mas precisa ser local, auditado e com limites.
@@ -280,8 +295,8 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 
 ## 9. Auto-Skills
 
-**Spec:** `.specs/features/auto-skills/`
-**Status:** 🔴 Draft revisado
+**Spec:** `.specs/features/auto-skills/`  
+**Status:** 🔴 Draft revisado  
 **Depende de:** User Isolation + Security Guard-Rails; ganha valor com as features anteriores
 
 **Problem:** tarefas bem-sucedidas viram conhecimento perdido; Auto-Skills transforma procedimentos úteis em skills privadas, PI-compatible (`SKILL.md`), gerenciadas pelo Aurelia.
@@ -302,9 +317,9 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 
 ## 10. TUI (Terminal User Interface)
 
-**Spec:** `docs/aurelia-tui-roadmap.md`
-**Status:** 🔴 Proposta
-**Depende de:** User-Scoped Project Memory (Sprint E) + Wiki Memory Gateway (Sprint F)
+**Spec:** `docs/aurelia-tui-roadmap.md`  
+**Status:** 🔴 Proposta  
+**Depende de:** Context-Scoped Memory (Sprint E) + Wiki Memory Gateway (Sprint F)
 
 **Problem:** o Telegram é hoje o único ponto de entrada conversacional da Aurelia. Isso cria fricção no contexto de terminal, sessões não retomáveis cross-surface e dependência de conectividade externa.
 
@@ -339,9 +354,9 @@ Foundation validada (Security Guard-Rails + Project Binding + Bridge Resilience)
       │
       ▼
 D0. Memory Contract & Spec Hygiene ✅
-       │
-       ▼
-5. User-Scoped Project Memory
+      │
+      ▼
+5. Context-Scoped Memory  ← próximo
       │
       ▼
 6. Wiki Memory Gateway
@@ -352,10 +367,10 @@ D0. Memory Contract & Spec Hygiene ✅
       ▼
 8. Agent Comms
       │
-       ▼
+      ▼
 9. Auto-Skills
-       │
-       ▼
+      │
+      ▼
 10. TUI (Terminal User Interface)
 ```
 
@@ -382,7 +397,7 @@ Sprint A: User Isolation MVP + runtime hardening
   ├─ ✅ pipeline integration + UserGate
   ├─ ✅ owner-only commands
   ├─ ✅ CancelAllForUser + active run/cancel/status/get-state user-scoped
-  └─ ➡️ User×project private memory movida para Sprint E
+  └─ ➡️ Context-scoped memory (topic + cwd overlay) movida para Sprint E
 
 Sprint B: Operational Observability (T0–T12 do tasks.md) ✅ v0.14.0
   ├─ ✅ RunContext + field map
@@ -420,20 +435,23 @@ Sprint D: ~~Plan Mode (T-1–T13 do tasks.md)~~  🗑️ Removido 2026-05-24
   internal/planning/ removido. /plan* e /execute removidos.
   Orquestrador e aurelia-plan preservados para execução legada.
 
-Sprint E: User-Scoped Project Memory
-  ├─ runtime.PathResolver per-user
-  ├─ prompt assembly com camadas corretas
-  └─ dream/nudge com targets escopados
+Sprint E: Context-Scoped Memory  ← próximo
+  ├─ runtime.PathResolver: UserMemoryDir, TopicMemoryDir, TopicCwdOverlayDir
+  ├─ remover scanForProject e travessia automática do filesystem
+  ├─ /cwd como overlay declarativo por ConversationKey (sem auto-detecção)
+  ├─ cwd_overlay em ~/.aurelia/topics/<chat>/<thread>/cwd_overlay/
+  ├─ prompt assembly: user_global + topic + cwd_overlay + team
+  └─ dream/nudge com targets escopados por camada
 
 Sprint F: Wiki Memory Gateway
   ├─ MCP server interno
-  ├─ wiki_query/save/status
+  ├─ wiki_query/save/status com escopos: user_global, topic, cwd_overlay, project_team
   └─ query-before-inject
 
 Sprint G: Learning Nudge
   ├─ transcript recorder por SessionKey
   ├─ redaction + profile edit_project
-  └─ escrita via Wiki scopes
+  └─ escrita via Wiki scopes (topic, cwd_overlay ou user_global)
 
 Sprint H: Agent Comms
   ├─ Agent Bus local por run
@@ -470,7 +488,7 @@ migração CLI
 active run / Bridge commands user-scoped
 ```
 
-O próximo trabalho deve assumir `user_id` real no handoff e evitar novos caminhos com `userID=0`, exceto compatibilidade/testes. `Orchestration Cycle` já pode usar `ExecutionContext` com `user_id` propagado.
+O próximo trabalho deve assumir `user_id` real no handoff e evitar novos caminhos com `userID=0`, exceto compatibilidade/testes. O Sprint E pode começar imediatamente: `TopicMemoryDir` e `TopicCwdOverlayDir` são adições ao `PathResolver` existente sem breaking changes.
 
 ## Backlog futuro
 
