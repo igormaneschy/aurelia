@@ -466,6 +466,117 @@ func TestMigration_ForceRemovesMarkerAndRestarts(t *testing.T) {
 	}
 }
 
+// ─── Context Memory Migration Tests (Sprint E) ────────────────────────────
+
+func TestEnsureContextMemoryLayout_DryRun(t *testing.T) {
+	resolver := newTestResolver(t)
+	root := resolver.Root()
+
+	// Create multi-user marker so the migration is valid.
+	multiUserMarker := filepath.Join(root, ".multi-user-migrated")
+	if err := os.WriteFile(multiUserMarker, []byte(`{"migrated_at":"2026-01-01T00:00:00Z"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Dry-run should succeed without creating marker.
+	if err := runEnsureContextMemoryLayout([]string{"--dry-run", "--user-id", "12345"}); err != nil {
+		t.Fatalf("dry-run failed: %v", err)
+	}
+
+	ctxMemMarker := filepath.Join(root, contextMemoryMigratedFile)
+	if _, err := os.Stat(ctxMemMarker); err == nil {
+		t.Fatal("dry-run should not create marker")
+	}
+}
+
+func TestEnsureContextMemoryLayout_Idempotent(t *testing.T) {
+	resolver := newTestResolver(t)
+	root := resolver.Root()
+
+	// Create multi-user marker.
+	multiUserMarker := filepath.Join(root, ".multi-user-migrated")
+	if err := os.WriteFile(multiUserMarker, []byte(`{"migrated_at":"2026-01-01T00:00:00Z"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// First run succeeds.
+	if err := runEnsureContextMemoryLayout([]string{"--user-id", "12345"}); err != nil {
+		t.Fatalf("first run: %v", err)
+	}
+
+	ctxMemMarker := filepath.Join(root, contextMemoryMigratedFile)
+	if _, err := os.Stat(ctxMemMarker); os.IsNotExist(err) {
+		t.Fatal("expected marker after first run")
+	}
+
+	// Second run without --force should abort.
+	if err := runEnsureContextMemoryLayout([]string{"--user-id", "12345"}); err == nil {
+		t.Fatal("second run should abort (already migrated)")
+	}
+
+	// Second run with --force should succeed.
+	if err := runEnsureContextMemoryLayout([]string{"--user-id", "12345", "--force"}); err != nil {
+		t.Fatalf("second run with --force: %v", err)
+	}
+}
+
+func TestEnsureContextMemoryLayout_RequiresMultiUserMigration(t *testing.T) {
+	_ = newTestResolver(t) // ensure instance root exists
+
+	// No multi-user marker → should fail.
+	if err := runEnsureContextMemoryLayout([]string{"--user-id", "12345"}); err == nil {
+		t.Fatal("expected error when multi-user migration not done")
+	}
+
+	// Dry-run should still work (just warns).
+	if err := runEnsureContextMemoryLayout([]string{"--dry-run", "--user-id", "12345"}); err != nil {
+		t.Fatalf("dry-run without multi-user marker: %v", err)
+	}
+}
+
+func TestEnsureContextMemoryLayout_DefaultUserID(t *testing.T) {
+	resolver := newTestResolver(t)
+	root := resolver.Root()
+
+	// Write app.json with default_owner_user_id directly.
+	cfg := config.AppConfig{
+		DefaultOwnerUserID:    99999,
+		TelegramAllowedUserIDs: []int64{99999},
+	}
+	cfgPath := resolver.AppConfig()
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cfgPath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create multi-user marker.
+	multiUserMarker := filepath.Join(root, ".multi-user-migrated")
+	if err := os.WriteFile(multiUserMarker, []byte(`{"migrated_at":"2026-01-01T00:00:00Z","target_user_id":99999}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// No --user-id provided, should use default_owner_user_id.
+	if err := runEnsureContextMemoryLayout([]string{}); err != nil {
+		t.Fatalf("migration with default user ID: %v", err)
+	}
+
+	ctxMemMarker := filepath.Join(root, contextMemoryMigratedFile)
+	markerData, readErr := os.ReadFile(ctxMemMarker)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	var marker contextMemoryMigratedMarker
+	if err := json.Unmarshal(markerData, &marker); err != nil {
+		t.Fatal(err)
+	}
+	if marker.TargetUserID != 99999 {
+		t.Fatalf("expected target_user_id=99999, got %d", marker.TargetUserID)
+	}
+}
+
 // ─── Utilities ──────────────────────────────────────────────────────────────
 
 func opMap(ops []migrationOp) map[string]string {

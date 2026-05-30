@@ -673,6 +673,127 @@ func relHome(path, root string) string {
 	return "~/.aurelia/" + rel
 }
 
+// ─── Context Memory Migration (Sprint E) ───────────────────────────────────
+
+const contextMemoryMigratedFile = ".context-memory-migrated"
+
+type contextMemoryMigratedMarker struct {
+	MigratedAt         time.Time `json:"migrated_at"`
+	TargetUserID       int64     `json:"target_user_id"`
+	MultiUserMigrated  bool      `json:"multi_user_migrated"`
+	SchemaVersion      int       `json:"schema_version"`
+}
+
+// runEnsureContextMemoryLayout validates that the deployment is ready for the
+// context-scoped memory layout (Sprint E) and writes the migration marker.
+// It depends on the multi-user migration having been run first.
+func runEnsureContextMemoryLayout(args []string) error {
+	var (
+		userID int64
+		dryRun bool
+		force  bool
+	)
+
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--user-id":
+			if i+1 >= len(args) {
+				return fmt.Errorf("--user-id requires a value")
+			}
+			i++
+			v, err := strconv.ParseInt(args[i], 10, 64)
+			if err != nil {
+				return fmt.Errorf("invalid --user-id %q: %w", args[i], err)
+			}
+			if v <= 0 {
+				return fmt.Errorf("--user-id must be a positive integer, got %d", v)
+			}
+			userID = v
+		case "--dry-run":
+			dryRun = true
+		case "--force":
+			force = true
+		default:
+			return fmt.Errorf("unknown flag: %s", args[i])
+		}
+	}
+
+	resolver, err := runtime.New()
+	if err != nil {
+		return fmt.Errorf("resolve instance root: %w", err)
+	}
+
+	root := resolver.Root()
+	multiUserMarker := filepath.Join(root, ".multi-user-migrated")
+	ctxMemMarker := filepath.Join(root, contextMemoryMigratedFile)
+
+	// Check idempotency: if marker already exists, abort (unless --force).
+	if _, err := os.Stat(ctxMemMarker); err == nil {
+		if !force {
+			return fmt.Errorf("context-memory migration already applied (%s exists); use --force to re-run", ctxMemMarker)
+		}
+		slog.Info("context-memory marker exists, re-running due to --force")
+	}
+
+	// Depends on multi-user migration.
+	multiUserDone := false
+	if _, err := os.Stat(multiUserMarker); err == nil {
+		multiUserDone = true
+	}
+
+	// Determine target user ID.
+	if userID == 0 {
+		cfg, cfgErr := config.Load(resolver)
+		if cfgErr != nil {
+			return fmt.Errorf("load config: %w", cfgErr)
+		}
+		userID = cfg.DefaultOwnerUserIDOrFallback()
+	}
+	if userID == 0 {
+		return fmt.Errorf("no target user ID: provide --user-id or set default_owner_user_id in config")
+	}
+
+	if dryRun {
+		fmt.Printf("Context-memory migration plan (dry-run):\n")
+		fmt.Printf("  Instance root:    %s\n", root)
+		fmt.Printf("  Target user ID:   %d\n", userID)
+		fmt.Printf("  Multi-user done:  %v\n", multiUserDone)
+		fmt.Printf("  Marker to create: %s\n", ctxMemMarker)
+		if !multiUserDone {
+			fmt.Printf("\n⚠️  Multi-user migration NOT detected. Run 'aurelia migrate-multi-user --user-id %d' first.\n", userID)
+		}
+		return nil
+	}
+
+	if !multiUserDone {
+		return fmt.Errorf("multi-user migration not detected: run 'aurelia migrate-multi-user --user-id %d' first", userID)
+	}
+
+	// Write marker.
+	marker := contextMemoryMigratedMarker{
+		MigratedAt:        time.Now().UTC(),
+		TargetUserID:      userID,
+		MultiUserMigrated: true,
+		SchemaVersion:     1,
+	}
+	data, err := json.MarshalIndent(marker, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal marker: %w", err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(ctxMemMarker, data, 0o600); err != nil {
+		return fmt.Errorf("write marker: %w", err)
+	}
+
+	slog.Info("context-memory migration complete",
+		"user_id", userID,
+		"marker", ctxMemMarker,
+	)
+	fmt.Printf("✅ Context-scoped memory layout activated for user %d.\n", userID)
+	fmt.Printf("   Marker: %s\n", ctxMemMarker)
+	return nil
+}
+
 // ─── Boot check ─────────────────────────────────────────────────────────────
 
 // checkMigrationLock returns an error if a .multi-user-migrating lock exists
