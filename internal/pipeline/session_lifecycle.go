@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -212,15 +213,24 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 
 		s.sendLifecycleNotice(chatID, threadID, lifecycleRotateSuccessMessage)
 
-		// Update session store with new session file
+		// Update session store with new session file. SetSession already marks
+		// active=true, and we continue from the compacted session instead of
+		// forcing a cold resume that injects checkpoint data unnecessarily.
 		if s.sessions != nil {
 			s.sessions.SetSession(chatID, threadID, userID, result.NewSessionFile)
 			s.sessions.ClearFailureState(chatID, threadID, userID)
 		}
 
-		// Resume the new session without continuing (cold start)
 		req.Options.Resume = result.NewSessionFile
-		req.Options.Continue = false
+		// Validate the new session file exists before setting Continue=true.
+		// A missing/corrupt file with Continue=true would cause the PI SDK
+		// to fail silently. Fall back to cold resume in that case.
+		if fi, err := os.Stat(result.NewSessionFile); err == nil && fi.Size() > 0 {
+			req.Options.Continue = true
+		} else {
+			log.Printf("lifecycle: rotated session file missing or empty (%s), falling back to cold resume", result.NewSessionFile)
+			req.Options.Continue = false
+		}
 		return lifecycleDecisionResult{
 			Decision:    dec,
 			ModifiedReq: req,

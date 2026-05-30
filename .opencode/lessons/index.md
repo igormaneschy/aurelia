@@ -66,3 +66,6 @@
 ## Change fix/billing-error-handling (2026-05-27)
 - [pattern] billing-error-defensive-layers
 - [process] verify-current-state-before-impl
+
+## Change cron-cwd-extraction (2026-05-29)
+- [pattern] cron-cwd-extraction-from-prompt

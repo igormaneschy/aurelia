@@ -48,7 +48,7 @@ func TestEvaluateLifecycle_InactiveSession(t *testing.T) {
 func TestEvaluateLifecycle_LargeInputTokens(t *testing.T) {
 	signals := HealthSignals{
 		Active:      true,
-		InputTokens: 150000, // above compact (120k), below rotate (250k)
+		InputTokens: 350000, // above compact (200k), below rotate (500k)
 	}
 	policy := DefaultLifecyclePolicy()
 
@@ -65,7 +65,7 @@ func TestEvaluateLifecycle_LargeInputTokens(t *testing.T) {
 func TestEvaluateLifecycle_DangerousInputTokens(t *testing.T) {
 	signals := HealthSignals{
 		Active:      true,
-		InputTokens: 300000, // above rotate (250k)
+		InputTokens: 550000, // above rotate (500k)
 	}
 	policy := DefaultLifecyclePolicy()
 
@@ -159,7 +159,7 @@ func TestEvaluateLifecycle_InputTokenBoundary(t *testing.T) {
 	// Exactly at compact threshold should continue (PI SDK manages compaction).
 	signals := HealthSignals{
 		Active:      true,
-		InputTokens: 120000,
+		InputTokens: 200000,
 	}
 	policy := DefaultLifecyclePolicy()
 
@@ -284,7 +284,7 @@ func TestEvaluateLifecycle_ActiveDangerousStillRotates(t *testing.T) {
 	// This ensures the dangerous token policy still applies to active sessions.
 	signals := HealthSignals{
 		Active:      true,
-		InputTokens: 300000,
+		InputTokens: 550000,
 	}
 	policy := DefaultLifecyclePolicy()
 

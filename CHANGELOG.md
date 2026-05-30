@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.20.2 - 2026-05-30
+
+### Changed
+- **Memory budget expanded**: `maxMemoryTotalChars` raised from 40K to 55K,
+  `memorySummaryTriggerChars` from 30K to 45K. Compact mode now shows 5
+  files (was 3), giving the model more context before switching to compact.
+- **Memory cache TTL**: increased from 5s to 30s, reducing disk I/O during
+  fast chat turns while still respecting explicit invalidations after writes.
+- **Session lifecycle rotate threshold**: raised from 250K to 500K input
+  tokens. The PI SDK handles auto-compaction internally (contextWindow -
+  reserveTokens); rotation is now a last-resort safety net for corrupt
+  sessions, not a routine token-management tool.
+- **Compact threshold**: raised from 120K to 200K (informational only).
+- **Post-rotate behavior**: after a successful rotation, `Continue` is now
+  `true` instead of `false`, avoiding unnecessary cold_resume + checkpoint
+  injection on the very next message.
+
+### Fixed
+- **MEMORY.md duplicate entries**: new `dedupMemoryIndex()` removes
+  duplicate index entries by filename before loading memory into the prompt.
+  Prevents duplicate entries from bloating the index and wasting token budget.
+
 ## v0.20.1 - 2026-05-29
 
 ### Fixed

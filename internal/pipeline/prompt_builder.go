@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -20,10 +21,10 @@ import (
 
 const (
 	maxMemoryFileChars        = 8000
-	maxMemoryTotalChars       = 40000
+	maxMemoryTotalChars       = 55000 // raised from 40000 to give memory layers more budget
 	maxMemoryIndexChars       = 12000
-	memorySummaryTriggerChars = 30000
-	compactExtraFiles         = 3
+	memorySummaryTriggerChars = 45000 // raised from 30000 — switch to compact mode later
+	compactExtraFiles         = 5     // raised from 3 — show more files in compact mode
 	maxMemoryFileBytes        = maxMemoryFileChars + 1000 // 9000 bytes — skip oversized files before reading
 )
 
@@ -478,7 +479,7 @@ func (bc *Service) loadMemoryDir(dir string) string {
 	indexPath := filepath.Join(dir, "MEMORY.md")
 	if indexStr, err := readMemoryFile(indexPath, "MEMORY.md"); err == nil && indexStr != "" {
 		sb.WriteString("**MEMORY.md (index):**\n")
-		sb.WriteString(truncateContent(indexStr, "MEMORY.md"))
+		sb.WriteString(truncateContent(dedupMemoryIndex(indexStr), "MEMORY.md"))
 	}
 	if fi, err := os.Stat(indexPath); err == nil {
 		mtimes["MEMORY.md"] = fi.ModTime()
@@ -525,10 +526,10 @@ func (bc *Service) loadMemoryDirCompact(dir string) string {
 	mtimes := make(map[string]time.Time, len(entries))
 	var otherFiles []os.DirEntry
 
-	// Index file — always included first (up to maxMemoryIndexChars)
+	// Index file — always included first (up to maxMemoryIndexChars), deduplicated
 	indexPath := filepath.Join(dir, "MEMORY.md")
 	if indexStr, err := readMemoryFile(indexPath, "MEMORY.md"); err == nil && indexStr != "" {
-		indexContent := truncateToBudget(indexStr, maxMemoryIndexChars)
+		indexContent := truncateToBudget(dedupMemoryIndex(indexStr), maxMemoryIndexChars)
 		sb.WriteString("**MEMORY.md (index):**\n")
 		sb.WriteString(indexContent)
 	}
@@ -585,6 +586,35 @@ func (bc *Service) loadMemoryDirCompact(dir string) string {
 	sb.WriteString("\n\n*Memory compact mode: memória completa omitida devido ao limite do prompt.*")
 
 	return sb.String()
+}
+
+// dedupMemoryIndex removes duplicate entries from a MEMORY.md index.
+// Entries are identified by the first markdown link's filename:
+// "- [Title](file.md)". Only the first occurrence of each filename is kept,
+// preserving insertion order. Lines without a markdown link pass through unchanged.
+//
+// Uses regexp for robust extraction: matches `](<filename>)` where filename
+// contains no closing paren (standard MEMORY.md entries don't have parens in
+// filenames). Lines with multiple links only use the first for dedup — the
+// MEMORY.md format is one entry per line, so this is intentional.
+var dedupMemLinkRe = regexp.MustCompile(`\]\(([^)]+)\)`)
+
+func dedupMemoryIndex(content string) string {
+	lines := strings.Split(content, "\n")
+	seen := make(map[string]bool, len(lines))
+	var result []string
+	for _, line := range lines {
+		matches := dedupMemLinkRe.FindStringSubmatch(line)
+		if len(matches) >= 2 {
+			filename := matches[1]
+			if seen[filename] {
+				continue // skip duplicate entry
+			}
+			seen[filename] = true
+		}
+		result = append(result, line)
+	}
+	return strings.Join(result, "\n")
 }
 
 // readMemoryFile reads a file with a size limit. Files larger than
