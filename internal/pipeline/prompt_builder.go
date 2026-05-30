@@ -15,7 +15,6 @@ import (
 	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
-	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/security"
 )
 
@@ -252,17 +251,11 @@ IMPORTANT rules about the working directory:
 }
 
 // topicMemoryDirCanonical returns the canonical topic memory directory using
-// the user resolver's TopicsDir(). Falls back to the runtime path resolver
-// when the user resolver is unavailable. Returns "" when no resolver exists.
+// the runtime PathResolver's TopicMemoryDir. Returns "" when no resolver
+// exists or when threadID <= 0.
 func (bc *Service) topicMemoryDirCanonical(chatID int64, threadID int) string {
-	if threadID <= 0 {
-		return ""
-	}
-	if bc.userResolver != nil {
-		return filepath.Join(bc.userResolver.TopicsDir(), fmt.Sprintf("chat_%d", chatID), fmt.Sprintf("thread_%d", threadID))
-	}
 	if bc.resolver != nil {
-		return filepath.Join(bc.resolver.Root(), "topics", fmt.Sprintf("chat_%d", chatID), fmt.Sprintf("thread_%d", threadID))
+		return bc.resolver.TopicMemoryDir(chatID, threadID)
 	}
 	return ""
 }
@@ -327,13 +320,13 @@ func (bc *Service) buildProjectMemoryInstructions(chatID int64, threadID int, pr
 	sb.WriteString("Save each fact in the correct layer:\n\n")
 	sb.WriteString("| Layer | Directory | What to save |\n")
 	sb.WriteString("|---|---|---|\n")
-	sb.WriteString("| **Global** | `~/.aurelia/memory/` | Personal facts, preferences, communication style — applies across all projects |\n")
-	sb.WriteString("| **Project Private** | `project-private://" + projectName + "` | Your personal notes, work log, individual decisions for project \"" + projectName + "\" |\n")
-	sb.WriteString("| **Project Team** | `project-team://" + projectName + "` | Stack, conventions, architecture, known bugs — useful for any team member on \"" + projectName + "\" |\n")
+	sb.WriteString("| **User Global** | `~/.aurelia/users/<id>/memory/` | Personal facts, preferences, communication style — cross-context |\n")
 	if topicDir != "" {
 		topicAlias := fmt.Sprintf("topic://chat_%d/thread_%d", chatID, threadID)
 		sb.WriteString("| **Topic** | `" + topicAlias + "` | Facts specific to this forum topic — isolated from other topics |\n")
 	}
+	sb.WriteString("| **CWD Overlay** | `~/.aurelia/topics/chat_<id>/thread_<id>/cwd_overlay/` | Work context, session notes, decisions for project \"" + projectName + "\" in this topic |\n")
+	sb.WriteString("| **Project Team** | `~/.aurelia/projects/<slug>/team/` | Stack, conventions, architecture, known bugs — shared among team members on \"" + projectName + "\" |\n")
 
 	sb.WriteString("\n### Saving memory\n")
 	sb.WriteString("When something meaningful happens, save it using the Write tool to the correct layer:\n")
@@ -347,7 +340,7 @@ func (bc *Service) buildProjectMemoryInstructions(chatID int64, threadID int, pr
 func (bc *Service) buildChatMemoryInstructions(chatID int64, threadID int, topicSuffix string, topicDir string) string {
 	var sb strings.Builder
 
-	dirList := "`~/.aurelia/memory/` (global)"
+	dirList := "`~/.aurelia/users/<id>/memory/` (user global)"
 	if topicDir != "" {
 		topicAlias := fmt.Sprintf("topic://chat_%d/thread_%d", chatID, threadID)
 		dirList += " and `" + topicAlias + "` (this topic)"
@@ -364,6 +357,12 @@ func (bc *Service) buildChatMemoryInstructions(chatID int64, threadID int, topic
 // Total output is capped at maxMemoryTotalChars; layers beyond the cap are skipped.
 // When the accumulated content exceeds memorySummaryTriggerChars, remaining
 // layers switch to compact mode (index + recent files only).
+//
+// Canonical layer order (from spec):
+//   1. User global   — always
+//   2. Topic memory  — always
+//   3. CWD overlay   — only when /cwd is active on the topic
+//   4. Project team  — only when /cwd is active
 func (bc *Service) loadMemoryContents(chatID int64, threadID int, userID int64, agent *agents.Agent) string {
 	var sb strings.Builder
 	var total int
@@ -409,46 +408,35 @@ func (bc *Service) loadMemoryContents(chatID int64, threadID int, userID int64, 
 	cwd := bc.effectiveCwd(agent, chatID, threadID)
 	hasProject := cwd != "" && bc.resolver != nil
 
-	// Priority order: current-context layers (project private, topic) load before
-	// the broad global layer, so they survive the token budget even when global
-	// memory is huge.
-	if hasProject {
-		projectName := filepath.Base(cwd)
-		privateDir := bc.resolver.ConversationProjectMemoryDir(cwd, chatID, threadID)
-		header := fmt.Sprintf("#### Project: %s (private)\n\n", projectName)
-		appendLayer(header, privateDir)
-	}
-
-	// User × Project private — user-specific notes for this project only
-	if bc.userResolver != nil && userID != 0 && hasProject {
-		slug := runtime.ProjectSlug(cwd)
-		upDir := bc.userResolver.ProjectMemoryDir(userID, slug)
-		if upDir != "" {
-			projectName := filepath.Base(cwd)
-			header := fmt.Sprintf("#### %s (user × project)\n\n", projectName)
-			appendLayer(header, upDir)
-		}
-	}
-
-	// Per-user memory — user-specific facts from nudge/dream (v0.11.0+)
-	if bc.userResolver != nil && userID != 0 {
-		userDir := bc.userResolver.MemoryDir(userID)
+	// Layer 1: User global — always loaded
+	if bc.resolver != nil && userID != 0 {
+		userDir := bc.resolver.UserMemoryDir(userID)
 		if userDir != "" {
 			header := "#### Personal Memory (user-specific)\n\n"
 			appendLayer(header, userDir)
 		}
 	}
 
+	// Layer 2: Topic memory — always loaded when threadID > 0
 	if topicDir := bc.topicMemoryDirCanonical(chatID, threadID); topicDir != "" {
-		header := fmt.Sprintf("\n\n#### Topic %d (chat %d)\n\n", threadID, chatID)
+		header := fmt.Sprintf("#### Topic %d (chat %d)\n\n", threadID, chatID)
 		appendLayer(header, topicDir)
 	}
 
-	appendLayer("#### Global (cross-project)\n\n", bc.memoryDir)
+	// Layer 3: CWD overlay — only when /cwd is active
+	if hasProject {
+		cwdOverlayDir := bc.resolver.TopicCwdOverlayDir(chatID, threadID)
+		if cwdOverlayDir != "" {
+			projectName := filepath.Base(cwd)
+			header := fmt.Sprintf("#### %s (cwd overlay)\n\n", projectName)
+			appendLayer(header, cwdOverlayDir)
+		}
+	}
 
+	// Layer 4: Project team — only when /cwd is active
 	if hasProject {
 		projectName := filepath.Base(cwd)
-		header := fmt.Sprintf("\n\n#### Project: %s (team)\n\n", projectName)
+		header := fmt.Sprintf("#### Project: %s (team)\n\n", projectName)
 		appendLayer(header, bc.resolver.ProjectTeamMemoryDir(cwd))
 	}
 
