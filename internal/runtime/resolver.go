@@ -247,3 +247,30 @@ func (r *PathResolver) ConversationProjectMemoryDir(cwd string, chatID int64, th
 func (r *PathResolver) ProjectTeamMemoryDir(cwd string) string {
 	return filepath.Join(r.root, "projects", ProjectSlug(cwd), "team")
 }
+
+// UserMemoryDir returns the per-user global memory directory.
+// ~/.aurelia/users/<userID>/memory/
+func (r *PathResolver) UserMemoryDir(userID int64) string {
+	return filepath.Join(r.root, "users", fmt.Sprintf("%d", userID), "memory")
+}
+
+// TopicMemoryDir returns the topic-scoped memory directory.
+// ~/.aurelia/topics/chat_<chatID>/thread_<threadID>/
+// Returns empty string when threadID <= 0 (topic memory only exists in threads).
+func (r *PathResolver) TopicMemoryDir(chatID int64, threadID int) string {
+	if threadID <= 0 {
+		return ""
+	}
+	return filepath.Join(r.root, "topics", fmt.Sprintf("chat_%d", chatID), fmt.Sprintf("thread_%d", threadID))
+}
+
+// TopicCwdOverlayDir returns the cwd overlay memory directory for a topic.
+// ~/.aurelia/topics/chat_<chatID>/thread_<threadID>/cwd_overlay/
+// Only valid when /cwd is declared for the topic. Returns empty string when
+// threadID <= 0.
+func (r *PathResolver) TopicCwdOverlayDir(chatID int64, threadID int) string {
+	if threadID <= 0 {
+		return ""
+	}
+	return filepath.Join(r.root, "topics", fmt.Sprintf("chat_%d", chatID), fmt.Sprintf("thread_%d", threadID), "cwd_overlay")
+}
