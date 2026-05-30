@@ -440,7 +440,22 @@ func (bc *Service) loadMemoryContents(chatID int64, threadID int, userID int64, 
 		appendLayer(header, bc.resolver.ProjectTeamMemoryDir(cwd))
 	}
 
+	// Observability: log which memory layers were loaded and their sizes.
+	// This helps diagnose prompt budget issues and verify layer isolation.
+	bc.logMemoryLayers(chatID, threadID, userID, hasProject, total)
+
 	return sb.String()
+}
+
+// logMemoryLayers logs a summary of which memory layers were loaded for a turn.
+// Included for observability: helps diagnose prompt budget issues and layer isolation.
+func (bc *Service) logMemoryLayers(chatID int64, threadID int, userID int64, hasProject bool, totalChars int) {
+	layers := []string{"user_global", "topic"}
+	if hasProject {
+		layers = append(layers, "cwd_overlay", "project_team")
+	}
+	log.Printf("memory: loaded %d layers for chat=%d thread=%d user=%d: %v (%d chars total)",
+		len(layers), chatID, threadID, userID, layers, totalChars)
 }
 
 // loadMemoryDir reads MEMORY.md and all .md files from a directory.
