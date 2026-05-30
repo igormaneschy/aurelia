@@ -231,6 +231,10 @@ func ProjectSlug(cwd string) string { return SanitizeCwd(cwd) }
 
 // ProjectMemoryDir returns the per-project private memory directory:
 // ~/.aurelia/projects/<sanitized-cwd>/memory/
+//
+// Deprecated: use TopicCwdOverlayDir for context-scoped private memory.
+// Kept for backward compatibility with legacy callers (bootstrap, cache, memoryux).
+// TODO(sprint-f): remove once all callers migrate to TopicCwdOverlayDir.
 func (r *PathResolver) ProjectMemoryDir(cwd string) string {
 	return filepath.Join(r.root, "projects", ProjectSlug(cwd), "memory")
 }
@@ -238,6 +242,10 @@ func (r *PathResolver) ProjectMemoryDir(cwd string) string {
 // ConversationProjectMemoryDir returns project-private memory for one
 // conversation. This prevents notes from one Telegram group/topic leaking into
 // another conversation that happens to bind the same repository.
+//
+// Deprecated: use TopicCwdOverlayDir which already scopes by (chat_id, thread_id).
+// Kept for backward compatibility with legacy callers (bootstrap, cache, memoryux).
+// TODO(sprint-f): remove once all callers migrate to TopicCwdOverlayDir.
 func (r *PathResolver) ConversationProjectMemoryDir(cwd string, chatID int64, threadID int) string {
 	return filepath.Join(r.ProjectMemoryDir(cwd), "conversations", fmt.Sprintf("chat_%d", chatID), fmt.Sprintf("thread_%d", threadID))
 }

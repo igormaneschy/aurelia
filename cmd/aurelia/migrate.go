@@ -307,6 +307,13 @@ func buildMigrationPlan(root string, userID int64) (*migrationPlan, error) {
 	}
 
 	// 4. Projects: root/projects/*/ → userRoot/projects/*/.
+	// NOTE: This step is from the multi-user migration (Sprint A).
+	// In the context-scoped memory model (Sprint E), project team memory
+	// stays in root/projects/<slug>/team/ (shared), not under users/<id>/.
+	// Private contextualized memory now lives in topics/.../cwd_overlay/.
+	// This step moves the entire project directory; the team/ subdirectory
+	// inside it will need to be extracted back to root/projects/ in a future
+	// cleanup migration.
 	projectsSrc := filepath.Join(root, "projects")
 	entries, err := os.ReadDir(projectsSrc)
 	if err != nil && !os.IsNotExist(err) {
