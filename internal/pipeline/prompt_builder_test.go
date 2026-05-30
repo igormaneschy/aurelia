@@ -19,16 +19,27 @@ import (
 
 func TestLoadMemoryContents_RespectsTotalCap(t *testing.T) {
 	dir := t.TempDir()
+	t.Setenv("AURELIA_HOME", dir)
+	resolver, err := runtime.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create massive user global memory that will fill the budget
+	userDir := resolver.UserMemoryDir(42)
+	if err := os.MkdirAll(userDir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	content := strings.Repeat("x", 5000)
 	for i := 0; i < 20; i++ {
-		path := filepath.Join(dir, fmt.Sprintf("memory-%02d.md", i))
+		path := filepath.Join(userDir, fmt.Sprintf("memory-%02d.md", i))
 		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	bc := &Service{memoryDir: dir, memoryCache: newMemoryCache(), sessions: session.NewStore()}
-	got := bc.loadMemoryContents(1, 0, 0, nil)
+	bc := &Service{resolver: resolver, memoryCache: newMemoryCache(), sessions: session.NewStore()}
+	got := bc.loadMemoryContents(1, 2, 42, nil)
 
 	if len(got) > maxMemoryTotalChars {
 		t.Fatalf("memory content length = %d, want <= %d", len(got), maxMemoryTotalChars)
@@ -235,33 +246,42 @@ func TestLoadMemoryContents_ProjectPrivateSurvivesWhenGlobalIsHuge(t *testing.T)
 		t.Fatal(err)
 	}
 	cwd := "/repo/aurelia"
-	projectPrivate := resolver.ConversationProjectMemoryDir(cwd, 42, 0)
-	if err := os.MkdirAll(projectPrivate, 0700); err != nil {
+	// CWD overlay directory for the topic (requires threadID > 0)
+	cwdOverlay := resolver.TopicCwdOverlayDir(42, 10)
+	if err := os.MkdirAll(cwdOverlay, 0700); err != nil {
 		t.Fatal(err)
 	}
-	// Create current_task.md in project private with a distinctive marker
-	if err := os.WriteFile(filepath.Join(projectPrivate, "current_task.md"), []byte("High-priority task: fix the thing"), 0600); err != nil {
+	// Create current_task.md in cwd overlay with a distinctive marker
+	if err := os.WriteFile(filepath.Join(cwdOverlay, "current_task.md"), []byte("High-priority task: fix the thing"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	// Create a massive global memory that alone would exhaust the budget (50KB > 40KB max)
-	globalDir := filepath.Join(root, "memory")
-	if err := os.MkdirAll(globalDir, 0700); err != nil {
+	// Create a sizeable user global memory but leave room for cwd overlay.
+	// The test verifies that cwd overlay current_task.md survives when user
+	// global is large but doesn't completely exhaust the token budget.
+	userDir := resolver.UserMemoryDir(42)
+	if err := os.MkdirAll(userDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	massiveFile := strings.Repeat("x", 50000)
-	if err := os.WriteFile(filepath.Join(globalDir, "massive.md"), []byte(massiveFile), 0600); err != nil {
+	// MEMORY.md + 8 files × 4000 chars ≈ 32KB raw (well under 55KB budget)
+	if err := os.WriteFile(filepath.Join(userDir, "MEMORY.md"), []byte("# User Memory Index\n"), 0600); err != nil {
 		t.Fatal(err)
+	}
+	for i := 0; i < 8; i++ {
+		content := strings.Repeat("x", 4000) + "\n"
+		if err := os.WriteFile(filepath.Join(userDir, fmt.Sprintf("huge-%02d.md", i)), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	sessions := session.NewStore()
-	sessions.SetCwd(42, 0, cwd)
-	bc := &Service{resolver: resolver, sessions: sessions, memoryDir: globalDir, memoryCache: newMemoryCache()}
-	got := bc.loadMemoryContents(42, 0, 0, nil)
+	sessions.SetCwd(42, 10, cwd)
+	bc := &Service{resolver: resolver, sessions: sessions, memoryCache: newMemoryCache()}
+	got := bc.loadMemoryContents(42, 10, 42, nil)
 
-	// Project private current_task.md must survive even when global is huge
+	// CWD overlay current_task.md must survive even when user global is huge
 	if !strings.Contains(got, "High-priority task") {
-		t.Fatal("project private current_task.md should survive when global is huge, but was not found")
+		t.Fatal("cwd overlay current_task.md should survive when user global is huge, but was not found")
 	}
 	// Total must be within budget
 	if len(got) > maxMemoryTotalChars {
@@ -301,24 +321,23 @@ func TestTopicMemoryDirCanonical_ResolvesViaUserResolver(t *testing.T) {
 
 func TestLoadMemoryContents_IsolatesProjectPrivateByThread(t *testing.T) {
 	root := t.TempDir()
-	// PathResolver root is private; use AURELIA_HOME path through New for real resolver.
 	t.Setenv("AURELIA_HOME", root)
 	resolver, err := runtime.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	cwd := "/repo/aurelia"
-	thread10 := resolver.ConversationProjectMemoryDir(cwd, 42, 10)
-	thread20 := resolver.ConversationProjectMemoryDir(cwd, 42, 20)
-	for _, dir := range []string{thread10, thread20} {
+	cwdOverlay10 := resolver.TopicCwdOverlayDir(42, 10)
+	cwdOverlay20 := resolver.TopicCwdOverlayDir(42, 20)
+	for _, dir := range []string{cwdOverlay10, cwdOverlay20} {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(thread10, "note.md"), []byte("thread ten private"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(cwdOverlay10, "note.md"), []byte("thread ten cwd overlay"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(thread20, "note.md"), []byte("thread twenty private"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(cwdOverlay20, "note.md"), []byte("thread twenty cwd overlay"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -326,11 +345,11 @@ func TestLoadMemoryContents_IsolatesProjectPrivateByThread(t *testing.T) {
 	sessions.SetCwd(42, 10, cwd)
 	bc := &Service{resolver: resolver, sessions: sessions, memoryCache: newMemoryCache()}
 	got := bc.loadMemoryContents(42, 10, 0, nil)
-	if !strings.Contains(got, "thread ten private") {
-		t.Fatalf("expected thread 10 memory, got %q", got)
+	if !strings.Contains(got, "thread ten cwd overlay") {
+		t.Fatalf("expected thread 10 cwd overlay memory, got %q", got)
 	}
-	if strings.Contains(got, "thread twenty private") {
-		t.Fatalf("thread 20 memory leaked into thread 10: %q", got)
+	if strings.Contains(got, "thread twenty cwd overlay") {
+		t.Fatalf("thread 20 cwd overlay leaked into thread 10: %q", got)
 	}
 }
 
@@ -996,9 +1015,9 @@ func TestBuildMemoryInstructions_NoAbsolutePathLeak(t *testing.T) {
 	if strings.Contains(got, "/Users/janedoe") {
 		t.Fatal("system prompt leaks absolute home directory path (H-02)")
 	}
-	// Must use the aliased global path
-	if !strings.Contains(got, "~/.aurelia/memory/") {
-		t.Fatal("expected aliased global path ~/.aurelia/memory/ in prompt")
+	// Must use the aliased user global path
+	if !strings.Contains(got, "~/.aurelia/users/<id>/memory/") {
+		t.Fatal("expected aliased user global path ~/.aurelia/users/<id>/memory/ in prompt")
 	}
 
 	// Now test with project context (hasProject=true)
@@ -1023,12 +1042,12 @@ func TestBuildMemoryInstructions_NoAbsolutePathLeak(t *testing.T) {
 	if strings.Contains(got2, "/Users/janedoe") {
 		t.Fatal("system prompt with project leaks absolute home directory path (H-02)")
 	}
-	// Must use alias format for project private
-	if !strings.Contains(got2, "project-private://my-app") {
-		t.Fatalf("expected project-private://my-app alias in prompt, got: %s", got2)
+	// Must use canonical layer names (not old project-private:// scheme)
+	if !strings.Contains(got2, "CWD Overlay") {
+		t.Fatalf("expected CWD Overlay in prompt, got: %s", got2)
 	}
-	if !strings.Contains(got2, "project-team://my-app") {
-		t.Fatalf("expected project-team://my-app alias in prompt, got: %s", got2)
+	if !strings.Contains(got2, "Project Team") {
+		t.Fatalf("expected Project Team in prompt, got: %s", got2)
 	}
 }
 

@@ -388,3 +388,119 @@ func TestResolveProjectCwd_CleansTraversalBeforePrefixCheck(t *testing.T) {
 		t.Fatalf("ResolveProjectCwd(%q) expected traversal outside prefix to be rejected", traversal)
 	}
 }
+
+func TestUserMemoryDir(t *testing.T) {
+	r := &PathResolver{root: "/tmp/aurelia"}
+
+	got := r.UserMemoryDir(12345)
+	want := filepath.Join("/tmp/aurelia", "users", "12345", "memory")
+	if got != want {
+		t.Errorf("UserMemoryDir(12345) = %q, want %q", got, want)
+	}
+
+	gotZero := r.UserMemoryDir(0)
+	wantZero := filepath.Join("/tmp/aurelia", "users", "0", "memory")
+	if gotZero != wantZero {
+		t.Errorf("UserMemoryDir(0) = %q, want %q", gotZero, wantZero)
+	}
+}
+
+func TestTopicMemoryDir(t *testing.T) {
+	r := &PathResolver{root: "/tmp/aurelia"}
+
+	t.Run("valid topic", func(t *testing.T) {
+		got := r.TopicMemoryDir(42, 99)
+		want := filepath.Join("/tmp/aurelia", "topics", "chat_42", "thread_99")
+		if got != want {
+			t.Errorf("TopicMemoryDir(42, 99) = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("thread zero returns empty", func(t *testing.T) {
+		if got := r.TopicMemoryDir(42, 0); got != "" {
+			t.Errorf("TopicMemoryDir(42, 0) = %q, want empty string", got)
+		}
+	})
+
+	t.Run("negative thread returns empty", func(t *testing.T) {
+		if got := r.TopicMemoryDir(42, -1); got != "" {
+			t.Errorf("TopicMemoryDir(42, -1) = %q, want empty string", got)
+		}
+	})
+
+	t.Run("chat zero with valid thread", func(t *testing.T) {
+		got := r.TopicMemoryDir(0, 1)
+		want := filepath.Join("/tmp/aurelia", "topics", "chat_0", "thread_1")
+		if got != want {
+			t.Errorf("TopicMemoryDir(0, 1) = %q, want %q", got, want)
+		}
+	})
+}
+
+func TestTopicCwdOverlayDir(t *testing.T) {
+	r := &PathResolver{root: "/tmp/aurelia"}
+
+	t.Run("valid topic", func(t *testing.T) {
+		got := r.TopicCwdOverlayDir(42, 99)
+		want := filepath.Join("/tmp/aurelia", "topics", "chat_42", "thread_99", "cwd_overlay")
+		if got != want {
+			t.Errorf("TopicCwdOverlayDir(42, 99) = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("thread zero returns empty", func(t *testing.T) {
+		if got := r.TopicCwdOverlayDir(42, 0); got != "" {
+			t.Errorf("TopicCwdOverlayDir(42, 0) = %q, want empty string", got)
+		}
+	})
+
+	t.Run("negative thread returns empty", func(t *testing.T) {
+		if got := r.TopicCwdOverlayDir(42, -1); got != "" {
+			t.Errorf("TopicCwdOverlayDir(42, -1) = %q, want empty string", got)
+		}
+	})
+}
+
+func TestPathResolver_IndependentTopics(t *testing.T) {
+	r := &PathResolver{root: "/tmp/aurelia"}
+
+	topicA := r.TopicCwdOverlayDir(111, 222)
+	topicB := r.TopicCwdOverlayDir(333, 444)
+
+	if topicA == topicB {
+		t.Errorf("TopicCwdOverlayDir for different topics should be different: %q == %q", topicA, topicB)
+	}
+
+	topicAMem := r.TopicMemoryDir(111, 222)
+	topicBMem := r.TopicMemoryDir(333, 444)
+
+	if topicAMem == topicBMem {
+		t.Errorf("TopicMemoryDir for different topics should be different: %q == %q", topicAMem, topicBMem)
+	}
+
+	// Same chat, different thread should be different
+	topicA2 := r.TopicMemoryDir(42, 1)
+	topicA3 := r.TopicMemoryDir(42, 2)
+	if topicA2 == topicA3 {
+		t.Errorf("TopicMemoryDir for different threads should be different: %q == %q", topicA2, topicA3)
+	}
+
+	// Cwd overlay should be distinct from topic memory
+	cwdOverlay := r.TopicCwdOverlayDir(42, 1)
+	topicMem := r.TopicMemoryDir(42, 1)
+	if cwdOverlay == topicMem {
+		t.Errorf("TopicCwdOverlayDir should not equal TopicMemoryDir: %q == %q", cwdOverlay, topicMem)
+	}
+}
+
+func TestProjectTeamMemoryDir_EmptyCwd(t *testing.T) {
+	r := &PathResolver{root: "/tmp/aurelia"}
+
+	// Empty cwd produces empty slug, which results in a path with empty slug segment.
+	// We test this explicitly to document current behavior — callers must validate
+	// cwd before calling this method.
+	got := r.ProjectTeamMemoryDir("")
+	if got == "" {
+		t.Error("ProjectTeamMemoryDir(\"\") unexpectedly returned empty")
+	}
+}
