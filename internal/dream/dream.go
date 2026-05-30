@@ -345,17 +345,17 @@ func (d *Dreamer) Root() string {
 }
 
 func (d *Dreamer) TopicMemoryDir(chatID int64, threadID int) string {
-	if d.userResolver == nil {
-		return ""
-	}
-	return filepath.Join(d.userResolver.TopicsDir(), fmt.Sprintf("chat_%d", chatID), fmt.Sprintf("thread_%d", threadID))
-}
-
-func (d *Dreamer) ProjectMemoryDir(cwd string, chatID int64, threadID int) string {
 	if d.resolver == nil {
 		return ""
 	}
-	return d.resolver.ConversationProjectMemoryDir(cwd, chatID, threadID)
+	return d.resolver.TopicMemoryDir(chatID, threadID)
+}
+
+func (d *Dreamer) TopicCwdOverlayDir(chatID int64, threadID int) string {
+	if d.resolver == nil {
+		return ""
+	}
+	return d.resolver.TopicCwdOverlayDir(chatID, threadID)
 }
 
 func (d *Dreamer) TeamMemoryDir(cwd string) string {

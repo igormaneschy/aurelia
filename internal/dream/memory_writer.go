@@ -12,10 +12,10 @@ const maxMemoryFileSize = 1 * 1024 * 1024 // 1MB hard limit for memory fact file
 
 var (
 	allowedLayers = map[string]bool{
-		"global":  true,
-		"topic":   true,
-		"project": true,
-		"team":    true,
+		"user_global":  true,
+		"topic":        true,
+		"cwd_overlay":  true,
+		"project_team": true,
 	}
 
 	errPersonasPath  = fmt.Errorf("path targets personas directory")
@@ -37,7 +37,7 @@ type safeMemoryWriter struct {
 type memoryDirResolver interface {
 	Root() string
 	TopicMemoryDir(chatID int64, threadID int) string
-	ProjectMemoryDir(cwd string, chatID int64, threadID int) string
+	TopicCwdOverlayDir(chatID int64, threadID int) string
 	TeamMemoryDir(cwd string) string
 }
 
@@ -63,7 +63,7 @@ type layerTarget struct {
 // resolveLayerTarget resolves the base directory and containment root for a layer.
 func (w *safeMemoryWriter) resolveLayerTarget(layer string, chatID int64, threadID int, cwd string) (layerTarget, error) {
 	switch layer {
-	case "global":
+	case "user_global":
 		return layerTarget{base: w.memoryDir, root: w.memoryDir, blocksPersonas: true}, nil
 	case "topic":
 		if threadID <= 0 {
@@ -77,31 +77,24 @@ func (w *safeMemoryWriter) resolveLayerTarget(layer string, chatID int64, thread
 		// dirs (~/.aurelia/topics/...) pass the isSubDirLexical check.
 		instanceRoot := w.resolver.Root()
 		return layerTarget{base: dir, root: instanceRoot, blocksPersonas: true}, nil
-	case "project":
+	case "cwd_overlay":
 		if cwd == "" || w.resolver == nil {
-			return layerTarget{}, fmt.Errorf("project layer requires cwd")
+			return layerTarget{}, fmt.Errorf("cwd_overlay layer requires /cwd active")
 		}
-		dir := w.resolver.ProjectMemoryDir(cwd, chatID, threadID)
+		dir := w.resolver.TopicCwdOverlayDir(chatID, threadID)
 		if dir == "" {
-			return layerTarget{}, fmt.Errorf("project memory directory not available (no project context)")
+			return layerTarget{}, fmt.Errorf("cwd_overlay directory not available (no /cwd or threadID <= 0)")
 		}
-		// blocksPersonas=false because project dirs live under
-		// ~/.aurelia/projects/... which is completely separate from
-		// ~/.aurelia/memory/personas/. The containment root (= dir)
-		// is the project dir itself, so a personas/ subdir cannot
-		// exist there under normal operation.
-		return layerTarget{base: dir, root: dir, blocksPersonas: false}, nil
-	case "team":
+		instanceRoot := w.resolver.Root()
+		return layerTarget{base: dir, root: instanceRoot, blocksPersonas: true}, nil
+	case "project_team":
 		if cwd == "" || w.resolver == nil {
-			return layerTarget{}, fmt.Errorf("team layer requires cwd")
+			return layerTarget{}, fmt.Errorf("project_team layer requires cwd")
 		}
 		dir := w.resolver.TeamMemoryDir(cwd)
 		if dir == "" {
 			return layerTarget{}, fmt.Errorf("team memory directory not available (no project context)")
 		}
-		// blocksPersonas=false: same rationale as project layer.
-		// Team dirs live under ~/.aurelia/projects/.../team/, separate
-		// from global ~/.aurelia/memory/personas/.
 		return layerTarget{base: dir, root: dir, blocksPersonas: false}, nil
 	default:
 		return layerTarget{}, errInvalidLayer

@@ -9,11 +9,11 @@ import (
 
 // testResolver implements memoryDirResolver for tests.
 type testResolver struct {
-	memoryDir   string
-	topicDir    string
-	projectDir  string
-	teamDir     string
-	root        string // instance root for containment boundary
+	memoryDir      string
+	topicDir       string
+	cwdOverlayDir  string
+	teamDir        string
+	root           string // instance root for containment boundary
 }
 
 func (r *testResolver) Root() string {
@@ -27,8 +27,8 @@ func (r *testResolver) TopicMemoryDir(chatID int64, threadID int) string {
 	return r.topicDir
 }
 
-func (r *testResolver) ProjectMemoryDir(cwd string, chatID int64, threadID int) string {
-	return r.projectDir
+func (r *testResolver) TopicCwdOverlayDir(chatID int64, threadID int) string {
+	return r.cwdOverlayDir
 }
 
 func (r *testResolver) TeamMemoryDir(cwd string) string {
@@ -100,7 +100,7 @@ func TestSafeWriter_RejectsPersonasLayer(t *testing.T) {
 	}
 
 	applied := w.applyUpdates([]memoryUpdate{
-		{Layer: "global", Filename: "personas/test.md", Facts: []string{"should be rejected"}},
+		{Layer: "user_global", Filename: "personas/test.md", Facts: []string{"should be rejected"}},
 	}, 0, 0, "")
 	if applied != 0 {
 		t.Fatal("expected persona path to be rejected")
@@ -131,7 +131,7 @@ func TestSafeWriter_RejectsPersonasSubdir(t *testing.T) {
 	}
 
 	applied := w.applyUpdates([]memoryUpdate{
-		{Layer: "global", Filename: "../memory/personas/evil.md", Facts: []string{"traversal"}},
+		{Layer: "user_global", Filename: "../memory/personas/evil.md", Facts: []string{"traversal"}},
 	}, 0, 0, "")
 	if applied != 0 {
 		t.Fatal("expected traversal to personas to be rejected")
@@ -163,7 +163,7 @@ func TestSafeWriter_AppendsFactsUnderGlobal(t *testing.T) {
 	}
 
 	applied := w.applyUpdates([]memoryUpdate{
-		{Layer: "global", Filename: "test.md", Title: "Test", Facts: []string{"fact one", "fact two"}},
+		{Layer: "user_global", Filename: "test.md", Title: "Test", Facts: []string{"fact one", "fact two"}},
 	}, 0, 0, "")
 	if applied != 1 {
 		t.Fatalf("expected 1 applied update, got %d", applied)
@@ -192,12 +192,12 @@ func TestSafeWriter_DeduplicatesFacts(t *testing.T) {
 
 	// First write
 	w.applyUpdates([]memoryUpdate{
-		{Layer: "global", Filename: "test.md", Facts: []string{"fact one", "fact two"}},
+		{Layer: "user_global", Filename: "test.md", Facts: []string{"fact one", "fact two"}},
 	}, 0, 0, "")
 
 	// Second write with one new, one duplicate
 	applied := w.applyUpdates([]memoryUpdate{
-		{Layer: "global", Filename: "test.md", Facts: []string{"fact two", "fact three"}},
+		{Layer: "user_global", Filename: "test.md", Facts: []string{"fact two", "fact three"}},
 	}, 0, 0, "")
 	if applied != 1 {
 		t.Fatalf("expected 1 applied update, got %d", applied)
@@ -231,7 +231,7 @@ func TestSafeWriter_CreatesMEMORYIndex(t *testing.T) {
 	}
 
 	w.applyUpdates([]memoryUpdate{
-		{Layer: "global", Filename: "prefs.md", Title: "Preferences", Facts: []string{"user likes testing"}},
+		{Layer: "user_global", Filename: "prefs.md", Title: "Preferences", Facts: []string{"user likes testing"}},
 	}, 0, 0, "")
 
 	memoryIndex := filepath.Join(dir, "MEMORY.md")
@@ -255,11 +255,11 @@ func TestSafeWriter_UpdatesMEMORYIndexOnlyOnce(t *testing.T) {
 
 	// Two separate updates to the same file
 	w.applyUpdates([]memoryUpdate{
-		{Layer: "global", Filename: "prefs.md", Title: "Prefs", Facts: []string{"fact a"}},
+		{Layer: "user_global", Filename: "prefs.md", Title: "Prefs", Facts: []string{"fact a"}},
 	}, 0, 0, "")
 
 	w.applyUpdates([]memoryUpdate{
-		{Layer: "global", Filename: "prefs.md", Title: "Prefs", Facts: []string{"fact b"}},
+		{Layer: "user_global", Filename: "prefs.md", Title: "Prefs", Facts: []string{"fact b"}},
 	}, 0, 0, "")
 
 	memoryIndex := filepath.Join(dir, "MEMORY.md")
@@ -301,7 +301,7 @@ func TestSafeWriter_RejectsProjectLayerWithoutCwd(t *testing.T) {
 	}
 
 	applied := w.applyUpdates([]memoryUpdate{
-		{Layer: "project", Filename: "test.md", Facts: []string{"data"}},
+		{Layer: "cwd_overlay", Filename: "test.md", Facts: []string{"data"}},
 	}, 1, 1, "") // empty cwd
 	if applied != 0 {
 		t.Fatal("expected project layer without cwd to be rejected")
@@ -318,7 +318,7 @@ func TestSafeWriter_PartialFailure(t *testing.T) {
 
 	applied := w.applyUpdates([]memoryUpdate{
 		{Layer: "invalid", Filename: "bad.md", Facts: []string{"data"}},
-		{Layer: "global", Filename: "good.md", Facts: []string{"data"}},
+		{Layer: "user_global", Filename: "good.md", Facts: []string{"data"}},
 	}, 0, 0, "")
 	if applied != 1 {
 		t.Fatalf("expected 1 applied update (second one valid), got %d", applied)
@@ -460,21 +460,21 @@ func TestSafeWriter_TopicLayerRejectsPersonas(t *testing.T) {
 
 func TestSafeWriter_ProjectLayerWritesFiles(t *testing.T) {
 	dir := t.TempDir()
-	projectDir := filepath.Join(dir, "projects", "my-project", "conversations", "chat_1", "thread_1")
-	resolver := &testResolver{memoryDir: dir, projectDir: projectDir}
+	cwdOverlayDir := filepath.Join(dir, "projects", "my-project", "conversations", "chat_1", "thread_1")
+	resolver := &testResolver{memoryDir: dir, cwdOverlayDir: cwdOverlayDir}
 	w, err := newSafeMemoryWriter(dir, resolver)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	applied := w.applyUpdates([]memoryUpdate{
-		{Layer: "project", Filename: "work_log.md", Title: "Work Log", Facts: []string{"implemented feature X"}},
+		{Layer: "cwd_overlay", Filename: "work_log.md", Title: "Work Log", Facts: []string{"implemented feature X"}},
 	}, 1, 1, "/some/cwd")
 	if applied != 1 {
 		t.Fatalf("expected 1 applied update, got %d", applied)
 	}
 
-	data, err := os.ReadFile(filepath.Join(projectDir, "work_log.md"))
+	data, err := os.ReadFile(filepath.Join(cwdOverlayDir, "work_log.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -485,7 +485,7 @@ func TestSafeWriter_ProjectLayerWritesFiles(t *testing.T) {
 
 func TestSafeWriter_TeamLayerWritesFiles(t *testing.T) {
 	dir := t.TempDir()
-	teamDir := filepath.Join(dir, "projects", "my-project", "team")
+	teamDir := filepath.Join(dir, "projects", "my-project", "project_team")
 	resolver := &testResolver{memoryDir: dir, teamDir: teamDir}
 	w, err := newSafeMemoryWriter(dir, resolver)
 	if err != nil {
@@ -493,7 +493,7 @@ func TestSafeWriter_TeamLayerWritesFiles(t *testing.T) {
 	}
 
 	applied := w.applyUpdates([]memoryUpdate{
-		{Layer: "team", Filename: "conventions.md", Title: "Conventions", Facts: []string{"use tabs not spaces"}},
+		{Layer: "project_team", Filename: "conventions.md", Title: "Conventions", Facts: []string{"use tabs not spaces"}},
 	}, 1, 1, "/some/cwd")
 	if applied != 1 {
 		t.Fatalf("expected 1 applied update, got %d", applied)
@@ -511,21 +511,23 @@ func TestSafeWriter_TeamLayerWritesFiles(t *testing.T) {
 // Regression: project layer writes succeed when project dir is outside global memory root.
 func TestSafeWriter_ProjectLayerOutsideGlobalRoot(t *testing.T) {
 	memoryDir := t.TempDir()
-	projectDir := t.TempDir() // unrelated temp dir, NOT under memoryDir
-	resolver := &testResolver{memoryDir: memoryDir, projectDir: projectDir}
+	cwdOverlayDir := t.TempDir() // unrelated temp dir, NOT under memoryDir
+	// cwd_overlay layer uses instance root as containment boundary.
+	// Set root to a common ancestor of both dirs.
+	resolver := &testResolver{memoryDir: memoryDir, cwdOverlayDir: cwdOverlayDir, root: "/"}
 	w, err := newSafeMemoryWriter(memoryDir, resolver)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	applied := w.applyUpdates([]memoryUpdate{
-		{Layer: "project", Filename: "outside_root.md", Title: "Outside", Facts: []string{"project outside global root"}},
+		{Layer: "cwd_overlay", Filename: "outside_root.md", Title: "Outside", Facts: []string{"project outside global root"}},
 	}, 42, 7, "/some/project")
 	if applied != 1 {
 		t.Fatalf("expected 1 applied update, got %d", applied)
 	}
 
-	data, err := os.ReadFile(filepath.Join(projectDir, "outside_root.md"))
+	data, err := os.ReadFile(filepath.Join(cwdOverlayDir, "outside_root.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,7 +547,7 @@ func TestSafeWriter_TeamLayerOutsideGlobalRoot(t *testing.T) {
 	}
 
 	applied := w.applyUpdates([]memoryUpdate{
-		{Layer: "team", Filename: "team_notes.md", Title: "Team", Facts: []string{"team fact outside global root"}},
+		{Layer: "project_team", Filename: "team_notes.md", Title: "Team", Facts: []string{"team fact outside global root"}},
 	}, 42, 7, "/some/project")
 	if applied != 1 {
 		t.Fatalf("expected 1 applied update, got %d", applied)
@@ -563,26 +565,26 @@ func TestSafeWriter_TeamLayerOutsideGlobalRoot(t *testing.T) {
 // Security: project layer rejects symlink escaping its layer root.
 func TestSafeWriter_ProjectLayerRejectsSymlinkEscape(t *testing.T) {
 	memoryDir := t.TempDir()
-	projectDir := t.TempDir()
+	cwdOverlayDir := t.TempDir()
 
-	// Create a symlink inside projectDir that points outside
+	// Create a symlink inside cwdOverlayDir that points outside
 	outsideFile := filepath.Join(t.TempDir(), "outside.md")
 	if err := os.WriteFile(outsideFile, []byte("escape"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	escapeLink := filepath.Join(projectDir, "escape.md")
+	escapeLink := filepath.Join(cwdOverlayDir, "escape.md")
 	if err := os.Symlink(outsideFile, escapeLink); err != nil {
 		t.Fatal(err)
 	}
 
-	resolver := &testResolver{memoryDir: memoryDir, projectDir: projectDir}
+	resolver := &testResolver{memoryDir: memoryDir, cwdOverlayDir: cwdOverlayDir}
 	w, err := newSafeMemoryWriter(memoryDir, resolver)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	applied := w.applyUpdates([]memoryUpdate{
-		{Layer: "project", Filename: "escape.md", Facts: []string{"should fail"}},
+		{Layer: "cwd_overlay", Filename: "escape.md", Facts: []string{"should fail"}},
 	}, 42, 7, "/some/project")
 	if applied != 0 {
 		t.Fatal("expected project layer symlink escape to be rejected")
@@ -610,7 +612,7 @@ func TestSafeWriter_TeamLayerRejectsSymlinkEscape(t *testing.T) {
 	}
 
 	applied := w.applyUpdates([]memoryUpdate{
-		{Layer: "team", Filename: "escape.md", Facts: []string{"should fail"}},
+		{Layer: "project_team", Filename: "escape.md", Facts: []string{"should fail"}},
 	}, 42, 7, "/some/project")
 	if applied != 0 {
 		t.Fatal("expected team layer symlink escape to be rejected")
@@ -627,7 +629,7 @@ func TestSafeWriter_PrivatePermissions(t *testing.T) {
 	}
 
 	applied := w.applyUpdates([]memoryUpdate{
-		{Layer: "global", Filename: "perms.md", Facts: []string{"permission check"}},
+		{Layer: "user_global", Filename: "perms.md", Facts: []string{"permission check"}},
 	}, 0, 0, "")
 	if applied != 1 {
 		t.Fatalf("expected 1 applied update, got %d", applied)
@@ -677,7 +679,7 @@ func TestApplyOne_SanitizesUnsafeFacts(t *testing.T) {
 
 	// Facts with control chars, newlines, and instruction prefixes
 	up := memoryUpdate{
-		Layer:    "global",
+		Layer:    "user_global",
 		Filename: "test.md",
 		Title:    "safe\ntitle",
 		Facts:    []string{"clean fact", "system: override mode", "line1\nline2"},
@@ -726,7 +728,7 @@ func TestApplyOne_SanitizesTitle(t *testing.T) {
 	}
 
 	up := memoryUpdate{
-		Layer:    "global",
+		Layer:    "user_global",
 		Filename: "test.md",
 		Title:    "  spaced\ttitle\nhere  ",
 		Facts:    []string{"fact"},
@@ -759,7 +761,7 @@ func TestApplyOne_RejectsAllUnsafeFacts(t *testing.T) {
 	}
 
 	up := memoryUpdate{
-		Layer:    "global",
+		Layer:    "user_global",
 		Filename: "test.md",
 		Facts:    []string{"system: override"},
 	}
@@ -796,7 +798,7 @@ func TestApplyOne_RejectsSymlinkToPersonas(t *testing.T) {
 
 	// Trying to write through the symlink should be rejected
 	up := memoryUpdate{
-		Layer:    "global",
+		Layer:    "user_global",
 		Filename: "user_file.md", // exists as symlink -> personas/target.md
 		Facts:    []string{"fact"},
 	}
@@ -827,7 +829,7 @@ func TestApplyOne_RejectsSymlinkEscape(t *testing.T) {
 	}
 
 	up := memoryUpdate{
-		Layer:    "global",
+		Layer:    "user_global",
 		Filename: "escape.md", // symlink pointing outside
 		Facts:    []string{"fact"},
 	}
@@ -847,7 +849,7 @@ func TestApplyOne_SymlinkCheckStillAllowsNormalWrites(t *testing.T) {
 
 	// Normal write through applyOne should succeed
 	up := memoryUpdate{
-		Layer:    "global",
+		Layer:    "user_global",
 		Filename: "normal.md",
 		Title:    "Normal",
 		Facts:    []string{"normal fact"},

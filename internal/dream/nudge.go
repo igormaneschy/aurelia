@@ -5,7 +5,6 @@ import (
 	"embed"
 	"fmt"
 	"log"
-	"path/filepath"
 	"strings"
 	"text/template"
 	"time"
@@ -22,10 +21,10 @@ var nudgeTemplateFS embed.FS
 
 // nudgeTemplateData holds the data for rendering nudge prompt templates.
 type nudgeTemplateData struct {
-	GlobalDir  string
-	TopicDir   string
-	ProjectDir string
-	TeamDir    string
+	GlobalDir     string
+	TopicDir      string
+	CwdOverlayDir string
+	TeamDir       string
 }
 
 // AfterTurnNudge checks if enough turns have accumulated to trigger a nudge review.
@@ -247,8 +246,8 @@ func (d *Dreamer) buildNudgePrompt(cwd string, chatID int64, threadID int, userI
 	}
 	globalDir := d.userResolver.MemoryDir(userID)
 	topicDir := ""
-	if threadID > 0 {
-		topicDir = filepath.Join(d.userResolver.TopicsDir(), fmt.Sprintf("chat_%d", chatID), fmt.Sprintf("thread_%d", threadID))
+	if d.resolver != nil && threadID > 0 {
+		topicDir = d.resolver.TopicMemoryDir(chatID, threadID)
 	}
 
 	data := nudgeTemplateData{
@@ -267,8 +266,8 @@ func (d *Dreamer) buildNudgePrompt(cwd string, chatID int64, threadID int, userI
 		return buf.String()
 	}
 
-	// Project context
-	data.ProjectDir = d.resolver.ConversationProjectMemoryDir(cwd, chatID, threadID)
+	// Project context — use canonical paths
+	data.CwdOverlayDir = d.resolver.TopicCwdOverlayDir(chatID, threadID)
 	data.TeamDir = d.resolver.ProjectTeamMemoryDir(cwd)
 
 	tmpl := template.Must(template.New("nudge_project").ParseFS(nudgeTemplateFS, "prompts/nudge_project.tmpl"))
