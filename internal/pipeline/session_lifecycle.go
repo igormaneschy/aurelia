@@ -212,15 +212,16 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 
 		s.sendLifecycleNotice(chatID, threadID, lifecycleRotateSuccessMessage)
 
-		// Update session store with new session file
+		// Update session store with new session file. SetSession already marks
+		// active=true, and we continue from the compacted session instead of
+		// forcing a cold resume that injects checkpoint data unnecessarily.
 		if s.sessions != nil {
 			s.sessions.SetSession(chatID, threadID, userID, result.NewSessionFile)
 			s.sessions.ClearFailureState(chatID, threadID, userID)
 		}
 
-		// Resume the new session without continuing (cold start)
 		req.Options.Resume = result.NewSessionFile
-		req.Options.Continue = false
+		req.Options.Continue = true // continue from compacted session, avoid cold_resume cascade
 		return lifecycleDecisionResult{
 			Decision:    dec,
 			ModifiedReq: req,

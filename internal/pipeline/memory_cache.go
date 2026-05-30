@@ -14,9 +14,9 @@ import (
 
 // defaultMemoryCacheTTL is the period during which a cached entry is trusted
 // without re-validating mtimes. Validation walks every .md file via os.Stat;
-// in fast chat turns these scans dominate. The TTL is short enough that
-// explicit invalidate() calls (after writes) still keep the cache fresh.
-const defaultMemoryCacheTTL = 5 * time.Second
+// in fast chat turns these scans dominate. 30s balances freshness with I/O
+// reduction; explicit invalidate() calls (after writes) keep the cache correct.
+const defaultMemoryCacheTTL = 30 * time.Second
 
 // memoryCache caches pre-rendered memory directory content by mtime.
 // A directory's content is re-read when any .md file's mtime changes, a new

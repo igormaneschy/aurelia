@@ -65,11 +65,15 @@ type LifecyclePolicy struct {
 }
 
 // DefaultLifecyclePolicy returns safe defaults for session lifecycle policy.
+// PI SDK handles auto-compaction internally (contextWindow - reserveTokens).
+// Rotate threshold is raised to 500K — rotation is a last-resort safety net
+// for corrupt sessions, not a routine token-management tool. The PI SDK's
+// auto-compaction keeps effective context within model limits automatically.
 func DefaultLifecyclePolicy() LifecyclePolicy {
 	return LifecyclePolicy{
 		Enabled:                      true,
-		CompactAfterInputTokens:      120000,
-		RotateAfterInputTokens:       250000,
+		CompactAfterInputTokens:      200000, // raised from 120000 — PI SDK manages normal compaction
+		RotateAfterInputTokens:       500000, // raised from 250000 — only rotate on truly huge sessions
 		MaxEmptyResultsBeforeRotate:  2,
 		MaxProcessDeathsBeforeRotate: 2,
 		IdleTimeoutMinutes:           20,
