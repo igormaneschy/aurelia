@@ -329,10 +329,6 @@ func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, rese
 	agent := s.routeAgent(input.text)
 	userText := stripAgentPrefix(input.text, agent)
 
-	if _, active := s.sessions.GetSessionWithState(input.chatID, input.threadID, input.userID); !active {
-		s.autoDetectProject(input.chatID, input.threadID, userText)
-	}
-
 	if s.checkProjectPreflight(input, agent, userText) {
 		return
 	}
@@ -378,10 +374,6 @@ func (s *Service) processRun(input pipelineInput) {
 	agent := s.routeAgent(input.text)
 	userText := stripAgentPrefix(input.text, agent)
 
-	if _, active := s.sessions.GetSessionWithState(input.chatID, input.threadID, input.userID); !active {
-		s.autoDetectProject(input.chatID, input.threadID, userText)
-	}
-
 	if s.checkProjectPreflight(input, agent, userText) {
 		return
 	}
@@ -426,18 +418,6 @@ func stripAgentPrefix(text string, agent *agents.Agent) string {
 		}
 	}
 	return text
-}
-
-func (s *Service) autoDetectProject(chatID int64, threadID int, userText string) {
-	detectCtx, detectCancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer detectCancel()
-
-	detected := s.detectProjectPath(detectCtx, userText)
-	if detected == "" {
-		return
-	}
-
-	log.Printf("cwd: auto-detected %s for chat=%d thread=%d; not persisted, use /cwd %s to bind", detected, chatID, threadID, detected)
 }
 
 func (s *Service) applyVisionFallback(req *bridge.Request, images []bridge.ImageAttachment) {
