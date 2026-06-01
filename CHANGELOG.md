@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.20.3 - 2026-06-01
+
+### Fixed
+- **Documentation drift**: corrected broken cross-references in
+  `CONTRIBUTING.md` and `SECURITY.md`; aligned `README.md` current-state
+  pointer and `internal/version/version.go` with the latest CHANGELOG entry.
+
 ## v0.20.2 - 2026-05-30
 
 ### Changed

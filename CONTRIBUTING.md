@@ -7,9 +7,9 @@ This repository accepts contributions only when they preserve the architectural,
 Read before opening a PR:
 
 - [AGENTS.md](AGENTS.md)
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- [docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md)
-- [docs/LEARNINGS.md](docs/LEARNINGS.md)
+- [.specs/codebase/ARCHITECTURE.md](.specs/codebase/ARCHITECTURE.md)
+- [.specs/codebase/CONVENTIONS.md](.specs/codebase/CONVENTIONS.md) — naming, file structure, error handling, comments
+- [.opencode/lessons/index.md](.opencode/lessons/index.md) — recurring lessons learned
 
 ## Contribution Rules
 
@@ -56,16 +56,16 @@ go test ./...
 
 If the change affects performance claims, docs, or release positioning:
 
-- update [docs/BENCHMARKS.md](docs/BENCHMARKS.md) when relevant
 - keep the README aligned with measured data
+- note any quantified impact in the PR description
 
 ## Documentation Rule
 
 If the change introduces a new architectural rule, coding rule, or recurring operational lesson, update the canonical document that owns it:
 
-- architecture -> [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- implementation rule -> [docs/STYLE_GUIDE.md](docs/STYLE_GUIDE.md)
-- recurring lesson -> [docs/LEARNINGS.md](docs/LEARNINGS.md)
+- architecture -> [.specs/codebase/ARCHITECTURE.md](.specs/codebase/ARCHITECTURE.md)
+- coding rules and conventions -> [.specs/codebase/CONVENTIONS.md](.specs/codebase/CONVENTIONS.md)
+- recurring lesson -> [.opencode/lessons/index.md](.opencode/lessons/index.md) and add a page under `.opencode/lessons/learned/`
 
 ## Pull Request Expectations
 

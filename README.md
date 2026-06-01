@@ -515,10 +515,10 @@ Full guide: [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Current State
 
-- **v0.16.x active development** — see [CHANGELOG.md](CHANGELOG.md)
+- **v0.20.x active development** — see [CHANGELOG.md](CHANGELOG.md)
 - Canonical repository: `https://github.com/igormaneschy/aurelia`
 - Go module: `github.com/igormaneschy/aurelia`
 - Go test suite is green
 - TypeScript Bridge compiles clean
 - Cross-platform: macOS, Windows, and Linux
-- Current architectural track: close the PI SDK boundary hardening (✅), user isolation (✅), observability (✅), orchestration cycle (✅), then plan mode, user-scoped project memory, and Wiki MCP in that order
+- Current architectural track: close the PI SDK boundary hardening (✅), user isolation (✅), observability (✅), orchestration cycle (✅), then context-scoped memory (✅, Sprint E), Wiki Memory Gateway via MCP (Sprint F, next), Learning Nudge, Agent Comms, and Auto-Skills — see [.specs/project/ROADMAP.md](.specs/project/ROADMAP.md) for the full sequence

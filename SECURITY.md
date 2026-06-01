@@ -32,7 +32,7 @@ Required response:
 1. rotate or revoke the secret outside the repository
 2. remove it from the working tree
 3. ensure it is not present in the published repository
-4. document any process lesson in [docs/LEARNINGS.md](docs/LEARNINGS.md) if it should prevent recurrence
+4. document any process lesson in [.opencode/lessons/index.md](.opencode/lessons/index.md) (and add a page under `.opencode/lessons/learned/`) if it should prevent recurrence
 
 ## Security Review Areas
 
