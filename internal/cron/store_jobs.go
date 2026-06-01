@@ -11,14 +11,16 @@ import (
 func (s *SQLiteCronStore) CreateJob(ctx context.Context, job CronJob) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO cron_jobs (
-			id, owner_user_id, target_chat_id, target_thread_id, schedule_type, cron_expr, run_at, prompt, active,
+			id, owner_user_id, target_chat_id, target_thread_id, cwd, agent_name, schedule_type, cron_expr, run_at, prompt, active,
 			last_run_at, next_run_at, last_status, last_error
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		job.ID,
 		job.OwnerUserID,
 		job.TargetChatID,
 		job.TargetThreadID,
+		job.Cwd,
+		job.AgentName,
 		job.ScheduleType,
 		job.CronExpr,
 		job.RunAt,
@@ -39,13 +41,15 @@ func (s *SQLiteCronStore) CreateJob(ctx context.Context, job CronJob) error {
 func (s *SQLiteCronStore) UpdateJobTx(ctx context.Context, tx *sql.Tx, job CronJob) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE cron_jobs
-		SET owner_user_id = ?, target_chat_id = ?, target_thread_id = ?, schedule_type = ?, cron_expr = ?, run_at = ?, prompt = ?, active = ?,
+		SET owner_user_id = ?, target_chat_id = ?, target_thread_id = ?, cwd = ?, agent_name = ?, schedule_type = ?, cron_expr = ?, run_at = ?, prompt = ?, active = ?,
 			last_run_at = ?, next_run_at = ?, last_status = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 	`,
 		job.OwnerUserID,
 		job.TargetChatID,
 		job.TargetThreadID,
+		job.Cwd,
+		job.AgentName,
 		job.ScheduleType,
 		job.CronExpr,
 		job.RunAt,
@@ -66,13 +70,15 @@ func (s *SQLiteCronStore) UpdateJobTx(ctx context.Context, tx *sql.Tx, job CronJ
 func (s *SQLiteCronStore) UpdateJob(ctx context.Context, job CronJob) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE cron_jobs
-		SET owner_user_id = ?, target_chat_id = ?, target_thread_id = ?, schedule_type = ?, cron_expr = ?, run_at = ?, prompt = ?, active = ?,
+		SET owner_user_id = ?, target_chat_id = ?, target_thread_id = ?, cwd = ?, agent_name = ?, schedule_type = ?, cron_expr = ?, run_at = ?, prompt = ?, active = ?,
 			last_run_at = ?, next_run_at = ?, last_status = ?, last_error = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?
 	`,
 		job.OwnerUserID,
 		job.TargetChatID,
 		job.TargetThreadID,
+		job.Cwd,
+		job.AgentName,
 		job.ScheduleType,
 		job.CronExpr,
 		job.RunAt,
@@ -134,7 +140,7 @@ func (s *SQLiteCronStore) ResolveJobID(ctx context.Context, prefix string) (stri
 
 func (s *SQLiteCronStore) GetJob(ctx context.Context, jobID string) (*CronJob, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, owner_user_id, target_chat_id, target_thread_id, schedule_type, cron_expr, run_at, prompt, active,
+		SELECT id, owner_user_id, target_chat_id, target_thread_id, cwd, agent_name, schedule_type, cron_expr, run_at, prompt, active,
 		       last_run_at, next_run_at, last_status, last_error, created_at, updated_at
 		FROM cron_jobs WHERE id = ?
 	`, jobID)
@@ -150,7 +156,7 @@ func (s *SQLiteCronStore) GetJob(ctx context.Context, jobID string) (*CronJob, e
 
 func (s *SQLiteCronStore) ListJobsByChat(ctx context.Context, chatID int64) ([]CronJob, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, owner_user_id, target_chat_id, target_thread_id, schedule_type, cron_expr, run_at, prompt, active,
+		SELECT id, owner_user_id, target_chat_id, target_thread_id, cwd, agent_name, schedule_type, cron_expr, run_at, prompt, active,
 		       last_run_at, next_run_at, last_status, last_error, created_at, updated_at
 		FROM cron_jobs
 		WHERE target_chat_id = ?
@@ -167,7 +173,7 @@ func (s *SQLiteCronStore) ListJobsByChat(ctx context.Context, chatID int64) ([]C
 // ListJobsByOwner returns all cron jobs owned by the given user.
 func (s *SQLiteCronStore) ListJobsByOwner(ctx context.Context, ownerUserID string) ([]CronJob, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, owner_user_id, target_chat_id, target_thread_id, schedule_type, cron_expr, run_at, prompt, active,
+		SELECT id, owner_user_id, target_chat_id, target_thread_id, cwd, agent_name, schedule_type, cron_expr, run_at, prompt, active,
 		       last_run_at, next_run_at, last_status, last_error, created_at, updated_at
 		FROM cron_jobs
 		WHERE owner_user_id = ?
@@ -185,7 +191,7 @@ func (s *SQLiteCronStore) ListJobsByOwner(ctx context.Context, ownerUserID strin
 // Returns nil, nil if not found (preserves privacy).
 func (s *SQLiteCronStore) GetJobByOwnerAndID(ctx context.Context, ownerUserID, jobID string) (*CronJob, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, owner_user_id, target_chat_id, target_thread_id, schedule_type, cron_expr, run_at, prompt, active,
+		SELECT id, owner_user_id, target_chat_id, target_thread_id, cwd, agent_name, schedule_type, cron_expr, run_at, prompt, active,
 		       last_run_at, next_run_at, last_status, last_error, created_at, updated_at
 		FROM cron_jobs WHERE id = ? AND owner_user_id = ?
 	`, jobID, ownerUserID)
@@ -254,7 +260,7 @@ func (s *SQLiteCronStore) ListDueJobs(ctx context.Context, now time.Time, limit 
 		limit = 20
 	}
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, owner_user_id, target_chat_id, target_thread_id, schedule_type, cron_expr, run_at, prompt, active,
+		SELECT id, owner_user_id, target_chat_id, target_thread_id, cwd, agent_name, schedule_type, cron_expr, run_at, prompt, active,
 		       last_run_at, next_run_at, last_status, last_error, created_at, updated_at
 		FROM cron_jobs
 		WHERE active = 1 AND next_run_at IS NOT NULL AND next_run_at <= ?

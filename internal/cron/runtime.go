@@ -68,6 +68,8 @@ func (r *BridgeCronRuntime) SetUserResolver(ur interface{ UserMdPath(userID int6
 	r.userResolver = ur
 }
 
+const maxCronCwdChars = 1024
+
 // extractCwdFromPrompt parses "Set cwd to <path>" from the prompt text.
 // Returns the path if found, empty string otherwise.
 // Matches variants:
@@ -75,26 +77,69 @@ func (r *BridgeCronRuntime) SetUserResolver(ur interface{ UserMdPath(userID int6
 //   - "Set cwd to /some/path. Run both: ..."
 //   - "Set cwd to /some/path. Run these three sequentially: ..."
 //   - "Set cwd to /some/path\n..."
+//   - "Set cwd to \"/some/path with spaces\". Run: ..."
 func extractCwdFromPrompt(prompt string) string {
 	const prefix = "Set cwd to "
 	idx := strings.Index(prompt, prefix)
 	if idx < 0 {
 		return ""
 	}
-	rest := prompt[idx+len(prefix):]
-
-	// Path ends at any ". Run" variant, newline, or end of string.
-	// This covers ". Run:", ". Run both:", ". Run these three sequentially:", etc.
-	var end int
-	if runIdx := strings.Index(rest, ". Run"); runIdx >= 0 {
-		end = runIdx
-	} else if nlIdx := strings.IndexAny(rest, "\n\r"); nlIdx >= 0 {
-		end = nlIdx
-	} else {
-		end = len(rest)
+	rest := strings.TrimSpace(prompt[idx+len(prefix):])
+	if rest == "" {
+		return ""
 	}
 
-	return strings.TrimSpace(rest[:end])
+	if rest[0] == '"' || rest[0] == '\'' {
+		return extractQuotedCwd(rest)
+	}
+
+	end := len(rest)
+	for _, delimiter := range []string{". Run", " Run:", "\n", "\r", ";"} {
+		if found := strings.Index(rest, delimiter); found >= 0 && found < end {
+			end = found
+		}
+	}
+
+	cwd := strings.TrimSpace(rest[:end])
+	if len(cwd) > maxCronCwdChars {
+		return ""
+	}
+	return strings.Trim(cwd, "`\"")
+}
+
+func extractQuotedCwd(rest string) string {
+	quote := rest[0]
+	for i := 1; i < len(rest); i++ {
+		if rest[i] == quote {
+			return strings.TrimSpace(rest[1:i])
+		}
+	}
+	return ""
+}
+
+func validateCronCwd(raw string) (string, error) {
+	cwd := strings.TrimSpace(strings.Trim(raw, "`\""))
+	if cwd == "" {
+		return "", nil
+	}
+	if len(cwd) > maxCronCwdChars {
+		return "", fmt.Errorf("cwd %q is too long: got %d chars, max %d", cwd[:80]+"...", len(cwd), maxCronCwdChars)
+	}
+	if strings.ContainsAny(cwd, "\x00\n\r") {
+		return "", fmt.Errorf("cwd %q must be a single filesystem path", cwd)
+	}
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", fmt.Errorf("resolve cwd %q: %w", cwd, err)
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", fmt.Errorf("cwd %q is not accessible: %w", abs, err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("cwd %q must be a directory", abs)
+	}
+	return abs, nil
 }
 
 // ExecuteJob builds the system prompt with persona, agent, scheduling
@@ -129,7 +174,7 @@ func (r *BridgeCronRuntime) ExecuteJob(ctx context.Context, job CronJob) (*Execu
 	// Cron-spawned agents need the scheduling instructions to be able to
 	// create follow-up jobs (e.g. "remind me again in 1 hour"). Without
 	// this section the LLM would invent non-existent internal tools.
-	if cron := r.buildCronInstructions(job.TargetChatID, job.OwnerUserID); cron != "" {
+	if cron := r.buildCronInstructions(job.TargetChatID, job.OwnerUserID, job.Cwd); cron != "" {
 		sections = append(sections, cron)
 	}
 
@@ -160,48 +205,72 @@ func (r *BridgeCronRuntime) ExecuteJob(ctx context.Context, job CronJob) (*Execu
 	// Attach security context so the bridge enforces tool-use policies.
 	ownerNumeric, _ := parseInt64(job.OwnerUserID)
 	cwd := ""
-	if agent != nil {
+	cwdSource := "none"
+	cwdAllowsExecution := false
+	// INVARIANT: only an explicit job.Cwd or a prompt-extracted cwd grants
+	// cwdAllowsExecution=true. An agent.Cwd without an explicit CapabilityProfile
+	// stays read_only — the agent must opt into execution through its profile.
+	// This prevents agents with a default Cwd from silently gaining Bash/Write.
+	if job.Cwd != "" {
+		cwd = job.Cwd
+		cwdSource = "job"
+		cwdAllowsExecution = true
+	} else if agent != nil && agent.Cwd != "" {
 		cwd = agent.Cwd
+		cwdSource = "agent"
+		// cwdAllowsExecution stays false: agent must declare CapabilityProfile.
+	} else if extracted := extractCwdFromPrompt(job.Prompt); extracted != "" {
+		cwd = extracted
+		cwdSource = "prompt"
+		cwdAllowsExecution = true
 	}
 
-	// When no agent provides a cwd, try to extract "Set cwd to <path>" from the
-	// prompt itself. This allows cron instructions like "Set cwd to /project. Run: script"
-	// to actually give the LLM the working directory and execution tools it needs.
-	// The extracted path is validated (must exist, be a directory, be absolute) before
-	// being trusted; invalid paths are discarded and the job falls back to observe mode.
-	extractedCwd := false
-	if cwd == "" {
-		if extracted := extractCwdFromPrompt(job.Prompt); extracted != "" {
-			if abs, err := filepath.Abs(extracted); err == nil {
-				if info, statErr := os.Stat(abs); statErr == nil && info.IsDir() {
-					cwd = abs
-					opts.Cwd = abs
-					extractedCwd = true
-				} else {
-					log.Printf("cron: cwd %q extracted from prompt but invalid (stat: %v), ignoring", extracted, statErr)
-				}
-			} else {
-				log.Printf("cron: cwd %q extracted from prompt but not absolute, ignoring", extracted)
-			}
+	// Validate the resolved cwd at execution time. This does I/O (os.Stat)
+	// on every run — a deliberate tradeoff. If the directory is on a
+	// temporarily unavailable mount, the job silently falls back to
+	// observe/read_only (no filesystem tools) instead of failing.
+	// A run_log event or Telegram notification on cwd validation failure
+	// could improve observability, but the current conservative fallback
+	// is safe: it never executes with a broken cwd.
+	if cwd != "" {
+		validated, validateErr := validateCronCwd(cwd)
+		if validateErr != nil {
+			log.Printf("cron: job=%s cwd_source=%s invalid cwd: %v", job.ID, cwdSource, validateErr)
+			cwd = ""
+			opts.Cwd = ""
+			cwdSource = "none"
+			cwdAllowsExecution = false
+		} else {
+			cwd = validated
+			opts.Cwd = validated
+			log.Printf("cron: job=%s using cwd=%q source=%s", job.ID, cwd, cwdSource)
 		}
 	}
 
 	// Determine effective capability profile for cron execution.
-	// Without an explicit agent/cwd, default to observe (no tools) or read_only
-	// to prevent arbitrary tool access. Only allow execute_safe when the agent
-	// and cwd both support it.
+	// Profile selection priority:
+	//   1. Agent with CapabilityProfile → use it directly (agent owns its policy)
+	//   2. Job/prompt cwd with cwdAllowsExecution → execute_safe (user opted in)
+	//   3. Agent cwd without CapabilityProfile → read_only (safe default until agent declares profile)
+	//   4. No agent, no cwd → observe (classification/routing only)
 	var profileStr string
 	var allowedTools []string
 	if agent != nil && agent.CapabilityProfile != "" {
 		profileStr = agent.CapabilityProfile
 		allowedTools = agent.AllowedTools
 	} else if cwd != "" {
-		if extractedCwd {
-			// Cwd was extracted from prompt — the job implies execution ("Run: script").
-			// Elevate to execute_safe so the LLM has Bash/Read/Write tools.
+		if cwdAllowsExecution {
+			// Cwd was explicitly configured on the job or extracted from a prompt
+			// that implies execution ("Run: script"). Elevate to execute_safe so
+			// the LLM has Bash/Read/Write tools.
 			profileStr = string(security.ProfileExecuteSafe)
 		} else {
-			// Has a working directory but no explicit profile — safe read-only.
+			// INVARIANT: agent.Cwd without CapabilityProfile → read_only.
+			// The agent has a working directory but hasn't opted into execution.
+			// This is safe: an agent that needs Bash/Write must set
+			// capability_profile: execute_safe (or higher) in its definition.
+			// Without this, a misconfigured agent with a default Cwd would
+			// silently gain filesystem write access.
 			profileStr = string(security.ProfileReadOnly)
 		}
 		allowedTools = security.ProfileTools(security.CapabilityProfile(profileStr))
@@ -226,7 +295,9 @@ func (r *BridgeCronRuntime) ExecuteJob(ctx context.Context, job CronJob) (*Execu
 			}
 		}
 		allowedTools = safe
-		if profileStr != string(security.ProfileObserve) {
+		if agent == nil {
+			profileStr = string(security.ProfileObserve)
+		} else if profileStr != string(security.ProfileObserve) {
 			profileStr = string(security.ProfileReadOnly)
 		}
 	}
@@ -280,7 +351,7 @@ func (r *BridgeCronRuntime) ExecuteJob(ctx context.Context, job CronJob) (*Execu
 // target chat is set (the --chat-id flag is required).
 // ownerUserID is included in the CLI example when non-empty, so follow-up jobs
 // inherit the original job's owner.
-func (r *BridgeCronRuntime) buildCronInstructions(targetChatID int64, ownerUserID string) string {
+func (r *BridgeCronRuntime) buildCronInstructions(targetChatID int64, ownerUserID string, cwd string) string {
 	if targetChatID == 0 {
 		return ""
 	}
@@ -294,6 +365,12 @@ func (r *BridgeCronRuntime) buildCronInstructions(targetChatID int64, ownerUserI
 		flags = fmt.Sprintf("%s --owner-user-id %s", flags, ownerUserID)
 		ownerSuffix = " If scheduling for yourself, include --owner-user-id <your_user_id>."
 	}
+	// %q quoting escapes spaces and special chars for the LLM to read as
+	// instructional text (not a shell command). Paths with unusual characters
+	// (e.g. Windows backslashes) are rare on this deployment target.
+	if strings.TrimSpace(cwd) != "" {
+		flags = fmt.Sprintf("%s --cwd %q", flags, strings.TrimSpace(cwd))
+	}
 	return fmt.Sprintf(`## Scheduling Tasks
 
 Use the Aurelia cron CLI for ALL scheduling. Internal scheduling tools die with the session — only the CLI persists.
@@ -302,7 +379,7 @@ Use the Aurelia cron CLI for ALL scheduling. Internal scheduling tools die with 
 - One-time: `+"`%s cron once \"<ISO-timestamp>\" \"<prompt>\" %s`"+`
 - List: `+"`%s cron list %s`"+` | Delete: `+"`%s cron del <id>`"+`
 
-Cron prompts are ACTION instructions (not content). They run in isolated sessions with no history. The --chat-id flag is required.%s`,
+Cron prompts are ACTION instructions (not content). They run in isolated sessions with no history. Prefer --cwd for project jobs instead of encoding "Set cwd to ..." inside the prompt. The --chat-id flag is required.%s`,
 		bin, flags,
 		bin, flags,
 		bin, flags,

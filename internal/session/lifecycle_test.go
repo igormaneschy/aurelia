@@ -62,20 +62,42 @@ func TestEvaluateLifecycle_LargeInputTokens(t *testing.T) {
 	}
 }
 
-func TestEvaluateLifecycle_DangerousInputTokens(t *testing.T) {
+func TestEvaluateLifecycle_VeryLargeInputTokensContinue(t *testing.T) {
 	signals := HealthSignals{
 		Active:      true,
-		InputTokens: 550000, // above rotate (500k)
+		InputTokens: 550000, // above legacy rotate threshold
 	}
 	policy := DefaultLifecyclePolicy()
 
 	dec := EvaluateLifecycle(signals, policy)
 
-	if dec.State != HealthDangerous {
-		t.Fatalf("expected dangerous, got %s", dec.State)
+	if dec.State != HealthLarge {
+		t.Fatalf("expected large, got %s", dec.State)
 	}
-	if dec.Action != ActionRotate {
-		t.Fatalf("expected rotate, got %s", dec.Action)
+	if dec.Action != ActionContinue {
+		t.Fatalf("expected continue because PI SDK owns continuity, got %s", dec.Action)
+	}
+}
+
+func TestEvaluateLifecycle_IncidentTokenCountDoesNotRotate(t *testing.T) {
+	// Regression for 2026-06-01: an active topic session with ~371k input
+	// tokens and an older 250k rotate threshold must continue the original PI
+	// session_file. Aurelia must not create a summary-seeded replacement.
+	signals := HealthSignals{
+		Active:      true,
+		InputTokens: 371682,
+	}
+	policy := DefaultLifecyclePolicy()
+	policy.CompactAfterInputTokens = 120000
+	policy.RotateAfterInputTokens = 250000
+
+	dec := EvaluateLifecycle(signals, policy)
+
+	if dec.State != HealthLarge {
+		t.Fatalf("expected large for incident token count, got %s", dec.State)
+	}
+	if dec.Action != ActionContinue {
+		t.Fatalf("expected continue for incident token count, got %s", dec.Action)
 	}
 }
 
@@ -117,10 +139,10 @@ func TestEvaluateLifecycle_SuspectDueToProcessDeaths(t *testing.T) {
 	}
 }
 
-func TestEvaluateLifecycle_PriorityDangerousOverSuspect(t *testing.T) {
-	// For active sessions, dangerous (suspect + rotate threshold) takes
-	// priority over single-suspect cold-resume. NeedsRotation catches
-	// this before the single-suspect step.
+func TestEvaluateLifecycle_RepeatedSuspectColdResumes(t *testing.T) {
+	// Repeated suspect signals are dangerous, but automatic rotation is not
+	// allowed because PI owns continuity. Aurelia cold-resumes the original
+	// session_file first.
 	signals := HealthSignals{
 		Active:              true,
 		InputTokens:         300000,
@@ -134,7 +156,10 @@ func TestEvaluateLifecycle_PriorityDangerousOverSuspect(t *testing.T) {
 	dec := EvaluateLifecycle(signals, policy)
 
 	if dec.State != HealthDangerous {
-		t.Fatalf("expected dangerous (higher priority), got %s", dec.State)
+		t.Fatalf("expected dangerous signal, got %s", dec.State)
+	}
+	if dec.Action != ActionColdResume {
+		t.Fatalf("expected cold_resume for repeated suspect signals, got %s", dec.Action)
 	}
 }
 
@@ -279,9 +304,9 @@ func TestEvaluateLifecycle_ColdOverridesDangerousTokens(t *testing.T) {
 	}
 }
 
-func TestEvaluateLifecycle_ActiveDangerousStillRotates(t *testing.T) {
-	// Active sessions with tokens above rotate threshold still rotate.
-	// This ensures the dangerous token policy still applies to active sessions.
+func TestEvaluateLifecycle_ActiveDangerousTokensStillContinue(t *testing.T) {
+	// Active sessions with tokens above the legacy rotate threshold still
+	// continue. The PI SDK owns compaction and continuity for large sessions.
 	signals := HealthSignals{
 		Active:      true,
 		InputTokens: 550000,
@@ -290,11 +315,11 @@ func TestEvaluateLifecycle_ActiveDangerousStillRotates(t *testing.T) {
 
 	dec := EvaluateLifecycle(signals, policy)
 
-	if dec.State != HealthDangerous {
-		t.Fatalf("expected dangerous for active session with high tokens, got %s", dec.State)
+	if dec.State != HealthLarge {
+		t.Fatalf("expected large for active session with high tokens, got %s", dec.State)
 	}
-	if dec.Action != ActionRotate {
-		t.Fatalf("expected rotate for active session with high tokens, got %s", dec.Action)
+	if dec.Action != ActionContinue {
+		t.Fatalf("expected continue for active session with high tokens, got %s", dec.Action)
 	}
 }
 
@@ -318,9 +343,9 @@ func TestEvaluateLifecycle_SingleEmptyResultSuspects(t *testing.T) {
 	}
 }
 
-func TestEvaluateLifecycle_TwoEmptyResultsRotate(t *testing.T) {
-	// Two empty results under default policy should hit NeedsRotation
-	// and produce dangerous/rotate.
+func TestEvaluateLifecycle_TwoEmptyResultsColdResume(t *testing.T) {
+	// Two empty results under default policy are dangerous, but Aurelia must not
+	// auto-rotate; it cold-resumes the original PI session first.
 	signals := HealthSignals{
 		Active:             true,
 		InputTokens:        1000,
@@ -333,8 +358,8 @@ func TestEvaluateLifecycle_TwoEmptyResultsRotate(t *testing.T) {
 	if dec.State != HealthDangerous {
 		t.Fatalf("expected dangerous for 2 empty results, got %s", dec.State)
 	}
-	if dec.Action != ActionRotate {
-		t.Fatalf("expected rotate for 2 empty results, got %s", dec.Action)
+	if dec.Action != ActionColdResume {
+		t.Fatalf("expected cold_resume for 2 empty results, got %s", dec.Action)
 	}
 }
 
@@ -358,9 +383,9 @@ func TestEvaluateLifecycle_SingleProcessDeathSuspects(t *testing.T) {
 	}
 }
 
-func TestEvaluateLifecycle_TwoProcessDeathsRotate(t *testing.T) {
-	// Two process deaths under default policy should hit NeedsRotation
-	// and produce dangerous/rotate.
+func TestEvaluateLifecycle_TwoProcessDeathsColdResume(t *testing.T) {
+	// Two process deaths under default policy are dangerous, but Aurelia must not
+	// auto-rotate; it cold-resumes the original PI session first.
 	signals := HealthSignals{
 		Active:              true,
 		InputTokens:         1000,
@@ -373,16 +398,14 @@ func TestEvaluateLifecycle_TwoProcessDeathsRotate(t *testing.T) {
 	if dec.State != HealthDangerous {
 		t.Fatalf("expected dangerous for 2 process deaths, got %s", dec.State)
 	}
-	if dec.Action != ActionRotate {
-		t.Fatalf("expected rotate for 2 process deaths, got %s", dec.Action)
+	if dec.Action != ActionColdResume {
+		t.Fatalf("expected cold_resume for 2 process deaths, got %s", dec.Action)
 	}
 }
 
-func TestEvaluateLifecycle_InactiveWithSuspectFailuresRotates(t *testing.T) {
-	// Inactive sessions with suspect failures reaching the rotation threshold
-	// must still rotate. NeedsRotation runs before the cold/inactive check
-	// because store failure markers (MarkEmptyResult, MarkProcessDeath) set
-	// Active=false as a side effect.
+func TestEvaluateLifecycle_InactiveWithSuspectFailuresColdResumes(t *testing.T) {
+	// Inactive sessions always cold-resume the original PI session. This avoids
+	// replacing topic context with a summary-generated session during recovery.
 	signals := HealthSignals{
 		Active:             false,
 		RecentEmptyResults: 2, // >= MaxEmptyResultsBeforeRotate (default=2)
@@ -391,11 +414,11 @@ func TestEvaluateLifecycle_InactiveWithSuspectFailuresRotates(t *testing.T) {
 
 	dec := EvaluateLifecycle(signals, policy)
 
-	if dec.State != HealthDangerous {
-		t.Fatalf("expected dangerous for inactive session with suspect failures, got %s", dec.State)
+	if dec.State != HealthCold {
+		t.Fatalf("expected cold for inactive session with suspect failures, got %s", dec.State)
 	}
-	if dec.Action != ActionRotate {
-		t.Fatalf("expected rotate for inactive session with suspect failures, got %s", dec.Action)
+	if dec.Action != ActionColdResume {
+		t.Fatalf("expected cold_resume for inactive session with suspect failures, got %s", dec.Action)
 	}
 }
 

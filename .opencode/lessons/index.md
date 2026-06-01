@@ -69,3 +69,8 @@
 
 ## Change cron-cwd-extraction (2026-05-29)
 - [pattern] cron-cwd-extraction-from-prompt
+
+## Change pi-session-continuity-review (2026-06-01)
+- [anti-pattern] summary-seeded-session-rotation
+- [process] incident-regression-from-daemon-logs
+- [pattern] cron-persist-cwd-not-prompt

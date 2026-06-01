@@ -48,7 +48,7 @@
 ### PI SDK Boundary
 **Location:** `bridge/index.ts`, `internal/pipeline/prompt_builder.go`, `internal/session/store.go`
 **Purpose:** Keep the PI SDK as the cognitive/execution engine while Aurelia owns product continuity.
-**Implementation:** The Bridge uses PI-native `ModelRegistry`, `SessionManager`, `SettingsManager.compaction`, `DefaultResourceLoader(noContextFiles=false)`, and `session.agent.beforeToolCall`. Go tracks `session_file` per `SessionKey` for resume, injects Aurelia-specific prompt layers (persona, Telegram, memory, security context, continuity), and does not own model routing or context compaction.
+**Implementation:** The Bridge uses PI-native `ModelRegistry`, `SessionManager`, `SettingsManager.compaction`, `DefaultResourceLoader(noContextFiles=false)`, and `session.agent.beforeToolCall`. Go tracks `session_file` per `SessionKey` for resume, injects Aurelia-specific prompt layers (persona, Telegram, memory, security context, continuity), and does not own model routing or context compaction. Automatic token-based rotation is forbidden; large sessions continue through the original PI `session_file` so SDK compaction preserves continuity.
 **Rule:** If PI already owns an engine concern, Aurelia adapts/orchestrates it. If the concern is identity, UX, memory, Wiki, project/user scoping, scheduling, audit or workflow state, Aurelia owns it.
 
 ### NDJSON Request Multiplexing
@@ -126,7 +126,7 @@
 
 1. **Poll:** Scheduler ticks every 15s, queries `ListDueJobs(now, limit=50)`
 2. **Dedup:** `sync.Map.LoadOrStore(jobID)` prevents concurrent runs of same job
-3. **Execute:** `BridgeCronRuntime.ExecuteJob()` builds persona+agent prompt, calls `bridge.ExecuteSync()`
+3. **Execute:** `BridgeCronRuntime.ExecuteJob()` builds persona+agent prompt, resolves persisted `cwd` (prompt parsing is fallback-only), calls `bridge.ExecuteSync()`
 4. **Record:** Atomic transaction: `RecordExecutionTx` + `UpdateJobTx`
 5. **Deliver:** `TelegramDelivery.Deliver()` sends result to `target_chat_id`
 6. **Schedule:** Compute `nextRunAt` (cron) or deactivate (once)

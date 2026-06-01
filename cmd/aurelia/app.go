@@ -36,8 +36,8 @@ type app struct {
 	cronStore  *cron.SQLiteCronStore
 	bindings   projectbinding.Store
 	runLog     runlog.Store
-	continuity    continuity.Store
-	bot           *telegram.BotController
+	continuity continuity.Store
+	bot        *telegram.BotController
 	sessions   *session.Store
 	scheduler  *cron.Scheduler
 	cronCtx    context.Context
@@ -729,13 +729,22 @@ func registerScheduledAgents(store *cron.SQLiteCronStore, reg *agents.Registry) 
 			continue
 		}
 		if existing != nil {
-			log.Printf("Scheduled agent %q already registered (job %s), skipping", a.Name, jobID)
+			existing.AgentName = a.Name
+			existing.Cwd = a.Cwd
+			existing.ScheduleType = "cron"
+			existing.CronExpr = a.Schedule
+			existing.Prompt = a.Prompt
+			if err := store.UpdateJob(context.Background(), *existing); err != nil {
+				log.Printf("Warning: failed to refresh scheduled agent %q metadata: %v", a.Name, err)
+			}
+			log.Printf("Scheduled agent %q already registered (job %s), refreshed metadata", a.Name, jobID)
 			continue
 		}
 
 		_, err = svc.CreateJob(context.Background(), cron.CronJob{
 			ID:           jobID,
 			AgentName:    a.Name,
+			Cwd:          a.Cwd,
 			ScheduleType: "cron",
 			CronExpr:     a.Schedule,
 			Prompt:       a.Prompt,

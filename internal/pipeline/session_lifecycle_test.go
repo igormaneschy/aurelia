@@ -384,7 +384,7 @@ type recordingOutput struct {
 	texts []string
 }
 
-func (r *recordingOutput) StartTyping(_ int64, _ int) func() { return func() {} }
+func (r *recordingOutput) StartTyping(_ int64, _ int) func()           { return func() {} }
 func (r *recordingOutput) NewProgress(_ int64, _ int) ProgressReporter { return &fakeProgress{} }
 func (r *recordingOutput) SendError(_ int64, _ int, text string) error { return nil }
 func (r *recordingOutput) SendReply(_ int64, _ int, text string) error { return nil }
@@ -392,9 +392,10 @@ func (r *recordingOutput) SendText(_ int64, _ int, text string) (any, error) {
 	r.texts = append(r.texts, text)
 	return nil, nil
 }
-func (r *recordingOutput) DeleteMessage(_ any)                              {}
-func (r *recordingOutput) ConfirmMessage(_ int64, _ int)                    {}
-func (r *recordingOutput) ExecuteApprovedPlan(_ int64, _ int, _ int, _ string, _ int64, _ *orchestrator.Plan) {}
+func (r *recordingOutput) DeleteMessage(_ any)           {}
+func (r *recordingOutput) ConfirmMessage(_ int64, _ int) {}
+func (r *recordingOutput) ExecuteApprovedPlan(_ int64, _ int, _ int, _ string, _ int64, _ *orchestrator.Plan) {
+}
 
 func TestApplyLifecycle_ColdStoreSendsNoRotateNotices(t *testing.T) {
 	// Cold/inactive sessions without suspect failures go directly to
@@ -477,16 +478,14 @@ func TestApplyLifecycle_SingleEmptyResultDoesNotRotate(t *testing.T) {
 func TestColdStoreCompositeSignalsDontRotate(t *testing.T) {
 	// Decision-level composite-signal test: the signal combination that
 	// results from a cold session store (Active=false) plus enriched bridge
-	// stats (InputTokens above rotate threshold) must produce cold_resume.
-	// This covers the production case: user returns from >1h idle with no
-	// suspect failures, session store is cold, bridge reports 317k tokens.
-	// Cold wins over token-based decisions for sessions without suspect
-	// failures.
+	// stats (even above the legacy rotate threshold) must produce cold_resume.
+	// Cold wins over token-based decisions so Aurelia preserves the original PI
+	// session_file instead of creating a summary-seeded replacement.
 	policy := config.DefaultSessionLifecycleConfig().LifecyclePolicy()
 
 	signals := session.HealthSignals{
-		Active:      false,   // from session store
-		InputTokens: 300000,  // from bridge enrichment
+		Active:      false,  // from session store
+		InputTokens: 600000, // from bridge enrichment
 	}
 
 	dec := session.EvaluateLifecycle(signals, policy)

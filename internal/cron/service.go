@@ -28,6 +28,10 @@ func (s *Service) CreateJob(ctx context.Context, job CronJob) (string, error) {
 	if strings.TrimSpace(job.Prompt) == "" {
 		return "", fmt.Errorf("prompt is required")
 	}
+	job.Cwd = strings.TrimSpace(job.Cwd)
+	if job.Cwd == "" {
+		job.Cwd = extractCwdFromPrompt(job.Prompt)
+	}
 	if job.ID == "" {
 		job.ID = uuid.NewString()
 	}
@@ -135,31 +139,33 @@ func (s *Service) DeleteJob(ctx context.Context, jobID string) error {
 }
 
 // AddRecurringJob creates a cron-scheduled job for the given chat/thread.
-func (s *Service) AddRecurringJob(ctx context.Context, userID string, chatID int64, threadID int, expr, prompt string) (string, error) {
+func (s *Service) AddRecurringJob(ctx context.Context, userID string, chatID int64, threadID int, expr, prompt, cwd string) (string, error) {
 	return s.CreateJob(ctx, CronJob{
-		ID:              uuid.NewString(),
-		OwnerUserID:     userID,
-		TargetChatID:    chatID,
-		TargetThreadID:  threadID,
-		ScheduleType:    "cron",
-		CronExpr:        expr,
-		Prompt:          prompt,
+		ID:             uuid.NewString(),
+		OwnerUserID:    userID,
+		TargetChatID:   chatID,
+		TargetThreadID: threadID,
+		Cwd:            cwd,
+		ScheduleType:   "cron",
+		CronExpr:       expr,
+		Prompt:         prompt,
 	})
 }
 
 // AddOnceJob creates a one-shot job scheduled at the given timestamp for the given chat/thread.
-func (s *Service) AddOnceJob(ctx context.Context, userID string, chatID int64, threadID int, timestamp, prompt string) (string, error) {
+func (s *Service) AddOnceJob(ctx context.Context, userID string, chatID int64, threadID int, timestamp, prompt, cwd string) (string, error) {
 	t, err := time.Parse(time.RFC3339, timestamp)
 	if err != nil {
 		return "", fmt.Errorf("invalid timestamp %q: %w", timestamp, err)
 	}
 	return s.CreateJob(ctx, CronJob{
-		ID:              uuid.NewString(),
-		OwnerUserID:     userID,
-		TargetChatID:    chatID,
-		TargetThreadID:  threadID,
-		ScheduleType:    "once",
-		RunAt:           &t,
-		Prompt:          prompt,
+		ID:             uuid.NewString(),
+		OwnerUserID:    userID,
+		TargetChatID:   chatID,
+		TargetThreadID: threadID,
+		Cwd:            cwd,
+		ScheduleType:   "once",
+		RunAt:          &t,
+		Prompt:         prompt,
 	})
 }

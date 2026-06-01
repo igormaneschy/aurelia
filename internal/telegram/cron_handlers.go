@@ -10,8 +10,8 @@ import (
 )
 
 type CronCommandService interface {
-	AddRecurringJob(ctx context.Context, userID string, chatID int64, threadID int, expr, prompt string) (string, error)
-	AddOnceJob(ctx context.Context, userID string, chatID int64, threadID int, timestamp, prompt string) (string, error)
+	AddRecurringJob(ctx context.Context, userID string, chatID int64, threadID int, expr, prompt, cwd string) (string, error)
+	AddOnceJob(ctx context.Context, userID string, chatID int64, threadID int, timestamp, prompt, cwd string) (string, error)
 	ListJobs(ctx context.Context, chatID int64) ([]cron.CronJob, error)
 	ListJobsByOwner(ctx context.Context, ownerUserID string) ([]cron.CronJob, error)
 	PauseJob(ctx context.Context, jobID string) error
@@ -49,21 +49,21 @@ func (h *CronCommandHandler) HandleText(ctx context.Context, userID string, chat
 		}
 		return formatCronJobs(jobs), nil
 	case strings.HasPrefix(rest, "add "):
-		args := parseQuotedArgs(strings.TrimSpace(strings.TrimPrefix(rest, "add")))
-		if len(args) != 2 {
+		args := splitCronArgs(strings.TrimSpace(strings.TrimPrefix(rest, "add")))
+		if len(args) < 2 {
 			return cronUsage(), nil
 		}
-		jobID, err := h.service.AddRecurringJob(ctx, userID, chatID, threadID, args[0], args[1])
+		jobID, err := h.service.AddRecurringJob(ctx, userID, chatID, threadID, args[0], args[1], parseFlagValue(args[2:], "--cwd"))
 		if err != nil {
 			return "", err
 		}
 		return fmt.Sprintf("Job cron criado com sucesso: `%s`", jobID), nil
 	case strings.HasPrefix(rest, "once "):
-		args := parseQuotedArgs(strings.TrimSpace(strings.TrimPrefix(rest, "once")))
-		if len(args) != 2 {
+		args := splitCronArgs(strings.TrimSpace(strings.TrimPrefix(rest, "once")))
+		if len(args) < 2 {
 			return cronUsage(), nil
 		}
-		jobID, err := h.service.AddOnceJob(ctx, userID, chatID, threadID, args[0], args[1])
+		jobID, err := h.service.AddOnceJob(ctx, userID, chatID, threadID, args[0], args[1], parseFlagValue(args[2:], "--cwd"))
 		if err != nil {
 			return "", err
 		}
@@ -101,30 +101,52 @@ func (h *CronCommandHandler) HandleText(ctx context.Context, userID string, chat
 }
 
 func cronUsage() string {
-	return "Uso: /cron list | /cron add \"<expr>\" \"<prompt>\" | /cron once \"<timestamp>\" \"<prompt>\" | /cron pause <id> | /cron resume <id> | /cron del <id>"
+	return "Uso: /cron list | /cron add \"<expr>\" \"<prompt>\" [--cwd <path>] | /cron once \"<timestamp>\" \"<prompt>\" [--cwd <path>] | /cron pause <id> | /cron resume <id> | /cron del <id>"
 }
 
-func parseQuotedArgs(input string) []string {
+func splitCronArgs(input string) []string {
 	var args []string
 	var current strings.Builder
 	inQuotes := false
 
-	for _, r := range input {
-		switch r {
-		case '"':
-			if inQuotes {
-				args = append(args, current.String())
-				current.Reset()
-			}
-			inQuotes = !inQuotes
-		default:
-			if inQuotes {
-				current.WriteRune(r)
-			}
+	flush := func() {
+		if current.Len() == 0 {
+			return
 		}
+		args = append(args, current.String())
+		current.Reset()
 	}
 
+	for _, r := range input {
+		switch {
+		case r == '"':
+			if inQuotes {
+				flush()
+			} else {
+				flush()
+			}
+			inQuotes = !inQuotes
+		case r == ' ' || r == '\t':
+			if inQuotes {
+				current.WriteRune(r)
+			} else {
+				flush()
+			}
+		default:
+			current.WriteRune(r)
+		}
+	}
+	flush()
 	return args
+}
+
+func parseFlagValue(args []string, name string) string {
+	for i, arg := range args {
+		if arg == name && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
 }
 
 func formatCronJobs(jobs []cron.CronJob) string {
@@ -138,7 +160,11 @@ func formatCronJobs(jobs []cron.CronJob) string {
 		if job.ScheduleType == "once" && job.RunAt != nil {
 			schedule = job.RunAt.Format(time.RFC3339)
 		}
-		lines = append(lines, fmt.Sprintf("- `%s` [%s] active=%t status=%s schedule=%s prompt=%s", job.ID, job.ScheduleType, job.Active, job.LastStatus, schedule, job.Prompt))
+		cwd := ""
+		if job.Cwd != "" {
+			cwd = fmt.Sprintf(" cwd=%s", job.Cwd)
+		}
+		lines = append(lines, fmt.Sprintf("- `%s` [%s] active=%t status=%s schedule=%s%s prompt=%s", job.ID, job.ScheduleType, job.Active, job.LastStatus, schedule, cwd, job.Prompt))
 	}
 	return strings.Join(lines, "\n")
 }

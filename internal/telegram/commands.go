@@ -559,15 +559,17 @@ func (bc *BotController) cmdCronCreate(c telebot.Context, text string) (string, 
 	threadID := c.Message().ThreadID
 	userID := fmt.Sprintf("%d", c.Sender().ID)
 
+	cwd := bc.currentCwd(chatID, threadID)
+
 	var (
 		jobID string
 		err   error
 	)
 	switch parsed.Type {
 	case "cron":
-		jobID, err = bc.cronHandler.service.AddRecurringJob(ctx, userID, chatID, threadID, parsed.CronExpr, parsed.Prompt)
+		jobID, err = bc.cronHandler.service.AddRecurringJob(ctx, userID, chatID, threadID, parsed.CronExpr, parsed.Prompt, cwd)
 	case "once":
-		jobID, err = bc.cronHandler.service.AddOnceJob(ctx, userID, chatID, threadID, parsed.RunAt, parsed.Prompt)
+		jobID, err = bc.cronHandler.service.AddOnceJob(ctx, userID, chatID, threadID, parsed.RunAt, parsed.Prompt, cwd)
 	default:
 		return "Não consegui determinar o tipo de agendamento.", nil
 	}
