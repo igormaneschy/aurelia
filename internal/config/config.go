@@ -79,8 +79,8 @@ type SessionLifecycleConfig struct {
 func DefaultSessionLifecycleConfig() SessionLifecycleConfig {
 	return SessionLifecycleConfig{
 		Enabled:                         true,
-		CompactAfterInputTokens:         120000,
-		RotateAfterInputTokens:          250000,
+		CompactAfterInputTokens:         200000,
+		RotateAfterInputTokens:          500000,
 		MaxEmptyResultsBeforeRotate:     2,
 		MaxProcessDeathsBeforeRotate:    2,
 		IdleTimeoutMinutes:              20,

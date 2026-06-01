@@ -16,11 +16,11 @@ import (
 // User-visible lifecycle messages. These must avoid technical terms like
 // "compactação", "calls", "ferramentas" per Long Flow UX v2 spec.
 const (
-	lifecycleCompactMessage         = "🧠 Preparando o contexto da conversa antes de continuar..."
-	lifecycleCompactFailedMessage   = "⚠️ Preparação do contexto não concluída. Retomando sessão com segurança."
-	lifecycleRotateMessage          = "🔄 Preparando uma retomada segura da conversa..."
-	lifecycleRotateSuccessMessage   = "✅ Contexto preparado. Continuando com segurança."
-	lifecycleRotateFailedMessage    = "⚠️ Preparação do contexto não concluída. Retomando sessão com segurança."
+	lifecycleCompactMessage       = "🧠 Preparando o contexto da conversa antes de continuar..."
+	lifecycleCompactFailedMessage = "⚠️ Preparação do contexto não concluída. Retomando sessão com segurança."
+	lifecycleRotateMessage        = "🔄 Preparando uma retomada segura da conversa..."
+	lifecycleRotateSuccessMessage = "✅ Contexto preparado. Continuando com segurança."
+	lifecycleRotateFailedMessage  = "⚠️ Preparação do contexto não concluída. Retomando sessão com segurança."
 )
 
 // lifecycleDecisionResult captures the outcome of a lifecycle evaluation
@@ -50,8 +50,8 @@ func (s *Service) sendLifecycleNotice(chatID int64, threadID int, message string
 //  3. Apply action:
 //     - continue:   keep Continue=true (no change)
 //     - cold_resume: force Continue=false
-//     - compact:     call compact-session, then update session file
-//     - rotate:      for now, force cold resume (rotation T10)
+//     - compact:     explicit/manual fallback only
+//     - rotate:      explicit/emergency fallback only; normal size management stays in PI
 //  4. Record lifecycle decision as runlog event
 //
 // Returns a result with the modified request or skip signal.
@@ -163,6 +163,9 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 		}
 
 	case session.ActionRotate:
+		// Automatic token-based rotation is intentionally disabled in
+		// EvaluateLifecycle. This branch is kept for explicit/emergency recovery
+		// paths only; normal continuity and compaction belong to the PI SDK.
 		// Notify user about session rotation (per Long Flow UX v2, avoid
 		// technical terms and old lifecycle language in user-facing messages).
 		s.sendLifecycleNotice(chatID, threadID, lifecycleRotateMessage)

@@ -112,7 +112,7 @@ Aurelia uses a TypeScript Bridge adapting the PI SDK as its inference and execut
 - **Bridge** — `bridge/index.ts` wraps `@earendil-works/pi-coding-agent` and is embedded into the Go binary.
 - **API key auth** — provider keys are configured during onboarding and exported to the bridge runtime environment.
 - **Streaming progress** — PI tool events are mapped back into Telegram progress messages.
-- **Long-lived sessions** — Bridge requests preserve PI `session_file` paths for continuity; context pruning is handled by PI SDK compaction.
+- **Long-lived sessions** — Bridge requests preserve PI `session_file` paths for continuity; context pruning is handled by PI SDK compaction. Aurelia does not auto-rotate sessions due to token count.
 - **Observability** — every run gets a unique `run_id` with timeline events
   (`bridge_request_started`, `tool_use`, `run_completed`, etc.); phase events
   are persisted in `run_events` table and queryable via CLI or Telegram debug

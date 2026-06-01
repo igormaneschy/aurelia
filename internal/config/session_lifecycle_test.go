@@ -21,11 +21,11 @@ func TestSessionLifecycleConfig_Defaults(t *testing.T) {
 	if !cfg.SessionLifecycle.Enabled {
 		t.Fatal("default session lifecycle should be enabled")
 	}
-	if cfg.SessionLifecycle.CompactAfterInputTokens != 120000 {
-		t.Fatalf("expected compact_after=120000, got %d", cfg.SessionLifecycle.CompactAfterInputTokens)
+	if cfg.SessionLifecycle.CompactAfterInputTokens != 200000 {
+		t.Fatalf("expected compact_after=200000, got %d", cfg.SessionLifecycle.CompactAfterInputTokens)
 	}
-	if cfg.SessionLifecycle.RotateAfterInputTokens != 250000 {
-		t.Fatalf("expected rotate_after=250000, got %d", cfg.SessionLifecycle.RotateAfterInputTokens)
+	if cfg.SessionLifecycle.RotateAfterInputTokens != 500000 {
+		t.Fatalf("expected rotate_after=500000, got %d", cfg.SessionLifecycle.RotateAfterInputTokens)
 	}
 	if cfg.SessionLifecycle.IdleTimeoutMinutes != 20 {
 		t.Fatalf("expected idle_timeout=20, got %d", cfg.SessionLifecycle.IdleTimeoutMinutes)
@@ -214,8 +214,8 @@ func TestSessionLifecycleConfig_PartialConfigUsesDefaults(t *testing.T) {
 	if cfg.SessionLifecycle.CompactAfterInputTokens != 50000 {
 		t.Fatalf("expected compact_after=50000, got %d", cfg.SessionLifecycle.CompactAfterInputTokens)
 	}
-	if cfg.SessionLifecycle.RotateAfterInputTokens != 250000 {
-		t.Fatalf("expected rotate_after=250000 (default), got %d", cfg.SessionLifecycle.RotateAfterInputTokens)
+	if cfg.SessionLifecycle.RotateAfterInputTokens != 500000 {
+		t.Fatalf("expected rotate_after=500000 (default), got %d", cfg.SessionLifecycle.RotateAfterInputTokens)
 	}
 }
 

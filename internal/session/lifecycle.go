@@ -66,14 +66,14 @@ type LifecyclePolicy struct {
 
 // DefaultLifecyclePolicy returns safe defaults for session lifecycle policy.
 // PI SDK handles auto-compaction internally (contextWindow - reserveTokens).
-// Rotate threshold is raised to 500K — rotation is a last-resort safety net
-// for corrupt sessions, not a routine token-management tool. The PI SDK's
-// auto-compaction keeps effective context within model limits automatically.
+// Aurelia must not rotate large sessions just because token counters are high:
+// rotation creates a new session seeded by a generated summary and can degrade
+// topic continuity. Token thresholds are now observability signals only.
 func DefaultLifecyclePolicy() LifecyclePolicy {
 	return LifecyclePolicy{
 		Enabled:                      true,
-		CompactAfterInputTokens:      200000, // raised from 120000 — PI SDK manages normal compaction
-		RotateAfterInputTokens:       500000, // raised from 250000 — only rotate on truly huge sessions
+		CompactAfterInputTokens:      200000, // informational — PI SDK manages normal compaction
+		RotateAfterInputTokens:       500000, // informational — automatic token rotation is disabled
 		MaxEmptyResultsBeforeRotate:  2,
 		MaxProcessDeathsBeforeRotate: 2,
 		IdleTimeoutMinutes:           20,
@@ -86,38 +86,20 @@ func DefaultLifecyclePolicy() LifecyclePolicy {
 // a decision. This function is pure: no I/O, no side effects.
 //
 // Priority order:
-//  1. Repeated suspect failures → rotate. Suspect counters can be set while
-//     the session is inactive (e.g. MarkEmptyResult sets Active=false), so
-//     NeedsRotation must run before the cold/inactive check to preserve the
-//     documented priority "repeated suspect failures → rotate".
-//  2. Cold/inactive session → cold resume. Inactive sessions without suspect
-//     failures resume cold, regardless of enriched token stats. This prevents
-//     stale large sessions (e.g. user returned after a day) from triggering
-//     a rotate + summary cycle on the first message.
-//  3. Single suspect failures → cold resume / safe recovery
-//  4. Dangerous token threshold → rotate (active sessions only)
-//  5. Large but healthy → continue (PI SDK manages compaction)
-//  6. Healthy → continue
+//  1. Cold/inactive session → cold resume. PI restores the persisted
+//     session_file; Aurelia must not replace it with a summary-seeded session.
+//  2. Suspect failures → cold resume / safe recovery. Repeated failures are
+//     logged in the reason, but still resume the original PI session first.
+//  3. Large or very large token counts → continue. PI SDK owns normal
+//     context compaction and pruning.
+//  4. Healthy → continue.
 //
-// ActionCompact is reserved for explicit/manual/fallback use only, not the
-// default healthy path. The PI SDK owns normal session compaction.
+// ActionCompact and ActionRotate are reserved for explicit/manual/emergency
+// flows only, not automatic token management. The PI SDK owns continuity.
 func EvaluateLifecycle(signals HealthSignals, policy LifecyclePolicy) Decision {
-	// 1. Repeated suspect signals are dangerous enough to rotate.
-	// Checked before cold/inactive because store failure markers (MarkEmptyResult,
-	// MarkProcessDeath) set Active=false as a side effect. Moving cold before
-	// NeedsRotation would silently demote repeated suspect failures to cold_resume.
-	if policy.NeedsRotation(signals) {
-		return Decision{
-			State:  HealthDangerous,
-			Action: ActionRotate,
-			Reason: fmt.Sprintf("suspect threshold reached: empty_results=%d process_deaths=%d", signals.RecentEmptyResults, signals.RecentProcessDeaths),
-		}
-	}
-
-	// 2. Cold/inactive: session is not active (e.g. restored from disk after
-	// restart or user returned after a long idle). Cold wins over token-based
-	// decisions to avoid unnecessary rotate/compact on the first user message
-	// from an inactive session without suspect failures.
+	// 1. Cold/inactive: session is not active (e.g. restored from disk after
+	// restart or user returned after a long idle). Cold wins over every
+	// token-based decision to avoid unnecessary rotate/summary cycles.
 	if !signals.Active {
 		return Decision{
 			State:  HealthCold,
@@ -126,43 +108,34 @@ func EvaluateLifecycle(signals HealthSignals, policy LifecyclePolicy) Decision {
 		}
 	}
 
-	// 3. Suspect: empty results or process deaths signal potential corruption.
-	if signals.RecentEmptyResults > 0 {
-		return Decision{
-			State:  HealthSuspect,
-			Action: ActionColdResume,
-			Reason: fmt.Sprintf("recent_empty_results=%d", signals.RecentEmptyResults),
+	// 2. Suspect: empty results or process deaths signal potential corruption.
+	// Cold resume preserves the original PI session_file and lets PI recover
+	// before Aurelia considers any explicit manual intervention.
+	if signals.RecentEmptyResults > 0 || signals.RecentProcessDeaths > 0 {
+		state := HealthSuspect
+		reason := fmt.Sprintf("recent_empty_results=%d recent_process_deaths=%d", signals.RecentEmptyResults, signals.RecentProcessDeaths)
+		if policy.NeedsRotation(signals) {
+			state = HealthDangerous
+			reason = fmt.Sprintf("suspect threshold reached; cold-resuming original PI session: empty_results=%d process_deaths=%d", signals.RecentEmptyResults, signals.RecentProcessDeaths)
 		}
-	}
-	if signals.RecentProcessDeaths > 0 {
 		return Decision{
-			State:  HealthSuspect,
+			State:  state,
 			Action: ActionColdResume,
-			Reason: fmt.Sprintf("recent_process_deaths=%d", signals.RecentProcessDeaths),
+			Reason: reason,
 		}
 	}
 
-	// 4. Dangerous: active session with input tokens exceeding rotate threshold.
-	if signals.InputTokens >= policy.RotateAfterInputTokens {
-		return Decision{
-			State:  HealthDangerous,
-			Action: ActionRotate,
-			Reason: fmt.Sprintf("input_tokens=%d >= rotate_after=%d", signals.InputTokens, policy.RotateAfterInputTokens),
-		}
-	}
-
-	// 5. Large but healthy: input tokens above the old compact threshold.
-	//    PI SDK manages normal compaction internally; Go continues the session
-	//    without proactive compaction.
+	// 3. Large but healthy: PI SDK manages normal compaction internally; Go
+	// continues the original session without proactive compaction or rotation.
 	if signals.InputTokens >= policy.CompactAfterInputTokens {
 		return Decision{
 			State:  HealthLarge,
 			Action: ActionContinue,
-			Reason: fmt.Sprintf("input_tokens=%d >= compact_after=%d (PI SDK manages compaction)", signals.InputTokens, policy.CompactAfterInputTokens),
+			Reason: fmt.Sprintf("input_tokens=%d >= compact_after=%d (PI SDK owns compaction/continuity)", signals.InputTokens, policy.CompactAfterInputTokens),
 		}
 	}
 
-	// 6. Healthy: normal continue.
+	// 4. Healthy: normal continue.
 	return Decision{
 		State:  HealthHealthy,
 		Action: ActionContinue,
@@ -170,7 +143,10 @@ func EvaluateLifecycle(signals HealthSignals, policy LifecyclePolicy) Decision {
 	}
 }
 
-// NeedsRotation returns true if the suspect signals exceed the rotate threshold.
+// NeedsRotation reports whether suspect signals crossed the legacy rotation
+// threshold. EvaluateLifecycle uses this as severity metadata only; automatic
+// rotation is disabled so PI can preserve continuity through the original
+// session_file.
 func (p LifecyclePolicy) NeedsRotation(signals HealthSignals) bool {
 	if signals.RecentEmptyResults >= p.MaxEmptyResultsBeforeRotate {
 		return true
