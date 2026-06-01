@@ -39,12 +39,19 @@ type cwdSnapshot struct {
 // Sessions restored from disk are intentionally cold: the PI bridge process
 // that held live in-memory state was restarted, so the next turn must use
 // resume without continue.
+//
+// As a defense-in-depth measure, all loaded sessions are explicitly marked
+// inactive. This prevents a scenario where the daemon crashes after saving
+// the snapshot but before the bridge process death callback fires, which
+// could leave sessions in an inconsistent active state if a future version
+// adds active to the serialization format.
 func NewPersistentStore(path string) (*Store, error) {
 	store := NewStore()
 	store.persistPath = path
 	if err := store.loadSnapshot(path); err != nil {
 		return nil, err
 	}
+	store.DeactivateAll()
 	return store, nil
 }
 

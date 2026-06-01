@@ -109,7 +109,7 @@ func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText strin
 		s.sessions.ClearFailureState(chatID, threadID, userID)
 	}
 
-	key := continuity.ConversationKey{ChatID: chatID, ThreadID: threadID}
+	key := continuity.ConversationKeyFor(chatID, threadID, userID)
 
 	// Progressive summarization: on non-summary turns, re-read the existing
 	// summary from continuity so LastAssistantSummary accumulates across
@@ -124,7 +124,7 @@ func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText strin
 				readCtx, readCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer readCancel()
 
-				state, err := s.continuity.Get(readCtx, chatID, threadID)
+				state, err := s.continuity.Get(readCtx, chatID, threadID, userID)
 				if err == nil && state != nil && state.LastAssistantSummary != "" {
 					// Use background context (not readCtx) so generateProgressiveSummary
 					// can derive its own 10s timeout — a 5s parent would truncate it.
@@ -141,7 +141,7 @@ func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText strin
 			// so subsequent intervals build on the previous summary.
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			state, err := s.continuity.Get(ctx, chatID, threadID)
+			state, err := s.continuity.Get(ctx, chatID, threadID, userID)
 			if err == nil && state != nil && state.LastAssistantSummary != "" {
 				finalSummary = state.LastAssistantSummary
 			}
@@ -195,7 +195,8 @@ func (s *Service) patchContinuityAfterSuccess(chatID int64, threadID int, userTe
 		sessionID = s.sessions.GetSession(chatID, threadID, sessionUserID(userID...))
 	}
 
-	err := s.continuity.Patch(ctx, continuity.ConversationKey{ChatID: chatID, ThreadID: threadID}, continuity.StatePatch{
+	uid := sessionUserID(userID...)
+	err := s.continuity.Patch(ctx, continuity.ConversationKeyFor(chatID, threadID, uid), continuity.StatePatch{
 		CWD:                  &cwd,
 		LastUserIntent:       &userText,
 		LastAssistantSummary: &assistantText,
@@ -274,15 +275,16 @@ func (s *Service) patchContinuityFailure(chatID int64, threadID int, status stri
 }
 
 // patchContinuitySessionCold marks the session as cold with a reset reason.
-func (s *Service) patchContinuitySessionCold(chatID int64, threadID int, reason string) {
+func (s *Service) patchContinuitySessionCold(chatID int64, threadID int, reason string, userID ...int64) {
 	if s.continuity == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
+	uid := sessionUserID(userID...)
 	cold := true
-	err := s.continuity.Patch(ctx, continuity.ConversationKey{ChatID: chatID, ThreadID: threadID}, continuity.StatePatch{
+	err := s.continuity.Patch(ctx, continuity.ConversationKeyFor(chatID, threadID, uid), continuity.StatePatch{
 		SessionCold: &cold,
 		ResetReason: &reason,
 		UpdatedAt:   time.Now(),
@@ -293,14 +295,15 @@ func (s *Service) patchContinuitySessionCold(chatID int64, threadID int, reason 
 }
 
 // patchContinuitySessionID updates the session ID in continuity state.
-func (s *Service) patchContinuitySessionID(chatID int64, threadID int, sessionID string) {
+func (s *Service) patchContinuitySessionID(chatID int64, threadID int, sessionID string, userID ...int64) {
 	if s.continuity == nil || sessionID == "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	err := s.continuity.Patch(ctx, continuity.ConversationKey{ChatID: chatID, ThreadID: threadID}, continuity.StatePatch{
+	uid := sessionUserID(userID...)
+	err := s.continuity.Patch(ctx, continuity.ConversationKeyFor(chatID, threadID, uid), continuity.StatePatch{
 		SessionID: &sessionID,
 		UpdatedAt: time.Now(),
 	})
@@ -313,14 +316,15 @@ func (s *Service) patchContinuitySessionID(chatID int64, threadID int, sessionID
 // Returns a compact, redacted summary string, or empty if unavailable.
 // All field values are redacted for defense-in-depth, escaped to prevent
 // delimiter injection, and the total is capped at MaxContinuityBlockChars.
-func (s *Service) continuitySnapshot(ctx context.Context, chatID int64, threadID int) string {
+func (s *Service) continuitySnapshot(ctx context.Context, chatID int64, threadID int, userID ...int64) string {
 	if s.continuity == nil {
 		return ""
 	}
 	getCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	state, err := s.continuity.Get(getCtx, chatID, threadID)
+	uid := sessionUserID(userID...)
+	state, err := s.continuity.Get(getCtx, chatID, threadID, uid)
 	if err != nil || state == nil {
 		return ""
 	}

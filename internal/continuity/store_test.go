@@ -16,6 +16,7 @@ func TestStore_UpsertGetRoundtrip(t *testing.T) {
 	state := ConversationState{
 		ChatID:               42,
 		ThreadID:             1,
+		UserID:               100,
 		CWD:                  "/repo/project",
 		ActiveGoal:           "Implement feature X",
 		LastUserIntent:       "Please implement X",
@@ -34,7 +35,7 @@ func TestStore_UpsertGetRoundtrip(t *testing.T) {
 		t.Fatalf("Upsert: %v", err)
 	}
 
-	got, err := store.Get(ctx, 42, 1)
+	got, err := store.Get(ctx, 42, 1, 100)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -61,7 +62,7 @@ func TestStore_GetMissingState_ReturnsNil(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	got, err := store.Get(ctx, 999, 0)
+	got, err := store.Get(ctx, 999, 0, 0)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -79,18 +80,18 @@ func TestStore_UpsertOverwritesExisting(t *testing.T) {
 	_ = store.Upsert(ctx, ConversationState{
 		ChatID:   42,
 		ThreadID: 0,
-		CWD:      "/old/path",
+		UserID:               1,		CWD:      "/old/path",
 		UpdatedAt: now,
 	})
 
 	_ = store.Upsert(ctx, ConversationState{
 		ChatID:   42,
 		ThreadID: 0,
-		CWD:      "/new/path",
+		UserID:               1,		CWD:      "/new/path",
 		UpdatedAt: now.Add(time.Hour),
 	})
 
-	got, _ := store.Get(ctx, 42, 0)
+	got, _ := store.Get(ctx, 42, 0, 1)
 	if got == nil {
 		t.Fatal("expected state after second upsert")
 	}
@@ -108,14 +109,14 @@ func TestStore_PatchOnlyUpdatesProvidedFields(t *testing.T) {
 	_ = store.Upsert(ctx, ConversationState{
 		ChatID:   42,
 		ThreadID: 0,
-		CWD:      "/repo",
+		UserID:               1,		CWD:      "/repo",
 		ActiveGoal: "Old goal",
 		UpdatedAt: now,
 	})
 
 	cold := true
 	reason := "auto-reset"
-	err := store.Patch(ctx, ConversationKey{ChatID: 42, ThreadID: 0}, StatePatch{
+	err := store.Patch(ctx, ConversationKeyFor(42, 0, 1), StatePatch{
 		SessionCold: &cold,
 		ResetReason: &reason,
 		UpdatedAt:   now.Add(time.Minute),
@@ -124,7 +125,7 @@ func TestStore_PatchOnlyUpdatesProvidedFields(t *testing.T) {
 		t.Fatalf("Patch: %v", err)
 	}
 
-	got, _ := store.Get(ctx, 42, 0)
+	got, _ := store.Get(ctx, 42, 0, 1)
 	if got == nil {
 		t.Fatal("expected state after patch")
 	}
@@ -153,7 +154,7 @@ func TestStore_PatchCreatesNewRowWhenMissing(t *testing.T) {
 	cold := true
 	reason := "fresh-cold"
 
-	err := store.Patch(ctx, ConversationKey{ChatID: 1, ThreadID: 2}, StatePatch{
+	err := store.Patch(ctx, ConversationKeyFor(1, 2, 0), StatePatch{
 		CWD:         strPtr("/workspace"),
 		SessionCold: &cold,
 		ResetReason: &reason,
@@ -163,7 +164,7 @@ func TestStore_PatchCreatesNewRowWhenMissing(t *testing.T) {
 		t.Fatalf("Patch on missing row: %v", err)
 	}
 
-	got, _ := store.Get(ctx, 1, 2)
+	got, _ := store.Get(ctx, 1, 2, 0)
 	if got == nil {
 		t.Fatal("expected state after patch on missing row")
 	}
@@ -189,7 +190,7 @@ func TestStore_ReopenPreservesState(t *testing.T) {
 	_ = store1.Upsert(ctx, ConversationState{
 		ChatID:   42,
 		ThreadID: 0,
-		CWD:      "/persisted",
+		UserID:               1,		CWD:      "/persisted",
 		UpdatedAt: now,
 	})
 	store1.Close()
@@ -200,7 +201,7 @@ func TestStore_ReopenPreservesState(t *testing.T) {
 	}
 	defer store2.Close()
 
-	got, _ := store2.Get(ctx, 42, 0)
+	got, _ := store2.Get(ctx, 42, 0, 1)
 	if got == nil {
 		t.Fatal("expected state after reopen")
 	}
@@ -218,17 +219,17 @@ func TestStore_GetDifferentThread(t *testing.T) {
 	_ = store.Upsert(ctx, ConversationState{
 		ChatID:   42,
 		ThreadID: 1,
-		CWD:      "/thread-1",
+		UserID:               1,		CWD:      "/thread-1",
 		UpdatedAt: now,
 	})
 	_ = store.Upsert(ctx, ConversationState{
 		ChatID:   42,
 		ThreadID: 2,
-		CWD:      "/thread-2",
+		UserID:               1,		CWD:      "/thread-2",
 		UpdatedAt: now,
 	})
 
-	got, _ := store.Get(ctx, 42, 1)
+	got, _ := store.Get(ctx, 42, 1, 1)
 	if got == nil {
 		t.Fatal("expected thread 1 state, got nil")
 	}
@@ -236,7 +237,7 @@ func TestStore_GetDifferentThread(t *testing.T) {
 		t.Fatalf("thread 1 CWD = %q, want %q", got.CWD, "/thread-1")
 	}
 
-	got, _ = store.Get(ctx, 42, 2)
+	got, _ = store.Get(ctx, 42, 2, 1)
 	if got == nil {
 		t.Fatal("expected thread 2 state, got nil")
 	}
@@ -244,7 +245,7 @@ func TestStore_GetDifferentThread(t *testing.T) {
 		t.Fatalf("thread 2 CWD = %q, want %q", got.CWD, "/thread-2")
 	}
 
-	got, _ = store.Get(ctx, 42, 3)
+	got, _ = store.Get(ctx, 42, 3, 1)
 	if got != nil {
 		t.Fatal("expected nil for non-existent thread")
 	}

@@ -767,7 +767,8 @@ func (bc *Service) buildContinuitySection(chatID int64, threadID int, userText s
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	state, err := bc.continuity.Get(ctx, chatID, threadID)
+	uid := sessionUserID(userID...)
+	state, err := bc.continuity.Get(ctx, chatID, threadID, uid)
 	if err != nil {
 		log.Printf("continuity: failed to get state chat=%d thread=%d: %v", chatID, threadID, err)
 		return ""
