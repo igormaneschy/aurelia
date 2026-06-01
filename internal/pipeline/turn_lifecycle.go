@@ -222,6 +222,7 @@ func (s *Service) patchContinuityFailure(chatID int64, threadID int, status stri
 
 	now := time.Now()
 	sessionCold := true
+	uid := sessionUserID(userID...)
 
 	// Capture latest checkpoint, tools, and partial assistant text from runLogState
 	checkpoint := ""
@@ -258,7 +259,7 @@ func (s *Service) patchContinuityFailure(chatID int64, threadID int, status stri
 		sid = s.sessions.GetSession(chatID, threadID, sessionUserID(userID...))
 	}
 
-	err := s.continuity.Patch(ctx, continuity.ConversationKey{ChatID: chatID, ThreadID: threadID}, continuity.StatePatch{
+	err := s.continuity.Patch(ctx, continuity.ConversationKeyFor(chatID, threadID, uid), continuity.StatePatch{
 		CWD:            &cwd,
 		LastRunID:      &runID,
 		LastRunStatus:  &status,

@@ -82,7 +82,7 @@ func TestContinuityAfterTimeout(t *testing.T) {
 	tracker.mark(timeoutOriginMaxExecution)
 	_ = svc.handleContextOutcome(parentCtx, ctx, 42, 0, 100, tracker)
 
-	state, err := contStore.Get(context.Background(), 42, 0, 0)
+	state, err := contStore.Get(context.Background(), 42, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestContinuityAfterEmptyResult(t *testing.T) {
 		t.Fatalf("expected OutcomeLLMError, got %v", outcome)
 	}
 
-	state, err := contStore.Get(context.Background(), 42, 0, 0)
+	state, err := contStore.Get(context.Background(), 42, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestContinuityAfterError(t *testing.T) {
 		t.Fatalf("expected OutcomeLLMError, got %v", outcome)
 	}
 
-	state, err := contStore.Get(context.Background(), 42, 0, 0)
+	state, err := contStore.Get(context.Background(), 42, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
