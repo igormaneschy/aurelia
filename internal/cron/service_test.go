@@ -50,6 +50,32 @@ func TestService_CreateJob_ComputesNextRunForRecurring(t *testing.T) {
 	}
 }
 
+func TestService_CreateJob_InferCwdFromPrompt(t *testing.T) {
+	t.Parallel()
+
+	service := newTestCronService(t)
+
+	jobID, err := service.CreateJob(context.Background(), CronJob{
+		OwnerUserID:  "user-1",
+		TargetChatID: 100,
+		ScheduleType: "cron",
+		CronExpr:     "*/5 * * * *",
+		Prompt:       "Set cwd to /tmp/project. Run: python report.py",
+		Active:       true,
+	})
+	if err != nil {
+		t.Fatalf("CreateJob() error = %v", err)
+	}
+
+	job, err := service.store.GetJob(context.Background(), jobID)
+	if err != nil {
+		t.Fatalf("GetJob() error = %v", err)
+	}
+	if job.Cwd != "/tmp/project" {
+		t.Fatalf("Cwd = %q, want /tmp/project", job.Cwd)
+	}
+}
+
 func TestService_PauseResumeDeleteJob(t *testing.T) {
 	t.Parallel()
 

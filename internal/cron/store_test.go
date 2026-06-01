@@ -24,6 +24,56 @@ func newTestCronStore(t *testing.T) *SQLiteCronStore {
 	return store
 }
 
+func TestSQLiteCronStore_BackfillsCwdFromPromptOnInitialize(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "cron.db")
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE cron_jobs (
+			id TEXT PRIMARY KEY,
+			owner_user_id TEXT NOT NULL,
+			target_chat_id INTEGER NOT NULL,
+			schedule_type TEXT NOT NULL,
+			cron_expr TEXT NOT NULL DEFAULT '',
+			run_at DATETIME,
+			prompt TEXT NOT NULL,
+			active INTEGER NOT NULL DEFAULT 1,
+			last_run_at DATETIME,
+			next_run_at DATETIME,
+			last_status TEXT NOT NULL DEFAULT 'idle',
+			last_error TEXT NOT NULL DEFAULT '',
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+			updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		);
+		INSERT INTO cron_jobs (id, owner_user_id, target_chat_id, schedule_type, cron_expr, prompt)
+		VALUES ('legacy-cwd', 'user-1', 123, 'cron', '* * * * *', 'Set cwd to /tmp/project. Run: python report.py');
+	`)
+	if closeErr := db.Close(); closeErr != nil {
+		t.Fatalf("db.Close() error = %v", closeErr)
+	}
+	if err != nil {
+		t.Fatalf("seed legacy cron db error = %v", err)
+	}
+
+	store, err := NewSQLiteCronStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteCronStore() error = %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	job, err := store.GetJob(context.Background(), "legacy-cwd")
+	if err != nil {
+		t.Fatalf("GetJob() error = %v", err)
+	}
+	if job.Cwd != "/tmp/project" {
+		t.Fatalf("Cwd = %q, want /tmp/project", job.Cwd)
+	}
+}
+
 func TestSQLiteCronStore_CreateJobAndGetJob(t *testing.T) {
 	t.Parallel()
 
@@ -35,6 +85,8 @@ func TestSQLiteCronStore_CreateJobAndGetJob(t *testing.T) {
 		ID:           "job-1",
 		OwnerUserID:  "user-1",
 		TargetChatID: 12345,
+		AgentName:    "reports",
+		Cwd:          "/tmp/project",
 		ScheduleType: "cron",
 		CronExpr:     "0 8 * * 1-5",
 		Prompt:       "Me mande o resumo da manha",
@@ -56,6 +108,12 @@ func TestSQLiteCronStore_CreateJobAndGetJob(t *testing.T) {
 	}
 	if got.Prompt != job.Prompt {
 		t.Fatalf("unexpected prompt: got %q want %q", got.Prompt, job.Prompt)
+	}
+	if got.Cwd != job.Cwd {
+		t.Fatalf("unexpected cwd: got %q want %q", got.Cwd, job.Cwd)
+	}
+	if got.AgentName != job.AgentName {
+		t.Fatalf("unexpected agent name: got %q want %q", got.AgentName, job.AgentName)
 	}
 	if got.NextRunAt == nil || !got.NextRunAt.Equal(nextRunAt) {
 		t.Fatalf("unexpected next run at: %#v", got.NextRunAt)

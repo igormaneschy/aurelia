@@ -16,6 +16,7 @@ type fakeCronCommandService struct {
 		threadID int
 		expr     string
 		prompt   string
+		cwd      string
 	}
 	addOnceCalls []struct {
 		userID    string
@@ -23,8 +24,9 @@ type fakeCronCommandService struct {
 		threadID  int
 		timestamp string
 		prompt    string
+		cwd       string
 	}
-	listByOwnerCalls []string
+	listByOwnerCalls  []string
 	pauseByOwnerCalls []struct {
 		userID string
 		jobID  string
@@ -44,28 +46,30 @@ type fakeCronCommandService struct {
 	listErr error
 }
 
-func (f *fakeCronCommandService) AddRecurringJob(ctx context.Context, userID string, chatID int64, threadID int, expr, prompt string) (string, error) {
+func (f *fakeCronCommandService) AddRecurringJob(ctx context.Context, userID string, chatID int64, threadID int, expr, prompt, cwd string) (string, error) {
 	f.addRecurringCalls = append(f.addRecurringCalls, struct {
 		userID   string
 		chatID   int64
 		threadID int
 		expr     string
 		prompt   string
-	}{userID: userID, chatID: chatID, threadID: threadID, expr: expr, prompt: prompt})
+		cwd      string
+	}{userID: userID, chatID: chatID, threadID: threadID, expr: expr, prompt: prompt, cwd: cwd})
 	if f.addErr != nil {
 		return "", f.addErr
 	}
 	return "job-recurring-1", nil
 }
 
-func (f *fakeCronCommandService) AddOnceJob(ctx context.Context, userID string, chatID int64, threadID int, timestamp, prompt string) (string, error) {
+func (f *fakeCronCommandService) AddOnceJob(ctx context.Context, userID string, chatID int64, threadID int, timestamp, prompt, cwd string) (string, error) {
 	f.addOnceCalls = append(f.addOnceCalls, struct {
 		userID    string
 		chatID    int64
 		threadID  int
 		timestamp string
 		prompt    string
-	}{userID: userID, chatID: chatID, threadID: threadID, timestamp: timestamp, prompt: prompt})
+		cwd       string
+	}{userID: userID, chatID: chatID, threadID: threadID, timestamp: timestamp, prompt: prompt, cwd: cwd})
 	if f.addErr != nil {
 		return "", f.addErr
 	}
@@ -143,6 +147,24 @@ func TestCronCommandHandler_HandleText_AddRecurring(t *testing.T) {
 	}
 	if !strings.Contains(reply, "job-recurring-1") {
 		t.Fatalf("expected reply to include created job id, got %q", reply)
+	}
+}
+
+func TestCronCommandHandler_HandleText_AddRecurringWithCwd(t *testing.T) {
+	t.Parallel()
+
+	service := &fakeCronCommandService{}
+	handler := NewCronCommandHandler(service)
+
+	_, err := handler.HandleText(context.Background(), "user-1", 12345, 0, `/cron add "0 8 * * *" "Run report" --cwd "/Volumes/Dados/Workspaces/AutoTradersOMQS"`)
+	if err != nil {
+		t.Fatalf("HandleText() error = %v", err)
+	}
+	if len(service.addRecurringCalls) != 1 {
+		t.Fatalf("expected one recurring add call, got %d", len(service.addRecurringCalls))
+	}
+	if got := service.addRecurringCalls[0].cwd; got != "/Volumes/Dados/Workspaces/AutoTradersOMQS" {
+		t.Fatalf("cwd = %q, want AutoTraders path", got)
 	}
 }
 

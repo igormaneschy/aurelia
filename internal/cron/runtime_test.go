@@ -3,6 +3,7 @@ package cron
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/igormaneschy/aurelia/internal/agents"
@@ -238,6 +239,16 @@ func TestExtractCwdFromPrompt(t *testing.T) {
 			prompt: "Set cwd to /some/path. Run: test",
 			want:   "/some/path",
 		},
+		{
+			name:   "quoted path with spaces",
+			prompt: "Set cwd to \"/some/path with spaces\". Run: test",
+			want:   "/some/path with spaces",
+		},
+		{
+			name:   "missing delimiter with long trailing prompt",
+			prompt: "Set cwd to /some/path " + strings.Repeat("x", maxCronCwdChars+1),
+			want:   "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -260,10 +271,11 @@ func TestBridgeCronRuntime_NoAgentWithCwdInPrompt(t *testing.T) {
 	persona := &fakePersona{prompt: "base"}
 
 	runtime := NewBridgeCronRuntime(executor, registry, persona, "/tmp/test-memory", "")
+	cwd := t.TempDir()
 
 	job := CronJob{
 		ID:     "job-cwd",
-		Prompt: "Set cwd to /Volumes/Dados/Workspaces/AutoTradersOMQS. Run: python funnel_analysis.py",
+		Prompt: "Set cwd to " + cwd + ". Run: python funnel_analysis.py",
 	}
 
 	result, err := runtime.ExecuteJob(context.Background(), job)
@@ -277,8 +289,8 @@ func TestBridgeCronRuntime_NoAgentWithCwdInPrompt(t *testing.T) {
 	req := executor.lastReq
 
 	// Cwd must be set from the prompt
-	if req.Options.Security.Cwd != "/Volumes/Dados/Workspaces/AutoTradersOMQS" {
-		t.Fatalf("Security.Cwd = %q, want %q", req.Options.Security.Cwd, "/Volumes/Dados/Workspaces/AutoTradersOMQS")
+	if req.Options.Security.Cwd != cwd {
+		t.Fatalf("Security.Cwd = %q, want %q", req.Options.Security.Cwd, cwd)
 	}
 
 	// Profile must be execute_safe (not observe) so the LLM has Bash/Read/Write
@@ -302,6 +314,85 @@ func TestBridgeCronRuntime_NoAgentWithCwdInPrompt(t *testing.T) {
 	}
 	if !hasRead {
 		t.Fatal("AllowedTools must include Read for cwd-from-prompt cron")
+	}
+}
+
+func TestBridgeCronRuntime_UsesExplicitJobCwd(t *testing.T) {
+	t.Parallel()
+
+	executor := &fakeBridgeExecutor{result: &bridge.Event{Type: "result", Content: "ok"}}
+	registry := &fakeRegistry{agents: map[string]*agents.Agent{}}
+	persona := &fakePersona{prompt: "base"}
+	runtime := NewBridgeCronRuntime(executor, registry, persona, "", "")
+	cwd := t.TempDir()
+
+	_, err := runtime.ExecuteJob(context.Background(), CronJob{
+		ID:     "job-explicit-cwd",
+		Cwd:    cwd,
+		Prompt: "Run: python report.py",
+	})
+	if err != nil {
+		t.Fatalf("ExecuteJob() error = %v", err)
+	}
+
+	if executor.lastReq.Options.Cwd != cwd {
+		t.Fatalf("Options.Cwd = %q, want %q", executor.lastReq.Options.Cwd, cwd)
+	}
+	if executor.lastReq.Options.Security.Profile != "execute_safe" {
+		t.Fatalf("Security.Profile = %q, want execute_safe", executor.lastReq.Options.Security.Profile)
+	}
+}
+
+func TestBridgeCronRuntime_InvalidLongCwdFallsBackSafely(t *testing.T) {
+	t.Parallel()
+
+	executor := &fakeBridgeExecutor{result: &bridge.Event{Type: "result", Content: "ok"}}
+	registry := &fakeRegistry{agents: map[string]*agents.Agent{}}
+	persona := &fakePersona{prompt: "base"}
+	runtime := NewBridgeCronRuntime(executor, registry, persona, "", "")
+
+	_, err := runtime.ExecuteJob(context.Background(), CronJob{
+		ID:     "job-long-cwd",
+		Cwd:    "/tmp/" + strings.Repeat("x", maxCronCwdChars+1),
+		Prompt: "Run: python report.py",
+	})
+	if err != nil {
+		t.Fatalf("ExecuteJob() error = %v", err)
+	}
+
+	if executor.lastReq.Options.Cwd != "" {
+		t.Fatalf("Options.Cwd = %q, want empty for invalid long cwd", executor.lastReq.Options.Cwd)
+	}
+	if executor.lastReq.Options.Security.Profile != "read_only" {
+		t.Fatalf("Security.Profile = %q, want read_only fallback", executor.lastReq.Options.Security.Profile)
+	}
+}
+
+func TestBridgeCronRuntime_PersistsAgentNameRuntimePath(t *testing.T) {
+	t.Parallel()
+
+	executor := &fakeBridgeExecutor{result: &bridge.Event{Type: "result", Content: "ok"}}
+	cwd := t.TempDir()
+	registry := &fakeRegistry{agents: map[string]*agents.Agent{
+		"reports": {Name: "reports", Cwd: cwd, CapabilityProfile: "execute_safe"},
+	}}
+	persona := &fakePersona{prompt: "base"}
+	runtime := NewBridgeCronRuntime(executor, registry, persona, "", "")
+
+	_, err := runtime.ExecuteJob(context.Background(), CronJob{
+		ID:        "job-agent",
+		AgentName: "reports",
+		Prompt:    "Run: python report.py",
+	})
+	if err != nil {
+		t.Fatalf("ExecuteJob() error = %v", err)
+	}
+
+	if executor.lastReq.Options.Cwd != cwd {
+		t.Fatalf("Options.Cwd = %q, want agent cwd %q", executor.lastReq.Options.Cwd, cwd)
+	}
+	if executor.lastReq.Options.Security.AgentName != "reports" {
+		t.Fatalf("Security.AgentName = %q, want reports", executor.lastReq.Options.Security.AgentName)
 	}
 }
 

@@ -229,7 +229,7 @@ Busque empresas no Google Places na regiao configurada.
 
 Fields: `name`, `description`, `model`, `schedule`, `cwd`, `mcp_servers`, `allowed_tools`.
 
-Agents with `schedule` are automatically registered in the cron scheduler.
+Agents with `schedule` are automatically registered in the cron scheduler. Their `cwd` is persisted on the cron job so scheduled executions do not depend on prompt parsing.
 
 ### Persona
 
@@ -287,8 +287,8 @@ go run ./cmd/aurelia/
 go run ./cmd/aurelia/ onboard
 
 # Cron management
-aurelia cron add "30 8 * * *" "pesquise noticias de tech" --chat-id 123456
-aurelia cron once "2026-03-22T09:00:00Z" "gere relatorio" --chat-id 123456
+aurelia cron add "30 8 * * *" "pesquise noticias de tech" --chat-id 123456 --cwd /path/to/project
+aurelia cron once "2026-03-22T09:00:00Z" "gere relatorio" --chat-id 123456 --cwd /path/to/project
 aurelia cron list
 aurelia cron del <job-id>
 

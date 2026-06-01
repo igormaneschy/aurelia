@@ -126,7 +126,7 @@
 
 1. **Poll:** Scheduler ticks every 15s, queries `ListDueJobs(now, limit=50)`
 2. **Dedup:** `sync.Map.LoadOrStore(jobID)` prevents concurrent runs of same job
-3. **Execute:** `BridgeCronRuntime.ExecuteJob()` builds persona+agent prompt, calls `bridge.ExecuteSync()`
+3. **Execute:** `BridgeCronRuntime.ExecuteJob()` builds persona+agent prompt, resolves persisted `cwd` (prompt parsing is fallback-only), calls `bridge.ExecuteSync()`
 4. **Record:** Atomic transaction: `RecordExecutionTx` + `UpdateJobTx`
 5. **Deliver:** `TelegramDelivery.Deliver()` sends result to `target_chat_id`
 6. **Schedule:** Compute `nextRunAt` (cron) or deactivate (once)

@@ -34,7 +34,7 @@ func runCronCLI(args []string) error {
 
 	switch args[0] {
 	case "add":
-		// aurelia cron add "<cron-expr>" "<prompt>" [--chat-id <id>] [--owner-user-id <id>]
+		// aurelia cron add "<cron-expr>" "<prompt>" [--chat-id <id>] [--owner-user-id <id>] [--cwd <path>]
 		if len(args) < 3 {
 			return printCronUsage()
 		}
@@ -42,7 +42,8 @@ func runCronCLI(args []string) error {
 		prompt := args[2]
 		chatID := parseChatIDFlag(args[3:])
 		ownerUserID := parseOwnerUserIDFlag(args[3:])
-		jobID, err := svc.AddRecurringJob(ctx, ownerUserID, chatID, 0, expr, prompt)
+		cwd := parseCwdFlag(args[3:])
+		jobID, err := svc.AddRecurringJob(ctx, ownerUserID, chatID, 0, expr, prompt, cwd)
 		if err != nil {
 			return err
 		}
@@ -50,7 +51,7 @@ func runCronCLI(args []string) error {
 		return nil
 
 	case "once":
-		// aurelia cron once "<timestamp>" "<prompt>" [--chat-id <id>] [--owner-user-id <id>]
+		// aurelia cron once "<timestamp>" "<prompt>" [--chat-id <id>] [--owner-user-id <id>] [--cwd <path>]
 		if len(args) < 3 {
 			return printCronUsage()
 		}
@@ -58,7 +59,8 @@ func runCronCLI(args []string) error {
 		prompt := args[2]
 		chatID := parseChatIDFlag(args[3:])
 		ownerUserID := parseOwnerUserIDFlag(args[3:])
-		jobID, err := svc.AddOnceJob(ctx, ownerUserID, chatID, 0, timestamp, prompt)
+		cwd := parseCwdFlag(args[3:])
+		jobID, err := svc.AddOnceJob(ctx, ownerUserID, chatID, 0, timestamp, prompt, cwd)
 		if err != nil {
 			return err
 		}
@@ -86,7 +88,11 @@ func runCronCLI(args []string) error {
 			if j.ScheduleType == "once" && j.RunAt != nil {
 				schedule = j.RunAt.Format("2006-01-02 15:04:05")
 			}
-			fmt.Printf("  %s  [%s]  active=%t  schedule=%s  prompt=%s\n", shortID(j.ID), j.ScheduleType, j.Active, schedule, j.Prompt)
+			cwd := ""
+			if j.Cwd != "" {
+				cwd = fmt.Sprintf("  cwd=%s", j.Cwd)
+			}
+			fmt.Printf("  %s  [%s]  active=%t  schedule=%s%s  prompt=%s\n", shortID(j.ID), j.ScheduleType, j.Active, schedule, cwd, j.Prompt)
 		}
 		return nil
 
@@ -144,6 +150,15 @@ func parseOwnerUserIDFlag(args []string) string {
 	return ""
 }
 
+func parseCwdFlag(args []string) string {
+	for i, a := range args {
+		if a == "--cwd" && i+1 < len(args) {
+			return args[i+1]
+		}
+	}
+	return ""
+}
+
 func shortID(id string) string {
 	if len(id) > 8 {
 		return id[:8]
@@ -154,8 +169,8 @@ func shortID(id string) string {
 func printCronUsage() error {
 	usage := []string{
 		"Usage:",
-		"  aurelia cron add \"<cron-expr>\" \"<prompt>\" [--chat-id <id>] [--owner-user-id <id>]",
-		"  aurelia cron once \"<timestamp>\" \"<prompt>\" [--chat-id <id>] [--owner-user-id <id>]",
+		"  aurelia cron add \"<cron-expr>\" \"<prompt>\" [--chat-id <id>] [--owner-user-id <id>] [--cwd <path>]",
+		"  aurelia cron once \"<timestamp>\" \"<prompt>\" [--chat-id <id>] [--owner-user-id <id>] [--cwd <path>]",
 		"  aurelia cron list [--chat-id <id>] [--owner-user-id <id>]",
 		"  aurelia cron del <job-id> [--owner-user-id <id>]",
 		"  aurelia cron pause <job-id> [--owner-user-id <id>]",
