@@ -351,6 +351,10 @@ func TestBridgeCronRuntime_InvalidLongCwdFallsBackSafely(t *testing.T) {
 	persona := &fakePersona{prompt: "base"}
 	runtime := NewBridgeCronRuntime(executor, registry, persona, "", "")
 
+	// Invalid cwd → validateCronCwd fails → cwd stripped → no agent present.
+	// Fallback chain: observe (no tools) → empty tools stripped → nil slice
+	// → final guard injects [Glob, LS] + read_only profile.
+	// This ensures a broken cwd never silently grants filesystem access.
 	_, err := runtime.ExecuteJob(context.Background(), CronJob{
 		ID:     "job-long-cwd",
 		Cwd:    "/tmp/" + strings.Repeat("x", maxCronCwdChars+1),

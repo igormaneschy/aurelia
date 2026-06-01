@@ -207,6 +207,10 @@ func (r *BridgeCronRuntime) ExecuteJob(ctx context.Context, job CronJob) (*Execu
 	cwd := ""
 	cwdSource := "none"
 	cwdAllowsExecution := false
+	// INVARIANT: only an explicit job.Cwd or a prompt-extracted cwd grants
+	// cwdAllowsExecution=true. An agent.Cwd without an explicit CapabilityProfile
+	// stays read_only — the agent must opt into execution through its profile.
+	// This prevents agents with a default Cwd from silently gaining Bash/Write.
 	if job.Cwd != "" {
 		cwd = job.Cwd
 		cwdSource = "job"
@@ -214,12 +218,20 @@ func (r *BridgeCronRuntime) ExecuteJob(ctx context.Context, job CronJob) (*Execu
 	} else if agent != nil && agent.Cwd != "" {
 		cwd = agent.Cwd
 		cwdSource = "agent"
+		// cwdAllowsExecution stays false: agent must declare CapabilityProfile.
 	} else if extracted := extractCwdFromPrompt(job.Prompt); extracted != "" {
 		cwd = extracted
 		cwdSource = "prompt"
 		cwdAllowsExecution = true
 	}
 
+	// Validate the resolved cwd at execution time. This does I/O (os.Stat)
+	// on every run — a deliberate tradeoff. If the directory is on a
+	// temporarily unavailable mount, the job silently falls back to
+	// observe/read_only (no filesystem tools) instead of failing.
+	// A run_log event or Telegram notification on cwd validation failure
+	// could improve observability, but the current conservative fallback
+	// is safe: it never executes with a broken cwd.
 	if cwd != "" {
 		validated, validateErr := validateCronCwd(cwd)
 		if validateErr != nil {
@@ -236,9 +248,11 @@ func (r *BridgeCronRuntime) ExecuteJob(ctx context.Context, job CronJob) (*Execu
 	}
 
 	// Determine effective capability profile for cron execution.
-	// Without an explicit agent/cwd, default to observe (no tools) or read_only
-	// to prevent arbitrary tool access. Only allow execute_safe when the agent
-	// and cwd both support it.
+	// Profile selection priority:
+	//   1. Agent with CapabilityProfile → use it directly (agent owns its policy)
+	//   2. Job/prompt cwd with cwdAllowsExecution → execute_safe (user opted in)
+	//   3. Agent cwd without CapabilityProfile → read_only (safe default until agent declares profile)
+	//   4. No agent, no cwd → observe (classification/routing only)
 	var profileStr string
 	var allowedTools []string
 	if agent != nil && agent.CapabilityProfile != "" {
@@ -251,7 +265,12 @@ func (r *BridgeCronRuntime) ExecuteJob(ctx context.Context, job CronJob) (*Execu
 			// the LLM has Bash/Read/Write tools.
 			profileStr = string(security.ProfileExecuteSafe)
 		} else {
-			// Agent-provided cwd without explicit profile remains safe read-only.
+			// INVARIANT: agent.Cwd without CapabilityProfile → read_only.
+			// The agent has a working directory but hasn't opted into execution.
+			// This is safe: an agent that needs Bash/Write must set
+			// capability_profile: execute_safe (or higher) in its definition.
+			// Without this, a misconfigured agent with a default Cwd would
+			// silently gain filesystem write access.
 			profileStr = string(security.ProfileReadOnly)
 		}
 		allowedTools = security.ProfileTools(security.CapabilityProfile(profileStr))
@@ -346,6 +365,9 @@ func (r *BridgeCronRuntime) buildCronInstructions(targetChatID int64, ownerUserI
 		flags = fmt.Sprintf("%s --owner-user-id %s", flags, ownerUserID)
 		ownerSuffix = " If scheduling for yourself, include --owner-user-id <your_user_id>."
 	}
+	// %q quoting escapes spaces and special chars for the LLM to read as
+	// instructional text (not a shell command). Paths with unusual characters
+	// (e.g. Windows backslashes) are rare on this deployment target.
 	if strings.TrimSpace(cwd) != "" {
 		flags = fmt.Sprintf("%s --cwd %q", flags, strings.TrimSpace(cwd))
 	}

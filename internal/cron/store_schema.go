@@ -42,7 +42,12 @@ func (s *SQLiteCronStore) initialize() error {
 		return fmt.Errorf("initialize cron schema: %w", err)
 	}
 
-	// Migration: add columns if missing (safe to re-run)
+	// Migration: add columns if missing (safe to re-run).
+	// On fresh installs, CREATE TABLE already includes these columns and the
+	// ALTER will fail with "duplicate column" — which is caught and ignored.
+	// This pattern avoids duplicating column definitions across two code paths
+	// (CREATE vs ALTER) and keeps the full schema visible in the CREATE TABLE
+	// while remaining compatible with existing databases.
 	for _, col := range []string{
 		"ALTER TABLE cron_executions ADD COLUMN session_id TEXT DEFAULT ''",
 		"ALTER TABLE cron_executions ADD COLUMN cost_usd REAL DEFAULT 0",
@@ -73,6 +78,10 @@ func (s *SQLiteCronStore) initialize() error {
 		return fmt.Errorf("create owner jobs index: %w", err)
 	}
 
+	// Backfill cwd from prompt text for existing jobs.
+	// New jobs created via CreateJob already have cwd populated by
+	// extractCwdFromPrompt at creation time, so the WHERE cwd = ''
+	// filter naturally skips them — no risk of double-extraction.
 	return s.backfillCronJobCwd()
 }
 
