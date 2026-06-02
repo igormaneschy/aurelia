@@ -292,8 +292,13 @@ func isMissingReplyTargetError(err error) bool {
 	if err == nil {
 		return false
 	}
+	// Telegram API error descriptions for missing reply target.
+	// New format: "Bad Request: reply message not found" (telebot.ErrNotFoundToReply sentinel)
+	// Old format: "Bad Request: message to be replied not found"
+	// If the dream package ever imports telebot, prefer errors.Is(err, telebot.ErrNotFoundToReply).
 	msg := strings.ToLower(err.Error())
-	return strings.Contains(msg, "message to be replied not found") || strings.Contains(msg, "reply message not found")
+	return strings.Contains(msg, "message to be replied not found") ||
+		strings.Contains(msg, "reply message not found")
 }
 
 func (d *Dreamer) buildNudgePrompt(cwd string, chatID int64, threadID int, userID int64) string {

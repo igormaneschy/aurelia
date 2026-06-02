@@ -2,6 +2,7 @@ package dream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 )
@@ -14,6 +15,12 @@ type fakeNudgeRunLog struct {
 
 func (f fakeNudgeRunLog) GetLastOutboundMessage(context.Context, string) (int64, int, int64, error) {
 	return f.chatID, f.threadID, f.messageID, nil
+}
+
+type fakeNudgeRunLogWithError struct{}
+
+func (f fakeNudgeRunLogWithError) GetLastOutboundMessage(context.Context, string) (int64, int, int64, error) {
+	return 0, 0, 0, errors.New("db unavailable")
 }
 
 type nudgeSendCall struct {
@@ -90,5 +97,23 @@ func TestSendNudgeReceipt_ThreadMismatchFallsBackWithoutReply(t *testing.T) {
 	call := sender.calls[0]
 	if call.chatID != 42 || call.threadID != 7 || call.replyToMessageID != 0 {
 		t.Fatalf("SendNudge call = %+v, want chat=42 thread=7 reply=0", call)
+	}
+}
+
+func TestSendNudgeReceipt_RunLogErrorFallsBackWithoutReply(t *testing.T) {
+	sender := &fakeNudgeSender{}
+	d := New(nil, nil, nil, DreamConfig{
+		RunLog:      fakeNudgeRunLogWithError{},
+		NudgeSender: sender,
+	})
+
+	d.sendNudgeReceipt(context.Background(), 42, 7, "/session.json", 1)
+
+	if len(sender.calls) != 1 {
+		t.Fatalf("SendNudge calls = %d, want 1", len(sender.calls))
+	}
+	call := sender.calls[0]
+	if call.chatID != 42 || call.threadID != 7 || call.replyToMessageID != 0 {
+		t.Fatalf("SendNudge call = %+v, want chat=42 thread=7 reply=0 (no reply when run log errors)", call)
 	}
 }

@@ -265,7 +265,7 @@ func (bc *BotController) SendNudge(ctx context.Context, chatID int64, threadID i
 		plainOpts := &telebot.SendOptions{ThreadID: threadID, ReplyTo: opts.ReplyTo}
 		_, retryErr := bc.bot.Send(chat, text, plainOpts)
 		if retryErr != nil {
-			return err
+			return fmt.Errorf("html send failed: %w; plain text retry also failed: %v", err, retryErr)
 		}
 	}
 	return nil
