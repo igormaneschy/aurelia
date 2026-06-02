@@ -124,7 +124,7 @@ func TestProgressiveSummaryAfterSuccessfulTurn(t *testing.T) {
 	// Turn 1: should NOT trigger summarization (interval=2, first turn)
 	// Summary should be PRESERVED from continuity, not overwritten by raw text.
 	svc.afterSuccessfulTurn(42, 0, "user text 1", "assistant response 1", "run-1", 100)
-	state, err := contStore.Get(ctx, 42, 0, 0)
+	state, err := contStore.Get(ctx, 42, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestProgressiveSummaryAfterSuccessfulTurn(t *testing.T) {
 	// The last turn's continuity still had the preserved summary, so on degrade
 	// the raw text is used as fallback.
 	svc.afterSuccessfulTurn(42, 0, "user text 2", "assistant response 2", "run-2", 100)
-	state, err = contStore.Get(ctx, 42, 0, 0)
+	state, err = contStore.Get(ctx, 42, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestProgressiveSummaryDisabled(t *testing.T) {
 	}
 
 	ctx := t.Context()
-	state, err := contStore.Get(ctx, 42, 0, 0)
+	state, err := contStore.Get(ctx, 42, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestProgressiveSummaryCounterResetAfterDegrade(t *testing.T) {
 		summaryCounter:  &summaryCounter{counts: make(map[continuity.ConversationKey]int)},
 		summaryInterval: 2,
 	}
-	key := continuity.ConversationKeyFor(42, 0, 0)
+	key := continuity.ConversationKeyFor(42, 0, 100)
 
 	// Turn 2 should trigger summarization attempt (nil bridge → degrades)
 	// After degrade, counter should NOT be reset
