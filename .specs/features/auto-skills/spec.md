@@ -1,7 +1,7 @@
 # Auto-Skills
 
 **Roadmap step:** 9  
-**Status:** 🔴 Draft revisado  
+**Status:** 🗑️ Descartado — 2026-06-02  
 **Depende de:** User Isolation (`multi-user-profiles`) para `TurnContext`, `SessionKey`, `UserGate` e diretórios privados por `user_id`
 **Depende de:** Security Guard-Rails (✅ done)
 **Ganha valor com:** Nudge, Orchestration, Agent Comms e a boundary PI/`ai-memory`, mas o MVP manual (`/skill save`) funciona sem eles

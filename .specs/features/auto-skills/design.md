@@ -1,7 +1,7 @@
 # Auto-Skills — Design
 
 **Spec:** `.specs/features/auto-skills/spec.md`
-**Status:** Revised after code review
+**Status:** 🗑️ Descartado — 2026-06-02
 
 ---
 

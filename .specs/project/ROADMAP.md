@@ -50,7 +50,7 @@ A próxima onda foca em tornar o sistema seguro e estável para trabalho autôno
 2. criar base de observabilidade operacional antes de ampliar execução autônoma;
 3. usar a base de User Isolation já auditada para fechar o ciclo de execução orquestrada;
 4. planejamento permanece conversacional, sem Plan Mode explícito (removido em 2026-05-24);
-5. escopar memória por utilizador e contexto conversacional — **topic/thread como eixo primário, `/cwd` como overlay declarativo opt-in** (reformulado em 2026-05-30; ver Sprint 5);
+5. escopar memória por utilizador e contexto conversacional - **topic/thread como eixo primário, `/cwd` como overlay declarativo opt-in** (reformulado em 2026-05-30; ver Sprint 5);
 6. realinhar a boundary de memória, descartando o Wiki MCP interno em favor de PI + `ai-memory` MCP;
 7. fechar operabilidade de sessão/perfil antes de ampliar memória/nudge: message bridge, timezone, default cwd e mode profiles;
 8. só então ativar nudge profundo, agent comms e auto-skills.
@@ -71,15 +71,15 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 
 ## 0. Delegate to PI SDK Native ✅
 
-**Spec:** `.specs/features/delegate-to-pi-sdk/`  
-**Tasks:** `.specs/features/delegate-to-pi-sdk/tasks.md`  
+**Spec:** `.specs/features/delegate-to-pi-sdk/`
+**Tasks:** `.specs/features/delegate-to-pi-sdk/tasks.md`
 **Status:** ✅ Concluído em v0.13.7 (2026-05-22)
-**Prioridade:** P0 — Fechado
+**Prioridade:** P0 - Fechado
 
 **O que foi entregue:**
 - Bridge: `ModelRegistry.find()` + fallback por ID exato.
 - Bridge: `SettingsManager.compaction.enabled=true`.
-- Bridge: `DefaultResourceLoader(noContextFiles=false)` — PI SDK carrega `CLAUDE.md`/`AGENTS.md`.
+- Bridge: `DefaultResourceLoader(noContextFiles=false)` - PI SDK carrega `CLAUDE.md`/`AGENTS.md`.
 - Bridge: Security hooks via `session.agent.beforeToolCall`.
 - Go: session store simplificada (session_file em vez de sessionID).
 - Go: auto-reset por token threshold removido; PI compaction é fonte de verdade.
@@ -104,11 +104,11 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 
 ## 1. User Isolation
 
-**Spec:** `.specs/features/multi-user-profiles/`  
-**Design:** `.specs/features/multi-user-profiles/design.md`  
-**Tasks:** `.specs/features/multi-user-profiles/tasks.md`  
-**Status:** ✅ MVP + runtime hardening auditados em 2026-05-22  
-**Prioridade:** P0 foundation — fechado para sessão/runtime
+**Spec:** `.specs/features/multi-user-profiles/`
+**Design:** `.specs/features/multi-user-profiles/design.md`
+**Tasks:** `.specs/features/multi-user-profiles/tasks.md`
+**Status:** ✅ MVP + runtime hardening auditados em 2026-05-22
+**Prioridade:** P0 foundation - fechado para sessão/runtime
 
 **Problem fechado:** A whitelist permite múltiplos `user_id`s. O runtime agora separa sessão PI, cancelamento, status, reset, active commands do Bridge, persona/user memory base, nudge buffer e cron owner por usuário.
 
@@ -116,7 +116,7 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 
 - `TurnContext` e `SessionKey{chat_id, thread_id, user_id}`;
 - `ConversationKey{chat_id, thread_id}` para `/cwd` e project binding compartilhado por conversa/tópico;
-- `internal/users/` — Profile, Resolver, Store, Onboarder e SQLite onboarding state;
+- `internal/users/` - Profile, Resolver, Store, Onboarder e SQLite onboarding state;
 - `UserGate` antes de comandos/pipeline;
 - USER/persona/memória pessoal por usuário;
 - cron owner normalizado e lifecycle methods owner-scoped;
@@ -137,11 +137,11 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 
 ## 2. Operational Observability
 
-**Spec:** `.specs/features/operational-observability/`  
-**Design:** `.specs/features/operational-observability/design.md`  
-**Tasks:** `.specs/features/operational-observability/tasks.md`  
-**Status:** ✅ Implementado em v0.14.0 (2026-05-23)  
-**Prioridade:** P0 — Fechado
+**Spec:** `.specs/features/operational-observability/`
+**Design:** `.specs/features/operational-observability/design.md`
+**Tasks:** `.specs/features/operational-observability/tasks.md`
+**Status:** ✅ Implementado em v0.14.0 (2026-05-23)
+**Prioridade:** P0 - Fechado
 
 **Problem:** Aurelia já tem `runlog`, `/status`, progresso Telegram, audit log e cron executions, mas a observabilidade é fragmentada. Para depurar produção, ainda é preciso correlacionar manualmente Telegram input, `request_id`, Bridge events, session_file, runlog, audit.log e logs do daemon.
 
@@ -154,7 +154,7 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 - `/debug` e `aurelia debug` para latest run, run específico, erros recentes e métricas;
 - métricas locais por SQLite: sucesso/falha, latência, tokens, custo, fallback, provider/model e cron.
 
-**Por que agora:** Orchestration e workflows autônomos vão aumentar muito a complexidade operacional. Antes de executar workflows mais longos, precisamos conseguir responder rapidamente “qual run falhou, em que fase, com qual modelo, custo, tools e erro?”.
+**Por que agora:** Orchestration e workflows autônomos vão aumentar muito a complexidade operacional. Antes de executar workflows mais longos, precisamos conseguir responder rapidamente "qual run falhou, em que fase, com qual modelo, custo, tools e erro?".
 
 ---
 
@@ -163,7 +163,7 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 **Spec:** `.specs/features/agent-orchestration-execution/`
 **Design:** `.specs/features/agent-orchestration-execution/design.md`
 **Tasks:** `.specs/features/agent-orchestration-execution/tasks.md`
-**Status:** ✅ Implementado em v0.16.0 (2026-05-24)  
+**Status:** ✅ Implementado em v0.16.0 (2026-05-24)
 **Depende de:** Operational Observability (✅); User Isolation runtime hardening (✅); Project Binding (✅)
 
 **Problem:** Aurelia já tem `internal/orchestrator/` com worktree, waves, git.go, validate.go, tasks_status.go (80% do código), mas **o ciclo não fecha**: `Validate`, `CommitChanges`, `CreatePR`, `UpdateTasksStatus` não são chamados no fluxo real. `currentBranch()` retorna hardcoded `"HEAD"`. Thread ID é perdido no handoff. O executor funcional prometido pela spec nunca foi entregue.
@@ -194,30 +194,30 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 
 **What was preserved:**
 - Orchestrator and `tryExecutePlan` for legacy/conversational `aurelia-plan` execution
-- `sanitizeExecutionPlanForChat` — still sanitizes invalid plan blocks
+- `sanitizeExecutionPlanForChat` - still sanitizes invalid plan blocks
 - `ExecuteApprovedPlan` on the Output interface (used by orchestrator)
 
 ---
 
 ## 5. Context-Scoped Memory
 
-**Spec:** `.specs/features/project-memory/`  
-**Status:** 🟡 Parcial (70% — camadas existem, paths não são per-user; modelo reformulado em 2026-05-30)  
+**Spec:** `.specs/features/project-memory/`
+**Status:** 🟡 Parcial (70% - camadas existem, paths não são per-user; modelo reformulado em 2026-05-30)
 **Depende de:** User Isolation (para paths `users/<id>/`)
 
-> **Decisão de design (2026-05-30):** O modelo original `(user_id, project_slug)` foi substituido por `(user_id, context_key)`. O `project_slug` como eixo central da memória impunha uma estrutura de "projeto" que o Aurelia deliberadamente não quer impor — pela mesma razão que o Plan Mode foi removido. A memória deve emergir do contexto conversacional, não de uma entidade formal.
+> **Decisão de design (2026-05-30):** O modelo original `(user_id, project_slug)` foi substituido por `(user_id, context_key)`. O `project_slug` como eixo central da memória impunha uma estrutura de "projeto" que o Aurelia deliberadamente não quer impor - pela mesma razão que o Plan Mode foi removido. A memória deve emergir do contexto conversacional, não de uma entidade formal.
 
-**Problem:** a memória atual é global por `cwd` com detecção automática via `scanForProject`. Com User Isolation, precisa ser escopada por utilizador — mas o eixo correto é o **topic/thread** como escopamento primário natural, com `/cwd` como overlay declarativo e opt-in quando o utilizador quer ancorar a sessão a um diretório de trabalho.
+**Problem:** a memória atual é global por `cwd` com detecção automática via `scanForProject`. Com User Isolation, precisa ser escopada por utilizador - mas o eixo correto é o **topic/thread** como escopamento primário natural, com `/cwd` como overlay declarativo e opt-in quando o utilizador quer ancorar a sessão a um diretório de trabalho.
 
 **Modelo de camadas:**
 
 ```text
 Prompt assembly por TurnContext:
-  1. Aurelia persona (IDENTITY + SOUL)     — sempre
-  2. User global                           — sempre
-  3. Topic memory                          — sempre
-  4. CWD overlay (se /cwd declarado)       — opt-in, por tópico
-  5. Project team (se /cwd declarado)      — opt-in, compartilhado
+  1. Aurelia persona (IDENTITY + SOUL)     - sempre
+  2. User global                           - sempre
+  3. Topic memory                          - sempre
+  4. CWD overlay (se /cwd declarado)       - opt-in, por tópico
+  5. Project team (se /cwd declarado)      - opt-in, compartilhado
 ```
 
 **Scope:**
@@ -227,7 +227,7 @@ Prompt assembly por TurnContext:
 - `/cwd` como overlay declarativo persistido por `ConversationKey{chat_id, thread_id}`;
 - topic memory em `~/.aurelia/topics/chat_<id>/thread_<id>/` (✅ canonical desde D0);
 - cwd overlay em `~/.aurelia/topics/chat_<id>/thread_<id>/cwd_overlay/`;
-- project team memory em `~/.aurelia/projects/<slug>/team/` (✅ canonical desde D0) — opcional, só quando `/cwd` ativo;
+- project team memory em `~/.aurelia/projects/<slug>/team/` (✅ canonical desde D0) - opcional, só quando `/cwd` ativo;
 - prompt assembly com camadas corretas por `TurnContext`;
 - dream/nudge com targets escopados por camada.
 
@@ -237,8 +237,8 @@ Prompt assembly por TurnContext:
 
 ## 6. Memory Boundary Realignment
 
-**Spec:** `.specs/features/wiki-memory/`  
-**Status:** ✅ Concluído como decisão documental em 2026-06-02; Wiki Gateway interno descartado  
+**Spec:** `.specs/features/wiki-memory/`
+**Status:** ✅ Concluído como decisão documental em 2026-06-02; Wiki Gateway interno descartado
 **Depende de:** User Isolation + Context-Scoped Memory
 
 **Problem:** o plano anterior criava um Wiki MCP interno no Aurelia. Isso duplicaria o `ai-memory` MCP já usado diretamente pelo PI e violaria a regra de não competir com capacidades do PI/MCP.
@@ -257,8 +257,8 @@ Prompt assembly por TurnContext:
 
 ## 7. Session/Profile Operability
 
-**Spec:** `.specs/features/session-profile-operability/`  
-**Status:** ✅ Concluído em v0.21.0 (2026-06-02)  
+**Spec:** `.specs/features/session-profile-operability/`
+**Status:** ✅ Concluído em v0.21.0 (2026-06-02)
 **Depende de:** User Isolation + Operational Observability/runlog + Project Binding + Security Guard-Rails
 
 **Problem:** antes de aprofundar memória/nudge, Aurelia precisa fechar lacunas operacionais básicas: correlação durável entre Pi session e mensagens Telegram, perfis de modo por usuário, timezone de cron e fallback de cwd para chats privados.
@@ -270,14 +270,14 @@ Prompt assembly por TurnContext:
 - Profile enrichment: `Profile.Timezone`, `Profile.DefaultCWD`, cron timezone-aware e onboarding de timezone;
 - features independentes, sem reimplementar histórico de conversa do PI.
 
-**Prioridade:** P0/P1 — bloqueia Learning Nudge confiável e melhora operação diária de cron/private chats.
+**Prioridade:** P0/P1 - bloqueia Learning Nudge confiável e melhora operação diária de cron/private chats.
 
 ---
 
-## 8. Learning Nudge — Scoped Memory Review
+## 8. Learning Nudge - Scoped Memory Review
 
-**Spec:** `.specs/features/learning-nudge/`  
-**Status:** 🔴 Draft revisado  
+**Spec:** `.specs/features/learning-nudge/`
+**Status:** 🔴 Draft revisado
 **Depende de:** User Isolation + Context-Scoped Memory + Security Guard-Rails + Memory Boundary Realignment + Session/Profile Operability
 
 **Problem:** extração por-turn/snippet perde contexto; nudge profundo precisa ser escopado para não vazar entre usuários/contextos e não deve depender de uma Wiki interna do Aurelia.
@@ -292,60 +292,43 @@ Prompt assembly por TurnContext:
 
 ---
 
-## 9. Agent Comms
+## 9. Agent Comms (Discarded)
 
-**Spec:** `.specs/features/agent-comms/`  
-**Status:** 🔴 Draft  
-**Depende de:** Orchestration Cycle + Security Guard-Rails
-
-**Problem:** workers especializados ganham qualidade quando podem consultar peers, mas precisa ser local, auditado e com limites.
-
-**Scope:**
-
-- Agent Bus local por run;
-- peers explícitos por task;
-- anti-loop/budget/timeouts;
-- payload policy e audit;
-- manifest com peer message counts;
-- sem rede/cross-device no MVP.
-
-**Por que depois da execução:** é melhoria da orquestração, não requisito para o primeiro executor seguro.
+**Spec:** `.specs/features/agent-comms/`
+**Status:** 🗑️ Descartado - 2026-06-02
+**Decision:** Agent-to-agent communication between workers is the PI SDK's
+responsibility, not Aurelia's. Aurelia manages Telegram messages, identity,
+operational memory, and guard-rails. Worker orchestration (task decomposition,
+subtask execution, inter-worker messaging) belongs to the PI SDK runtime.
+Keeping Agent Comms in Aurelia would duplicate PI SDK capabilities and violate
+the architectural boundary established in Sprint 0 (Delegate to PI SDK).
 
 ---
 
-## 10. Auto-Skills
+## 10. Auto-Skills (Discarded)
 
 **Spec:** `.specs/features/auto-skills/`  
-**Status:** 🔴 Draft revisado  
-**Depende de:** User Isolation + Security Guard-Rails; ganha valor com as features anteriores
-
-**Problem:** tarefas bem-sucedidas viram conhecimento perdido; Auto-Skills transforma procedimentos úteis em skills privadas, PI-compatible (`SKILL.md`), gerenciadas pelo Aurelia.
-
-**Scope:**
-
-- recorder de último turno bem-sucedido;
-- `/skill save <slug>` explícito;
-- geração via LLM sem tools;
-- validação rígida de frontmatter Agent Skills/PI + adapter Aurelia;
-- storage privado por user em layout `<slug>/SKILL.md`;
-- `capability_profile` obrigatório/validado;
-- registry per-user.
-
-**Decisão:** Opção A — Aurelia-native, PI-compatible. Não usar `pi-hermes-memory` nem escrever em `~/.pi/agent` no MVP.
+**Status:** 🗑️ Descartado — 2026-06-02  
+**Decision:** Skill creation, loading, and execution are PI SDK responsibilities.
+Aurelia's job is to know WHO is talking (identity/persona), in WHAT mode
+(developer/research/general), and with WHAT context (memory layers + /cwd).
+The execution engine (tools, skills, task decomposition) belongs to the PI SDK
+runtime. Duplicating skill management in Aurelia would violate the architectural
+boundary established in Sprint 0 (Delegate to PI SDK).
 
 ---
 
 ## 11. TUI (Terminal User Interface)
 
-**Spec:** `docs/aurelia-tui-roadmap.md`  
-**Status:** 🔴 Proposta  
+**Spec:** `docs/aurelia-tui-roadmap.md`
+**Status:** 🔴 Proposta
 **Depende de:** Context-Scoped Memory (Sprint E) + Memory Boundary Realignment (Sprint F, ✅) + Session/Profile Operability (Sprint G)
 
 **Problem:** o Telegram é hoje o único ponto de entrada conversacional da Aurelia. Isso cria fricção no contexto de terminal, sessões não retomáveis cross-surface e dependência de conectividade externa.
 
 **Scope:**
 
-- abstração de transport (`Transport` interface) — Fase 0, pode ser feita antes;
+- abstração de transport (`Transport` interface) - Fase 0, pode ser feita antes;
 - IPC layer via Unix socket para comunicação com daemon;
 - TUI MVP com Bubble Tea: sidebar, viewport, input, streaming;
 - multi-sessão local + retomada de sessões Telegram;
@@ -388,12 +371,6 @@ D0. Memory Contract & Spec Hygiene ✅
 8. Learning Nudge
       │
       ▼
-9. Agent Comms
-      │
-      ▼
-10. Auto-Skills
-      │
-      ▼
 11. TUI (Terminal User Interface)
 ```
 
@@ -422,7 +399,7 @@ Sprint A: User Isolation MVP + runtime hardening
   ├─ ✅ CancelAllForUser + active run/cancel/status/get-state user-scoped
   └─ ➡️ Context-scoped memory (topic + cwd overlay) movida para Sprint E
 
-Sprint B: Operational Observability (T0–T12 do tasks.md) ✅ v0.14.0
+Sprint B: Operational Observability (T0-T12 do tasks.md) ✅ v0.14.0
   ├─ ✅ RunContext + field map
   ├─ ✅ slog estruturado configurável
   ├─ ✅ run_journal expandido
@@ -433,7 +410,7 @@ Sprint B: Operational Observability (T0–T12 do tasks.md) ✅ v0.14.0
   ├─ ✅ /debug owner-only
   └─ ✅ métricas locais por SQLite
 
-Sprint C: Close Orchestration Cycle (T0–T12 do tasks.md) ✅ v0.16.0
+Sprint C: Close Orchestration Cycle (T0-T12 do tasks.md) ✅ v0.16.0
   ├─ ✅ ExecutionContext com cwd+threadID
   ├─ ✅ git preflight
   ├─ ✅ artifact collection + verify command
@@ -444,7 +421,7 @@ Sprint C: Close Orchestration Cycle (T0–T12 do tasks.md) ✅ v0.16.0
   └─ ✅ integration smoke test
 
 Sprint D0: Memory Contract & Spec Hygiene ✅ v0.16.1
-  ├─ AGENT_RESPONSIBILITY_MODEL.md — canonical PI↔Aurelia boundary
+  ├─ AGENT_RESPONSIBILITY_MODEL.md - canonical PI↔Aurelia boundary
   ├─ project-memory spec: topic path `~/.aurelia/topics/`, team path `~/.aurelia/projects/<slug>/team/`
   ├─ wiki-memory spec: layers aligned with project-memory (superseded later by PI + ai-memory MCP)
   ├─ ARCHITECTURE.md: remove stale orchestration statements (cycle wired since v0.16.0)
@@ -453,7 +430,7 @@ Sprint D0: Memory Contract & Spec Hygiene ✅ v0.16.1
   ├─ runtime: ProjectTeamMemoryDir → `~/.aurelia/projects/<slug>/team/`
   └─ README: memory layers updated, Node.js >=20.6.0
 
-Sprint D: ~~Plan Mode (T-1–T13 do tasks.md)~~  🗑️ Removido 2026-05-24
+Sprint D: ~~Plan Mode (T-1-T13 do tasks.md)~~  🗑️ Removido 2026-05-24
   Planejamento permanece conversacional, sem Plan Mode explícito.
   internal/planning/ removido. /plan* e /execute removidos.
   Orquestrador e aurelia-plan preservados para execução legada.
@@ -485,23 +462,12 @@ Sprint H: Learning Nudge
   ├─ redaction + profile edit_project
   └─ sugestões/updates escopados; Wiki transversal só via PI + ai-memory quando configurado
 
-Sprint I: Agent Comms
-  ├─ Agent Bus local por run
-  ├─ peers explícitos + limites
-  └─ manifest + audit
-
-Sprint J: Auto-Skills
-  ├─ skill recorder
-  ├─ /skill save + generator
-  ├─ validator de SKILL.md
-  └─ registry per-user
-
 Sprint K: TUI
-  ├─ Fase 0: Transport Abstraction (2d) — pode antecipar
+  ├─ Fase 0: Transport Abstraction (2d) - pode antecipar
   ├─ Fase 1: IPC Layer (3d)
   ├─ Fase 2: TUI MVP (5d)
   ├─ Fase 3: Multi-sessão (4d)
-  ├─ Fase 4: Painel de Estado do Projeto (3d) — cwd, artefatos, checkpoints
+  ├─ Fase 4: Painel de Estado do Projeto (3d) - cwd, artefatos, checkpoints
   └─ Fase 5: Polish + Distribuição (3d)
 ```
 

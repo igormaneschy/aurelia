@@ -1,7 +1,7 @@
 # Auto-Skills — Tasks
 
 **Design:** `.specs/features/auto-skills/design.md`
-**Status:** Revised after code review
+**Status:** 🗑️ Descartado — 2026-06-02
 
 > Depende de User Isolation entregar `TurnContext`, `SessionKey`, `UserGate` e diretório privado por `user_id`.
 > MVP gera skills PI-compatible (`<slug>/SKILL.md`), mas Aurelia-managed e privadas por `user_id`; não escreve em `~/.pi/agent` nem usa `pi-hermes-memory`.
