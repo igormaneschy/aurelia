@@ -35,7 +35,7 @@ A reformulação do modelo de memória de `(user_id, project_slug)` para `(user_
 3. **Camada `users/<id>/projects/<slug>/memory/` ainda referenciada** — `users.Resolver.ProjectMemoryDir` e `prompt_builder.go` user×project layer.
 4. **`memory_writer.go` não conhece `cwd_overlay`** — só tem `global`, `topic`, `project`, `team`.
 5. **Prompt assembly não segue ordem canónica** — a ordem definida na spec (persona → user global → topic → cwd_overlay → project team) não é respeitada.
-6. **`wiki-memory/spec.md` ainda referencia `users/<id>/projects/<slug>/memory/`** — precisa ser patchado.
+6. **`wiki-memory/spec.md` foi superseded** — não deve mais orientar implementação de paths ou gateway MCP interno.
 
 ---
 
@@ -358,7 +358,7 @@ E1 (patch specs)
 | Nudge templates exigirem re-teste extenso | Média | Médio | Templates novos são aditivos; template antigo `nudge_global.tmpl` continua igual |
 | `scanForProject` ter callers ocultos | Baixa | Baixo | `grep` já confirma apenas 1 caller; se houver callers em testes, são tratados em E3 |
 | Path traversal nos novos métodos do PathResolver | Baixa | Alto | Validação de userID=0, chatID=0, threadID≤0; testes unitários em E2.7 |
-| wiki-memory spec desalinhada após patch | Média | Baixo | E1 trata isso antes de qualquer código |
+| Specs antigas ainda citarem Wiki MCP interno | Média | Baixo | E1 trata isso antes de qualquer código |
 
 ---
 
@@ -366,7 +366,7 @@ E1 (patch specs)
 
 | Arquivo | Tipo de mudança | Sprint |
 |---|---|---|
-| `.specs/features/wiki-memory/spec.md` | Patch (remover `user_project`, atualizar paths) | E1 |
+| `.specs/features/wiki-memory/spec.md` | Marcar como superseded por PI + `ai-memory` MCP | E1 |
 | `.specs/features/multi-user-profiles/spec.md` | Patch (marcar P1 como movida) | E1 |
 | `internal/runtime/resolver.go` | Adicionar `UserMemoryDir`, `TopicMemoryDir`, `TopicCwdOverlayDir` | E2 |
 | `internal/runtime/resolver_test.go` | Testes para novos métodos | E2 |

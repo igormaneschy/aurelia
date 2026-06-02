@@ -4,7 +4,7 @@
 **Spec:** `.specs/features/project-memory/`  
 **Status geral:** 🔴 Não iniciado  
 **Depende de:** Sprint 1 (User Isolation ✅), Sprint 3 (Project Binding ✅)  
-**Desbloqueia:** Sprint F (Wiki Memory Gateway), Sprint G (Learning Nudge)
+**Desbloqueia:** Sprint F (Memory Boundary Realignment), Sprint G (Learning Nudge)
 
 ---
 
@@ -45,14 +45,14 @@ O modelo anterior centrava-se em `(user_id, project_slug)` com deteção automá
 
 ### Objetivo
 
-Actualizar `wiki-memory/spec.md` e `multi-user-profiles/spec.md` para remover referências ao scope `user_project` e ao path `users/<id>/projects/<slug>/memory/`, adoptando os escopos canónicos do novo modelo.
+Actualizar `multi-user-profiles/spec.md` e specs de memória para remover referências ao scope `user_project` e ao path `users/<id>/projects/<slug>/memory/`, adoptando os escopos canónicos do novo modelo. A antiga `wiki-memory/spec.md` fica apenas como decisão superseded, não como alvo implementável.
 
 ### Tasks
 
-- [ ] **E1.1** — `wiki-memory/spec.md`: remover `users/<id>/projects/<slug>/memory/` do directory model e da tabela de paths canónicos
-- [ ] **E1.2** — `wiki-memory/spec.md`: substituir scope `user_project` por `cwd_overlay` (escopado por `ConversationKey{chat_id, thread_id}`, não por `user×slug`)
-- [ ] **E1.3** — `wiki-memory/spec.md`: actualizar tabela de scope names para os nomes canónicos: `user_global`, `topic`, `cwd_overlay`, `project_team`, `procedural`
-- [ ] **E1.4** — `wiki-memory/spec.md`: ajustar `wiki_query` e `wiki_save` para não exigirem `project_slug` em scope cwd_overlay — substituir por `chat_id + thread_id`
+- [ ] **E1.1** — `wiki-memory/spec.md`: marcar Spec F como superseded por PI + `ai-memory` MCP; remover backlog implementável de gateway interno
+- [ ] **E1.2** — `project-memory/spec.md`: tratar `user_global`, `topic`, `cwd_overlay`, `project_team`, `procedural` como camadas operacionais do Aurelia, não como API de Wiki MCP
+- [ ] **E1.3** — `ROADMAP.md`/docs: substituir Sprint F “Wiki Memory Gateway” por “Memory Boundary Realignment”
+- [ ] **E1.4** — `learning-nudge/spec.md`: remover dependência de Wiki writer interno e definir nudge como sugestões/updates escopados
 - [ ] **E1.5** — `multi-user-profiles/spec.md`: marcar user story "Project memory por user × projeto" (P1) como **movida para Sprint E** com nota de reformulação
 - [ ] **E1.6** — `multi-user-profiles/spec.md`: corrigir acceptance criterion da migração CLI — o passo `~/.aurelia/projects/` → `users/<id>/projects/` deve ser removido (project team continua em `projects/<slug>/team/`; memória privada contextualizada vai para `topics/.../cwd_overlay/`)
 - [ ] **E1.7** — `multi-user-profiles/spec.md`: actualizar goals list — marcar "Project memory privada por `(user_id, project_slug)`" como **reformulada** para `cwd_overlay` por tópico
@@ -60,7 +60,7 @@ Actualizar `wiki-memory/spec.md` e `multi-user-profiles/spec.md` para remover re
 ### Acceptance criteria
 
 1. Nenhuma spec activa deve referenciar `users/<id>/projects/<slug>/memory/` como path de escrita.
-2. `wiki-memory` deve listar apenas os 5 escopos canónicos e os paths correspondentes em `project-memory`.
+2. `wiki-memory` deve estar marcada como superseded e não deve listar ferramentas/backlog de MCP interno.
 3. `multi-user-profiles` deve reflectir que memória privada contextualizada de trabalho vive em `cwd_overlay`, não em `user×project`.
 
 ---
@@ -333,6 +333,6 @@ E1 (specs)
 ## Links
 
 - Spec principal: `.specs/features/project-memory/spec.md`
-- Specs a patchear: `.specs/features/wiki-memory/spec.md`, `.specs/features/multi-user-profiles/spec.md`
+- Specs a patchear: `.specs/features/wiki-memory/spec.md`, `.specs/features/multi-user-profiles/spec.md`, `.specs/features/learning-nudge/spec.md`
 - Depende de: `.specs/features/project-binding/` (✅), `.specs/features/multi-user-profiles/` (✅)
-- Desbloqueia: `.specs/features/wiki-memory/` (Sprint F), `.specs/features/learning-nudge/` (Sprint G)
+- Desbloqueia: Memory Boundary Realignment (Sprint F), `.specs/features/learning-nudge/` (Sprint G)

@@ -17,7 +17,7 @@ Aurelia Product Layer
 - identity and persona
 - Telegram-native UX
 - workflows and conversational planning
-- persistent memory and future Wiki
+- operational memory and continuity context
 - user/project/topic scoping
 - policy, audit, continuity and scheduling
         ↓
@@ -30,9 +30,9 @@ PI SDK
 Tools / filesystem / web / APIs / projects
 ```
 
-The architectural rule is: **delegate engine capabilities to PI; keep product continuity in Aurelia**. Aurelia must not become a thin PI wrapper, but it also must not rebuild model routing, session compaction, context loading or tool execution when PI already provides them.
+The architectural rule is: **delegate engine capabilities to PI; keep product continuity in Aurelia**. Aurelia must not become a thin PI wrapper, but it also must not rebuild model routing, session compaction, context loading, tool execution or MCP-backed memory when PI already provides them.
 
-The strategic differentiator is the future **Wiki Memory Gateway**: local-first, markdown-auditable, scoped memory that can be queried and updated by Aurelia, PI direct, PI Code/opencode and future MCP-compatible clients.
+The strategic differentiator is the persistent Telegram product layer: identity, UX, continuity, scheduling, orchestration, guard-rails and operational context over PI. Transversal Wiki memory is delegated to PI via the existing `ai-memory` MCP instead of being reimplemented inside Aurelia.
 
 ## Goals
 
@@ -78,7 +78,7 @@ The strategic differentiator is the future **Wiki Memory Gateway**: local-first,
 ### In progress
 - Closing the conceptual boundary: PI owns model/session/context/tool execution; Aurelia owns Telegram UX, identity/persona, persistence, scheduling, memory, project binding, policy/audit and orchestration.
 - Agent registry boundary decision: keep Aurelia specialists as a product-layer feature for now; investigate PI-native parsing/discovery later via `agentsFilesOverride` rather than forcing a user-facing migration.
-- Memory/Wiki preparation: project memory scopes must become user×project private plus project-team shared before exposing Wiki MCP.
+- Memory boundary realignment: project memory scopes remain Aurelia operational context; transversal Wiki memory is handled by PI via `ai-memory` MCP.
 
 ## Roadmap
 
@@ -91,7 +91,7 @@ Sprint B → Operational Observability (run_id, timeline, /debug, métricas loca
 Sprint C → Close Orchestration Cycle (conectar scaffold existente)
 Sprint D → ~~Plan Mode Architecture~~ 🗑️ Removido 2026-05-24; planejamento conversational
 Sprint E → User-Scoped Project Memory
-Sprint F → Wiki Memory Gateway (MCP)
+Sprint F → Memory Boundary Realignment (PI + ai-memory MCP, no internal Wiki Gateway)
 Sprint G → Learning Nudge escopado
 Sprint H → Agent Comms
 Sprint I → Auto-Skills

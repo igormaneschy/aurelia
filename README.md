@@ -62,7 +62,7 @@ Aurelia is the **product layer** on top of the PI SDK engine:
 Telegram / CLI / Cron / future interfaces
         ↓
 Aurelia Product Layer
-identity · persona · Telegram UX · workflows · memory · Wiki · policies · continuity
+identity · persona · Telegram UX · workflows · operational memory · policies · continuity
         ↓
 PI SDK
 reasoning · tool execution · sessions · agent runtime · model/provider abstraction
@@ -72,12 +72,13 @@ Tools / filesystem / web / APIs / projects
 
 The boundary is intentional:
 
-- **PI SDK owns** model/provider resolution, tool execution, session runtime, compaction, context-file loading, skills/extensions, and agentic execution primitives.
-- **Aurelia owns** identity, personality, Telegram-native UX, user/project scoping, persistent memory, cron, workflows, audit, orchestration, and the future Wiki layer.
+- **PI SDK owns** model/provider resolution, tool execution, session runtime, compaction, context-file loading, skills/extensions, MCP tools, and agentic execution primitives.
+- **PI + ai-memory MCP owns** transversal Wiki memory used by PI, PI Code/opencode, and other MCP-compatible clients.
+- **Aurelia owns** identity, personality, Telegram-native UX, user/project scoping, operational memory, cron, workflows, audit, orchestration, and continuity.
 - When the PI SDK already owns a capability, Aurelia adapts or orchestrates it rather than reimplementing it.
-- When the capability is product-specific continuity, memory, policy, UX, or workflow state, Aurelia remains the source of truth.
+- When the capability is product-specific continuity, operational memory, policy, UX, or workflow state, Aurelia remains the source of truth.
 
-The long-term differentiator is the **Wiki Memory Gateway**: a local-first, markdown-auditable, scoped memory layer usable by Aurelia, PI direct, PI Code/opencode, and future MCP clients without mixing users or projects.
+The long-term differentiator is the persistent Telegram product layer over PI. Transversal Wiki memory is delegated to PI through the existing `ai-memory` MCP rather than reimplemented as an Aurelia gateway.
 
 ## Core Capabilities
 
@@ -521,4 +522,4 @@ Full guide: [docs/OPERATIONS.md](docs/OPERATIONS.md).
 - Go test suite is green
 - TypeScript Bridge compiles clean
 - Cross-platform: macOS, Windows, and Linux
-- Current architectural track: close the PI SDK boundary hardening (✅), user isolation (✅), observability (✅), orchestration cycle (✅), then context-scoped memory (✅, Sprint E), Wiki Memory Gateway via MCP (Sprint F, next), Learning Nudge, Agent Comms, and Auto-Skills — see [.specs/project/ROADMAP.md](.specs/project/ROADMAP.md) for the full sequence
+- Current architectural track: close the PI SDK boundary hardening (✅), user isolation (✅), observability (✅), orchestration cycle (✅), context-scoped operational memory (Sprint E), Memory Boundary Realignment (Sprint F: PI + `ai-memory` MCP owns Wiki memory), Learning Nudge, Agent Comms, and Auto-Skills — see [.specs/project/ROADMAP.md](.specs/project/ROADMAP.md) for the full sequence
