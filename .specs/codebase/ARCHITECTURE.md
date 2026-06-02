@@ -21,6 +21,7 @@
                          │  (internal/pipeline)     │
                          │  Prompt + Bridge + Plan  │
                          │  Resilience + Supervisor │
+                         │  Tool Monitoring         │
                          └────┬───────┬───────┬─────┘
                               │       │       │
                 ┌─────────────▼─┐   ┌─▼───┐ ┌─▼──────────────┐
@@ -74,6 +75,21 @@
 **Implementation:** `ExtractPlan` parses the `aurelia-plan` code block. `ExecutionOrder` topologically sorts tasks into waves. `ExecutePlan` spawns workers per wave with bounded concurrency, each in its own git worktree when `needs_worktree` is set. Validation with artifact-aware retry, serial merge, commit, and optional PR creation form a closed production cycle since v0.16.0.
 **Example:** `pipeline.go:tryExecutePlan` → `BotController.executeApprovedPlan` → `Orchestrator.ExecutePlan`.
 
+### Tool Monitoring & Loop Defenses
+**Location:** `internal/pipeline/tool_monitoring.go`
+**Purpose:** Prevent silent tool-call explosions and repetitive loop patterns that lead to 30-min timeouts and wasted LLM cost
+**Implementation:** Two cooperating components run on every turn:
+- `toolCallTracker` — counts cumulative tool calls per turn. At configurable thresholds (warning=20, critical=50) it sends a user-facing Telegram message AND a `steer` command to the model asking it to consolidate findings. The steer message includes the elapsed time since the run started.
+- `loopDetector` — maintains a circular ring buffer of the last 12 `toolCallSnapshot` entries (name + stable input fingerprint). On every `tool_use` event it checks for three patterns: (1) **consecutive repeat** — same tool+input ≥3 times in a row; (2) **ping-pong** — A-B-A-B alternation; (3) **tool spiral** — only "read"-prefixed calls for the last 8 slots (prefix-matched, case-insensitive). On detection, sends a Telegram warning and a steer command to break the cycle. The `warned` flag is reset at the start of each new turn so subsequent turns can detect new loops independently.
+**Key types:** `toolCallTracker`, `loopDetector`, `toolCallSnapshot`
+**Signals:** Both components receive `steerFunc func(string)` at construction, which calls `bridge.ExecuteSync("steer", ...)` without cancelling the run.
+
+### Heartbeat Monitor
+**Location:** `internal/pipeline/pipeline.go:heartbeatMonitor`
+**Purpose:** Detect and surface "model is thinking without tools" gaps — long silent stretches where the model is reasoning but not emitting tool_use events
+**Implementation:** A goroutine ticks every 10s. If no `tool_use` signal arrived in the last 15s and no beat was already sent, it sends a human-language progress message to Telegram (e.g. "⏱️ 25s — Ainda estou processando."). Every 8th beat includes elapsed context. Resets on each `tool_use` event.
+**Note:** Beat messages are intentionally low-noise and human-language — no technical counts or tool names.
+
 ### Constructor Injection with Interfaces
 **Location:** All packages
 **Purpose:** Testable, loosely coupled components
@@ -104,7 +120,7 @@
 3. **Command layer:** Local commands intercept before the LLM (cron CRUD, reset, status — see `internal/telegram/commands.go`)
 4. **Routing:** `routeAgent()` — `@name` prefix match OR LLM classification
 5. **Pipeline:** `pipeline.Service.Run()` takes over: builds layered prompt, opens a supervised run, calls the resilient bridge
-6. **Streaming:** Pipeline accumulates assistant text, tracks tool use, drives a `ProgressReporter` for typing/progress feedback, and stores PI `session_file` for resume
+6. **Streaming:** Pipeline accumulates assistant text, tracks tool use via `toolCallTracker` + `loopDetector`, drives a `ProgressReporter` for typing/progress feedback, and stores PI `session_file` for resume
 7. **Plan dispatch:** If the final response contains an `aurelia-plan` code block, `tryExecutePlan` strips the block, sends the visible reply, and hands off to `BotController.executeApprovedPlan`
 8. **Output:** `SendTextReply()` chunks at 3900 chars, converts MD→HTML, handles rate limits
 9. **Session:** PI `session_file` stored for context resumption on next message; SDK compaction handles pruning; dream/nudge consolidation runs in the background
@@ -138,7 +154,7 @@
 **Module boundaries:**
 - `cmd/aurelia/` — CLI entry points, dependency wiring, lifecycle
 - `internal/telegram/` — Telegram I/O, message processing, rendering, command layer
-- `internal/pipeline/` — Reusable turn processor (prompt + bridge + plan dispatch + resilience + supervision)
+- `internal/pipeline/` — Reusable turn processor (prompt + bridge + plan dispatch + resilience + supervision + tool monitoring)
 - `internal/orchestrator/` — Plan→workers→validate→deliver cycle, worktree management, quality gate, git/PR
 - `internal/bridge/` — TypeScript process management, NDJSON protocol (PI SDK)
 - `internal/cron/` — Scheduler, store, runtime, delivery (self-contained with SQLite)

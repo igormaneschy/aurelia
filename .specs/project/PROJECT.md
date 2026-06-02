@@ -20,6 +20,7 @@ Aurelia Product Layer
 - operational memory and continuity context
 - user/project/topic scoping
 - policy, audit, continuity and scheduling
+- tool monitoring and loop defenses
         ↓
 PI SDK
 - reasoning and tool execution
@@ -50,7 +51,7 @@ The strategic differentiator is the persistent Telegram product layer: identity,
 - **Cross-platform** — CI and development target macOS, Windows, and Linux
 - **No Docker** — Single binary deployment, no container orchestration
 
-## Current State (May 2026)
+## Current State (June 2026)
 
 ### Core operational
 - Core loop working: Telegram → Agent routing → Bridge → PI SDK → Response
@@ -61,6 +62,7 @@ The strategic differentiator is the persistent Telegram product layer: identity,
 - Agent registry: markdown-defined Aurelia specialists with model/tool/MCP overrides (migration to PI-native agents remains open)
 - Onboarding CLI: interactive setup for providers, tokens, and configuration
 - Vision model fallback + Groq STT + bridge image format (PI SDK compatible)
+- Tool monitoring: `toolCallTracker` + `loopDetector` + heartbeat monitor prevent silent explosions and loop cycles
 
 ### Recently completed (v0.11.0–v0.16.0)
 - **User Isolation MVP + runtime hardening**: user profiles, owner gate, per-user persona/memory loading, user-scoped sessions/active runs/Bridge commands, cron ownership, `/users`, `/forgetme`, migration CLI.
@@ -74,6 +76,7 @@ The strategic differentiator is the persistent Telegram product layer: identity,
 - **Operational Observability v0.14.0**: `run_id` correlation, structured `slog`, expanded `run_journal`, `run_events` timeline, `/debug` CLI/Telegram commands, local metrics.
 - **Session Lifecycle Manager v0.15.0**: Health states (healthy/large/suspect/dangerous/cold), auto-decisions (continue/compact/rotate/cold_resume), bridge commands (`get-session-stats`, `compact-session`, `rotate-session`), failure metadata persistence.
 - **Close Orchestration Cycle v0.16.0**: `ExecutionContext` with cwd/threadID, git preflight, artifact collection, fail-closed validation with retry, serial merge, dependency skip, commit + optional PR, `ExecutionManifest`.
+- **Tool Monitoring hardening (Jun 2026)**: `loopDetector.ResetForNewTurn()`, elapsed time in steer messages, `detectToolSpiral` prefix-match, `AddToolEvent` nudge integration.
 
 ### In progress
 - Closing the conceptual boundary: PI owns model/session/context/tool execution; Aurelia owns Telegram UX, identity/persona, persistence, scheduling, memory, project binding, policy/audit and orchestration.
