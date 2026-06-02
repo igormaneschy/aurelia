@@ -1,90 +1,15 @@
 package telegram
 
 import (
-	"strings"
 	"testing"
 	"time"
 
 	"gopkg.in/telebot.v3"
 
-	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/session"
 )
-
-func TestBuildSystemPrompt_WithoutDependencies(t *testing.T) {
-	t.Parallel()
-
-	bc := &BotController{
-		config: &config.AppConfig{
-			Providers: map[string]config.ProviderConfig{},
-		},
-		sessions: session.NewStore(),
-	}
-
-	prompt, err := bc.buildSystemPrompt("hello", nil, 0, 0, 0, 0)
-	if err != nil {
-		t.Fatalf("buildSystemPrompt() error = %v", err)
-	}
-	if !strings.Contains(prompt, "## Scheduling Tasks") {
-		t.Fatalf("expected cron instructions in prompt, got %q", prompt)
-	}
-}
-
-func TestBuildSystemPrompt_WithAgent(t *testing.T) {
-	t.Parallel()
-
-	bc := &BotController{
-		config: &config.AppConfig{
-			Providers: map[string]config.ProviderConfig{},
-		},
-		sessions: session.NewStore(),
-	}
-
-	agent := &agents.Agent{
-		Name:   "coder",
-		Prompt: "You are a coding assistant.",
-	}
-
-	prompt, err := bc.buildSystemPrompt("write some code", agent, 0, 0, 0, 0)
-	if err != nil {
-		t.Fatalf("buildSystemPrompt() error = %v", err)
-	}
-	if !strings.Contains(prompt, "You are a coding assistant.") {
-		t.Fatalf("expected agent prompt in system prompt, got %q", prompt)
-	}
-	if !strings.Contains(prompt, "# Agent Instructions") {
-		t.Fatalf("expected agent header in system prompt, got %q", prompt)
-	}
-}
-
-func TestBuildSystemPrompt_AgentWithEmptyPrompt(t *testing.T) {
-	t.Parallel()
-
-	bc := &BotController{
-		config: &config.AppConfig{
-			Providers: map[string]config.ProviderConfig{},
-		},
-		sessions: session.NewStore(),
-	}
-
-	agent := &agents.Agent{
-		Name: "empty",
-	}
-
-	prompt, err := bc.buildSystemPrompt("hello", agent, 0, 0, 0, 0)
-	if err != nil {
-		t.Fatalf("buildSystemPrompt() error = %v", err)
-	}
-	// With empty agent, prompt should only contain cron instructions
-	if !strings.Contains(prompt, "## Scheduling Tasks") {
-		t.Fatalf("expected cron instructions in prompt, got %q", prompt)
-	}
-	if strings.Contains(prompt, "# Agent Instructions") {
-		t.Fatalf("expected no agent instructions with empty agent, got %q", prompt)
-	}
-}
 
 // newTestBotController creates a minimal BotController for testing bridge event
 // processing. The bot field is nil — only use for tests that don't trigger Send.

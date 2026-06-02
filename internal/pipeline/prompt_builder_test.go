@@ -15,6 +15,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/session"
+	"github.com/igormaneschy/aurelia/internal/users"
 )
 
 func TestLoadMemoryContents_RespectsTotalCap(t *testing.T) {
@@ -81,6 +82,101 @@ func TestEffectiveCwd_UsesPersistedBindingWithTopicFallback(t *testing.T) {
 	}
 	if got := bc.effectiveCwd(nil, 42, 99); got != "/repo/topic" {
 		t.Fatalf("effectiveCwd() = %q, want topic override", got)
+	}
+}
+
+func TestEffectiveCwdForContext_UsesDefaultCWDWhenPrivateNoBinding(t *testing.T) {
+	dir := t.TempDir()
+	resolver := users.NewResolver(dir)
+	store := users.NewStore(resolver)
+
+	// Save profile with DefaultCWD set
+	if err := store.Save(&users.Profile{
+		UserID:     1,
+		DefaultCWD: dir,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	bc := &Service{usersStore: store}
+	got := bc.effectiveCwdForContext(nil, 42, 0, 1, true)
+	if got != dir {
+		t.Fatalf("effectiveCwdForContext() = %q, want DefaultCWD %q", got, dir)
+	}
+}
+
+func TestEffectiveCwdForContext_BindingBeatsDefaultCWD(t *testing.T) {
+	dir := t.TempDir()
+	resolver := users.NewResolver(dir)
+	store := users.NewStore(resolver)
+
+	if err := store.Save(&users.Profile{
+		UserID:     1,
+		DefaultCWD: dir,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate a project binding
+	bc := &Service{usersStore: store, sessions: session.NewStore()}
+	bc.sessions.SetCwd(42, 0, "/repo/explicit")
+	got := bc.effectiveCwdForContext(nil, 42, 0, 1, true)
+	if got != "/repo/explicit" {
+		t.Fatalf("effectiveCwdForContext() = %q, want binding cwd", got)
+	}
+}
+
+func TestEffectiveCwdForContext_DefaultCWDNotUsedInGroup(t *testing.T) {
+	dir := t.TempDir()
+	resolver := users.NewResolver(dir)
+	store := users.NewStore(resolver)
+
+	if err := store.Save(&users.Profile{UserID: 1, DefaultCWD: dir}); err != nil {
+		t.Fatal(err)
+	}
+
+	bc := &Service{usersStore: store}
+	// Not private chat
+	got := bc.effectiveCwdForContext(nil, 42, 0, 1, false)
+	if got != "" {
+		t.Fatalf("effectiveCwdForContext() = %q, want empty for group chat", got)
+	}
+}
+
+func TestEffectiveCwdForContext_DefaultCWDNotUsedInTopic(t *testing.T) {
+	dir := t.TempDir()
+	resolver := users.NewResolver(dir)
+	store := users.NewStore(resolver)
+
+	if err := store.Save(&users.Profile{UserID: 1, DefaultCWD: dir}); err != nil {
+		t.Fatal(err)
+	}
+
+	bc := &Service{usersStore: store}
+	// Private chat but with topic/thread
+	got := bc.effectiveCwdForContext(nil, 42, 99, 1, true)
+	if got != "" {
+		t.Fatalf("effectiveCwdForContext() = %q, want empty for topic chat", got)
+	}
+}
+
+func TestEffectiveCwdForContext_InvalidDefaultCWDIgnored(t *testing.T) {
+	dir := t.TempDir()
+	resolver := users.NewResolver(dir)
+	store := users.NewStore(resolver)
+
+	// Path does not exist
+	if err := store.Save(&users.Profile{
+		UserID:     1,
+		DefaultCWD: "/nonexistent/path",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	bc := &Service{usersStore: store}
+	got := bc.effectiveCwdForContext(nil, 42, 0, 1, true)
+	if got != "" {
+		t.Fatalf("effectiveCwdForContext() = %q, want empty for invalid path", got)
 	}
 }
 
@@ -864,7 +960,7 @@ func TestBuildSystemPrompt_ContinuityOrdering(t *testing.T) {
 	}
 
 	// Build system prompt — should include continuity, last-run-state, and memory sections
-	prompt, err := svc.buildSystemPrompt("continua", nil, 42, 1, 0, 0)
+	prompt, err := svc.buildSystemPrompt("continua", nil, 42, 1, 0, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -946,7 +1042,7 @@ func TestBuildSystemPrompt_AllSectionsPresent(t *testing.T) {
 		memoryCache: newMemoryCache(),
 	}
 
-	prompt, err := svc.buildSystemPrompt("continua", nil, 42, 1, 0, 0)
+	prompt, err := svc.buildSystemPrompt("continua", nil, 42, 1, 0, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -984,7 +1080,7 @@ func TestBuildSystemPrompt_NoContinuityWhenNilStore(t *testing.T) {
 		memoryCache: newMemoryCache(),
 	}
 
-	prompt, err := svc.buildSystemPrompt("hello", nil, 1, 1, 0, 0)
+	prompt, err := svc.buildSystemPrompt("hello", nil, 1, 1, 0, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1010,7 +1106,7 @@ func TestBuildMemoryInstructions_NoAbsolutePathLeak(t *testing.T) {
 	}
 
 	// Call buildMemoryInstructions with no project context (hasProject=false)
-	got := bc.buildMemoryInstructions(42, 0, 0, nil)
+	got := bc.buildMemoryInstructions(42, 0, 0, nil, false)
 	if got == "" {
 		t.Fatal("expected non-empty memory instructions")
 	}
@@ -1037,7 +1133,7 @@ func TestBuildMemoryInstructions_NoAbsolutePathLeak(t *testing.T) {
 	}
 	bc2.sessions.SetCwd(42, 0, cwd)
 
-	got2 := bc2.buildMemoryInstructions(42, 0, 0, nil)
+	got2 := bc2.buildMemoryInstructions(42, 0, 0, nil, false)
 	if got2 == "" {
 		t.Fatal("expected non-empty memory instructions with cwd")
 	}

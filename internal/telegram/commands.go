@@ -21,6 +21,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/session"
+	"github.com/igormaneschy/aurelia/internal/users"
 )
 
 // CommandType identifies a system command that can be handled locally without LLM.
@@ -35,6 +36,7 @@ const (
 	CmdListAgents
 	CmdListModels
 	CmdSetModel
+	CmdRefreshModels
 	CmdMemoryStatus
 	CmdMemoryCheckpoint
 	CmdUsers
@@ -42,6 +44,7 @@ const (
 	CmdDebugLast
 	CmdDebugRun
 	CmdDebugErrors
+	CmdSetMode
 )
 
 // MatchedCommand represents a message that was identified as a system command.
@@ -77,6 +80,22 @@ var commandRules = []commandRule{
 		"deleta agendamento", "deletar agendamento",
 		"apaga agendamento", "apagar agendamento",
 	}, false},
+	// mode_set — slash commands use substring match; natural language uses exact
+	{CmdSetMode, []string{
+		"/mode ", "/modo ",
+	}, false},
+	// mode_set_exact — natural-language mode commands must be exact (no "modo devops" false positive)
+	{CmdSetMode, []string{
+		"modo dev", "modo desenvolvedor", "modo developer",
+		"modo pesquisa", "modo pesquisador", "modo researcher",
+		"modo geral",
+	}, true},
+	// mode_query (exact match)
+	{CmdSetMode, []string{
+		"/mode",
+		"qual meu modo", "qual o meu modo",
+		"meu modo atual",
+	}, true},
 	// cron_create
 	{CmdCronCreate, []string{
 		"agenda ", "agendar ", "agende ",
@@ -113,6 +132,12 @@ var commandRules = []commandRule{
 		"muda modelo", "mudar modelo", "troca modelo", "trocar modelo",
 		"escolhe modelo", "seleciona modelo",
 		"/model ",
+	}, false},
+	// refresh_models — natural-language alias for /model refresh.
+	// Substring match keeps "atualiza a lista de modelos" and variants working.
+	{CmdRefreshModels, []string{
+		"atualiza modelos", "atualizar modelos", "atualiza a lista",
+		"refresh modelos", "recarregar modelos",
 	}, false},
 	// memory_status
 	{CmdMemoryStatus, []string{
@@ -165,11 +190,29 @@ func stripAccents(s string) string {
 	return accentReplacer.Replace(s)
 }
 
+// slashBotMentionRE matches a slash command followed by an @botname mention
+// (e.g., "/mode@ManeDev_bot"). Telegram clients append this in group and
+// topic chats to disambiguate which bot should handle the command. We strip
+// it before command matching so the same rules work in private and group
+// contexts. Only strips mentions of slash commands — leaves other @mentions
+// in the text untouched.
+var slashBotMentionRE = regexp.MustCompile(`^(/[A-Za-z0-9_]+)@[A-Za-z0-9_]+`)
+
+// stripBotMention removes an optional @botname suffix from a slash command
+// at the start of text. Returns text unchanged when no match.
+func stripBotMention(text string) string {
+	return slashBotMentionRE.ReplaceAllString(text, "$1")
+}
+
 // MatchCommand checks if a message is a system command. Returns nil if no match.
 // Uses keyword matching with a narrative-context heuristic to avoid false positives.
 // Diacritics are stripped so "começa de novo" and "comeca de novo" match equally.
+// A leading @botname suffix on slash commands is stripped so the same rules
+// apply in private chats and in group/topic chats (where Telegram appends
+// "@ManeDev_bot" to disambiguate the target bot).
 func MatchCommand(text string) *MatchedCommand {
 	lower := stripAccents(strings.ToLower(strings.TrimSpace(text)))
+	lower = stripBotMention(lower)
 	if lower == "" {
 		return nil
 	}
@@ -232,8 +275,7 @@ func (bc *BotController) handleCommand(c telebot.Context, cmd *MatchedCommand) e
 	chatID := c.Chat().ID
 	threadID := c.Message().ThreadID
 	userID := safeSenderID(c.Sender())
-	redactedText := pipelinepkg.RedactSecrets(cmd.Text)
-	log.Printf("command: type=%d chat=%d thread=%d user=%d text=%q", cmd.Type, chatID, threadID, userID, redactedText)
+	log.Printf("command: type=%d chat=%d thread=%d user=%d len=%d", cmd.Type, chatID, threadID, userID, len(cmd.Text))
 	defer bc.confirmMessage(c.Message())
 
 	var reply string
@@ -251,7 +293,7 @@ func (bc *BotController) handleCommand(c telebot.Context, cmd *MatchedCommand) e
 	case CmdStatus:
 		reply, err = bc.cmdStatus(chatID, threadID, userID)
 	case CmdListAgents:
-		reply, err = bc.cmdListAgents()
+		reply, err = bc.cmdListAgents(userID)
 	case CmdListModels:
 		reply, err = bc.cmdListModels()
 	case CmdSetModel:
@@ -260,10 +302,16 @@ func (bc *BotController) handleCommand(c telebot.Context, cmd *MatchedCommand) e
 			break
 		}
 		reply, err = bc.cmdSetModel(c, cmd.Text)
+	case CmdRefreshModels:
+		if !bc.isOwner(c) {
+			reply = "Permissão negada. Apenas o owner pode atualizar a lista de modelos."
+			break
+		}
+		reply, err = bc.cmdRefreshModels()
 	case CmdMemoryStatus:
 		reply, err = bc.cmdMemoryStatus(c.Chat().ID, c.Message().ThreadID)
 	case CmdMemoryCheckpoint:
-		reply, err = bc.cmdMemoryCheckpoint(c.Chat().ID, c.Message().ThreadID, cmd.Text)
+		reply, err = bc.cmdMemoryCheckpoint(c.Chat().ID, c.Message().ThreadID, userID, cmd.Text)
 	case CmdUsers:
 		reply, err = bc.cmdUsers(c)
 	case CmdForgetMe:
@@ -286,6 +334,8 @@ func (bc *BotController) handleCommand(c telebot.Context, cmd *MatchedCommand) e
 			break
 		}
 		reply, err = bc.cmdDebugErrors()
+	case CmdSetMode:
+		reply, err = bc.cmdSetMode(c, cmd.Text)
 	default:
 		return fmt.Errorf("unknown command type: %d", cmd.Type)
 	}
@@ -436,28 +486,6 @@ func looksLikeJobID(s string) bool {
 
 const cronParseTimeout = 10 * time.Second
 
-const cronParseSystemPrompt = `You are a scheduling assistant. Extract scheduling parameters from the user's message.
-
-Respond with ONLY a JSON object (no markdown, no explanation):
-
-For recurring schedules:
-{"type":"cron","cron_expr":"<cron expression>","prompt":"<what to do>"}
-
-For one-time schedules:
-{"type":"once","run_at":"<ISO 8601 timestamp>","prompt":"<what to do>"}
-
-Rules:
-- cron_expr uses standard 5-field cron: minute hour day month weekday
-- run_at must be ISO 8601 with timezone (use -03:00 for BRT unless specified)
-- prompt is the ACTION to perform, not the scheduling part
-- If the user says "amanhã" or relative dates, calculate from current time
-- If no time specified, default to 09:00
-
-Examples:
-"agenda todo dia às 9h revisar emails" → {"type":"cron","cron_expr":"0 9 * * *","prompt":"revisar emails"}
-"me lembra amanhã às 15h de fazer deploy" → {"type":"once","run_at":"2026-03-27T15:00:00-03:00","prompt":"fazer deploy"}
-"agendar toda segunda e quarta às 10h standup" → {"type":"cron","cron_expr":"0 10 * * 1,3","prompt":"standup"}`
-
 // cronCreateParsed holds the extracted scheduling parameters from LLM response.
 type cronCreateParsed struct {
 	Type     string `json:"type"`
@@ -503,46 +531,23 @@ func parseCronCreateResponse(raw string) (*cronCreateParsed, error) {
 	return &parsed, nil
 }
 
-// parseCronWithLLM is the slow-path cron parser used when the regex fast-path
-// in cronFastParse doesn't recognize the message. Returns nil parsed and no
-// error when the LLM response can't be decoded — caller surfaces that as
-// "didn't understand" to the user.
-func (bc *BotController) parseCronWithLLM(text string) (*cronCreateParsed, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), cronParseTimeout)
-	defer cancel()
-	options := bridge.RequestOptions{SystemPrompt: cronParseSystemPrompt}
-	bc.applyConfiguredModelOptions(&options)
-
-	result, err := bc.bridge.ExecuteSync(ctx, bridge.Request{
-		Command: "query",
-		Prompt:  text,
-		Options: options,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	parsed, parseErr := parseCronCreateResponse(result.Content)
-	if parseErr != nil {
-		log.Printf("command: cron_create LLM parse error: %v (raw: %q)", parseErr, pipelinepkg.RedactSecrets(result.Content))
-		return nil, nil
-	}
-	return parsed, nil
-}
-
 func (bc *BotController) cmdCronCreate(c telebot.Context, text string) (string, error) {
 	if bc.cronHandler == nil {
 		return "Sistema de agendamentos não disponível.", nil
 	}
 
+	userID := safeSenderID(c.Sender())
+	tzName, loc := bc.userTimezone(userID)
+	now := time.Now().In(loc)
+
 	// Fast path: try local regex parser before paying the LLM round-trip.
-	// Handles the common ~70% (daily, weekly, today/tomorrow, "daqui N min").
-	parsed := cronFastParse(text, time.Now())
+	// Pass location-aware now so "tomorrow" and "today" use user-local days.
+	parsed := cronFastParse(text, now)
 	if parsed == nil {
 		if bc.bridge == nil {
 			return "Processador não disponível para interpretar o agendamento.", nil
 		}
-		llmParsed, err := bc.parseCronWithLLM(text)
+		llmParsed, err := bc.parseCronWithLLM(text, now, displayTimezoneName(tzName))
 		if err != nil {
 			return "Não consegui interpretar o agendamento. Tente algo como: \"agenda todo dia às 9h revisar emails\"", nil
 		}
@@ -557,9 +562,13 @@ func (bc *BotController) cmdCronCreate(c telebot.Context, text string) (string, 
 	ctx := context.Background()
 	chatID := c.Chat().ID
 	threadID := c.Message().ThreadID
-	userID := fmt.Sprintf("%d", c.Sender().ID)
+	userIDStr := fmt.Sprintf("%d", userID)
 
-	cwd := bc.currentCwd(chatID, threadID)
+	// DefaultCWD fallback applies only in private chats (no topic).
+	// In groups / supergroups / topics the user must set /cwd explicitly —
+	// DefaultCWD is a per-user convenience, not a shared project context.
+	isPrivateChat := c.Chat().Type == telebot.ChatPrivate
+	cwd := bc.currentCwdForContext(chatID, threadID, userID, isPrivateChat)
 
 	var (
 		jobID string
@@ -567,9 +576,9 @@ func (bc *BotController) cmdCronCreate(c telebot.Context, text string) (string, 
 	)
 	switch parsed.Type {
 	case "cron":
-		jobID, err = bc.cronHandler.service.AddRecurringJob(ctx, userID, chatID, threadID, parsed.CronExpr, parsed.Prompt, cwd)
+		jobID, err = bc.cronHandler.service.AddRecurringJob(ctx, userIDStr, chatID, threadID, parsed.CronExpr, parsed.Prompt, cwd, tzName)
 	case "once":
-		jobID, err = bc.cronHandler.service.AddOnceJob(ctx, userID, chatID, threadID, parsed.RunAt, parsed.Prompt, cwd)
+		jobID, err = bc.cronHandler.service.AddOnceJob(ctx, userIDStr, chatID, threadID, parsed.RunAt, parsed.Prompt, cwd)
 	default:
 		return "Não consegui determinar o tipo de agendamento.", nil
 	}
@@ -808,7 +817,7 @@ func statusWorkLines(description string, queueSize int) []string {
 	return lines
 }
 
-func (bc *BotController) cmdListAgents() (string, error) {
+func (bc *BotController) cmdListAgents(userID int64) (string, error) {
 	if bc.agents == nil {
 		return "Nenhum agent configurado.", nil
 	}
@@ -831,7 +840,43 @@ func (bc *BotController) cmdListAgents() (string, error) {
 		}
 		lines = append(lines, line)
 	}
+
+	// Mode section
+	modeSection := bc.buildModeListSection(userID)
+	if modeSection != "" {
+		lines = append(lines, modeSection)
+	}
+
 	return strings.Join(lines, "\n"), nil
+}
+
+// buildModeListSection returns a formatted "Modos disponíveis" section.
+// Returns "" when user store is unavailable or profile load fails.
+func (bc *BotController) buildModeListSection(userID int64) string {
+	activeMode := ""
+	if bc.userStore != nil {
+		if profile, err := bc.userStore.Get(userID); err == nil && profile != nil {
+			activeMode = profile.ActiveMode
+		} else if err != nil {
+			log.Printf("command: list agents failed to load profile user=%d: %v", userID, err)
+		}
+	}
+	// Default to "general" when empty
+	displayActive := activeMode
+	if displayActive == "" {
+		displayActive = "general"
+	}
+	modes := []string{"general", "developer", "researcher"}
+	var lines []string
+	lines = append(lines, "\n**Modos disponíveis**")
+	for _, m := range modes {
+		marker := ""
+		if m == displayActive {
+			marker = " (● ativo)"
+		}
+		lines = append(lines, fmt.Sprintf("- **%s**%s", m, marker))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (bc *BotController) cmdListModels() (string, error) {
@@ -891,6 +936,7 @@ func (bc *BotController) cmdListModels() (string, error) {
 	}
 
 	lines = append(lines, "\n\nUse /model <nome> para trocar ou /model auto para usar o PI default.")
+	lines = append(lines, "Lista em cache (5 min) — diga 'atualiza modelos' para refresh imediato.")
 	return strings.Join(lines, "\n"), nil
 }
 
@@ -959,21 +1005,18 @@ func (bc *BotController) cmdSetModel(c telebot.Context, text string) (string, er
 		return "Processador não disponível.", nil
 	}
 
-	// Validate: check if the model exists in PI registry
+	// Validate: check if the model exists in PI registry.
+	// Always force-refresh: the user just typed a specific model name, so they
+	// expect validation against the current PI state, not a 5-min-old cache.
+	// A stale cache would falsely reject a model added to PI moments ago,
+	// forcing the user to run /model refresh first. The 1-15s latency is
+	// a fair price for accurate validation.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	available, err := bc.getModels(ctx, false)
+	available, err := bc.getModels(ctx, true)
 	if err != nil {
 		return "", fmt.Errorf("falha ao consultar modelos: %w", err)
-	}
-
-	// If cache was empty (e.g. first request after restart), force-refresh once.
-	if len(available) == 0 {
-		available, err = bc.getModels(ctx, true)
-		if err != nil {
-			return "", fmt.Errorf("falha ao consultar modelos: %w", err)
-		}
 	}
 
 	var matched *bridge.ModelInfo
@@ -1003,6 +1046,12 @@ func (bc *BotController) cmdSetModel(c telebot.Context, text string) (string, er
 	if bc.refreshProviderEnv != nil {
 		bc.refreshProviderEnv()
 	}
+
+	// Invalidate the model cache after provider env changes so the next
+	// /model listing reflects the new API key + provider configuration.
+	// Without this, a stale cache could list models from the previous
+	// provider (whose API key may no longer be valid).
+	bc.invalidateModelCache()
 
 	userID := safeSenderID(c.Sender())
 	resetMsg := bc.resetCurrentModelSession(c.Chat().ID, c.Message().ThreadID, userID)
@@ -1123,7 +1172,7 @@ func (bc *BotController) cmdMemoryStatus(chatID int64, threadID int) (string, er
 	return memoryuxpkg.FormatStatus(status), nil
 }
 
-func (bc *BotController) cmdMemoryCheckpoint(chatID int64, threadID int, text string) (string, error) {
+func (bc *BotController) cmdMemoryCheckpoint(chatID int64, threadID int, userID int64, text string) (string, error) {
 	// Extract note after the command phrase
 	trimmed := strings.TrimSpace(text)
 	lower := strings.ToLower(trimmed)
@@ -1141,6 +1190,9 @@ func (bc *BotController) cmdMemoryCheckpoint(chatID int64, threadID int, text st
 		}
 	}
 
+	// Append active mode tag to the checkpoint note.
+	note = appendModeTag(note, bc.userActiveMode(userID))
+
 	svc := memoryuxpkg.New(bc.memoryDir, bc.resolver)
 	cwd := bc.currentCwd(chatID, threadID)
 	log.Printf("memory command: action=checkpoint chat=%d thread=%d cwd_set=%t", chatID, threadID, cwd != "")
@@ -1152,6 +1204,224 @@ func (bc *BotController) cmdMemoryCheckpoint(chatID int64, threadID int, text st
 		log.Printf("memory command: checkpoint written chat=%d layer=%s path=%s", chatID, result.Layer, result.Path)
 	}
 	return memoryuxpkg.FormatCheckpoint(result), nil
+}
+
+// --- Mode helpers and handler ---
+
+// userActiveMode returns the normalized active mode from the user's profile.
+// Returns "" for general/default mode or when the store is unavailable.
+func (bc *BotController) userActiveMode(userID int64) string {
+	if bc.userStore == nil {
+		return ""
+	}
+	profile, err := bc.userStore.Get(userID)
+	if err != nil || profile == nil {
+		if err != nil {
+			log.Printf("command: failed to load profile for mode user=%d: %v", userID, err)
+		}
+		return ""
+	}
+	return profile.ActiveMode
+}
+
+// userTimezone returns the IANA timezone name and *time.Location for a user.
+// Falls back to UTC on any error (logs the error but does not block).
+func (bc *BotController) userTimezone(userID int64) (string, *time.Location) {
+	if bc.userStore == nil {
+		return "", time.UTC
+	}
+	profile, err := bc.userStore.Get(userID)
+	if err != nil || profile == nil || profile.Timezone == "" {
+		if err != nil {
+			log.Printf("command: failed to load profile for timezone user=%d: %v", userID, err)
+		}
+		return "", time.UTC
+	}
+	name, loc, err := users.NormalizeTimezone(profile.Timezone)
+	if err != nil {
+		log.Printf("telegram: invalid profile timezone user=%d timezone=%q: %v", userID, profile.Timezone, err)
+		return "", time.UTC
+	}
+	return name, loc
+}
+
+// displayTimezoneName returns a human-readable timezone name for prompt display.
+func displayTimezoneName(tzName string) string {
+	if tzName == "" {
+		return "UTC"
+	}
+	return tzName
+}
+
+// appendModeTag appends a [mode:xxx] tag to the checkpoint note when the
+// user has an active mode. General/default mode appends nothing.
+func appendModeTag(note, mode string) string {
+	mode, _ = users.NormalizeMode(mode)
+	if mode == "" {
+		return note
+	}
+	tag := "[mode:" + mode + "]"
+	if strings.TrimSpace(note) == "" {
+		return tag
+	}
+	return strings.TrimSpace(note) + " " + tag
+}
+
+// cmdSetMode handles /mode set and query commands.
+func (bc *BotController) cmdSetMode(c telebot.Context, text string) (string, error) {
+	userID := safeSenderID(c.Sender())
+	if bc.userStore == nil {
+		return "Sistema de usuários não disponível.", nil
+	}
+
+	profile, err := bc.userStore.Get(userID)
+	if err != nil {
+		return "", fmt.Errorf("load profile: %w", err)
+	}
+	if profile == nil {
+		return "Perfil não encontrado. Complete o onboarding primeiro.", nil
+	}
+	if profile.UserID != userID {
+		log.Printf("command: cmdSetMode profile user mismatch: loaded=%d sender=%d", profile.UserID, userID)
+		return "", fmt.Errorf("profile user mismatch: loaded %d != sender %d", profile.UserID, userID)
+	}
+
+	// Detect query vs set
+	modeText := extractModeTarget(text)
+	if modeText == "" {
+		// Query current mode
+		display := profile.ActiveMode
+		if display == "" {
+			display = "general"
+		}
+		return fmt.Sprintf("Modo atual: **%s**.", display), nil
+	}
+
+	// Set mode
+	normalized, err := users.NormalizeMode(modeText)
+	if err != nil {
+		return fmt.Sprintf("Modo inválido %q. Use **general**, **developer** ou **researcher**.", modeText), nil
+	}
+
+	profile.ActiveMode = normalized
+	if err := bc.userStore.Save(profile); err != nil {
+		return "", fmt.Errorf("save profile: %w", err)
+	}
+
+	display := normalized
+	if display == "" {
+		display = "general"
+	}
+	return fmt.Sprintf("✅ Modo alterado para **%s**. Próxima mensagem usará o novo perfil.", display), nil
+}
+
+// extractModeTarget extracts the target mode from a mode command text.
+// Returns "" when the message is a query (no target mode).
+func extractModeTarget(text string) string {
+	trimmed := strings.TrimSpace(text)
+	lower := stripAccents(strings.ToLower(trimmed))
+
+	// "/mode" alone → query
+	if lower == "/mode" {
+		return ""
+	}
+	// Query phrases
+	for _, q := range []string{"qual meu modo", "qual o meu modo", "meu modo atual"} {
+		if lower == q {
+			return ""
+		}
+	}
+
+	// "/mode developer", "/modo dev" etc.
+	for _, prefix := range []string{"/mode ", "/modo "} {
+		if strings.HasPrefix(lower, prefix) {
+			return strings.TrimSpace(trimmed[len(prefix):])
+		}
+	}
+
+	// "modo dev", "modo desenvolvedor" etc.
+	for _, prefix := range []string{"modo "} {
+		if strings.HasPrefix(lower, prefix) {
+			return strings.TrimSpace(trimmed[len(prefix):])
+		}
+	}
+
+	return ""
+}
+
+// --- Timezone-aware cron parsing ---
+
+// cronParseSystemPromptForLocation builds the LLM cron parse prompt with
+// location-aware timezone guidance instead of the old hardcoded BRT.
+func cronParseSystemPromptForLocation(now time.Time, tzName string) string {
+	_, offset := now.Zone()
+	offsetText := formatUTCOffset(offset)
+	if tzName == "" {
+		tzName = "UTC"
+	}
+	return fmt.Sprintf(`You are a scheduling assistant. Extract scheduling parameters from the user's message.
+
+Respond with ONLY a JSON object (no markdown, no explanation):
+
+For recurring schedules:
+{"type":"cron","cron_expr":"<cron expression>","prompt":"<what to do>"}
+
+For one-time schedules:
+{"type":"once","run_at":"<ISO 8601 timestamp>","prompt":"<what to do>"}
+
+Rules:
+- User timezone: %s (%s)
+- Current user-local time: %s
+- cron_expr uses standard 5-field cron in the user's local timezone: minute hour day month weekday
+- run_at must be ISO 8601 with timezone offset %s unless the user explicitly specifies another timezone
+- prompt is the ACTION to perform, not the scheduling part
+- If the user says "amanhã" or relative dates, calculate from current user-local time
+- If no time specified, default to 09:00 user-local time
+
+Examples:
+"agenda todo dia às 9h revisar emails" → {"type":"cron","cron_expr":"0 9 * * *","prompt":"revisar emails"}
+"me lembra amanhã às 15h de fazer deploy" → {"type":"once","run_at":"2026-03-27T15:00:00%s","prompt":"fazer deploy"}
+"agendar toda segunda e quarta às 10h standup" → {"type":"cron","cron_expr":"0 10 * * 1,3","prompt":"standup"}`, tzName, offsetText, now.Format(time.RFC3339), offsetText, offsetText)
+}
+
+// formatUTCOffset returns a UTC offset string like "+00:00" or "-03:00".
+func formatUTCOffset(offsetSeconds int) string {
+	sign := "+"
+	if offsetSeconds < 0 {
+		sign = "-"
+		offsetSeconds = -offsetSeconds
+	}
+	h := offsetSeconds / 3600
+	m := (offsetSeconds % 3600) / 60
+	return fmt.Sprintf("%s%02d:%02d", sign, h, m)
+}
+
+// parseCronWithLLM is the slow-path cron parser used when the regex fast-path
+// in cronFastParse doesn't recognize the message. now and tzName configure
+// the LLM prompt with user-local time semantics.
+func (bc *BotController) parseCronWithLLM(text string, now time.Time, tzName string) (*cronCreateParsed, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), cronParseTimeout)
+	defer cancel()
+	options := bridge.RequestOptions{
+		SystemPrompt: cronParseSystemPromptForLocation(now, tzName),
+	}
+	bc.applyConfiguredModelOptions(&options)
+
+	result, err := bc.bridge.ExecuteSync(ctx, bridge.Request{
+		Command: "query",
+		Prompt:  text,
+		Options: options,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	parsed, parseErr := parseCronCreateResponse(result.Content)
+	if parseErr != nil {
+		log.Printf("command: cron_create LLM parse error: %v", parseErr)
+		return nil, nil
+	}
+	return parsed, nil
 }
 
 // Pre-compiled redaction regexes for status checkpoint output.

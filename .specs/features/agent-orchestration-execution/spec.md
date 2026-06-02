@@ -1,9 +1,9 @@
 # Agent Orchestration — Execution Mode
 
 **Roadmap step:** 3 — Close Orchestration Cycle  
-**Companion spec:** `.specs/features/plan-mode-architecture/` (covers how the artifacts this spec consumes are produced)  
+**Companion context:** planning remains conversational; `.specs/features/plan-mode-architecture/` is a removed historical artifact.  
 **Depends on:** `.specs/features/project-binding/` (✅ done) + `.specs/features/multi-user-profiles/` (✅ runtime hardening) + `.specs/features/operational-observability/`  
-**Desbloqueia:** Plan Mode handoff, Agent Comms
+**Desbloqueia:** conversational plan handoff, Agent Comms
 
 ## Problem Statement
 
@@ -22,7 +22,7 @@ When Aurelia emits a structured execution plan, Go should fan that plan out to w
 - The validator reviews the worker's prose, not the actual git diff / changed files / verification output, and validation infrastructure failure currently approves by default
 - `CommitChanges` stages the whole repo with `git add -A`, which can accidentally commit unrelated user changes
 
-This spec scopes the work to **close the execution cycle** so an approved plan can ride all the way from "plan JSON detected" to "commit + PR posted on Telegram". Creating the `.specs/features/<feat>/{spec,design,tasks}.md` artifacts is **out of scope** here and lives in the companion Plan Mode spec.
+This spec scopes the work to **close the execution cycle** so an approved conversational plan can ride all the way from "plan JSON detected" to "commit + PR posted on Telegram". Creating the `.specs/features/<feat>/{spec,design,tasks}.md` artifacts is **out of scope** here and belongs to explicit user/agent planning work, not a formal Plan Mode.
 
 ## Goals
 
@@ -43,7 +43,7 @@ This spec scopes the work to **close the execution cycle** so an approved plan c
 
 ## Out of Scope
 
-- Aurelia creating spec/design/tasks artifacts — covered in `plan-mode-architecture`
+- Aurelia creating spec/design/tasks artifacts automatically
 - Routing decisions by `@mention` — Aurelia decides
 - Worker-to-worker delegation
 - Multi-repo workflows

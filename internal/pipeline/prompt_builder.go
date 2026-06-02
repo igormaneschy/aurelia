@@ -28,11 +28,11 @@ const (
 )
 
 // BuildSystemPrompt assembles all system prompt sections for a request.
-func (bc *Service) BuildSystemPrompt(userText string, agent *agents.Agent, chatID int64, messageID int, threadID int, userID int64) (string, error) {
-	return bc.buildSystemPrompt(userText, agent, chatID, messageID, threadID, userID)
+func (bc *Service) BuildSystemPrompt(userText string, agent *agents.Agent, chatID int64, messageID int, threadID int, userID int64, isPrivateChat bool) (string, error) {
+	return bc.buildSystemPrompt(userText, agent, chatID, messageID, threadID, userID, isPrivateChat)
 }
 
-func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatID int64, messageID int, threadID int, userID int64) (string, error) {
+func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatID int64, messageID int, threadID int, userID int64, isPrivateChat bool) (string, error) {
 	var sections []string
 
 	// Runtime identity — tells the model what provider and model it is running on
@@ -48,19 +48,31 @@ func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatI
 	identitySection := fmt.Sprintf("# Runtime Identity\n\nYou are running via the Aurelia bridge over the PI SDK.\nProvider: %s\nModel: %s\nAlways answer accurately when asked what model you are.", provider, model)
 	sections = append(sections, identitySection)
 
+	// Agent-specific prompt — placed BEFORE persona so the mode overlay
+	// appended last by BuildPromptForUser takes final precedence over
+	// agent instructions (mode is the user's latest behavioural intent).
+	if agent != nil && agent.Prompt != "" {
+		agentSection := "# Agent Instructions\n\n" + agent.Prompt
+		sections = append(sections, agentSection)
+	}
+
 	// Persona prompt — prefer per-user persona when userID and resolver are available
 	if bc.persona != nil {
 		var personaPrompt string
 		var err error
 		if bc.userResolver != nil && userID != 0 {
 			var isOwner bool
+			activeMode := ""
 			if bc.usersStore != nil {
-				profile, _ := bc.usersStore.Get(userID)
-				if profile != nil {
+				profile, pErr := bc.usersStore.Get(userID)
+				if pErr != nil {
+					log.Printf("Pipeline: failed to load profile for user %d: %v", userID, pErr)
+				} else if profile != nil {
 					isOwner = profile.IsOwner
+					activeMode = profile.ActiveMode
 				}
 			}
-			personaPrompt, err = bc.persona.BuildPromptForUser(userID, bc.userResolver, isOwner)
+			personaPrompt, err = bc.persona.BuildPromptForUser(userID, bc.userResolver, isOwner, activeMode)
 		} else {
 			personaPrompt, err = bc.persona.BuildPrompt()
 		}
@@ -71,18 +83,12 @@ func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatI
 		}
 	}
 
-	// Agent-specific prompt
-	if agent != nil && agent.Prompt != "" {
-		agentSection := "# Agent Instructions\n\n" + agent.Prompt
-		sections = append(sections, agentSection)
-	}
-
 	// Cron scheduling instructions
 	cronSection := bc.buildCronInstructions(chatID)
 	sections = append(sections, cronSection)
 
 	// Telegram interaction instructions
-	telegramSection := bc.buildTelegramInstructions(chatID, messageID, threadID, agent, userID)
+	telegramSection := bc.buildTelegramInstructions(chatID, messageID, threadID, agent, userID, isPrivateChat)
 	sections = append(sections, telegramSection)
 
 	// Security Boundaries — capability profile and rules for tool usage.
@@ -110,11 +116,11 @@ func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatI
 
 	// Auto-memory instructions (SDK auto-memory doesn't activate via programmatic API,
 	// so we instruct the model explicitly)
-	memorySection := bc.buildMemoryInstructions(chatID, threadID, userID, agent)
+	memorySection := bc.buildMemoryInstructions(chatID, threadID, userID, agent, isPrivateChat)
 	sections = append(sections, memorySection)
 
 	// Long-task guidance — prompt the model to checkpoint when the task looks complex
-	if looksLikeLongTask(userText, bc.effectiveCwd(agent, chatID, threadID) != "") {
+	if looksLikeLongTask(userText, bc.effectiveCwdForContext(agent, chatID, threadID, userID, isPrivateChat) != "") {
 		sections = append(sections, "# Long Task Guidance\n\n"+longTaskGuidance())
 	}
 
@@ -122,7 +128,7 @@ func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatI
 	// inject a specific instruction so the model responds with clear /cwd guidance
 	// instead of attempting file operations or giving a vague answer.
 	// When the user has known project bindings from other chats, list them as suggestions.
-	if looksLikeCodebaseRead(userText) && bc.effectiveCwd(agent, chatID, threadID) == "" {
+	if looksLikeCodebaseRead(userText) && bc.effectiveCwdForContext(agent, chatID, threadID, userID, isPrivateChat) == "" {
 		knownPaths := bc.listKnownProjectPaths(userID)
 		sections = append(sections, codebaseReadChatModeGuidanceForKnownProjects(knownPaths))
 	}
@@ -133,7 +139,15 @@ func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatI
 }
 
 // effectiveCwd resolves the working directory: agent override → chat-level.
+// Deprecated: prefer effectiveCwdForContext for DefaultCWD fallback in private chats.
 func (bc *Service) effectiveCwd(agent *agents.Agent, chatID int64, threadID int) string {
+	return bc.effectiveCwdForContext(agent, chatID, threadID, 0, false)
+}
+
+// effectiveCwdForContext resolves the working directory with full context:
+// agent override → projectbinding.Resolve → session.GetCwd → Profile.DefaultCWD
+// (only for private chats with threadID==0). userID==0 skips profile lookup.
+func (bc *Service) effectiveCwdForContext(agent *agents.Agent, chatID int64, threadID int, userID int64, isPrivateChat bool) string {
 	if agent != nil && agent.Cwd != "" {
 		return agent.Cwd
 	}
@@ -148,10 +162,26 @@ func (bc *Service) effectiveCwd(agent *agents.Agent, chatID int64, threadID int)
 			return resolved.Binding.CWD
 		}
 	}
-	if bc.sessions == nil {
-		return ""
+	if bc.sessions != nil {
+		if cwd := bc.sessions.GetCwd(chatID, threadID); cwd != "" {
+			return cwd
+		}
 	}
-	return bc.sessions.GetCwd(chatID, threadID)
+	// DefaultCWD fallback: private chats only, no topic/thread
+	if isPrivateChat && threadID == 0 && userID != 0 && bc.usersStore != nil {
+		profile, err := bc.usersStore.Get(userID)
+		if err != nil {
+			log.Printf("cwd: effectiveCwdForContext failed to load profile user=%d: %v", userID, err)
+		} else if profile != nil && profile.DefaultCWD != "" {
+			// Validate: only use path if it exists and is a directory
+			if info, statErr := os.Stat(profile.DefaultCWD); statErr == nil && info.IsDir() {
+				return profile.DefaultCWD
+			} else if statErr != nil {
+				log.Printf("cwd: DefaultCWD user=%d path=%q is invalid/unreadable: %v", userID, profile.DefaultCWD, statErr)
+			}
+		}
+	}
+	return ""
 }
 
 // listKnownProjectPaths returns up to 5 unique CWD paths from the user's
@@ -181,13 +211,13 @@ func (bc *Service) listKnownProjectPaths(userID int64) []string {
 }
 
 // buildTelegramInstructions returns instructions for interacting with the Telegram chat.
-func (bc *Service) buildTelegramInstructions(chatID int64, messageID int, threadID int, agent *agents.Agent, userID int64) string {
+func (bc *Service) buildTelegramInstructions(chatID int64, messageID int, threadID int, agent *agents.Agent, userID int64, isPrivateChat bool) string {
 	bin := "aurelia"
 	if bc.exePath != "" {
 		bin = bc.exePath
 	}
 
-	cwd := bc.effectiveCwd(agent, chatID, threadID)
+	cwd := bc.effectiveCwdForContext(agent, chatID, threadID, userID, isPrivateChat)
 	cwdDisplay := cwd
 	if cwd == "" {
 		cwdDisplay = "(none — no project set)"
@@ -261,10 +291,10 @@ func (bc *Service) topicMemoryDirCanonical(chatID int64, threadID int) string {
 }
 
 // buildMemoryInstructions returns the system prompt section for persistent memory.
-func (bc *Service) buildMemoryInstructions(chatID int64, threadID int, userID int64, agent *agents.Agent) string {
+func (bc *Service) buildMemoryInstructions(chatID int64, threadID int, userID int64, agent *agents.Agent, isPrivateChat bool) string {
 	var sb strings.Builder
 
-	cwd := bc.effectiveCwd(agent, chatID, threadID)
+	cwd := bc.effectiveCwdForContext(agent, chatID, threadID, userID, isPrivateChat)
 	hasProject := cwd != "" && bc.resolver != nil
 
 	topicSuffix := ""

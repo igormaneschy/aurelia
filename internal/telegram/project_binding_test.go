@@ -1,10 +1,13 @@
 package telegram
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
+	"github.com/igormaneschy/aurelia/internal/users"
 )
 
 // --- cwdSetTarget tests ---
@@ -415,5 +418,115 @@ func TestCwdClearThread_NotClear(t *testing.T) {
 	}
 	if ok {
 		t.Fatal("expected ok=false for non-clear args")
+	}
+}
+
+// --- currentCwdForContext tests (DefaultCWD fallback) ---
+
+// newUserStoreWithDefaultCWD creates a users.Store rooted at t.TempDir() with a
+// profile whose DefaultCWD is set to the given path. Returns the store and the
+// profile's userID.
+func newUserStoreWithDefaultCWD(t *testing.T, defaultCWD string) *users.Store {
+	t.Helper()
+	dir := t.TempDir()
+	resolver := users.NewResolver(dir)
+	store := users.NewStore(resolver)
+	profile := &users.Profile{
+		UserID:     1,
+		Name:       "Alice",
+		Language:   "pt",
+		DefaultCWD: defaultCWD,
+	}
+	if err := store.Save(profile); err != nil {
+		t.Fatalf("save profile: %v", err)
+	}
+	return store
+}
+
+func TestCurrentCwdForContext_DefaultCWDInPrivateChat(t *testing.T) {
+	t.Parallel()
+
+	// Create a real directory that DefaultCWD will point to.
+	repoDir := t.TempDir()
+	store := newUserStoreWithDefaultCWD(t, repoDir)
+
+	bc := &BotController{userStore: store}
+	// Private chat, no topic, no /cwd binding, no session CWD → DefaultCWD wins.
+	got := bc.currentCwdForContext(42, 0, 1, true)
+	if got != repoDir {
+		t.Fatalf("currentCwdForContext() = %q, want DefaultCWD %q", got, repoDir)
+	}
+}
+
+func TestCurrentCwdForContext_DefaultCWDIgnoredInGroupChat(t *testing.T) {
+	t.Parallel()
+
+	// DefaultCWD is a per-user convenience for private chats only.
+	// Group / supergroup / topic must NOT see it.
+	repoDir := t.TempDir()
+	store := newUserStoreWithDefaultCWD(t, repoDir)
+
+	bc := &BotController{userStore: store}
+	got := bc.currentCwdForContext(42, 0, 1, false)
+	if got != "" {
+		t.Fatalf("currentCwdForContext(group) = %q, want empty", got)
+	}
+}
+
+func TestCurrentCwdForContext_DefaultCWDIgnoredInTopic(t *testing.T) {
+	t.Parallel()
+
+	// Topic chat (threadID > 0) in a private chat: still must NOT use DefaultCWD.
+	// Per spec, DefaultCWD is the fallback for private chats with no topic only.
+	repoDir := t.TempDir()
+	store := newUserStoreWithDefaultCWD(t, repoDir)
+
+	bc := &BotController{userStore: store}
+	got := bc.currentCwdForContext(42, 99, 1, true)
+	if got != "" {
+		t.Fatalf("currentCwdForContext(topic) = %q, want empty", got)
+	}
+}
+
+func TestCurrentCwdForContext_DefaultCWDInvalidPathIgnored(t *testing.T) {
+	t.Parallel()
+
+	// A profile with a DefaultCWD pointing at a non-existent path must log
+	// and return "" — never propagate a broken path to the bridge.
+	missing := filepath.Join(t.TempDir(), "does", "not", "exist")
+	store := newUserStoreWithDefaultCWD(t, missing)
+
+	bc := &BotController{userStore: store}
+	got := bc.currentCwdForContext(42, 0, 1, true)
+	if got != "" {
+		t.Fatalf("currentCwdForContext(invalid path) = %q, want empty", got)
+	}
+}
+
+func TestCurrentCwdForContext_NoUserStoreReturnsEmpty(t *testing.T) {
+	t.Parallel()
+
+	// No userStore → no DefaultCWD lookup → empty.
+	bc := &BotController{}
+	got := bc.currentCwdForContext(42, 0, 1, true)
+	if got != "" {
+		t.Fatalf("currentCwdForContext() = %q, want empty", got)
+	}
+}
+
+func TestCurrentCwdForContext_DefaultCWDIsRegularDirectory(t *testing.T) {
+	t.Parallel()
+
+	// Defensive: DefaultCWD must be a directory, not a regular file.
+	filePath := filepath.Join(t.TempDir(), "not-a-dir.txt")
+	if err := os.WriteFile(filePath, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := newUserStoreWithDefaultCWD(t, filePath)
+
+	bc := &BotController{userStore: store}
+	got := bc.currentCwdForContext(42, 0, 1, true)
+	if got != "" {
+		t.Fatalf("currentCwdForContext(file) = %q, want empty (file is not a directory)", got)
 	}
 }

@@ -11,11 +11,13 @@ import (
 const (
 	bootstrapStepAssistant = "assistant"
 	bootstrapStepProfile   = "profile"
+	bootstrapStepTimezone  = "timezone"
 )
 
 type bootstrapState struct {
 	Choice string
 	Step   string
+	UserID int64 // cached for timezone step
 }
 
 type bootstrapPreset struct {

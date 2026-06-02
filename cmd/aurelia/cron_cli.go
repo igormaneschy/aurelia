@@ -43,7 +43,7 @@ func runCronCLI(args []string) error {
 		chatID := parseChatIDFlag(args[3:])
 		ownerUserID := parseOwnerUserIDFlag(args[3:])
 		cwd := parseCwdFlag(args[3:])
-		jobID, err := svc.AddRecurringJob(ctx, ownerUserID, chatID, 0, expr, prompt, cwd)
+		jobID, err := svc.AddRecurringJob(ctx, ownerUserID, chatID, 0, expr, prompt, cwd, "")
 		if err != nil {
 			return err
 		}

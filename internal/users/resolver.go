@@ -41,6 +41,12 @@ func (r *Resolver) UserMdPath(userID int64) string {
 	return filepath.Join(r.PersonasDir(userID), "USER.md")
 }
 
+// UserModePath returns the path to a user's mode overlay file.
+// Mode must already be normalized (call NormalizeMode first).
+func (r *Resolver) UserModePath(userID int64, mode string) string {
+	return filepath.Join(r.PersonasDir(userID), "mode_"+mode+".md")
+}
+
 // ProfilePath returns the path to a user's profile.json file.
 func (r *Resolver) ProfilePath(userID int64) string {
 	return filepath.Join(r.UserRoot(userID), "profile.json")

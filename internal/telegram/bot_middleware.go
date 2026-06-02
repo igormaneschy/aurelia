@@ -64,6 +64,14 @@ func (bc *BotController) registerContentRoutes() {
 	bc.bot.Handle("/agents", bc.handleAgentsCommand)
 	bc.bot.Handle("/memory", bc.handleMemoryCommand)
 	bc.bot.Handle("/model", bc.handleModelCommand)
+	// /mode and /modo must be registered as slash handlers so the telebot
+	// dispatcher strips the @botname suffix that Telegram adds in groups
+	// and topics ("/mode@ManeDev_bot developer" → command="/mode",
+	// payload="developer"). Without this, the message falls through to
+	// OnText → MatchCommand, which only knows the bare phrase and
+	// silently fails in group/topic chats. See live bug report 2026-06-02.
+	bc.bot.Handle("/mode", bc.handleModeCommand)
+	bc.bot.Handle("/modo", bc.handleModeCommand)
 	bc.bot.Handle("/users", bc.handleUsersCommand)
 	bc.bot.Handle("/forgetme", bc.handleForgetMeCommand)
 	bc.bot.Handle("\fforget_me_confirm", bc.handleForgetMeConfirm)
@@ -77,22 +85,28 @@ func (bc *BotController) registerContentRoutes() {
 }
 
 func (bc *BotController) registerSlashMenu() {
-	commands := []telebot.Command{
+	if err := bc.bot.SetCommands(slashMenuCommands()); err != nil {
+		log.Printf("Failed to set bot commands: %v", err)
+	}
+}
+
+// slashMenuCommands returns the Telegram slash-menu command list. Extracted
+// from registerSlashMenu so tests can verify the list without a live bot.
+func slashMenuCommands() []telebot.Command {
+	return []telebot.Command{
 		{Text: "new", Description: "Nova sessão (limpa contexto)"},
 		{Text: "usage", Description: "Ver uso de tokens da sessão"},
 		{Text: "status", Description: "Ver estado atual da Aurelia"},
 		{Text: "cwd", Description: "Definir diretório de trabalho"},
 		{Text: "cron", Description: "Gerenciar agendamentos"},
-		{Text: "agents", Description: "Listar agentes disponíveis"},
+		{Text: "agents", Description: "Listar agentes disponíveis + modo ativo"},
 		{Text: "memory", Description: "Ver status da memória e criar checkpoints"},
 		{Text: "model", Description: "Ver/trocar modelo ativo"},
+		{Text: "mode", Description: "Trocar/consultar modo (developer/researcher/general)"},
 		{Text: "stop", Description: "Interromper processamento ativo (preserva sessão)"},
 		{Text: "users", Description: "Listar usuários autorizados (owner)"},
 		{Text: "forgetme", Description: "Apagar meus dados e recomeçar"},
 		{Text: "help", Description: "Mostrar comandos disponíveis"},
-	}
-	if err := bc.bot.SetCommands(commands); err != nil {
-		log.Printf("Failed to set bot commands: %v", err)
 	}
 }
 
@@ -110,6 +124,7 @@ func helpMessage() string {
 		"/cwd <path> — Definir diretório de trabalho (tópicos herdam do grupo)\n" +
 		"/cron — Gerenciar agendamentos\n" +
 		"/agents — Listar agentes disponíveis (também roteáveis com @nome)\n" +
+		"/mode — Trocar/consultar modo ativo (developer/researcher/general)\n" +
 		"/memory — Ver status da memória e criar checkpoints\n" +
 		"/model — Ver/trocar modelo ativo\n" +
 		"/help — Mostrar esta mensagem\n\n" +
@@ -129,21 +144,39 @@ func helpMessage() string {
 
 func (bc *BotController) handleAgentsCommand(c telebot.Context) error {
 	defer bc.confirmMessage(c.Message())
+	// Delegate to cmdListAgents so the slash command returns the same
+	// output as the natural-language path ("lista agents" / "quais agents"):
+	// markdown formatting + the active mode section, in addition to thread
+	// routing. Keep the "Crie arquivos .md ..." hint for the empty case.
+	reply, err := bc.cmdListAgents(safeSenderID(c.Sender()))
+	if err != nil {
+		return err
+	}
 	if bc.agents == nil || len(bc.agents.Agents()) == 0 {
-		return SendText(bc.bot, c.Chat(), "Nenhum agente configurado. Crie arquivos .md em ~/.aurelia/agents/")
+		reply = "Nenhum agente configurado. Crie arquivos .md em ~/.aurelia/agents/"
 	}
-	var lines []string
-	for _, a := range bc.agents.Agents() {
-		line := fmt.Sprintf("• %s — %s", a.Name, a.Description)
-		if a.Model != "" {
-			line += fmt.Sprintf(" [%s]", a.Model)
-		}
-		if a.Schedule != "" {
-			line += fmt.Sprintf(" (cron: %s)", a.Schedule)
-		}
-		lines = append(lines, line)
+	return SendTextWithThread(bc.bot, c.Chat(), reply, c.Message().ThreadID)
+}
+
+// handleModeCommand serves the /mode and /modo slash commands. Telebot has
+// already stripped the @botname suffix and extracted the payload, so we
+// rebuild the text in the canonical "/mode <target>" form and delegate to
+// cmdSetMode — same code path as the natural-language "modo dev" /
+// "qual meu modo" commands. Thread-safe reply routing.
+func (bc *BotController) handleModeCommand(c telebot.Context) error {
+	defer bc.confirmMessage(c.Message())
+	text := "/mode"
+	if p := strings.TrimSpace(c.Message().Payload); p != "" {
+		text = "/mode " + p
 	}
-	return SendText(bc.bot, c.Chat(), "Agentes disponíveis:\n\n"+strings.Join(lines, "\n"))
+	reply, err := bc.cmdSetMode(c, text)
+	if err != nil {
+		return err
+	}
+	if reply == "" {
+		return nil
+	}
+	return SendTextWithThread(bc.bot, c.Chat(), reply, c.Message().ThreadID)
 }
 
 func (bc *BotController) handleCwdCommand(c telebot.Context) error {
@@ -288,14 +321,20 @@ func (bc *BotController) handleStatusCommand(c telebot.Context) error {
 func (bc *BotController) handleCronCommand(c telebot.Context) error {
 	defer bc.confirmMessage(c.Message())
 	if bc.cronHandler == nil {
-		return SendText(bc.bot, c.Chat(), "Cron não está disponível.")
+		return SendTextWithThread(bc.bot, c.Chat(), "Cron não está disponível.", c.Message().ThreadID)
 	}
 	userID := fmt.Sprintf("%d", c.Sender().ID)
 	chatID := c.Chat().ID
 	threadID := c.Message().ThreadID
 	text := c.Message().Text
 
-	reply, err := bc.cronHandler.HandleText(context.Background(), userID, chatID, threadID, text)
+	// Resolve sender's profile timezone for recurring cron jobs.
+	// userTimezone validates the IANA name and falls back to UTC on any
+	// error (with a log line), matching the natural-language cron path so
+	// a corrupt profile timezone can't fail job creation.
+	tzName, _ := bc.userTimezone(safeSenderID(c.Sender()))
+
+	reply, err := bc.cronHandler.HandleText(context.Background(), userID, chatID, threadID, text, tzName)
 	if err != nil {
 		return SendErrorWithThread(bc.bot, c.Chat(), err.Error(), threadID)
 	}

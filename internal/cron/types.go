@@ -21,6 +21,7 @@ type CronJob struct {
 	RunAt          *time.Time
 	Prompt         string
 	Active         bool
+	Timezone       string    // IANA timezone for recurring cron; empty = UTC
 	LastRunAt      *time.Time
 	NextRunAt      *time.Time
 	LastStatus     string

@@ -406,3 +406,55 @@ func TestScheduler_RunDueJobs_PropagatesStoreError(t *testing.T) {
 		t.Fatalf("expected store error %v, got %v", expectedErr, err)
 	}
 }
+
+func TestComputeNextRunInLocation_ReturnsUTC(t *testing.T) {
+	// "0 9 * * *" = 09:00 daily
+	// after = 2026-06-02 08:30 UTC = 05:30 local → next run = 09:00 local = 12:00 UTC
+	after := time.Date(2026, 6, 2, 8, 30, 0, 0, time.UTC)
+	next, err := computeNextRunInLocation("0 9 * * *", after, "America/Sao_Paulo")
+	if err != nil {
+		t.Fatalf("computeNextRunInLocation: %v", err)
+	}
+	if next.Location() != time.UTC {
+		t.Errorf("next.Location() = %v, want UTC", next.Location())
+	}
+	expectedUTC := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
+	if !next.Equal(expectedUTC) {
+		t.Errorf("next = %v, want %v", next, expectedUTC)
+	}
+}
+
+func TestComputeNextRunInLocation_ListDueJobsCompat(t *testing.T) {
+	// Create a recurring job at 09:00 America/Sao_Paulo
+	expr := "0 9 * * *"
+	now := time.Date(2026, 6, 2, 8, 0, 0, 0, time.UTC)
+	nextRun, err := computeNextRunInLocation(expr, now, "America/Sao_Paulo")
+	if err != nil {
+		t.Fatalf("computeNextRunInLocation: %v", err)
+	}
+	// nextRun should be 12:00 UTC on the same day
+	if nextRun.Location() != time.UTC {
+		t.Errorf("nextRun not UTC: %v", nextRun.Location())
+	}
+
+	// Simulate ListDueJobs check: now >= nextRun
+	dueCheck := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
+	if !nextRun.Before(dueCheck) && !nextRun.Equal(dueCheck) {
+		t.Errorf("nextRun %v not <= dueCheck %v", nextRun, dueCheck)
+	}
+}
+
+func TestComputeNextRunInLocation_EmptyTzIsUTC(t *testing.T) {
+	after := time.Date(2026, 6, 2, 8, 30, 0, 0, time.UTC)
+	next, err := computeNextRunInLocation("0 9 * * *", after, "")
+	if err != nil {
+		t.Fatalf("computeNextRunInLocation: %v", err)
+	}
+	if next.Location() != time.UTC {
+		t.Errorf("next.Location() = %v, want UTC", next.Location())
+	}
+	expectedUTC := time.Date(2026, 6, 2, 9, 0, 0, 0, time.UTC)
+	if !next.Equal(expectedUTC) {
+		t.Errorf("next = %v, want %v", next, expectedUTC)
+	}
+}

@@ -1,8 +1,10 @@
 # Plan Mode Architecture — Tasks
 
+**Status:** 🗑️ Superseded / removed 2026-05-24 — historical artifact only. Do not implement.
+
 **Design:** `.specs/features/plan-mode-architecture/design.md`
 **Roadmap step:** 4
-**Status:** 🔴 A implementar (parcial: detecção heurística existe)
+**Status:** 🗑️ Removido; tarefas mantidas apenas para histórico
 **Depende de:** User Isolation + Orchestration Cycle (ExecutionContext, handoff)
 
 > Depende de User Isolation entregar `TurnContext`, `SessionKey` e `UserGate`.

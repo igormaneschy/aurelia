@@ -11,6 +11,7 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
+	"github.com/igormaneschy/aurelia/internal/persona"
 	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
 	"github.com/igormaneschy/aurelia/internal/security"
 )
@@ -24,7 +25,7 @@ type BridgeCronRuntime struct {
 	memoryDir       string
 	defaultProvider string
 	exePath         string // path to the aurelia binary for CLI instructions
-	userResolver    interface{ UserMdPath(userID int64) string }
+	userResolver    persona.UserPromptResolver
 }
 
 // AgentRegistry resolves agent definitions by name.
@@ -35,7 +36,7 @@ type AgentRegistry interface {
 // PersonaBuilder builds the base system prompt from persona files.
 type PersonaBuilder interface {
 	BuildPrompt() (string, error)
-	BuildPromptForUser(userID int64, resolver interface{ UserMdPath(userID int64) string }, isOwner bool) (string, error)
+	BuildPromptForUser(userID int64, resolver persona.UserPromptResolver, isOwner bool, activeMode string) (string, error)
 }
 
 // NewBridgeCronRuntime creates a runtime that executes jobs via Bridge
@@ -64,7 +65,7 @@ func (r *BridgeCronRuntime) SetExePath(path string) {
 }
 
 // SetUserResolver configures the user path resolver for per-user persona support.
-func (r *BridgeCronRuntime) SetUserResolver(ur interface{ UserMdPath(userID int64) string }) {
+func (r *BridgeCronRuntime) SetUserResolver(ur persona.UserPromptResolver) {
 	r.userResolver = ur
 }
 
@@ -150,7 +151,7 @@ func (r *BridgeCronRuntime) ExecuteJob(ctx context.Context, job CronJob) (*Execu
 	if r.userResolver != nil && job.OwnerUserID != "" {
 		ownerNumeric, parseErr := parseInt64(job.OwnerUserID)
 		if parseErr == nil && ownerNumeric > 0 {
-			basePrompt, err = r.persona.BuildPromptForUser(ownerNumeric, r.userResolver, false)
+			basePrompt, err = r.persona.BuildPromptForUser(ownerNumeric, r.userResolver, false, "")
 		} else {
 			if parseErr != nil {
 				log.Printf("cron: failed to parse OwnerUserID %q as int64 for job %s, using global persona", job.OwnerUserID, job.ID)

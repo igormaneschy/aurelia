@@ -4,7 +4,7 @@
 **Status:** 🔴 Draft revisado  
 **Depende de:** User Isolation (`multi-user-profiles`) para `TurnContext`, `SessionKey`, `UserGate` e diretórios privados por `user_id`
 **Depende de:** Security Guard-Rails (✅ done)
-**Ganha valor com:** Wiki, Nudge, Plan Mode, Orchestration e Agent Comms, mas o MVP manual (`/skill save`) funciona sem eles
+**Ganha valor com:** Nudge, Orchestration, Agent Comms e a boundary PI/`ai-memory`, mas o MVP manual (`/skill save`) funciona sem eles
 
 ## Problem Statement
 
@@ -83,7 +83,7 @@ O Aurelia continua sendo a fonte de verdade para `user_id`, `chat_id`, `thread_i
 2. WHEN `tool_use` chega THEN recorder SHALL guardar nome da tool e input redigido/truncado.
 3. WHEN `tool_result` chega THEN recorder SHALL guardar snippet redigido/truncado.
 4. WHEN `result` chega com sucesso THEN recorder SHALL guardar resposta final redigida/truncada e stats.
-5. WHEN turno termina com erro, timeout, cancelamento, handoff de Plan Mode ou chamada interna de generator/dream/validator THEN recorder SHALL NOT substituir o último transcript capturável.
+5. WHEN turno termina com erro, timeout, cancelamento, handoff de plano conversacional ou chamada interna de generator/dream/validator THEN recorder SHALL NOT substituir o último transcript capturável.
 6. WHEN transcript passa de limites configurados THEN eventos antigos/longos SHALL ser truncados com marcador explícito.
 
 **Independent Test:** Fake bridge com `Read`, `Bash`, `tool_result` e `result` produz transcript com stats corretos e sem system prompt completo.

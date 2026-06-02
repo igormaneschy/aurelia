@@ -235,6 +235,145 @@ func TestRefreshModelsFromCallback_RedrawsProvidersWithNewModel(t *testing.T) {
 	}
 }
 
+// TestCmdSetModel_ValidationForceRefreshes verifies the regression fix
+// for the live bug: a model added to PI within the last 5 minutes could not
+// be set via /model <name> because validation read the stale 5-min cache.
+// Now validation always force-refreshes, so newly added models are
+// immediately usable. We verify the side effect (bridge fetch) rather than
+// the full save flow because saveDefaultModel requires a real config file.
+func TestCmdSetModel_ValidationForceRefreshes(t *testing.T) {
+	t.Parallel()
+
+	// The fake returns the NEW list on the first call — the validation
+	// must hit this, not the stale cache populated below.
+	fake := &fakeModelLister{models: [][]bridge.ModelInfo{
+		{{Provider: "newpi", ID: "new-model"}},
+	}}
+	bc := testModelController(session.NewStore())
+	bc.modelLister = fake
+	bc.bot = newOfflineTestBot(t)
+	c := newTestTelegramContext(42, 0, 100, "")
+
+	// Prime cache with the OLD list (e.g., from /model <other> minutos ago).
+	// Without force-refresh on validation, the new model would be
+	// falsely rejected because the cache doesn't know about it.
+	bc.modelCache = []bridge.ModelInfo{{Provider: "oldpi", ID: "old-model"}}
+	bc.modelCacheExpiry = time.Now().Add(5 * time.Minute)
+
+	// Drive cmdSetModel. We discard the result because saveDefaultModel
+	// will fail in the test env (no real config file), but the
+	// validation force-refresh happens BEFORE saveDefaultModel, so we
+	// can observe its side effect via the fake.calls counter.
+	_, _ = bc.cmdSetModel(c, "/model newpi/new-model")
+
+	// The key assertion: validation must have called the bridge
+	// (force=true bypasses cache). If it had used the cache, the
+	// "oldpi" list would not contain "newpi/new-model" and the test
+	// would have failed earlier (model not found, no bridge call).
+	if fake.calls < 1 {
+		t.Fatalf("expected at least one bridge fetch during validation, got %d", fake.calls)
+	}
+}
+
+// TestCmdSetModel_InvalidatesCacheAfterProviderEnvChange verifies that
+// after a successful model change, the model cache is cleared so the next
+// /model listing reflects the new provider's configuration.
+func TestCmdSetModel_InvalidatesCacheAfterProviderEnvChange(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("AURELIA_HOME", tmpDir)
+	r, err := runtime.New()
+	if err != nil {
+		t.Fatalf("runtime.New() unexpected error: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(r.AppConfig()), 0o700); err != nil {
+		t.Fatalf("MkdirAll() unexpected error: %v", err)
+	}
+	initial := `{"default_provider":"anthropic","default_model":"claude-sonnet-4-6","providers":{}}`
+	if err := os.WriteFile(r.AppConfig(), []byte(initial), 0o600); err != nil {
+		t.Fatalf("WriteFile() unexpected error: %v", err)
+	}
+
+	fake := &fakeModelLister{models: [][]bridge.ModelInfo{
+		{{Provider: "newpi", ID: "new-model"}},
+	}}
+	bc := testModelController(session.NewStore())
+	bc.modelLister = fake
+	bc.bot = newOfflineTestBot(t)
+	envRefreshCalled := false
+	bc.refreshProviderEnv = func() { envRefreshCalled = true }
+	c := newTestTelegramContext(42, 0, 100, "")
+
+	// Pre-populate cache with old models.
+	bc.modelCache = []bridge.ModelInfo{{Provider: "oldpi", ID: "old-model"}}
+	bc.modelCacheExpiry = time.Now().Add(time.Hour)
+
+	if _, err := bc.cmdSetModel(c, "/model newpi/new-model"); err != nil {
+		t.Fatalf("cmdSetModel() error = %v", err)
+	}
+
+	if !envRefreshCalled {
+		t.Fatal("expected refreshProviderEnv to be called after model change")
+	}
+	// Cache must be cleared AFTER the env refresh so the next listing
+	// fetches models using the new API key.
+	if bc.modelCache != nil {
+		t.Fatalf("expected cache invalidated after env refresh, got %#v", bc.modelCache)
+	}
+	if !bc.modelCacheExpiry.IsZero() {
+		t.Fatalf("expected cache expiry reset, got %v", bc.modelCacheExpiry)
+	}
+}
+
+// TestMatchCommand_RefreshModelsNaturalLanguage verifies the natural
+// language rules for refreshing the model list. "atualiza modelos" was
+// the missing entry — users previously had to use the /model refresh
+// slash command.
+func TestMatchCommand_RefreshModelsNaturalLanguage(t *testing.T) {
+	t.Parallel()
+
+	for _, phrase := range []string{
+		"atualiza modelos",
+		"atualizar modelos",
+		"atualiza a lista",
+		"refresh modelos",
+		"recarregar modelos",
+		"atualiza a lista de modelos",
+	} {
+		t.Run(phrase, func(t *testing.T) {
+			t.Parallel()
+			got := MatchCommand(phrase)
+			if got == nil {
+				t.Fatalf("MatchCommand(%q) = nil, want CmdRefreshModels", phrase)
+			}
+			if got.Type != CmdRefreshModels {
+				t.Fatalf("MatchCommand(%q).Type = %d, want CmdRefreshModels (%d)", phrase, got.Type, CmdRefreshModels)
+			}
+		})
+	}
+}
+
+// TestCmdListModels_IncludesRefreshHint verifies the user-facing hint
+// that tells the user the list is cached and how to refresh.
+func TestCmdListModels_IncludesRefreshHint(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeModelLister{models: [][]bridge.ModelInfo{{{Provider: "openai", ID: "gpt-5.1"}}}}
+	bc := testModelController(session.NewStore())
+	bc.modelLister = fake
+	bc.bot = newOfflineTestBot(t)
+
+	reply, err := bc.cmdListModels()
+	if err != nil {
+		t.Fatalf("cmdListModels() error = %v", err)
+	}
+	if !strings.Contains(reply, "atualiza modelos") {
+		t.Fatalf("cmdListModels output should hint at refresh command, got: %q", reply)
+	}
+	if !strings.Contains(reply, "cache") {
+		t.Fatalf("cmdListModels output should mention cache to set user expectation, got: %q", reply)
+	}
+}
+
 func TestSendProviderMenu_IncludesRefreshButton(t *testing.T) {
 	t.Parallel()
 

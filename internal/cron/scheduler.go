@@ -125,7 +125,7 @@ func (s *Scheduler) runSingleJob(ctx context.Context, now time.Time, job CronJob
 		job.Active = false
 		job.NextRunAt = nil
 	} else if strings.EqualFold(job.ScheduleType, "cron") {
-		nextRunAt, err := computeNextRun(job.CronExpr, finishedAt)
+		nextRunAt, err := computeNextRunInLocation(job.CronExpr, finishedAt, job.Timezone)
 		if err != nil {
 			return err
 		}
@@ -148,6 +148,7 @@ func (s *Scheduler) runSingleJob(ctx context.Context, now time.Time, job CronJob
 }
 
 // computeNextRun calculates the next run time for a standard cron expression.
+// Uses UTC for backward compatibility.
 func computeNextRun(expr string, after time.Time) (time.Time, error) {
 	parser := robfigcron.NewParser(robfigcron.Minute | robfigcron.Hour | robfigcron.Dom | robfigcron.Month | robfigcron.Dow)
 	sched, err := parser.Parse(expr)
@@ -155,4 +156,27 @@ func computeNextRun(expr string, after time.Time) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("invalid cron expression %q: %w", expr, err)
 	}
 	return sched.Next(after), nil
+}
+
+// computeNextRunInLocation calculates the next run time for a cron expression
+// interpreted in the given timezone. Empty tzName means UTC.
+func computeNextRunInLocation(expr string, after time.Time, tzName string) (time.Time, error) {
+	tzName = strings.TrimSpace(tzName)
+	loc := time.UTC
+	if tzName != "" {
+		var err error
+		loc, err = time.LoadLocation(tzName)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("invalid timezone %q for cron expr %q: %w", tzName, expr, err)
+		}
+	}
+	parser := robfigcron.NewParser(robfigcron.Minute | robfigcron.Hour | robfigcron.Dom | robfigcron.Month | robfigcron.Dow)
+	sched, err := parser.Parse(expr)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid cron expression %q: %w", expr, err)
+	}
+	// Interpret `after` in the job's timezone so the cron parser
+	// evaluates the expression relative to user-local wall-clock time.
+	// Result is normalized to UTC so ListDueJobs comparisons with now.UTC() are correct.
+	return sched.Next(after.In(loc)).UTC(), nil
 }

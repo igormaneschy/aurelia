@@ -78,7 +78,7 @@ func (bc *BotController) completeBootstrapAssistant(c telebot.Context, state boo
 	generated, err := bc.bootstrapGenerate(prompt)
 	if err != nil {
 		log.Printf("Bootstrap assistant LLM error: %v", pipelinepkg.RedactSecrets(err.Error()))
-		bc.setPendingBootstrap(c.Sender().ID, bootstrapState{Choice: state.Choice, Step: bootstrapStepProfile})
+		bc.setPendingBootstrap(c.Sender().ID, bootstrapState{Choice: state.Choice, Step: bootstrapStepProfile, UserID: safeSenderID(c.Sender())})
 		return SendContextText(c, bootstrapProfileMessage())
 	}
 
@@ -87,13 +87,13 @@ func (bc *BotController) completeBootstrapAssistant(c telebot.Context, state boo
 	identity, soul, err := parseGeneratedPersona(generated)
 	if err != nil {
 		log.Printf("Bootstrap assistant parse error: %v — raw output: %.300s", err, pipelinepkg.RedactSecrets(generated))
-		bc.setPendingBootstrap(c.Sender().ID, bootstrapState{Choice: state.Choice, Step: bootstrapStepProfile})
+		bc.setPendingBootstrap(c.Sender().ID, bootstrapState{Choice: state.Choice, Step: bootstrapStepProfile, UserID: safeSenderID(c.Sender())})
 		return SendContextText(c, bootstrapProfileMessage())
 	}
 
 	if err := writeGeneratedPersona(bc.personasDir, identity, soul); err != nil {
 		log.Printf("Bootstrap assistant write error: %v", err)
-		bc.setPendingBootstrap(c.Sender().ID, bootstrapState{Choice: state.Choice, Step: bootstrapStepProfile})
+		bc.setPendingBootstrap(c.Sender().ID, bootstrapState{Choice: state.Choice, Step: bootstrapStepProfile, UserID: safeSenderID(c.Sender())})
 		return SendContextText(c, bootstrapProfileMessage())
 	}
 
@@ -119,7 +119,9 @@ func (bc *BotController) completeBootstrapProfile(c telebot.Context, state boots
 		return SendContextText(c, bootstrapFailureMessage())
 	}
 
-	return SendContextText(c, bootstrapSuccessMessage())
+	// Transition to timezone collection instead of finishing onboarding.
+	bc.setPendingBootstrap(c.Sender().ID, bootstrapState{Choice: state.Choice, Step: bootstrapStepTimezone, UserID: safeSenderID(c.Sender())})
+	return SendContextText(c, bootstrapTimezoneMessage())
 }
 
 // bootstrapGenerate calls the LLM via bridge to generate persona content.

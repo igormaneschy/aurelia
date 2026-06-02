@@ -5,6 +5,8 @@ import (
 	"log"
 	"os"
 	"strings"
+
+	"github.com/igormaneschy/aurelia/internal/users"
 )
 
 // CanonicalIdentityService loads persona files and builds a system prompt.
@@ -15,6 +17,12 @@ type CanonicalIdentityService struct {
 	ownerPlaybookPath   string
 	lessonsLearnedPath  string
 	projectPlaybookPath string
+}
+
+// UserPromptResolver provides paths for per-user persona files.
+type UserPromptResolver interface {
+	UserMdPath(userID int64) string
+	UserModePath(userID int64, mode string) string
 }
 
 // NewCanonicalIdentityService creates a persona loader.
@@ -62,8 +70,9 @@ func (s *CanonicalIdentityService) BuildPrompt() (string, error) {
 }
 
 // BuildPromptForUser loads IDENTITY + SOUL (global) and USER.md (per-user),
-// injecting owner docs only when isOwner is true.
-func (s *CanonicalIdentityService) BuildPromptForUser(userID int64, resolver interface{ UserMdPath(userID int64) string }, isOwner bool) (string, error) {
+// injecting owner docs only when isOwner is true. When activeMode is a
+// non-empty, normalized mode, appends the mode overlay file last.
+func (s *CanonicalIdentityService) BuildPromptForUser(userID int64, resolver UserPromptResolver, isOwner bool, activeMode string) (string, error) {
 	identityBytes, err := readPersonaFile(s.identityPath, "identity")
 	if err != nil {
 		return "", fmt.Errorf("build prompt for user: %w", err)
@@ -129,7 +138,30 @@ func (s *CanonicalIdentityService) BuildPromptForUser(userID int64, resolver int
 		prompt = prompt + "\n\n" + projectBlock
 	}
 
+	// Active mode overlay — appended LAST.
+	if modeBlock := s.buildModeBlock(userID, resolver, activeMode); modeBlock != "" {
+		prompt = prompt + "\n\n" + modeBlock
+	}
+
 	return prompt, nil
+}
+
+// buildModeBlock reads the mode overlay file and returns a formatted prompt
+// block. Returns "" when mode is empty, invalid, or the overlay file is missing.
+func (s *CanonicalIdentityService) buildModeBlock(userID int64, resolver UserPromptResolver, mode string) string {
+	mode, err := users.NormalizeMode(mode)
+	if err != nil || mode == "" {
+		return ""
+	}
+	content, err := readOptionalFile(resolver.UserModePath(userID, mode))
+	if err != nil {
+		log.Printf("persona: failed to read mode overlay user=%d mode=%s: %v", userID, mode, err)
+		return ""
+	}
+	if strings.TrimSpace(content) == "" {
+		return ""
+	}
+	return "## ACTIVE MODE: " + strings.ToUpper(mode) + "\n\n" + strings.TrimSpace(content)
 }
 
 // extractUserMdBody returns the body of a USER.md file after the YAML frontmatter.

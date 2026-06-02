@@ -250,7 +250,7 @@ Aurelia has a scoped persistent memory that survives across sessions. Each scope
 |-------|----------|---------|
 | **Global** | `~/.aurelia/memory/` | Cross-project facts, preferences, communication style |
 | **User** | `~/.aurelia/users/<id>/memory/` | Personal facts per user (cross-project) |
-| **Project Private** | `~/.aurelia/users/<id>/projects/<slug>/memory/` | Per-user per-project notes, work log (Sprint E — planned) |
+| **CWD Overlay** | `~/.aurelia/topics/chat_<id>/thread_<id>/cwd_overlay/` | Private working-context notes for a declared `/cwd` in that topic |
 | **Project Team** | `~/.aurelia/projects/<slug>/team/` | Stack, conventions, architecture (shareable) |
 | **Topic** | `~/.aurelia/topics/chat_<id>/thread_<id>/` | Conversation-scoped context per Telegram topic |
 | **Procedural (future)** | `~/.aurelia/users/<id>/skills/<slug>/SKILL.md` | Reusable workflows via Auto-Skills |
@@ -259,7 +259,7 @@ Memory is populated automatically:
 - **Nudge** — extracts facts from conversations when a session is explicitly reset or flushed
 - **Dream** — periodic background consolidation that organizes, deduplicates, and prunes memory files
 
-The model sees all relevant memory layers in its system prompt and can read/write them during conversation. Layers are injected by precedence: project-private and topic first, then user, then global, then team — so the most context-relevant facts survive token budget limits.
+The model sees relevant operational memory layers in its system prompt. Layers are injected by the current conversation context: persona/user global first, then topic, then CWD overlay and project team only when `/cwd` is declared. Transversal Wiki memory is delegated to PI through `ai-memory` MCP rather than implemented as an Aurelia gateway.
 
 ## Telegram Commands
 
@@ -522,4 +522,4 @@ Full guide: [docs/OPERATIONS.md](docs/OPERATIONS.md).
 - Go test suite is green
 - TypeScript Bridge compiles clean
 - Cross-platform: macOS, Windows, and Linux
-- Current architectural track: close the PI SDK boundary hardening (✅), user isolation (✅), observability (✅), orchestration cycle (✅), context-scoped operational memory (Sprint E), Memory Boundary Realignment (Sprint F: PI + `ai-memory` MCP owns Wiki memory), Learning Nudge, Agent Comms, and Auto-Skills — see [.specs/project/ROADMAP.md](.specs/project/ROADMAP.md) for the full sequence
+- Current architectural track: close the PI SDK boundary hardening (✅), user isolation (✅), observability (✅), orchestration cycle (✅), context-scoped operational memory (Sprint E), Memory Boundary Realignment (✅ docs decision: PI + `ai-memory` MCP owns Wiki memory), Session/Profile Operability, Learning Nudge, Agent Comms, and Auto-Skills — see [.specs/project/ROADMAP.md](.specs/project/ROADMAP.md) for the full sequence

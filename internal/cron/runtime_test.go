@@ -8,6 +8,7 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
+	"github.com/igormaneschy/aurelia/internal/persona"
 )
 
 // --- fakes ---
@@ -40,7 +41,7 @@ func (f *fakePersona) BuildPrompt() (string, error) {
 	return f.prompt, f.err
 }
 
-func (f *fakePersona) BuildPromptForUser(_ int64, _ interface{ UserMdPath(userID int64) string }, _ bool) (string, error) {
+func (f *fakePersona) BuildPromptForUser(_ int64, _ persona.UserPromptResolver, _ bool, _ string) (string, error) {
 	return f.prompt, f.err
 }
 

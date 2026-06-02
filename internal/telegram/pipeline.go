@@ -7,7 +7,6 @@ import (
 
 	"gopkg.in/telebot.v3"
 
-	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
@@ -28,6 +27,8 @@ func (bc *BotController) processInputWithImages(c telebot.Context, text string, 
 		switch state.Step {
 		case bootstrapStepAssistant:
 			return bc.completeBootstrapAssistant(c, state, text)
+		case bootstrapStepTimezone:
+			return bc.completeBootstrapTimezone(c, state, text)
 		default:
 			return bc.completeBootstrapProfile(c, state, text)
 		}
@@ -72,7 +73,7 @@ func (bc *BotController) processInputWithImages(c telebot.Context, text string, 
 			if err := SendContextText(c, interruptedResumeAck(sessionFile)); err != nil {
 				return err
 			}
-			return bc.runPipeline(chatID, threadID, c.Message().ID, interruptedResumePrompt(), images, senderID)
+			return bc.runPipeline(chatID, threadID, c.Message().ID, interruptedResumePrompt(), images, senderID, c.Chat().Type == telebot.ChatPrivate)
 		}
 	}
 
@@ -80,15 +81,11 @@ func (bc *BotController) processInputWithImages(c telebot.Context, text string, 
 		return bc.handleCommand(c, cmd)
 	}
 
-	return bc.runPipeline(c.Chat().ID, c.Message().ThreadID, c.Message().ID, text, images, senderID)
+	return bc.runPipeline(c.Chat().ID, c.Message().ThreadID, c.Message().ID, text, images, senderID, c.Chat().Type == telebot.ChatPrivate)
 }
 
-func (bc *BotController) runPipeline(chatID int64, threadID int, messageID int, text string, images []bridge.ImageAttachment, userID int64) error {
-	return bc.ensurePipeline().Process(chatID, threadID, messageID, text, images, userID)
-}
-
-func (bc *BotController) buildSystemPrompt(userText string, agent *agents.Agent, chatID int64, messageID int, threadID int, userID int64) (string, error) {
-	return bc.ensurePipeline().BuildSystemPrompt(userText, agent, chatID, messageID, threadID, userID)
+func (bc *BotController) runPipeline(chatID int64, threadID int, messageID int, text string, images []bridge.ImageAttachment, userID int64, isPrivateChat bool) error {
+	return bc.ensurePipeline().Process(chatID, threadID, messageID, text, images, userID, isPrivateChat)
 }
 
 func (bc *BotController) processBridgeEventsAsync(chat *telebot.Chat, ch <-chan bridge.Event, progress *progressReporter, userText string, messageID int) bridgeOutcome {

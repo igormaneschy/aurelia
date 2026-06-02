@@ -50,7 +50,7 @@ func (s *Service) CreateJob(ctx context.Context, job CronJob) (string, error) {
 		if strings.TrimSpace(job.CronExpr) == "" {
 			return "", fmt.Errorf("cron_expr is required for cron jobs")
 		}
-		nextRunAt, err := computeNextRun(job.CronExpr, now)
+		nextRunAt, err := computeNextRunInLocation(job.CronExpr, now, job.Timezone)
 		if err != nil {
 			return "", err
 		}
@@ -139,7 +139,7 @@ func (s *Service) DeleteJob(ctx context.Context, jobID string) error {
 }
 
 // AddRecurringJob creates a cron-scheduled job for the given chat/thread.
-func (s *Service) AddRecurringJob(ctx context.Context, userID string, chatID int64, threadID int, expr, prompt, cwd string) (string, error) {
+func (s *Service) AddRecurringJob(ctx context.Context, userID string, chatID int64, threadID int, expr, prompt, cwd, tzName string) (string, error) {
 	return s.CreateJob(ctx, CronJob{
 		ID:             uuid.NewString(),
 		OwnerUserID:    userID,
@@ -149,6 +149,7 @@ func (s *Service) AddRecurringJob(ctx context.Context, userID string, chatID int
 		ScheduleType:   "cron",
 		CronExpr:       expr,
 		Prompt:         prompt,
+		Timezone:       tzName,
 	})
 }
 

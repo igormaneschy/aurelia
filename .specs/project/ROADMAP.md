@@ -52,7 +52,8 @@ A próxima onda foca em tornar o sistema seguro e estável para trabalho autôno
 4. planejamento permanece conversacional, sem Plan Mode explícito (removido em 2026-05-24);
 5. escopar memória por utilizador e contexto conversacional — **topic/thread como eixo primário, `/cwd` como overlay declarativo opt-in** (reformulado em 2026-05-30; ver Sprint 5);
 6. realinhar a boundary de memória, descartando o Wiki MCP interno em favor de PI + `ai-memory` MCP;
-7. só então ativar nudge profundo, agent comms e auto-skills.
+7. fechar operabilidade de sessão/perfil antes de ampliar memória/nudge: message bridge, timezone, default cwd e mode profiles;
+8. só então ativar nudge profundo, agent comms e auto-skills.
 
 **Ordem é importante:** cada spec depende da anterior, técnica e conceitualmente. O refactoring do PI SDK pode ser feito em paralelo com User Isolation, mas deve ser merged antes para reduzir a superfície de código.
 
@@ -237,7 +238,7 @@ Prompt assembly por TurnContext:
 ## 6. Memory Boundary Realignment
 
 **Spec:** `.specs/features/wiki-memory/`  
-**Status:** 🗑️ Wiki Gateway interno descartado; boundary documentada  
+**Status:** ✅ Concluído como decisão documental em 2026-06-02; Wiki Gateway interno descartado  
 **Depende de:** User Isolation + Context-Scoped Memory
 
 **Problem:** o plano anterior criava um Wiki MCP interno no Aurelia. Isso duplicaria o `ai-memory` MCP já usado diretamente pelo PI e violaria a regra de não competir com capacidades do PI/MCP.
@@ -254,11 +255,30 @@ Prompt assembly por TurnContext:
 
 ---
 
-## 7. Learning Nudge — Scoped Memory Review
+## 7. Session/Profile Operability
+
+**Spec:** `.specs/features/session-profile-operability/`  
+**Status:** 🔴 Draft — próxima prioridade recomendada  
+**Depende de:** User Isolation + Operational Observability/runlog + Project Binding + Security Guard-Rails
+
+**Problem:** antes de aprofundar memória/nudge, Aurelia precisa fechar lacunas operacionais básicas: correlação durável entre Pi session e mensagens Telegram, perfis de modo por usuário, timezone de cron e fallback de cwd para chats privados.
+
+**Scope:**
+
+- Runlog Message Bridge: `inbound_message_id`, `outbound_message_id`, `GetLastOutboundMessage` e nudge threading;
+- Mode Profiles: `Profile.ActiveMode`, overlays `mode_<name>.md`, comando `/mode`, listagem ativa e checkpoint tag;
+- Profile enrichment: `Profile.Timezone`, `Profile.DefaultCWD`, cron timezone-aware e onboarding de timezone;
+- features independentes, sem reimplementar histórico de conversa do PI.
+
+**Prioridade:** P0/P1 — bloqueia Learning Nudge confiável e melhora operação diária de cron/private chats.
+
+---
+
+## 8. Learning Nudge — Scoped Memory Review
 
 **Spec:** `.specs/features/learning-nudge/`  
 **Status:** 🔴 Draft revisado  
-**Depende de:** User Isolation + Context-Scoped Memory + Security Guard-Rails + Memory Boundary Realignment
+**Depende de:** User Isolation + Context-Scoped Memory + Security Guard-Rails + Memory Boundary Realignment + Session/Profile Operability
 
 **Problem:** extração por-turn/snippet perde contexto; nudge profundo precisa ser escopado para não vazar entre usuários/contextos e não deve depender de uma Wiki interna do Aurelia.
 
@@ -272,7 +292,7 @@ Prompt assembly por TurnContext:
 
 ---
 
-## 8. Agent Comms
+## 9. Agent Comms
 
 **Spec:** `.specs/features/agent-comms/`  
 **Status:** 🔴 Draft  
@@ -293,7 +313,7 @@ Prompt assembly por TurnContext:
 
 ---
 
-## 9. Auto-Skills
+## 10. Auto-Skills
 
 **Spec:** `.specs/features/auto-skills/`  
 **Status:** 🔴 Draft revisado  
@@ -315,11 +335,11 @@ Prompt assembly por TurnContext:
 
 ---
 
-## 10. TUI (Terminal User Interface)
+## 11. TUI (Terminal User Interface)
 
 **Spec:** `docs/aurelia-tui-roadmap.md`  
 **Status:** 🔴 Proposta  
-**Depende de:** Context-Scoped Memory (Sprint E) + Memory Boundary Realignment (Sprint F)
+**Depende de:** Context-Scoped Memory (Sprint E) + Memory Boundary Realignment (Sprint F, ✅) + Session/Profile Operability (Sprint G)
 
 **Problem:** o Telegram é hoje o único ponto de entrada conversacional da Aurelia. Isso cria fricção no contexto de terminal, sessões não retomáveis cross-surface e dependência de conectividade externa.
 
@@ -356,22 +376,25 @@ Foundation validada (Security Guard-Rails + Project Binding + Bridge Resilience)
 D0. Memory Contract & Spec Hygiene ✅
       │
       ▼
-5. Context-Scoped Memory  ← próximo
+5. Context-Scoped Memory
       │
       ▼
-6. Memory Boundary Realignment
+6. Memory Boundary Realignment ✅
       │
       ▼
-7. Learning Nudge
+7. Session/Profile Operability  ← próximo
       │
       ▼
-8. Agent Comms
+8. Learning Nudge
       │
       ▼
-9. Auto-Skills
+9. Agent Comms
       │
       ▼
-10. TUI (Terminal User Interface)
+10. Auto-Skills
+      │
+      ▼
+11. TUI (Terminal User Interface)
 ```
 
 ## Mapa de implementação por sprint
@@ -435,7 +458,7 @@ Sprint D: ~~Plan Mode (T-1–T13 do tasks.md)~~  🗑️ Removido 2026-05-24
   internal/planning/ removido. /plan* e /execute removidos.
   Orquestrador e aurelia-plan preservados para execução legada.
 
-Sprint E: Context-Scoped Memory  ← próximo
+Sprint E: Context-Scoped Memory
   ├─ runtime.PathResolver: UserMemoryDir, TopicMemoryDir, TopicCwdOverlayDir
   ├─ remover scanForProject e travessia automática do filesystem
   ├─ /cwd como overlay declarativo por ConversationKey (sem auto-detecção)
@@ -443,29 +466,37 @@ Sprint E: Context-Scoped Memory  ← próximo
   ├─ prompt assembly: user_global + topic + cwd_overlay + team
   └─ dream/nudge com targets escopados por camada
 
-Sprint F: Memory Boundary Realignment
-  ├─ descartar MCP Wiki interno
-  ├─ registrar PI + ai-memory MCP como Wiki transversal
-  ├─ separar memória operacional do Aurelia de Wiki memory do PI
-  └─ ajustar specs dependentes
+Sprint F: Memory Boundary Realignment ✅ docs/decision
+  ├─ ✅ descartar MCP Wiki interno
+  ├─ ✅ registrar PI + ai-memory MCP como Wiki transversal
+  ├─ ✅ separar memória operacional do Aurelia de Wiki memory do PI
+  └─ ✅ ajustar specs dependentes principais
 
-Sprint G: Learning Nudge
+Sprint G: Session/Profile Operability  ← próximo
+  ├─ Runlog Message Bridge: completar nudge threading/fallback se ainda pendente
+  ├─ Profile fields: ActiveMode, Timezone, DefaultCWD
+  ├─ /mode + mode overlays no prompt
+  ├─ cron timezone-aware
+  ├─ DefaultCWD fallback só em private chat
+  └─ onboarding timezone
+
+Sprint H: Learning Nudge
   ├─ transcript recorder por SessionKey
   ├─ redaction + profile edit_project
   └─ sugestões/updates escopados; Wiki transversal só via PI + ai-memory quando configurado
 
-Sprint H: Agent Comms
+Sprint I: Agent Comms
   ├─ Agent Bus local por run
   ├─ peers explícitos + limites
   └─ manifest + audit
 
-Sprint I: Auto-Skills
+Sprint J: Auto-Skills
   ├─ skill recorder
   ├─ /skill save + generator
   ├─ validator de SKILL.md
   └─ registry per-user
 
-Sprint J: TUI
+Sprint K: TUI
   ├─ Fase 0: Transport Abstraction (2d) — pode antecipar
   ├─ Fase 1: IPC Layer (3d)
   ├─ Fase 2: TUI MVP (5d)

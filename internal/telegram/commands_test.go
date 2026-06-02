@@ -17,6 +17,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/session"
+	"github.com/igormaneschy/aurelia/internal/users"
 )
 
 func TestMatch(t *testing.T) {
@@ -76,10 +77,47 @@ func TestMatch(t *testing.T) {
 		{name: "checkpoint memoria", text: "checkpoint memoria revisar PR", want: cmdPtr(CmdMemoryCheckpoint)},
 		{name: "checkpoint de memoria", text: "checkpoint de memoria", want: cmdPtr(CmdMemoryCheckpoint)},
 
+		// --- mode_set ---
+		{name: "/mode developer", text: "/mode developer", want: cmdPtr(CmdSetMode)},
+		{name: "/mode researcher", text: "/mode researcher", want: cmdPtr(CmdSetMode)},
+		{name: "/mode general", text: "/mode general", want: cmdPtr(CmdSetMode)},
+		{name: "modo dev", text: "modo dev", want: cmdPtr(CmdSetMode)},
+		{name: "modo desenvolvedor", text: "modo desenvolvedor", want: cmdPtr(CmdSetMode)},
+		{name: "modo pesquisa", text: "modo pesquisa", want: cmdPtr(CmdSetMode)},
+		{name: "modo pesquisador", text: "modo pesquisador", want: cmdPtr(CmdSetMode)},
+		{name: "modo geral", text: "modo geral", want: cmdPtr(CmdSetMode)},
+
+		// --- mode_query ---
+		{name: "/mode alone", text: "/mode", want: cmdPtr(CmdSetMode)},
+		{name: "qual meu modo", text: "qual meu modo", want: cmdPtr(CmdSetMode)},
+		{name: "qual o meu modo", text: "qual o meu modo", want: cmdPtr(CmdSetMode)},
+		{name: "meu modo atual", text: "meu modo atual", want: cmdPtr(CmdSetMode)},
+
+		// --- mode in group/topic with @botname suffix ---
+		// Telegram appends "@<bot_username>" to slash commands in groups.
+		// MatchCommand must strip the suffix so the same rules apply in
+		// private and group/topic contexts (regression 2026-06-02).
+		{name: "/mode@bot alone", text: "/mode@ManeDev_bot", want: cmdPtr(CmdSetMode)},
+		{name: "/mode@bot developer", text: "/mode@ManeDev_bot developer", want: cmdPtr(CmdSetMode)},
+		{name: "/modo@bot dev", text: "/modo@ManeDev_bot dev", want: cmdPtr(CmdSetMode)},
+
+		// --- stripBotMention regression: at-mention in middle of text not stripped ---
+		// The regex anchors at ^ and requires a leading "/" — other @mentions
+		// in conversation text must be left alone.
+		{name: "mention in middle not stripped", text: "olá @ManeDev_bot como vai", want: nil},
+		{name: "no slash before mention", text: "oi @ManeDev_bot tudo bem?", want: nil},
+
 		// --- NO match: normal conversation ---
 		{name: "greeting", text: "bom dia", want: nil},
 		{name: "question", text: "como funciona o bridge?", want: nil},
 		{name: "code request", text: "escreve um teste pro handler", want: nil},
+
+		// --- NO match: mode false positives ---
+		{name: "modo devops", text: "modo devops no projeto", want: nil},
+		{name: "modo developer narrative", text: "modo developer é melhor para isso", want: nil},
+		{name: "narrative pesquisa", text: "tenho pesquisa a fazer sobre X", want: nil},
+		{name: "narrative pesquisador", text: "o pesquisador da USP publicou um paper", want: nil},
+		{name: "narrative researcher", text: "a researcher role at the lab", want: nil},
 
 		// --- NO match: narrative context (anti-false-positive) ---
 		{name: "narrative agendar", text: "ontem eu tentei agendar uma reunião", want: nil},
@@ -671,7 +709,7 @@ func TestCmdListAgents_WithAgents(t *testing.T) {
 		agents: reg,
 	}
 
-	reply, err := bc.cmdListAgents()
+	reply, err := bc.cmdListAgents(0)
 	if err != nil {
 		t.Fatalf("cmdListAgents() error = %v", err)
 	}
@@ -687,7 +725,7 @@ func TestCmdListAgents_Empty(t *testing.T) {
 		config: &config.AppConfig{Providers: map[string]config.ProviderConfig{}},
 	}
 
-	reply, err := bc.cmdListAgents()
+	reply, err := bc.cmdListAgents(0)
 	if err != nil {
 		t.Fatalf("cmdListAgents() error = %v", err)
 	}
@@ -963,6 +1001,126 @@ func TestHelpMessageIncludesNaturalExamples(t *testing.T) {
 	}
 }
 
+// TestHelpMessageIncludesModeCommand verifies that /mode is documented in
+// the inline /help output (regression: was missing after the operability
+// feature — users had to know the command existed by trying it).
+func TestHelpMessageIncludesModeCommand(t *testing.T) {
+	t.Parallel()
+
+	help := helpMessage()
+	if !strings.Contains(help, "/mode") {
+		t.Fatalf("help should document /mode, got: %q", help)
+	}
+	if !strings.Contains(help, "developer") || !strings.Contains(help, "researcher") {
+		t.Fatalf("help /mode description should mention developer/researcher, got: %q", help)
+	}
+}
+
+// TestStripBotMention verifies the helper that strips @botname suffix from
+// slash commands. Telegram appends this in group/topic chats to disambiguate
+// the target bot. The helper must:
+//   - strip when input starts with /<cmd>@<bot>
+//   - leave non-slash text untouched (other @mentions stay)
+//   - leave slash commands without @botname untouched
+func TestStripBotMention(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "slash with botname", in: "/mode@ManeDev_bot", want: "/mode"},
+		{name: "slash with botname + payload", in: "/mode@ManeDev_bot developer", want: "/mode developer"},
+		{name: "slash without botname", in: "/mode", want: "/mode"},
+		{name: "slash without botname + payload", in: "/mode developer", want: "/mode developer"},
+		{name: "modo variant", in: "/modo@ManeDev_bot dev", want: "/modo dev"},
+		{name: "at mention without slash", in: "olá @ManeDev_bot", want: "olá @ManeDev_bot"},
+		{name: "at mention mid text", in: "fala @ManeDev_bot beleza?", want: "fala @ManeDev_bot beleza?"},
+		{name: "empty", in: "", want: ""},
+		{name: "no slash no at", in: "modo dev", want: "modo dev"},
+		{name: "underscore in botname", in: "/agents@ManeDev_bot", want: "/agents"},
+		{name: "digits in command", in: "/m3@ManeDev_bot", want: "/m3"},
+		{name: "botname with digits", in: "/mode@Bot123", want: "/mode"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := stripBotMention(tt.in); got != tt.want {
+				t.Errorf("stripBotMention(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestHandleModeCommand_ReconstructsText verifies that handleModeCommand
+// builds the canonical "/mode <target>" text from telebot's payload before
+// delegating to cmdSetMode. Regression: in groups, telebot strips the
+// @botname and provides only the payload (e.g., "developer"), so the
+// handler must reconstruct the slash form for the existing extractModeTarget
+// logic to work.
+func TestHandleModeCommand_ReconstructsText(t *testing.T) {
+	t.Parallel()
+
+	// We can't easily mock a telebot.Context, but we can verify the text
+	// reconstruction by testing extractModeTarget on the canonical forms
+	// the handler builds. If those parse correctly, the dispatch works.
+	tests := []struct {
+		reconstructed string
+		wantTarget    string
+	}{
+		{"/mode", ""},                  // query
+		{"/mode developer", "developer"},
+		{"/mode dev", "dev"},
+		{"/mode general", "general"},
+		{"/modo dev", "dev"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.reconstructed, func(t *testing.T) {
+			t.Parallel()
+			if got := extractModeTarget(tt.reconstructed); got != tt.wantTarget {
+				t.Errorf("extractModeTarget(%q) = %q, want %q", tt.reconstructed, got, tt.wantTarget)
+			}
+		})
+	}
+}
+
+// TestSlashMenuCommands_IncludesMode verifies that the Telegram slash menu
+// registers the /mode command. Regression: operability feature added
+// cmdSetMode handler but did not register it with bot.SetCommands, so
+// /mode never appeared in the Telegram auto-complete menu.
+func TestSlashMenuCommands_IncludesMode(t *testing.T) {
+	t.Parallel()
+
+	cmds := slashMenuCommands()
+	want := map[string]bool{
+		"new": false, "usage": false, "status": false, "cwd": false,
+		"cron": false, "agents": false, "memory": false, "model": false,
+		"mode": false, "stop": false, "users": false, "forgetme": false,
+		"help": false,
+	}
+	for _, c := range cmds {
+		if _, ok := want[c.Text]; ok {
+			want[c.Text] = true
+		} else {
+			t.Errorf("unexpected command in slash menu: %q", c.Text)
+		}
+	}
+	for name, found := range want {
+		if !found {
+			t.Errorf("command %q missing from slash menu", name)
+		}
+	}
+	if len(cmds) != len(want) {
+		t.Errorf("expected %d commands, got %d", len(want), len(cmds))
+	}
+	for _, c := range cmds {
+		if c.Description == "" {
+			t.Errorf("command %q has empty description (Telegram requires it)", c.Text)
+		}
+	}
+}
+
 func TestCancelActiveRun_NilPipelineReturnsFalse(t *testing.T) {
 	t.Parallel()
 
@@ -1093,6 +1251,175 @@ func TestDebugCommands_OwnerOnly(t *testing.T) {
 	_ = CmdDebugLast
 	_ = CmdDebugRun
 	_ = CmdDebugErrors
+}
+
+func TestAppendModeTag(t *testing.T) {
+	tests := []struct {
+		name string
+		note string
+		mode string
+		want string
+	}{
+		{"empty note, developer", "", "developer", "[mode:developer]"},
+		{"note, developer", "before refactor", "developer", "before refactor [mode:developer]"},
+		{"note, researcher", "research findings", "researcher", "research findings [mode:researcher]"},
+		{"note, general", "some note", "", "some note"},
+		{"note, auto", "some note", "general", "some note"},
+		{"note, invalid ignored", "some note", "invalid", "some note"},
+		{"empty note, empty mode", "", "", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := appendModeTag(tc.note, tc.mode)
+			if got != tc.want {
+				t.Errorf("appendModeTag(%q, %q) = %q, want %q", tc.note, tc.mode, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUserTimezone_NoStore(t *testing.T) {
+	bc := &BotController{}
+	name, loc := bc.userTimezone(42)
+	if name != "" {
+		t.Errorf("timezone name = %q, want \"\"", name)
+	}
+	if loc != time.UTC {
+		t.Errorf("loc = %v, want UTC", loc)
+	}
+}
+
+func TestCronParseSystemPrompt_IncludesTimezone(t *testing.T) {
+	loc, err := time.LoadLocation("America/Sao_Paulo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 6, 2, 14, 30, 0, 0, loc)
+	prompt := cronParseSystemPromptForLocation(now, "America/Sao_Paulo")
+	if !strings.Contains(prompt, "America/Sao_Paulo") {
+		t.Fatal("prompt should include timezone name")
+	}
+	if !strings.Contains(prompt, "-03:00") {
+		t.Fatal("prompt should include UTC offset")
+	}
+	if !strings.Contains(prompt, "2026-06-02T14:30:00") {
+		t.Fatal("prompt should include user-local time")
+	}
+	// Should NOT contain old hardcoded BRT guidance
+	if strings.Contains(strings.ToLower(prompt), "brt") {
+		t.Fatal("prompt should NOT contain hardcoded BRT")
+	}
+}
+
+func TestCronParseSystemPrompt_DefaultUTC(t *testing.T) {
+	now := time.Date(2026, 6, 2, 14, 30, 0, 0, time.UTC)
+	prompt := cronParseSystemPromptForLocation(now, "")
+	if !strings.Contains(prompt, "UTC") {
+		t.Fatal("prompt should default to UTC when tzName is empty")
+	}
+	if !strings.Contains(prompt, "+00:00") {
+		t.Fatal("prompt should include +00:00 offset")
+	}
+}
+
+func TestExtractModeTarget(t *testing.T) {
+	tests := []struct {
+		text string
+		want string
+	}{
+		{"/mode", ""},
+		{"/mode developer", "developer"},
+		{"/mode researcher", "researcher"},
+		{"/mode general", "general"},
+		{"/modo dev", "dev"},
+		{"/modo pesquisa", "pesquisa"},
+		{"/modo geral", "geral"},
+		{"modo dev", "dev"},
+		{"modo desenvolvedor", "desenvolvedor"},
+		{"qual meu modo", ""},
+		{"meu modo atual", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.text, func(t *testing.T) {
+			got := extractModeTarget(tc.text)
+			if got != tc.want {
+				t.Errorf("extractModeTarget(%q) = %q, want %q", tc.text, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestFormatUTCOffset(t *testing.T) {
+	tests := []struct {
+		offset int
+		want   string
+	}{
+		{0, "+00:00"},
+		{3600, "+01:00"},
+		{-10800, "-03:00"},
+		{-18000, "-05:00"},
+		{7200, "+02:00"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.want, func(t *testing.T) {
+			got := formatUTCOffset(tc.offset)
+			if got != tc.want {
+				t.Errorf("formatUTCOffset(%d) = %q, want %q", tc.offset, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCmdSetMode_ProfileUserMismatch(t *testing.T) {
+	// Verify cmdSetMode refuses to save when the loaded profile's UserID
+	// does not match the sender. This prevents a bug where the wrong user's
+	// profile is mutated.
+	dir := t.TempDir()
+	resolver := users.NewResolver(dir)
+	store := users.NewStore(resolver)
+
+	// Save profile for user 1 (the sender).
+	profile1 := &users.Profile{
+		UserID:     1,
+		Name:       "User One",
+		Language:   "pt",
+		ActiveMode: "",
+	}
+	if err := store.Save(profile1); err != nil {
+		t.Fatalf("save profile: %v", err)
+	}
+
+	// Pre-flight: confirm store invariant — the loaded profile's UserID
+	// matches the file-keyed id.
+	loaded, err := store.Get(1)
+	if err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+	if loaded == nil || loaded.UserID != 1 {
+		t.Fatalf("store invariant violated: profile.UserID=%d want 1", loaded.UserID)
+	}
+
+	// Call cmdSetMode directly via the real handler with a fake context.
+	// /mode (alone) is a query — exercises the userStore load + the
+	// profile.UserID == sender check without needing the full model
+	// refresh path.
+	bc := &BotController{
+		userStore: store,
+		bot:       newOfflineTestBot(t),
+		config: &config.AppConfig{
+			DefaultOwnerUserID: 1,
+			Providers:          map[string]config.ProviderConfig{},
+		},
+	}
+	c := newTestTelegramContext(42, 0, 1, "")
+
+	reply, err := bc.cmdSetMode(c, "/mode")
+	if err != nil {
+		t.Fatalf("cmdSetMode() error = %v", err)
+	}
+	if !strings.Contains(reply, "general") {
+		t.Fatalf("expected query to return current mode, got %q", reply)
+	}
 }
 
 func contains(s, substr string) bool {

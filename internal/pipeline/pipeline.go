@@ -59,12 +59,13 @@ func extractCancelFn(v any) context.CancelFunc {
 
 // pipelineInput carries a user message through processing.
 type pipelineInput struct {
-	chatID    int64
-	threadID  int
-	messageID int
-	userID    int64
-	text      string
-	images    []bridge.ImageAttachment
+	chatID        int64
+	threadID      int
+	messageID     int
+	userID        int64
+	text          string
+	images        []bridge.ImageAttachment
+	isPrivateChat bool
 }
 
 const (
@@ -157,7 +158,7 @@ func bridgeCooldownMessage(remaining time.Duration) string {
 }
 
 // Process handles a user message after transport-level bootstrap and command checks.
-func (s *Service) Process(chatID int64, threadID int, messageID int, text string, images []bridge.ImageAttachment, userID int64) error {
+func (s *Service) Process(chatID int64, threadID int, messageID int, text string, images []bridge.ImageAttachment, userID int64, isPrivateChat bool) error {
 	if s == nil {
 		return errors.New("pipeline service is nil")
 	}
@@ -169,7 +170,7 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 	}
 
 	key := sessionKey(chatID, threadID, userID)
-	input := pipelineInput{chatID: chatID, threadID: threadID, messageID: messageID, userID: userID, text: text, images: images}
+	input := pipelineInput{chatID: chatID, threadID: threadID, messageID: messageID, userID: userID, text: text, images: images, isPrivateChat: isPrivateChat}
 
 	// Create a real cancelable context BEFORE atomic reservation so cancel/supersede
 	// arriving during the reservation window actually cancel the run, not a no-op sentinel.
@@ -333,7 +334,7 @@ func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, rese
 		return
 	}
 
-	systemPrompt, err := s.buildSystemPrompt(userText, agent, input.chatID, input.messageID, input.threadID, input.userID)
+	systemPrompt, err := s.buildSystemPrompt(userText, agent, input.chatID, input.messageID, input.threadID, input.userID, input.isPrivateChat)
 	if err != nil {
 		log.Printf("Failed to build system prompt: %s", redactSecrets(err.Error()))
 		if err := s.output.SendError(input.chatID, input.threadID, "Falha ao montar o prompt de sistema."); err != nil {
@@ -378,7 +379,7 @@ func (s *Service) processRun(input pipelineInput) {
 		return
 	}
 
-	systemPrompt, err := s.buildSystemPrompt(userText, agent, input.chatID, input.messageID, input.threadID, input.userID)
+	systemPrompt, err := s.buildSystemPrompt(userText, agent, input.chatID, input.messageID, input.threadID, input.userID, input.isPrivateChat)
 	if err != nil {
 		log.Printf("Failed to build system prompt: %s", redactSecrets(err.Error()))
 		if err := s.output.SendError(input.chatID, input.threadID, "Falha ao montar o prompt de sistema."); err != nil {
