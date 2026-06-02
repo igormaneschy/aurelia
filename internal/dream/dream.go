@@ -39,11 +39,13 @@ type DreamConfig struct {
 	Provider         string        // PI provider to use for consolidation/extraction
 	Model            string        // model to use for consolidation (dream)
 	ExtractModel     string        // model to use for memory extraction (legacy, unused with nudge)
-	NudgeEnabled     bool          // enable periodic nudge review
-	NudgeTurns       int           // turns between nudge reviews
-	NudgeModel       string        // model for nudge review
-	NudgeMinInterval time.Duration // minimum time between nudge reviews per chat/thread
-	RunLog           NudgeRunLog
+	NudgeEnabled       bool          // enable periodic nudge review
+	NudgeTurns         int           // turns between nudge reviews
+	NudgeModel         string        // model for nudge review
+	NudgeMinInterval   time.Duration // minimum time between nudge reviews per chat/thread
+	NudgeMinTranscript int           // minimum total chars in buffer before running nudge (0=disable)
+	NudgeMaxTranscript int           // max total bytes sent to LLM per nudge (0=no cap)
+	RunLog             NudgeRunLog
 	NudgeSender      NudgeSender
 }
 
@@ -55,10 +57,12 @@ func DefaultConfig() DreamConfig {
 		MinTurns:         5,
 		Model:            "claude-sonnet-4-6",
 		ExtractModel:     "claude-haiku-4-5",
-		NudgeEnabled:     true,
-		NudgeTurns:       10,
-		NudgeModel:       "claude-haiku-4-5",
-		NudgeMinInterval: 10 * time.Minute,
+		NudgeEnabled:       true,
+		NudgeTurns:         10,
+		NudgeModel:         "claude-haiku-4-5",
+		NudgeMinInterval:   10 * time.Minute,
+		NudgeMinTranscript: 2000,
+		NudgeMaxTranscript: 80000,
 	}
 }
 

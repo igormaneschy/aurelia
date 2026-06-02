@@ -70,6 +70,13 @@ func (d *Dreamer) flushNudgeBuffer(chatID int64, threadID int, userID int64, cwd
 		return
 	}
 
+	// MinTranscriptLen gate: skip if total chars in buffer are too low.
+	// This prevents running nudge on trivial conversations (Gap #2).
+	if d.config.NudgeMinTranscript > 0 && buffer.TotalChars(chatID, threadID, userID) < d.config.NudgeMinTranscript {
+		d.finishNudge(key)
+		return
+	}
+
 	messages, version := buffer.Snapshot(chatID, threadID, userID)
 	if len(messages) == 0 {
 		d.finishNudge(key)
@@ -124,12 +131,36 @@ func (d *Dreamer) runNudge(messages []session.NudgeMessage, chatID int64, thread
 		}
 	}
 
-	// Build conversation transcript (untrusted data, redacted before sending to LLM)
+	// Build conversation transcript (untrusted data).
+	// Include tool summaries when present (Gap #1).
 	var transcriptRaw strings.Builder
 	for _, m := range messages {
-		fmt.Fprintf(&transcriptRaw, "**%s:** %s\n\n", m.Role, m.Content)
+		fmt.Fprintf(&transcriptRaw, "**%s:** %s\n", m.Role, m.Content)
+		if m.ToolSummary != "" {
+			fmt.Fprintf(&transcriptRaw, "  [tools used: %s]\n", m.ToolSummary)
+		}
+		transcriptRaw.WriteString("\n")
 	}
-	transcriptStr := pipelinepkg.RedactSecrets(transcriptRaw.String())
+	transcriptStr := transcriptRaw.String()
+
+	// MaxTranscriptBytes gate: truncate oldest messages first, keeping
+	// user/assistant pairs intact to preserve conversation structure (Gap #3).
+	if d.config.NudgeMaxTranscript > 0 && len(transcriptStr) > d.config.NudgeMaxTranscript {
+		transcriptStr = truncateTranscriptPairs(messages, d.config.NudgeMaxTranscript)
+	}
+
+	// Redact secrets before sending to LLM.
+	transcriptStr = pipelinepkg.RedactSecrets(transcriptStr)
+
+	// Fail-closed post-redaction check: if the transcript still contains
+	// suspicious patterns after redaction, abort to prevent data leakage (Gap #4).
+	// Must run regardless of other config flags — security does not depend on
+	// transcript size caps.
+	if isContentStillSuspicious(transcriptStr) {
+		log.Printf("[nudge] user=%d chat=%d thread=%d: post-redaction check failed — transcript still suspicious", userID, chatID, threadID)
+		recordNudgeReceipt(nil, 0, 0, "redaction_failed", "post-redaction check found suspicious content")
+		return
+	}
 
 	// Build system prompt with memory directories
 	sysPrompt := d.buildNudgePrompt(cwd, chatID, threadID, userID)
@@ -338,4 +369,88 @@ func (d *Dreamer) buildNudgePrompt(cwd string, chatID int64, threadID int, userI
 		return ""
 	}
 	return buf.String()
+}
+
+// truncateTranscriptPairs truncates the transcript to fit within maxBytes,
+// removing the oldest user/assistant pairs first. Each turn is kept intact
+// so the model sees coherent exchanges. Tool summaries within messages are
+// preserved when the message is kept.
+func truncateTranscriptPairs(messages []session.NudgeMessage, maxBytes int) string {
+	// Build all turn strings first so we know exact sizes.
+	type turn struct {
+		idx  int // index of user message in the pair
+		text string
+	}
+	var turns []turn
+	orphans := 0
+	for i := 0; i+1 < len(messages); i += 2 {
+		if messages[i].Role != "user" || messages[i+1].Role != "assistant" {
+			orphans++
+			continue
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "**user:** %s\n\n", messages[i].Content)
+		fmt.Fprintf(&b, "**assistant:** %s\n", messages[i+1].Content)
+		if messages[i+1].ToolSummary != "" {
+			fmt.Fprintf(&b, "  [tools used: %s]\n", messages[i+1].ToolSummary)
+		}
+		b.WriteString("\n")
+		turns = append(turns, turn{idx: i, text: b.String()})
+	}
+	if orphans > 0 {
+		log.Printf("[nudge] truncateTranscriptPairs: skipped %d orphan message(s) with unexpected role order", orphans)
+	}
+
+	// Keep newest turns until we hit the budget.
+	var kept strings.Builder
+	for i := len(turns) - 1; i >= 0; i-- {
+		candidate := turns[i].text
+		if kept.Len()+len(candidate) > maxBytes {
+			break
+		}
+		// Prepend to maintain chronological order.
+		keptStr := kept.String()
+		kept.Reset()
+		kept.WriteString(candidate)
+		kept.WriteString(keptStr)
+	}
+	return kept.String()
+}
+
+// isContentStillSuspicious checks if redacted content still contains
+// patterns that indicate secrets may have survived redaction.
+// Returns true if the content should be blocked (fail-closed).
+//
+// Patterns are checked case-insensitively. Prefix-based patterns use
+// specific substrings (e.g. "sk-ant-" not just "sk-") to avoid false
+// positives on words like "task-", "disk-", "risk-".
+func isContentStillSuspicious(content string) bool {
+	suspicious := []string{
+		"sk-ant-",       // Anthropic API key prefix
+		"sk-proj-",      // Anthropic project key prefix
+		"sk-or-",        // OpenAI/Anthropic org key prefix
+		"sk-admin-",     // OpenAI admin key prefix
+		"sk-svcacct-",   // OpenAI service account key prefix
+		"api_key=",      // env assignment
+		"apikey=",       // camelCase variant
+		"bearer ",       // Bearer token header (followed by key pattern)
+		"-----begin",    // PEM private key (lowered)
+		"private key-----",
+		"ghp_",          // GitHub personal access token
+		"gho_",          // GitHub OAuth token
+		"ghu_",          // GitHub user token
+		"ghs_",          // GitHub server token
+		"ghr_",          // GitHub refresh token
+		"xoxb-",         // Slack bot token
+		"xoxp-",         // Slack user token
+		"ya29.",         // Google OAuth token
+		"akia",          // AWS access key ID pattern (lowered)
+	}
+	lower := strings.ToLower(content)
+	for _, pattern := range suspicious {
+		if strings.Contains(lower, pattern) {
+			return true
+		}
+	}
+	return false
 }

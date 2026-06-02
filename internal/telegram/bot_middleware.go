@@ -737,6 +737,11 @@ func (bc *BotController) handleForgetMeConfirm(c telebot.Context) error {
 		return err
 	}
 
+	// Clear nudge buffer (pending transcripts) for this user
+	if bc.pipeline != nil && bc.pipeline.NudgeBuffer() != nil {
+		bc.pipeline.NudgeBuffer().ClearUser(senderID)
+	}
+
 	// Edit the original message to show confirmation
 	_, err := c.Bot().Send(c.Chat(), "Seus dados foram apagados. Próxima mensagem iniciará o onboarding.", &telebot.SendOptions{ThreadID: callbackThreadID(c)})
 	return err

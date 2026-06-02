@@ -298,6 +298,12 @@ func bootstrapApp() (*app, error) {
 	if cfg.NudgeModel != "" {
 		dreamCfg.NudgeModel = cfg.NudgeModel
 	}
+	if cfg.NudgeMinTranscript > 0 {
+		dreamCfg.NudgeMinTranscript = cfg.NudgeMinTranscript
+	}
+	if cfg.NudgeMaxTranscript > 0 {
+		dreamCfg.NudgeMaxTranscript = cfg.NudgeMaxTranscript
+	}
 	dreamCfg.RunLog = runLogStore
 	dreamCfg.NudgeSender = bot
 	userResolver := users.NewResolver(resolver.Root())

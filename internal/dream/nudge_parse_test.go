@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
+	"github.com/igormaneschy/aurelia/internal/session"
 )
 
 func TestParseNudgeJSON_ValidUpdates(t *testing.T) {
@@ -507,5 +508,93 @@ func TestNudgeRedactSecrets_RedactsClientSecret(t *testing.T) {
 	output := pipelinepkg.RedactSecrets(input)
 	if strings.Contains(output, "my-super-secret-value") {
 		t.Fatal("client_secret value not redacted")
+	}
+}
+
+func TestTruncateTranscriptPairs_KeepsNewestFirst(t *testing.T) {
+	msgs := []session.NudgeMessage{
+		{Role: "user", Content: "old question"},
+		{Role: "assistant", Content: "old answer"},
+		{Role: "user", Content: "recent question with more details"},
+		{Role: "assistant", Content: "recent answer"},
+	}
+
+	// Budget small enough to only fit newest pair
+	got := truncateTranscriptPairs(msgs, 120)
+
+	if !strings.Contains(got, "recent question") {
+		t.Fatal("should keep newest user message")
+	}
+	if !strings.Contains(got, "recent answer") {
+		t.Fatal("should keep newest assistant message")
+	}
+	if strings.Contains(got, "old question") {
+		t.Fatal("should drop oldest pair")
+	}
+}
+
+func TestTruncateTranscriptPairs_PreservesToolSummary(t *testing.T) {
+	msgs := []session.NudgeMessage{
+		{Role: "user", Content: "hi"},
+		{Role: "assistant", Content: "hello", ToolSummary: "tool: Read(file=x.go)"},
+	}
+
+	got := truncateTranscriptPairs(msgs, 500)
+
+	if !strings.Contains(got, "Read(file=x.go)") {
+		t.Fatal("tool summary should be preserved in kept messages")
+	}
+	// Tool summary must appear AFTER the assistant label, not between user and assistant
+	asstIdx := strings.Index(got, "**assistant:**")
+	toolIdx := strings.Index(got, "Read(file=x.go)")
+	if toolIdx < asstIdx {
+		t.Fatal("tool summary should appear after assistant label, not before")
+	}
+}
+
+func TestTruncateTranscriptPairs_LargeBudgetKeepsAll(t *testing.T) {
+	msgs := []session.NudgeMessage{
+		{Role: "user", Content: "q1"},
+		{Role: "assistant", Content: "a1"},
+		{Role: "user", Content: "q2"},
+		{Role: "assistant", Content: "a2"},
+	}
+
+	got := truncateTranscriptPairs(msgs, 10000)
+
+	if !strings.Contains(got, "q1") || !strings.Contains(got, "q2") {
+		t.Fatal("large budget should keep all pairs")
+	}
+}
+
+func TestIsContentStillSuspicious_DetectsAPIKey(t *testing.T) {
+	tests := []struct {
+		name      string
+		content   string
+		suspicious bool
+	}{
+		{"sk prefix", "model used: sk-ant-api03-xxx", true},
+		{"sk proj prefix", "key is sk-proj-abc123def", true},
+		{"api_key assignment", "export api_key=secret123", true},
+		{"bearer token", "Authorization: Bearer sk-ant-abc123", true},
+		{"PEM key", "-----BEGIN RSA PRIVATE KEY-----", true},
+		{"GitHub token", "GITHUB_TOKEN=ghp_xxxxxxxxxxxx", true},
+		{"Slack bot token", "SLACK_BOT_TOKEN=xoxb-1234", true},
+		{"Google token", "access_token=ya29.abc123", true},
+		{"AWS key", "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE", true},
+		{"normal text", "the user asked about deployment", false},
+		{"code snippet", "func main() { fmt.Println(\"hello\") }", false},
+		{"task- not a key", "the task-id is task-12345", false},
+		{"disk- not a key", "disk-space is disk-99", false},
+		{"flask in text", "we use flask for the API", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isContentStillSuspicious(tt.content)
+			if got != tt.suspicious {
+				t.Errorf("isContentStillSuspicious(%q) = %v, want %v", tt.content, got, tt.suspicious)
+			}
+		})
 	}
 }
