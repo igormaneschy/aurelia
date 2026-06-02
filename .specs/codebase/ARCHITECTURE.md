@@ -161,6 +161,6 @@
 |---|---|---|
 | Global | `~/.aurelia/memory/` | Cross-project, deployment-level facts |
 | User | `~/.aurelia/users/<id>/memory/` | Personal facts per user |
-| CWD Overlay | `~/.aurelia/topics/chat_<id>/thread_<id>/cwd_overlay/` | Private working-context notes when `/cwd` is declared in a topic |
+| CWD Overlay | `~/.aurelia/topics/chat_<id>/thread_<id>/cwd_overlay/` | Private working-context notes when `/cwd` is declared in a topic (previously called **Project Private** in older docs; see [Context-Scoped Memory spec](.specs/features/project-memory/spec.md) for the path evolution) |
 | Project Team | `~/.aurelia/projects/<slug>/team/` | Shared project conventions |
 | Topic | `~/.aurelia/topics/chat_<id>/thread_<id>/` | Conversation-scoped context |

@@ -1380,8 +1380,8 @@ Rules:
 
 Examples:
 "agenda todo dia às 9h revisar emails" → {"type":"cron","cron_expr":"0 9 * * *","prompt":"revisar emails"}
-"me lembra amanhã às 15h de fazer deploy" → {"type":"once","run_at":"2026-03-27T15:00:00%%s","prompt":"fazer deploy"}
-"agendar toda segunda e quarta às 10h standup" → {"type":"cron","cron_expr":"0 10 * * 1,3","prompt":"standup"}`, tzName, offsetText, now.Format(time.RFC3339), offsetText)
+"me lembra amanhã às 15h de fazer deploy" → {"type":"once","run_at":"2026-03-27T15:00:00%s","prompt":"fazer deploy"}
+"agendar toda segunda e quarta às 10h standup" → {"type":"cron","cron_expr":"0 10 * * 1,3","prompt":"standup"}`, tzName, offsetText, now.Format(time.RFC3339), offsetText, offsetText)
 }
 
 // formatUTCOffset returns a UTC offset string like "+00:00" or "-03:00".

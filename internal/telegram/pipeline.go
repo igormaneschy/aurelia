@@ -7,7 +7,6 @@ import (
 
 	"gopkg.in/telebot.v3"
 
-	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
@@ -87,10 +86,6 @@ func (bc *BotController) processInputWithImages(c telebot.Context, text string, 
 
 func (bc *BotController) runPipeline(chatID int64, threadID int, messageID int, text string, images []bridge.ImageAttachment, userID int64, isPrivateChat bool) error {
 	return bc.ensurePipeline().Process(chatID, threadID, messageID, text, images, userID, isPrivateChat)
-}
-
-func (bc *BotController) buildSystemPrompt(userText string, agent *agents.Agent, chatID int64, messageID int, threadID int, userID int64) (string, error) {
-	return bc.ensurePipeline().BuildSystemPrompt(userText, agent, chatID, messageID, threadID, userID, false)
 }
 
 func (bc *BotController) processBridgeEventsAsync(chat *telebot.Chat, ch <-chan bridge.Event, progress *progressReporter, userText string, messageID int) bridgeOutcome {

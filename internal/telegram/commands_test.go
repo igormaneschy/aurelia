@@ -115,6 +115,9 @@ func TestMatch(t *testing.T) {
 		// --- NO match: mode false positives ---
 		{name: "modo devops", text: "modo devops no projeto", want: nil},
 		{name: "modo developer narrative", text: "modo developer é melhor para isso", want: nil},
+		{name: "narrative pesquisa", text: "tenho pesquisa a fazer sobre X", want: nil},
+		{name: "narrative pesquisador", text: "o pesquisador da USP publicou um paper", want: nil},
+		{name: "narrative researcher", text: "a researcher role at the lab", want: nil},
 
 		// --- NO match: narrative context (anti-false-positive) ---
 		{name: "narrative agendar", text: "ontem eu tentei agendar uma reunião", want: nil},
@@ -1375,7 +1378,7 @@ func TestCmdSetMode_ProfileUserMismatch(t *testing.T) {
 	resolver := users.NewResolver(dir)
 	store := users.NewStore(resolver)
 
-	// Save profile for user 1 with developer mode
+	// Save profile for user 1 (the sender).
 	profile1 := &users.Profile{
 		UserID:     1,
 		Name:       "User One",
@@ -1386,39 +1389,36 @@ func TestCmdSetMode_ProfileUserMismatch(t *testing.T) {
 		t.Fatalf("save profile: %v", err)
 	}
 
-	// Create a second profile for user 2
-	profile2 := &users.Profile{
-		UserID:     2,
-		Name:       "User Two",
-		Language:   "pt",
-		ActiveMode: "researcher",
-	}
-	if err := store.Save(profile2); err != nil {
-		t.Fatalf("save profile 2: %v", err)
-	}
-
-	bc := &BotController{userStore: store}
-
-	// Manually verify the invariant: if cmdSetMode loads profile for user 2
-	// but somehow had a sender ID of 1, the check should fire.
-	// We can't call cmdSetMode directly (needs telebot.Context), but we can
-	// verify the invariant check exists by testing that loading a profile with
-	// mismatched UserID is detected.
-	profile, err := bc.userStore.Get(2)
+	// Pre-flight: confirm store invariant — the loaded profile's UserID
+	// matches the file-keyed id.
+	loaded, err := store.Get(1)
 	if err != nil {
 		t.Fatalf("get profile: %v", err)
 	}
-	if profile == nil {
-		t.Fatal("profile 2 not found")
+	if loaded == nil || loaded.UserID != 1 {
+		t.Fatalf("store invariant violated: profile.UserID=%d want 1", loaded.UserID)
 	}
-	// The invariant: profile.UserID must match the sender. If we pass sender=1,
-	// the handler should refuse because it loaded profile for user 2.
-	if profile.UserID == 1 {
-		t.Error("profile.UserID should be 2, not 1")
+
+	// Call cmdSetMode directly via the real handler with a fake context.
+	// /mode (alone) is a query — exercises the userStore load + the
+	// profile.UserID == sender check without needing the full model
+	// refresh path.
+	bc := &BotController{
+		userStore: store,
+		bot:       newOfflineTestBot(t),
+		config: &config.AppConfig{
+			DefaultOwnerUserID: 1,
+			Providers:          map[string]config.ProviderConfig{},
+		},
 	}
-	// Verify profile 2's ActiveMode is still "researcher" (unmodified)
-	if profile.ActiveMode != "researcher" {
-		t.Errorf("ActiveMode should be researcher, got %q", profile.ActiveMode)
+	c := newTestTelegramContext(42, 0, 1, "")
+
+	reply, err := bc.cmdSetMode(c, "/mode")
+	if err != nil {
+		t.Fatalf("cmdSetMode() error = %v", err)
+	}
+	if !strings.Contains(reply, "general") {
+		t.Fatalf("expected query to return current mode, got %q", reply)
 	}
 }
 

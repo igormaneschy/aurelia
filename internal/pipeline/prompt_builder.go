@@ -48,8 +48,9 @@ func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatI
 	identitySection := fmt.Sprintf("# Runtime Identity\n\nYou are running via the Aurelia bridge over the PI SDK.\nProvider: %s\nModel: %s\nAlways answer accurately when asked what model you are.", provider, model)
 	sections = append(sections, identitySection)
 
-	// Agent-specific prompt — placed before persona so agent instructions
-	// do not supersede the active mode overlay appended by BuildPromptForUser.
+	// Agent-specific prompt — placed BEFORE persona so the mode overlay
+	// appended last by BuildPromptForUser takes final precedence over
+	// agent instructions (mode is the user's latest behavioural intent).
 	if agent != nil && agent.Prompt != "" {
 		agentSection := "# Agent Instructions\n\n" + agent.Prompt
 		sections = append(sections, agentSection)
