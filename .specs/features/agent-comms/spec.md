@@ -4,14 +4,14 @@
 **Status:** 🔴 Draft  
 **Depende de:** `.specs/features/agent-orchestration-execution/` para workers, manifest e execução por waves  
 **Depende de:** `.specs/features/security-guard-rails/` (✅ done) para capability profiles, payload policy e audit  
-**Complementa:** `.specs/features/plan-mode-architecture/` e `.specs/features/auto-skills/`
+**Complementa:** execução de planos conversacionais aprovados e `.specs/features/auto-skills/`
 
 ## Problem Statement
 
 O Aurelia usa o PI como motor de execução e já caminha para um modelo onde um plano aprovado é dividido em tarefas e executado por workers especializados. Esse modelo hierárquico é necessário e deve continuar existindo:
 
 ```text
-Plan Mode → Orchestrator → Workers → Validator → Merge/Commit/PR
+Conversational approved plan → Orchestrator → Workers → Validator → Merge/Commit/PR
 ```
 
 Mas alguns trabalhos melhoram quando agentes especializados conseguem conversar entre si durante a execução. Um worker de backend pode consultar um worker de testes; um worker de implementação pode pedir revisão a um worker de segurança; um agente que conhece uma ferramenta antiga pode responder dúvidas de outro agente que está criando uma skill equivalente.
@@ -77,7 +77,7 @@ Esta feature adiciona um **Agent Bus local e governado pelo daemon Go**: um cana
 2. WHEN um `Task` declara peers THEN ele SHALL poder enviar mensagens somente para os `task_id`s listados.
 3. WHEN um worker tenta enviar para peer não autorizado THEN a mensagem SHALL ser rejeitada e auditada.
 4. WHEN o plano declara um peer inexistente THEN preflight do plano SHALL retornar erro ou warning antes de executar workers.
-5. WHEN Plan Mode sugere colaboração THEN ele SHALL declarar peers de forma explícita no plano JSON.
+5. WHEN um plano conversacional aprovado sugere colaboração THEN ele SHALL declarar peers de forma explícita no plano JSON.
 6. WHEN uma task tem `CapabilityProfile=read_only` THEN Agent Comms SHALL continuar permitido apenas para mensagens; não concede novas tools.
 
 **Independent Test:** T1 permite peer T2; envio T1 → T2 passa, envio T1 → T3 falha.

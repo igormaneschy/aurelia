@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -12,6 +13,11 @@ import (
 )
 
 func (bc *BotController) currentCwd(chatID int64, threadID int) string {
+	return bc.currentCwdForContext(chatID, threadID, 0, false)
+}
+
+// currentCwdForContext resolves the CWD with DefaultCWD fallback for private chats.
+func (bc *BotController) currentCwdForContext(chatID int64, threadID int, userID int64, isPrivateChat bool) string {
 	if bc.bindings != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -23,10 +29,25 @@ func (bc *BotController) currentCwd(chatID int64, threadID int) string {
 			log.Printf("cwd: currentCwd failed to resolve binding chat=%d thread=%d: %v", chatID, threadID, err)
 		}
 	}
-	if bc.sessions == nil {
-		return ""
+	if bc.sessions != nil {
+		if cwd := bc.sessions.GetCwd(chatID, threadID); cwd != "" {
+			return cwd
+		}
 	}
-	return bc.sessions.GetCwd(chatID, threadID)
+	// DefaultCWD fallback: private chats only, no topic/thread
+	if isPrivateChat && threadID == 0 && userID != 0 && bc.userStore != nil {
+		profile, err := bc.userStore.Get(userID)
+		if err != nil {
+			log.Printf("cwd: currentCwdForContext failed to load profile user=%d: %v", userID, err)
+		} else if profile != nil && profile.DefaultCWD != "" {
+			if info, statErr := os.Stat(profile.DefaultCWD); statErr == nil && info.IsDir() {
+				return profile.DefaultCWD
+			} else if statErr != nil {
+				log.Printf("cwd: DefaultCWD user=%d path=%q is invalid/unreadable: %v", userID, profile.DefaultCWD, statErr)
+			}
+		}
+	}
+	return ""
 }
 
 func (bc *BotController) setCurrentCwd(chatID int64, threadID int, userID int64, rawPath string) (string, error) {

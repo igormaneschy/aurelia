@@ -49,7 +49,7 @@
 **Location:** `bridge/index.ts`, `internal/pipeline/prompt_builder.go`, `internal/session/store.go`
 **Purpose:** Keep the PI SDK as the cognitive/execution engine while Aurelia owns product continuity.
 **Implementation:** The Bridge uses PI-native `ModelRegistry`, `SessionManager`, `SettingsManager.compaction`, `DefaultResourceLoader(noContextFiles=false)`, and `session.agent.beforeToolCall`. Go tracks `session_file` per `SessionKey` for resume, injects Aurelia-specific prompt layers (persona, Telegram, memory, security context, continuity), and does not own model routing or context compaction. Automatic token-based rotation is forbidden; large sessions continue through the original PI `session_file` so SDK compaction preserves continuity.
-**Rule:** If PI already owns an engine concern, Aurelia adapts/orchestrates it. If the concern is identity, UX, memory, Wiki, project/user scoping, scheduling, audit or workflow state, Aurelia owns it.
+**Rule:** If PI already owns an engine concern, Aurelia adapts/orchestrates it. If the concern is identity, UX, operational memory, project/user scoping, scheduling, audit or workflow state, Aurelia owns it. Transversal Wiki memory belongs to PI via `ai-memory` MCP, not an Aurelia MCP gateway.
 
 ### NDJSON Request Multiplexing
 **Location:** `internal/bridge/bridge.go`
@@ -161,6 +161,6 @@
 |---|---|---|
 | Global | `~/.aurelia/memory/` | Cross-project, deployment-level facts |
 | User | `~/.aurelia/users/<id>/memory/` | Personal facts per user |
-| Project Private | `~/.aurelia/users/<id>/projects/<slug>/memory/` | Per-user per-project notes |
+| CWD Overlay | `~/.aurelia/topics/chat_<id>/thread_<id>/cwd_overlay/` | Private working-context notes when `/cwd` is declared in a topic |
 | Project Team | `~/.aurelia/projects/<slug>/team/` | Shared project conventions |
 | Topic | `~/.aurelia/topics/chat_<id>/thread_<id>/` | Conversation-scoped context |

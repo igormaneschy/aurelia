@@ -1,5 +1,7 @@
 # Plan Mode Architecture
 
+**Status:** 🗑️ Superseded / removed 2026-05-24 — historical artifact only. Do not implement. Planning remains conversational; `aurelia-plan` legacy orchestration is preserved outside any formal Plan Mode.
+
 **Roadmap step:** 4  
 **Depende de:** `.specs/features/multi-user-profiles/` (`TurnContext`, `SessionKey`, `UserGate`, comandos por usuário)  
 **Depende de:** `.specs/features/project-binding/` (✅ done — `/cwd` persistente)  

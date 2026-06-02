@@ -16,6 +16,7 @@ func scanCronJob(scanner interface{ Scan(dest ...any) error }) (*CronJob, error)
 		&job.TargetThreadID,
 		&job.Cwd,
 		&job.AgentName,
+		&job.Timezone,
 		&job.ScheduleType,
 		&job.CronExpr,
 		&runAt,

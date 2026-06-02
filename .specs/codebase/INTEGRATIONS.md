@@ -94,8 +94,9 @@
 ├── data/cron.db                 # SQLite database
 ├── memory/personas/             # Global IDENTITY.md, SOUL.md
 ├── users/<id>/personas/USER.md  # Per-user persona
-├── users/<id>/memory/           # Per-user memory
-├── projects/<slug>/memory/      # Current project memory layout; roadmap moves private project memory under users/<id>/projects/<slug>/memory
+├── users/<id>/memory/           # Per-user global operational memory
+├── topics/chat_<id>/thread_<id>/ # Topic memory and optional cwd_overlay/
+├── projects/<slug>/team/        # Shared project/team operational memory
 ├── memory/OWNER_PLAYBOOK.md     # Optional owner instructions
 ├── agents/*.md                  # Agent definitions (YAML frontmatter)
 └── bridge/                      # TypeScript runtime files

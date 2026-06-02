@@ -1,5 +1,7 @@
 # Plan Mode Architecture — Design
 
+**Status:** 🗑️ Superseded / removed 2026-05-24 — historical artifact only. Do not implement.
+
 **Spec:** `.specs/features/plan-mode-architecture/spec.md`
 **Roadmap step:** 4
 **Status:** Revised after code review

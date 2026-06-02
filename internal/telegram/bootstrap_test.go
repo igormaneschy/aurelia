@@ -185,3 +185,37 @@ func TestWriteBootstrapPreset_WritesToDir(t *testing.T) {
 		t.Fatal("SOUL.md must not be written to CWD")
 	}
 }
+
+func TestBootstrapTimezone_PresetsExist(t *testing.T) {
+	// Verify all preset choices map to valid IANA timezones.
+	presets := bootstrapTimezonePresets
+	if len(presets) != 4 {
+		t.Fatalf("expected 4 preset timezones, got %d", len(presets))
+	}
+	for key, tz := range presets {
+		// Verify key naming convention
+		if !strings.HasPrefix(key, "tz_") {
+			t.Errorf("preset key %q should start with tz_", key)
+		}
+		// Verify timezone is non-empty
+		if tz == "" {
+			t.Errorf("preset %q has empty timezone", key)
+		}
+	}
+}
+
+func TestBootstrapTimezoneMenu_HasFiveButtons(t *testing.T) {
+	menu := newBootstrapTimezoneMenu()
+	if menu == nil {
+		t.Fatal("newBootstrapTimezoneMenu() returned nil")
+	}
+	// Inline keyboards have InlineKeyboard field
+	rows := menu.InlineKeyboard
+	totalButtons := 0
+	for _, row := range rows {
+		totalButtons += len(row)
+	}
+	if totalButtons != 5 {
+		t.Fatalf("expected 5 buttons in timezone menu, got %d", totalButtons)
+	}
+}

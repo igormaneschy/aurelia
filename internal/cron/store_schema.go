@@ -14,6 +14,7 @@ func (s *SQLiteCronStore) initialize() error {
 		target_thread_id INTEGER NOT NULL DEFAULT 0,
 		cwd TEXT NOT NULL DEFAULT '',
 		agent_name TEXT NOT NULL DEFAULT '',
+		timezone TEXT DEFAULT '',
 		schedule_type TEXT NOT NULL,
 		cron_expr TEXT NOT NULL DEFAULT '',
 		run_at DATETIME,
@@ -55,6 +56,7 @@ func (s *SQLiteCronStore) initialize() error {
 		"ALTER TABLE cron_jobs ADD COLUMN target_thread_id INTEGER NOT NULL DEFAULT 0",
 		"ALTER TABLE cron_jobs ADD COLUMN cwd TEXT NOT NULL DEFAULT ''",
 		"ALTER TABLE cron_jobs ADD COLUMN agent_name TEXT NOT NULL DEFAULT ''",
+		"ALTER TABLE cron_jobs ADD COLUMN timezone TEXT DEFAULT ''",
 	} {
 		_, err := s.db.Exec(col)
 		if err != nil && !strings.Contains(err.Error(), "duplicate column") {

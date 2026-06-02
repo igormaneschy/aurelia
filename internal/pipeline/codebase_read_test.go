@@ -78,7 +78,7 @@ func TestCodebaseReadGuidance_InjectedWhenNoCwd(t *testing.T) {
 	}
 
 	// When user asks to read code but no cwd is set, guidance should appear
-	prompt, err := svc.buildSystemPrompt("leia a code base do aurelia", nil, 42, 1, 0, 0)
+	prompt, err := svc.buildSystemPrompt("leia a code base do aurelia", nil, 42, 1, 0, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +101,7 @@ func TestCodebaseReadGuidance_SkippedWhenCwdSet(t *testing.T) {
 		memoryCache: newMemoryCache(),
 	}
 
-	prompt, err := svc.buildSystemPrompt("leia a code base do aurelia", nil, 42, 1, 0, 0)
+	prompt, err := svc.buildSystemPrompt("leia a code base do aurelia", nil, 42, 1, 0, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestCodebaseReadGuidance_NotInjectedForNormalChat(t *testing.T) {
 		memoryCache: newMemoryCache(),
 	}
 
-	prompt, err := svc.buildSystemPrompt("bom dia", nil, 42, 1, 0, 0)
+	prompt, err := svc.buildSystemPrompt("bom dia", nil, 42, 1, 0, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestCodebaseReadGuidance_IncludesKnownProjectsForUser(t *testing.T) {
 		memoryCache: newMemoryCache(),
 	}
 
-	prompt, err := svc.buildSystemPrompt("leia a code base do aurelia", nil, 42, 1, 0, 42)
+	prompt, err := svc.buildSystemPrompt("leia a code base do aurelia", nil, 42, 1, 0, 42, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -212,7 +212,7 @@ func TestCodebaseReadGuidance_NoCrossChatForUserIDZero(t *testing.T) {
 		memoryCache: newMemoryCache(),
 	}
 
-	prompt, err := svc.buildSystemPrompt("leia a code base do aurelia", nil, 42, 1, 0, 0)
+	prompt, err := svc.buildSystemPrompt("leia a code base do aurelia", nil, 42, 1, 0, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestGeneralCwdGuidance_IncludedWhenCwdEmptyWithKnownProjects(t *testing.T) 
 	}
 
 	// Use a general chat message (NOT codebase-read) to verify broad guidance
-	prompt, err := svc.buildSystemPrompt("bom dia, tudo bem?", nil, 42, 1, 0, 42)
+	prompt, err := svc.buildSystemPrompt("bom dia, tudo bem?", nil, 42, 1, 0, 42, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -283,7 +283,7 @@ func TestGeneralCwdGuidance_OmittedForNoKnownProjects(t *testing.T) {
 	}
 
 	// General chat, no cwd, no known projects — should NOT add known-project suggestions
-	prompt, err := svc.buildSystemPrompt("bom dia, tudo bem?", nil, 42, 1, 0, 42)
+	prompt, err := svc.buildSystemPrompt("bom dia, tudo bem?", nil, 42, 1, 0, 42, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +325,7 @@ func TestGeneralCwdGuidance_OmittedForUserIDZero(t *testing.T) {
 	}
 
 	// userID=0 — unidentifiable sender, should NOT get cross-chat suggestions
-	prompt, err := svc.buildSystemPrompt("bom dia", nil, 42, 1, 0, 0)
+	prompt, err := svc.buildSystemPrompt("bom dia", nil, 42, 1, 0, 0, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +366,7 @@ func TestCodebaseReadGuidance_NoCrossChatForOtherUser(t *testing.T) {
 	}
 
 	// User 42 has no bindings — should get standard guidance without suggestions
-	prompt, err := svc.buildSystemPrompt("leia a code base do aurelia", nil, 42, 1, 0, 42)
+	prompt, err := svc.buildSystemPrompt("leia a code base do aurelia", nil, 42, 1, 0, 42, false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -86,13 +86,14 @@ Ver `.specs/project/ROADMAP.md` para o sequenciamento completo. Resumo:
 
 ```
 Sprint 0 → Delegate to PI SDK Native core ✅; remaining: agent registry boundary decision
-Sprint A → User Isolation MVP + runtime hardening ✅; remaining user×project memory moved to Sprint E
+Sprint A → User Isolation MVP + runtime hardening ✅; remaining context-scoped operational memory moved to Sprint E
 Sprint B → Operational Observability (run_id, timeline, /debug, métricas locais)
 Sprint C → Close Orchestration Cycle (conectar scaffold existente)
 Sprint D → ~~Plan Mode Architecture~~ 🗑️ Removido 2026-05-24; planejamento conversational
-Sprint E → User-Scoped Project Memory
-Sprint F → Memory Boundary Realignment (PI + ai-memory MCP, no internal Wiki Gateway)
-Sprint G → Learning Nudge escopado
-Sprint H → Agent Comms
-Sprint I → Auto-Skills
+Sprint E → Context-Scoped Operational Memory
+Sprint F → Memory Boundary Realignment ✅ (PI + ai-memory MCP, no internal Wiki Gateway)
+Sprint G → Session/Profile Operability
+Sprint H → Learning Nudge escopado
+Sprint I → Agent Comms
+Sprint J → Auto-Skills
 ```
