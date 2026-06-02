@@ -36,43 +36,41 @@ func Bootstrap(r *PathResolver) error {
 	return nil
 }
 
-// BootstrapProjectMemory ensures the per-project memory directories exist
-// and creates empty MEMORY.md index files if they don't exist yet.
+// BootstrapProjectMemory ensures the per-project team memory directory exists
+// and creates an empty MEMORY.md index file if it doesn't exist yet.
 func BootstrapProjectMemory(r *PathResolver, cwd string) error {
 	if strings.TrimSpace(cwd) == "" {
 		return nil
 	}
 
-	dirs := []string{
-		r.ProjectMemoryDir(cwd),
-		r.ProjectTeamMemoryDir(cwd),
+	dir := r.ProjectTeamMemoryDir(cwd)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return fmt.Errorf("runtime: bootstrap project team memory %q: %w", dir, err)
 	}
-	for _, dir := range dirs {
-		if err := os.MkdirAll(dir, 0700); err != nil {
-			return fmt.Errorf("runtime: bootstrap project memory %q: %w", dir, err)
-		}
-		indexPath := filepath.Join(dir, "MEMORY.md")
-		if _, err := os.Stat(indexPath); os.IsNotExist(err) {
-			if err := os.WriteFile(indexPath, nil, 0600); err != nil {
-				return fmt.Errorf("runtime: create memory index %q: %w", indexPath, err)
-			}
+	indexPath := filepath.Join(dir, "MEMORY.md")
+	if _, err := os.Stat(indexPath); os.IsNotExist(err) {
+		if err := os.WriteFile(indexPath, nil, 0600); err != nil {
+			return fmt.Errorf("runtime: create team memory index %q: %w", indexPath, err)
 		}
 	}
 	return nil
 }
 
-// BootstrapConversationProjectMemory ensures conversation-private project
-// memory exists alongside shared team memory for the bound project.
+// BootstrapConversationProjectMemory ensures context-scoped memory directories
+// exist for the bound project: cwd overlay (topic-scoped) and project team memory.
 func BootstrapConversationProjectMemory(r *PathResolver, cwd string, chatID int64, threadID int) error {
 	if strings.TrimSpace(cwd) == "" {
 		return nil
 	}
 
 	dirs := []string{
-		r.ConversationProjectMemoryDir(cwd, chatID, threadID),
+		r.TopicCwdOverlayDir(chatID, threadID),
 		r.ProjectTeamMemoryDir(cwd),
 	}
 	for _, dir := range dirs {
+		if dir == "" {
+			continue
+		}
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return fmt.Errorf("runtime: bootstrap conversation project memory %q: %w", dir, err)
 		}

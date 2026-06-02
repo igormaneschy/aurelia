@@ -145,7 +145,7 @@ func TestParseNudgeJSON_DeduplicatesFacts(t *testing.T) {
 }
 
 func TestParseNudgeJSON_AllLayersAllowed(t *testing.T) {
-	layers := []string{"global", "topic", "project", "team"}
+	layers := []string{"user_global", "topic", "cwd_overlay", "project_team"}
 	for _, layer := range layers {
 		raw := `{"updates":[{"layer":"` + layer + `","filename":"test.md","facts":["fact"]}]}`
 		ext := parseNudgeJSON(raw)

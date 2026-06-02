@@ -331,22 +331,10 @@ func TestProjectMemoryDirs(t *testing.T) {
 	r := &PathResolver{root: "/tmp/aurelia"}
 	cwd := "/home/user/myproject"
 
-	gotPrivate := r.ProjectMemoryDir(cwd)
-	wantPrivate := filepath.Join("/tmp/aurelia", "projects", "-home-user-myproject", "memory")
-	if gotPrivate != wantPrivate {
-		t.Errorf("ProjectMemoryDir() = %q, want %q", gotPrivate, wantPrivate)
-	}
-
 	gotTeam := r.ProjectTeamMemoryDir(cwd)
 	wantTeam := filepath.Join("/tmp/aurelia", "projects", "-home-user-myproject", "team")
 	if gotTeam != wantTeam {
 		t.Errorf("ProjectTeamMemoryDir() = %q, want %q", gotTeam, wantTeam)
-	}
-
-	gotConversation := r.ConversationProjectMemoryDir(cwd, 42, 99)
-	wantConversation := filepath.Join(wantPrivate, "conversations", "chat_42", "thread_99")
-	if gotConversation != wantConversation {
-		t.Errorf("ConversationProjectMemoryDir() = %q, want %q", gotConversation, wantConversation)
 	}
 }
 
@@ -448,15 +436,19 @@ func TestTopicCwdOverlayDir(t *testing.T) {
 		}
 	})
 
-	t.Run("thread zero returns empty", func(t *testing.T) {
-		if got := r.TopicCwdOverlayDir(42, 0); got != "" {
-			t.Errorf("TopicCwdOverlayDir(42, 0) = %q, want empty string", got)
+	t.Run("thread zero returns chat-level cwd overlay", func(t *testing.T) {
+		got := r.TopicCwdOverlayDir(42, 0)
+		want := filepath.Join("/tmp/aurelia", "topics", "chat_42", "cwd_overlay")
+		if got != want {
+			t.Errorf("TopicCwdOverlayDir(42, 0) = %q, want %q", got, want)
 		}
 	})
 
-	t.Run("negative thread returns empty", func(t *testing.T) {
-		if got := r.TopicCwdOverlayDir(42, -1); got != "" {
-			t.Errorf("TopicCwdOverlayDir(42, -1) = %q, want empty string", got)
+	t.Run("negative thread returns chat-level cwd overlay", func(t *testing.T) {
+		got := r.TopicCwdOverlayDir(42, -1)
+		want := filepath.Join("/tmp/aurelia", "topics", "chat_42", "cwd_overlay")
+		if got != want {
+			t.Errorf("TopicCwdOverlayDir(42, -1) = %q, want %q", got, want)
 		}
 	})
 }

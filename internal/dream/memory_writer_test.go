@@ -1060,3 +1060,126 @@ func TestAppendUniqueFacts_RejectsAlreadyOversizedFile(t *testing.T) {
 		t.Fatalf("expected 'memory file size limit exceeded' error, got: %v", err)
 	}
 }
+
+// TestSafeWriter_TwoUsersIsolated verifies that dream writes for user A
+// do not affect user B's user_global memory, even when both users share
+// the same topic (E9.4).
+func TestSafeWriter_TwoUsersIsolated(t *testing.T) {
+	baseDir := t.TempDir()
+
+	// User A directories
+	userADir := filepath.Join(baseDir, "users", "100", "memory")
+	if err := os.MkdirAll(userADir, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	// User B directories
+	userBDir := filepath.Join(baseDir, "users", "200", "memory")
+	if err := os.MkdirAll(userBDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Shared topic directory
+	topicDir := filepath.Join(baseDir, "topics", "chat_42", "thread_99")
+	if err := os.MkdirAll(topicDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	// Resolver pointing to the same topic dir for both
+	resolver := &testResolver{
+		memoryDir:     userADir,
+		topicDir:      topicDir,
+		cwdOverlayDir: filepath.Join(topicDir, "cwd_overlay"),
+		teamDir:       filepath.Join(baseDir, "projects", "test-project", "team"),
+		root:          baseDir,
+	}
+
+	// Writer for user A
+	writerA, err := newSafeMemoryWriter(userADir, resolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Writer for user B (different memoryDir, same resolver)
+	resolverB := &testResolver{
+		memoryDir:     userBDir,
+		topicDir:      topicDir,
+		cwdOverlayDir: filepath.Join(topicDir, "cwd_overlay"),
+		teamDir:       filepath.Join(baseDir, "projects", "test-project", "team"),
+		root:          baseDir,
+	}
+	writerB, err := newSafeMemoryWriter(userBDir, resolverB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Dream writes for user A to user_global
+	updatesA := []memoryUpdate{
+		{Layer: "user_global", Filename: "prefs.md", Facts: []string{"Alice prefers dark mode"}},
+	}
+	countA := writerA.applyUpdates(updatesA, 42, 99, "/repo/test")
+	if countA != 1 {
+		t.Fatalf("user A write: expected 1 applied, got %d", countA)
+	}
+
+	// Dream writes for user B to user_global
+	updatesB := []memoryUpdate{
+		{Layer: "user_global", Filename: "prefs.md", Facts: []string{"Bob prefers light mode"}},
+	}
+	countB := writerB.applyUpdates(updatesB, 42, 99, "/repo/test")
+	if countB != 1 {
+		t.Fatalf("user B write: expected 1 applied, got %d", countB)
+	}
+
+	// Verify user A's file only contains Alice's fact
+	dataA, err := os.ReadFile(filepath.Join(userADir, "prefs.md"))
+	if err != nil {
+		t.Fatalf("read user A prefs: %v", err)
+	}
+	if !strings.Contains(string(dataA), "Alice prefers dark mode") {
+		t.Fatal("user A prefs should contain Alice's fact")
+	}
+	if strings.Contains(string(dataA), "Bob prefers light mode") {
+		t.Fatal("user B's fact leaked into user A's user_global memory")
+	}
+
+	// Verify user B's file only contains Bob's fact
+	dataB, err := os.ReadFile(filepath.Join(userBDir, "prefs.md"))
+	if err != nil {
+		t.Fatalf("read user B prefs: %v", err)
+	}
+	if !strings.Contains(string(dataB), "Bob prefers light mode") {
+		t.Fatal("user B prefs should contain Bob's fact")
+	}
+	if strings.Contains(string(dataB), "Alice prefers dark mode") {
+		t.Fatal("user A's fact leaked into user B's user_global memory")
+	}
+
+	// Both can write to shared topic (topic layer is shared)
+	updatesTopicA := []memoryUpdate{
+		{Layer: "topic", Filename: "decision.md", Facts: []string{"Alice decided on React"}},
+	}
+	countTopicA := writerA.applyUpdates(updatesTopicA, 42, 99, "/repo/test")
+	if countTopicA != 1 {
+		t.Fatalf("user A topic write: expected 1 applied, got %d", countTopicA)
+	}
+	updatesTopicB := []memoryUpdate{
+		{Layer: "topic", Filename: "decision.md", Facts: []string{"Bob decided on Vue"}},
+	}
+	countTopicB := writerB.applyUpdates(updatesTopicB, 42, 99, "/repo/test")
+	if countTopicB != 1 {
+		t.Fatalf("user B topic write: expected 1 applied, got %d", countTopicB)
+	}
+
+	// Topic file should contain both (shared layer)
+	dataTopic, err := os.ReadFile(filepath.Join(topicDir, "decision.md"))
+	if err != nil {
+		t.Fatalf("read topic decision: %v", err)
+	}
+	if !strings.Contains(string(dataTopic), "React") {
+		t.Fatal("topic should contain Alice's decision (React)")
+	}
+	if !strings.Contains(string(dataTopic), "Vue") {
+		t.Fatal("topic should contain Bob's decision (Vue)")
+	}
+}

@@ -38,7 +38,7 @@ func TestStatus_Layers(t *testing.T) {
 	for i, l := range status.Layers {
 		names[i] = l.Name
 	}
-	if names[0] != "Global" || names[1] != "Topic" || names[2] != "Project" || names[3] != "Team" {
+	if names[0] != "Global" || names[1] != "Topic" || names[2] != "CWD Overlay" || names[3] != "Team" {
 		t.Fatalf("unexpected layer order: %v", names)
 	}
 
@@ -52,8 +52,8 @@ func TestStatus_Layers(t *testing.T) {
 	if status.CWD != cwd {
 		t.Fatalf("expected cwd %q, got %q", cwd, status.CWD)
 	}
-	if status.CheckpointLayer != "project" {
-		t.Fatalf("expected checkpoint target 'project', got %q", status.CheckpointLayer)
+	if status.CheckpointLayer != "cwd_overlay" {
+		t.Fatalf("expected checkpoint target 'cwd_overlay', got %q", status.CheckpointLayer)
 	}
 }
 
@@ -77,7 +77,7 @@ func TestStatus_NoThread(t *testing.T) {
 	if len(status.Layers) != 3 {
 		t.Fatalf("expected 3 layers, got %d", len(status.Layers))
 	}
-	if status.Layers[0].Name != "Global" || status.Layers[1].Name != "Project" || status.Layers[2].Name != "Team" {
+	if status.Layers[0].Name != "Global" || status.Layers[1].Name != "CWD Overlay" || status.Layers[2].Name != "Team" {
 		t.Fatalf("unexpected layers: %v", status.Layers)
 	}
 }
@@ -156,8 +156,8 @@ func TestCheckpoint_ChoosesProjectOverTopic(t *testing.T) {
 		t.Fatalf("WriteCheckpoint(): %v", err)
 	}
 
-	if result.Layer != "project" {
-		t.Fatalf("expected 'project' layer, got %q", result.Layer)
+	if result.Layer != "cwd_overlay" {
+		t.Fatalf("expected 'cwd_overlay' layer, got %q", result.Layer)
 	}
 	if result.Path == "" {
 		t.Fatal("expected non-empty path")
@@ -313,7 +313,7 @@ func TestCheckpoint_MEMORYIndexPermissions(t *testing.T) {
 	}
 
 	// Verify MEMORY.md exists and has correct permissions
-	projectDir := resolver.ConversationProjectMemoryDir("/tmp/proj", 42, 0)
+	projectDir := resolver.TopicCwdOverlayDir(42, 0)
 	memoryIndexPath := filepath.Join(projectDir, "MEMORY.md")
 
 	info, err := os.Stat(memoryIndexPath)
@@ -353,7 +353,7 @@ func TestCheckpoint_SymlinkEscapeRejected(t *testing.T) {
 	svc := New(resolver.Memory(), resolver)
 
 	// Create the checkpoint directory first
-	targetDir := resolver.ConversationProjectMemoryDir("/tmp/proj-escape", 42, 0)
+	targetDir := resolver.TopicCwdOverlayDir(42, 0)
 	if err := os.MkdirAll(targetDir, 0700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestCheckpoint_MEMORYIndexSymlinkEscapeRejected(t *testing.T) {
 	svc := New(resolver.Memory(), resolver)
 
 	// Create the checkpoint directory
-	targetDir := resolver.ConversationProjectMemoryDir("/tmp/proj-escape-idx", 42, 0)
+	targetDir := resolver.TopicCwdOverlayDir(42, 0)
 	if err := os.MkdirAll(targetDir, 0700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -446,7 +446,7 @@ func TestCheckpoint_ContentIncludesMetadata(t *testing.T) {
 
 	checks := []string{
 		"# Current Task Checkpoint",
-		"Scope: project",
+		"Scope: cwd_overlay",
 		"CWD: /tmp/proj-content",
 		"## User Note",
 		"my custom note",

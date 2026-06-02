@@ -45,11 +45,6 @@ func TestResolver_Paths(t *testing.T) {
 			want: filepath.Join(root, "users", "42", "profile.json"),
 		},
 		{
-			name: "ProjectMemoryDir",
-			fn:   func(r *Resolver) string { return r.ProjectMemoryDir(42, "my-project") },
-			want: filepath.Join(root, "users", "42", "projects", "my-project"),
-		},
-		{
 			name: "SkillsDir",
 			fn:   func(r *Resolver) string { return r.SkillsDir(42) },
 			want: filepath.Join(root, "users", "42", "skills"),
