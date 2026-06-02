@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,10 +14,10 @@ import (
 
 func TestParseSessionKey_Valid(t *testing.T) {
 	tests := []struct {
-		key             string
-		wantChatID      int64
-		wantThreadID    int
-		wantUserID      int64
+		key          string
+		wantChatID   int64
+		wantThreadID int
+		wantUserID   int64
 	}{
 		{"42:7:100", 42, 7, 100},
 		{"0:0:0", 0, 0, 0},
@@ -45,15 +46,15 @@ func TestParseSessionKey_Malformed(t *testing.T) {
 	tests := []string{
 		"",
 		"abc:def:ghi",
-		"42:7",              // missing userID
-		"42:7:100:extra",    // extra trailing field
+		"42:7",           // missing userID
+		"42:7:100:extra", // extra trailing field
 		"not-a-key",
-		"42::100",           // empty threadID
-		":7:100",            // empty chatID
-		"42:7:",             // empty userID
-		"42:7:100x",         // trailing non-digit in userID field
-		"42:7:100 ",         // trailing whitespace
-		" 42:7:100",         // leading whitespace
+		"42::100",   // empty threadID
+		":7:100",    // empty chatID
+		"42:7:",     // empty userID
+		"42:7:100x", // trailing non-digit in userID field
+		"42:7:100 ", // trailing whitespace
+		" 42:7:100", // leading whitespace
 	}
 	for _, key := range tests {
 		_, _, _, ok := parseSessionKey(key)
@@ -339,7 +340,7 @@ func TestRecordToolUse_NoDeadlockWithCompleteRunLog(t *testing.T) {
 
 	// Simulate startRunLog by creating a minimal state
 	runID := uuid.NewString()
-	key := runLogKey(42, 7)
+	key := runLogKey(42, 7, 100)
 	s.runLogMu.Lock()
 	s.runLogStates[key] = &runLogState{
 		runID: runID,
@@ -363,7 +364,7 @@ func TestRecordToolUse_NoDeadlockWithCompleteRunLog(t *testing.T) {
 	// Now completeRunLog should work without hanging
 	done := make(chan struct{})
 	go func() {
-		s.completeRunLog(42, 7, runlog.RunCompleted, "", "")
+		s.completeRunLog(42, 7, 100, runlog.RunCompleted, "", "")
 		close(done)
 	}()
 
@@ -372,6 +373,31 @@ func TestRecordToolUse_NoDeadlockWithCompleteRunLog(t *testing.T) {
 		// success — no deadlock
 	case <-time.After(3 * time.Second):
 		t.Fatal("completeRunLog deadlocked or hung")
+	}
+}
+
+func TestRunLogKey_IncludesUserID(t *testing.T) {
+	if runLogKey(1, 2, 100) == runLogKey(1, 2, 200) {
+		t.Fatal("runLogKey must isolate different users in the same chat/thread")
+	}
+}
+
+func TestSavePartialAssistant_RedactsBeforeCheckpoint(t *testing.T) {
+	s := &Service{runLogStates: make(map[string]*runLogState)}
+	key := runLogKey(1, 0, 100)
+	s.runLogStates[key] = &runLogState{runID: "run-1"}
+
+	s.savePartialAssistant(1, 0, 100, "partial token sk-proj-abc123def4567890abcdef")
+
+	state := s.runLogStates[key]
+	state.mu.Lock()
+	partial := state.partialAssistant
+	state.mu.Unlock()
+	if strings.Contains(partial, "sk-proj-") {
+		t.Fatalf("partial assistant leaked secret: %q", partial)
+	}
+	if !strings.Contains(partial, "REDACTED") {
+		t.Fatalf("partial assistant missing redaction marker: %q", partial)
 	}
 }
 
@@ -390,7 +416,7 @@ func TestRecordPipelineEvent_RunIDFallback(t *testing.T) {
 	// Simulate: state was deleted (e.g. by completeRunLog), but caller
 	// passes a captured runID in the event.
 	fallbackRunID := "run-after-state-cleanup"
-	s.recordPipelineEvent(42, 7, observability.NewEvent(fallbackRunID,
+	s.recordPipelineEvent(42, 7, 100, observability.NewEvent(fallbackRunID,
 		observability.PhaseRunCompleted, "status=completed"))
 
 	evs := spy.recordedEvents()
@@ -418,13 +444,13 @@ func TestUpdateRunLogSessionFile_PersistsSessionFile(t *testing.T) {
 	}
 
 	runID := uuid.NewString()
-	key := runLogKey(42, 7)
+	key := runLogKey(42, 7, 100)
 	s.runLogMu.Lock()
 	s.runLogStates[key] = &runLogState{runID: runID}
 	s.runLogMu.Unlock()
 
 	sessionFile := "/home/user/.pi/agent/sessions/session-abc.json"
-	s.updateRunLogSessionFile(42, 7, sessionFile)
+	s.updateRunLogSessionFile(42, 7, 100, sessionFile)
 
 	updates := spy.recordedUpdates()
 	if len(updates) != 1 {
@@ -513,7 +539,7 @@ func TestRecordPipelineEvent_DropsEventWithoutRunID(t *testing.T) {
 	}
 
 	// No state exists — caller passes empty runID.
-	s.recordPipelineEvent(42, 7, observability.NewEvent("",
+	s.recordPipelineEvent(42, 7, 100, observability.NewEvent("",
 		observability.PhaseRunCanceled, "cancelado pelo usuário"))
 
 	evs := spy.recordedEvents()
@@ -529,9 +555,9 @@ func TestHandleContextOutcome_CancelledCapturesRunID(t *testing.T) {
 	spy := &spyRunLogStore{}
 	runID := uuid.NewString()
 	s := &Service{
-		runLog:       spy,
+		runLog: spy,
 		runLogStates: map[string]*runLogState{
-			runLogKey(1, 0): {runID: runID},
+			runLogKey(1, 0, 100): {runID: runID},
 		},
 		runLogMu: sync.Mutex{},
 	}
@@ -562,7 +588,7 @@ func TestHandleContextOutcome_CancelledCapturesRunID(t *testing.T) {
 
 	// Verify completeRunLog cleaned up the state.
 	s.runLogMu.Lock()
-	_, exists := s.runLogStates[runLogKey(1, 0)]
+	_, exists := s.runLogStates[runLogKey(1, 0, 100)]
 	s.runLogMu.Unlock()
 	if exists {
 		t.Error("runLogState was not cleaned up by completeRunLog")

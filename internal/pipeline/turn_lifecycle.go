@@ -161,7 +161,7 @@ func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText strin
 		sessionFile = s.sessions.GetSession(chatID, threadID, userID)
 	}
 	s.nudgeBuffer.AddTurn(chatID, threadID, userID, userText, finalText)
-	if toolSummary := s.getRunToolSummary(chatID, threadID); toolSummary != "" {
+	if toolSummary := s.getRunToolSummary(chatID, threadID, userID); toolSummary != "" {
 		s.nudgeBuffer.AddToolEvent(chatID, threadID, userID, toolSummary)
 	}
 	s.dreamer.AfterTurnNudge(chatID, threadID, userID, cwd, sessionFile, s.nudgeBuffer)
@@ -172,8 +172,8 @@ func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText strin
 
 // getRunID returns the current runID from runLogStates, or empty string.
 // Must be called before completeRunLog, which deletes the state.
-func (s *Service) getRunID(chatID int64, threadID int) string {
-	key := runLogKey(chatID, threadID)
+func (s *Service) getRunID(chatID int64, threadID int, userID int64) string {
+	key := runLogKey(chatID, threadID, userID)
 	s.runLogMu.Lock()
 	state, ok := s.runLogStates[key]
 	s.runLogMu.Unlock()
@@ -234,7 +234,7 @@ func (s *Service) patchContinuityFailure(chatID int64, threadID int, status stri
 	tools := ""
 	runID := ""
 	assistantText := ""
-	key := runLogKey(chatID, threadID)
+	key := runLogKey(chatID, threadID, userID)
 	s.runLogMu.Lock()
 	state, ok := s.runLogStates[key]
 	if ok && state != nil {
@@ -410,8 +410,8 @@ func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev
 	log.Printf("Bridge error: %s", redacted)
 	status, runStatus, reason := classifyBridgeErrorOutcome(redacted)
 	s.patchContinuityFailure(chatID, threadID, status, reason, userID)
-	s.completeRunLog(chatID, threadID, runStatus, "", reason)
-	s.recordPipelineEvent(chatID, threadID, observability.NewErrorEvent("",
+	s.completeRunLog(chatID, threadID, userID, runStatus, "", reason)
+	s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent("",
 		observability.PhaseRunFailed, reason))
 
 	// Mark failure for timeout/provider errors so lifecycle manager marks session suspect.

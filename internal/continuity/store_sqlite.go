@@ -122,7 +122,7 @@ func (s *SQLiteStore) ensureUserIDColumn() error {
 	if err != nil {
 		return fmt.Errorf("begin migration transaction: %w", err)
 	}
-	defer tx.Rollback() // no-op after successful Commit
+	defer func() { _ = tx.Rollback() }() // no-op after successful Commit
 
 	// Step 1: Create new table.
 	_, err = tx.Exec(`

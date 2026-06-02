@@ -95,7 +95,7 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 		chatID, threadID, userID, dec.State, dec.Action, dec.Reason)
 
 	// Record lifecycle decision as runlog event
-	s.recordLifecycleDecision(chatID, threadID, dec)
+	s.recordLifecycleDecision(chatID, threadID, userID, dec)
 
 	// Apply action
 	switch dec.Action {
@@ -312,11 +312,11 @@ func (s *Service) compactSession(ctx context.Context, chatID int64, threadID int
 }
 
 // recordLifecycleDecision records the lifecycle decision as a runlog event.
-func (s *Service) recordLifecycleDecision(chatID int64, threadID int, dec session.Decision) {
+func (s *Service) recordLifecycleDecision(chatID int64, threadID int, userID int64, dec session.Decision) {
 	if s.runLog == nil {
 		return
 	}
-	s.recordPipelineEvent(chatID, threadID, observability.NewEvent("",
+	s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent("",
 		observability.PhaseSessionLifecycle,
 		fmt.Sprintf("state=%s action=%s reason=%s", dec.State, dec.Action, redactSecrets(dec.Reason))))
 }

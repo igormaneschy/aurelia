@@ -38,9 +38,9 @@ const diffTruncationLimit = 64 * 1024 // 64 KB
 // and optionally runs a verify command for a completed worker task.
 //
 // The verify command precedence is:
-//   1. task.Verify (if non-empty)
-//   2. plan.Verify (if non-empty)
-//   3. none (Verify is nil)
+//  1. task.Verify (if non-empty)
+//  2. plan.Verify (if non-empty)
+//  3. none (Verify is nil)
 //
 // The verify command runs with the orchestrator's configured VerifyTimeout
 // (default 2 minutes). Diff content is truncated at diffTruncationLimit
@@ -117,18 +117,25 @@ func runVerify(ctx context.Context, cwd, command string, timeout time.Duration) 
 		timeout = 2 * time.Minute
 	}
 
+	argv, err := parseSafeVerifyCommand(command)
+	if err != nil {
+		return &VerifyResult{Command: command, ExitCode: -1, Stderr: err.Error()}, err
+	}
+
 	vctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
 	start := time.Now()
-	cmd := exec.CommandContext(vctx, "sh", "-c", command)
+	// #nosec G204 -- argv is parsed by parseSafeVerifyCommand: command names and
+	// arguments are allowlisted and shell metacharacters are rejected before exec.
+	cmd := exec.CommandContext(vctx, argv[0], argv[1:]...)
 	cmd.Dir = cwd
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	err := cmd.Run()
+	err = cmd.Run()
 	dur := time.Since(start).Milliseconds()
 
 	vr := &VerifyResult{
@@ -153,6 +160,56 @@ func runVerify(ctx context.Context, cwd, command string, timeout time.Duration) 
 		return vr, err
 	}
 	return vr, nil
+}
+
+func parseSafeVerifyCommand(command string) ([]string, error) {
+	trimmed := strings.TrimSpace(command)
+	if trimmed == "" {
+		return nil, fmt.Errorf("verify command is empty")
+	}
+	if strings.ContainsAny(trimmed, ";&|`$<>\n\r") {
+		return nil, fmt.Errorf("verify command %q rejected: shell metacharacters are not allowed", command)
+	}
+	fields := strings.Fields(trimmed)
+	if len(fields) == 0 {
+		return nil, fmt.Errorf("verify command is empty")
+	}
+	if !isAllowedVerifyArgv(fields) {
+		return nil, fmt.Errorf("verify command %q rejected: only build/test/typecheck commands are allowed", command)
+	}
+	return fields, nil
+}
+
+func isAllowedVerifyArgv(argv []string) bool {
+	if len(argv) == 0 {
+		return false
+	}
+	switch argv[0] {
+	case "go":
+		return len(argv) >= 2 && oneOf(argv[1], "test", "vet", "build")
+	case "npm":
+		if len(argv) >= 2 && argv[1] == "test" {
+			return true
+		}
+		return len(argv) >= 3 && argv[1] == "run" && oneOf(argv[2], "test", "typecheck", "build", "lint")
+	case "pnpm", "yarn":
+		return len(argv) >= 2 && oneOf(argv[1], "test", "typecheck", "build", "lint")
+	case "npx":
+		return len(argv) >= 2 && argv[1] == "tsc"
+	case "pytest", "rspec":
+		return true
+	default:
+		return false
+	}
+}
+
+func oneOf(value string, allowed ...string) bool {
+	for _, item := range allowed {
+		if value == item {
+			return true
+		}
+	}
+	return false
 }
 
 // parseChangedFiles extracts file names from git status --porcelain output.

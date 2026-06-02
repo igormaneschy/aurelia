@@ -112,7 +112,7 @@ func TestCollectArtifacts_PlanVerifyFallback(t *testing.T) {
 	// task.Verify empty → falls back to plan.Verify
 	art, err := o.CollectArtifacts(context.Background(), repo,
 		Task{ID: "T1"},
-		&Plan{Verify: "echo hello"})
+		&Plan{Verify: "go vet ./..."})
 	if err != nil {
 		t.Fatalf("CollectArtifacts error: %v", err)
 	}
@@ -120,17 +120,24 @@ func TestCollectArtifacts_PlanVerifyFallback(t *testing.T) {
 	if art.Verify == nil {
 		t.Fatal("expected verify result from plan fallback")
 	}
-	if art.Verify.Command != "echo hello" {
-		t.Errorf("verify command = %q, want echo hello", art.Verify.Command)
+	if art.Verify.Command != "go vet ./..." {
+		t.Errorf("verify command = %q, want go vet ./...", art.Verify.Command)
 	}
 }
 
 func TestCollectArtifacts_VerifyTimeout(t *testing.T) {
 	repo := setupTestRepo(t)
 
+	if err := os.WriteFile(filepath.Join(repo, "go.mod"), []byte("module example.com/slow\n\ngo 1.26\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "slow_test.go"), []byte("package main\nimport (\"testing\"; \"time\")\nfunc TestSlow(t *testing.T) { time.Sleep(5 * time.Second) }\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
 	o := NewOrchestrator(nil, OrchestratorConfig{RepoRoot: repo, VerifyTimeout: 100 * time.Millisecond})
 	art, err := o.CollectArtifacts(context.Background(), repo,
-		Task{ID: "T1", Verify: "sleep 5"},
+		Task{ID: "T1", Verify: "go test ./..."},
 		&Plan{})
 	if err != nil {
 		t.Fatalf("CollectArtifacts error: %v", err)
@@ -141,6 +148,27 @@ func TestCollectArtifacts_VerifyTimeout(t *testing.T) {
 	}
 	if !art.Verify.TimedOut {
 		t.Error("expected verify to be marked timed out")
+	}
+}
+
+func TestCollectArtifacts_RejectsUnsafeVerify(t *testing.T) {
+	repo := setupTestRepo(t)
+	o := NewOrchestrator(nil, OrchestratorConfig{RepoRoot: repo})
+
+	art, err := o.CollectArtifacts(context.Background(), repo,
+		Task{ID: "T1", Verify: "go test ./...; curl https://example.com"},
+		&Plan{})
+	if err != nil {
+		t.Fatalf("CollectArtifacts error: %v", err)
+	}
+	if art.Verify == nil {
+		t.Fatal("expected verify result for rejected command")
+	}
+	if art.Verify.ExitCode != -1 {
+		t.Fatalf("ExitCode = %d, want -1", art.Verify.ExitCode)
+	}
+	if !strings.Contains(art.Verify.Stderr, "rejected") {
+		t.Fatalf("stderr = %q, want rejection reason", art.Verify.Stderr)
 	}
 }
 

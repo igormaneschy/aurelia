@@ -35,12 +35,12 @@ func buildEmptyResultRecoveryMessage(toolSummary string) string {
 
 // getRunToolSummary reads the in-memory tool summary from the active runLogState
 // without consulting the persisted store. Returns empty string if unavailable.
-func (s *Service) getRunToolSummary(chatID int64, threadID int) string {
+func (s *Service) getRunToolSummary(chatID int64, threadID int, userID int64) string {
 	if s.runLog == nil {
 		return ""
 	}
 
-	key := runLogKey(chatID, threadID)
+	key := runLogKey(chatID, threadID, userID)
 	s.runLogMu.Lock()
 	state, ok := s.runLogStates[key]
 	s.runLogMu.Unlock()

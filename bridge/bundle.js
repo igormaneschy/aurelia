@@ -286123,7 +286123,7 @@ function evaluateToolPolicy(toolName, input, security) {
         if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
         return { decision: "block", reason };
       }
-      if (toolName === "Read" && cfg.cwd && !isPathInsideCwd(path14, cfg.cwd, cfg.allowed_outside_cwd || [])) {
+      if (cfg.cwd && !isPathInsideCwd(path14, cfg.cwd, cfg.allowed_outside_cwd || [])) {
         const reason = `path outside working directory: ${path14}`;
         if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
         return { decision: "block", reason };
@@ -286620,7 +286620,6 @@ async function handleQuery(req) {
           lastErrorMsg = lastMsg.errorMessage;
         }
       }
-      redactedLog(`query done: rid=${reqId} stopReason=${stopReason ?? "none"} piError=${piError ?? "none"} lastErrorMsg=${lastErrorMsg ?? "none"} msgs=${lastMessages.length} tokens=${stats.tokens.input}+${stats.tokens.output} cost=${stats.cost} turns=${turnCount} assistantMsgs=${stats.assistantMessages}`);
       const hasExplicitError = piError || stopReason === "error" || lastErrorMsg;
       const zeroTokens = stats.tokens.input === 0 && stats.tokens.output === 0 && stats.cost === 0;
       const silentFailure = zeroTokens && (turnCount > 0 || stats.assistantMessages > 0);
@@ -286684,7 +286683,6 @@ async function handleSteer(req) {
     return;
   }
   clearTimeout(cs2.idleTimer);
-  cs2.currentReqId = reqId;
   redactedLog(`steer \u2014 rid=${reqId} chat=${chatID} thread=${threadID} user=${userID}`);
   try {
     await cs2.session.steer(req.prompt);
@@ -286710,7 +286708,6 @@ async function handleFollowUp(req) {
     return;
   }
   clearTimeout(cs2.idleTimer);
-  cs2.currentReqId = reqId;
   redactedLog(`followUp \u2014 rid=${reqId} chat=${chatID} thread=${threadID} user=${userID}`);
   try {
     await cs2.session.followUp(req.prompt);

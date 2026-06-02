@@ -486,6 +486,28 @@ describe("isSensitivePath (via evaluateToolPolicy Read)", () => {
     const r = evaluateToolPolicy("Read", { path: "/home/user/.pi/agent/auth.json" }, execSafeCtx());
     assert.strictEqual(r.decision, "block");
   });
+
+  it("blocks Grep outside cwd", () => {
+    const r = evaluateToolPolicy("Grep", { path: "/home/user/other" }, execSafeCtx());
+    assert.strictEqual(r.decision, "block");
+  });
+
+  it("blocks Glob outside cwd", () => {
+    const r = evaluateToolPolicy("Glob", { path: "../other" }, execSafeCtx());
+    assert.strictEqual(r.decision, "block");
+  });
+
+  it("blocks LS outside cwd", () => {
+    const r = evaluateToolPolicy("LS", { path: "/etc" }, execSafeCtx());
+    assert.strictEqual(r.decision, "block");
+  });
+
+  it("allows read-like tools inside cwd", () => {
+    for (const tool of ["Read", "Grep", "Glob", "LS"]) {
+      const r = evaluateToolPolicy(tool, { path: "/home/user/project/src" }, execSafeCtx());
+      assert.strictEqual(r.decision, "allow", `${tool} should be allowed inside cwd`);
+    }
+  });
 });
 
 // ── redactAuditPath (audit sensitive-path redaction helper) ──────────────

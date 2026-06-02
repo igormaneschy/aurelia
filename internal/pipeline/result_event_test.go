@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
@@ -17,6 +18,8 @@ type fakeOutput struct {
 	planCwd       string
 	planUserID    int64
 	confirmCalled bool
+	planDone      chan struct{}
+	planDoneOnce  sync.Once
 }
 
 func (f *fakeOutput) StartTyping(_ int64, _ int) func() {
@@ -52,6 +55,9 @@ func (f *fakeOutput) ExecuteApprovedPlan(_ int64, threadID int, _ int, cwd strin
 	f.planThreadID = threadID
 	f.planCwd = cwd
 	f.planUserID = userID
+	if f.planDone != nil {
+		f.planDoneOnce.Do(func() { close(f.planDone) })
+	}
 }
 
 type fakeProgress struct{}

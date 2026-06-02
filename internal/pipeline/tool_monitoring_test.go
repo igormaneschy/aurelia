@@ -386,9 +386,7 @@ func TestRecentDistinctTools(t *testing.T) {
 		}
 	}
 
-	d.mu.Lock()
 	tools := d.recentDistinctTools(3)
-	d.mu.Unlock()
 
 	if len(tools) != 2 {
 		t.Errorf("expected 2 distinct tools, got %d: %v", len(tools), tools)

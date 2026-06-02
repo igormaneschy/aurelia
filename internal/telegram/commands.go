@@ -683,7 +683,7 @@ func (bc *BotController) cmdStatus(chatID int64, threadID int, userID int64) (st
 
 	// Active run tool calls (live data, not persisted)
 	if bc.pipeline != nil {
-		snap := bc.pipeline.GetActiveToolSnapshot()
+		snap := bc.pipeline.GetActiveToolSnapshot(chatID, threadID, userID)
 		if snap.ToolCount > 0 {
 			var parts []string
 			parts = append(parts, fmt.Sprintf("🔧 Tool calls (run atual): **%d**", snap.ToolCount))
@@ -1619,7 +1619,10 @@ func (bc *BotController) cmdDebugRun(chatID int64, threadID int, text string) (s
 		return fmt.Sprintf("Execução %q não encontrada.", runID), nil
 	}
 
-	events, _ := bc.runLog.ListEvents(ctx, runID)
+	events, err := bc.runLog.ListEvents(ctx, runID)
+	if err != nil {
+		return "", fmt.Errorf("listar eventos da execução %s: %w", runID, err)
+	}
 	return formatTelegramRunDetail(r, events), nil
 }
 
