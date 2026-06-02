@@ -1,12 +1,15 @@
 package bridge
 
 import (
+	"context"
 	"crypto/sha256"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
+	"time"
 )
 
 const bridgePackageJSON = `{
@@ -89,6 +92,14 @@ func EnsureBridge(targetDir string, bundleJS []byte) (string, error) {
 						}
 					}
 				}
+			} else {
+				// PI CLI auth is absent — remove any stale isolated auth file
+				// so the PI SDK does not consume stale credentials.
+				if err := os.Remove(aureliaAuthPath); err != nil && !os.IsNotExist(err) {
+					slog.Warn("failed to remove stale isolated auth.json (PI CLI auth absent)", "error", err)
+				} else if err == nil {
+					slog.Info("Removed stale isolated auth.json — PI CLI auth is absent")
+				}
 			}
 		}
 	}
@@ -133,10 +144,19 @@ func EnsureBridge(targetDir string, bundleJS []byte) (string, error) {
 		}
 
 		slog.Info("Installing PI SDK bridge dependencies (npm install)...")
-		cmd := exec.Command("npm", "install", "--production", "--no-optional")
+		installCtx, installCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer installCancel()
+		cmd := exec.CommandContext(installCtx, "npm", "install", "--production", "--no-optional")
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		cmd.Dir = targetDir
 		cmd.Stdout = os.Stderr
 		cmd.Stderr = os.Stderr
+		// Kill the entire process group on context cancellation so npm's children
+		// (e.g. esbuild) are also terminated rather than becoming orphans.
+		cmd.Cancel = func() error {
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			return nil
+		}
 		if err := cmd.Run(); err != nil {
 			return "", fmt.Errorf("npm install failed: %w", err)
 		}
@@ -161,10 +181,18 @@ func EnsureBridge(targetDir string, bundleJS []byte) (string, error) {
 		} else {
 			// No embedded bundle — build from TypeScript source.
 			slog.Info("Building Bridge from TypeScript source (esbuild)...")
-			cmd := exec.Command("npm", "run", "build")
+			buildCtx, buildCancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer buildCancel()
+			cmd := exec.CommandContext(buildCtx, "npm", "run", "build")
+			cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 			cmd.Dir = targetDir
 			cmd.Stdout = os.Stderr
 			cmd.Stderr = os.Stderr
+			// Kill the entire process group on context cancellation.
+			cmd.Cancel = func() error {
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				return nil
+			}
 			if err := cmd.Run(); err != nil {
 				return "", fmt.Errorf("npm run build failed: %w", err)
 			}

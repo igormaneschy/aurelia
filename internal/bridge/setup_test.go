@@ -104,3 +104,48 @@ func TestSourceHashDetection(t *testing.T) {
 		t.Error("isSourceHashCurrent returned true for missing file")
 	}
 }
+
+// TestEnsureBridge_RemovesStaleAuthWhenPICLIAuthAbsent verifies that when
+// PI CLI auth (~/.pi/agent/auth.json) does NOT exist, any stale isolated
+// auth file (~/.aurelia/pi-agent/auth.json) is removed so the PI SDK
+// cannot consume stale credentials.
+func TestEnsureBridge_RemovesStaleAuthWhenPICLIAuthAbsent(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	// Create isolated PI agent dir with a stale regular-file auth.json.
+	aureliaPiAgentDir := filepath.Join(homeDir, ".aurelia", "pi-agent")
+	if err := os.MkdirAll(aureliaPiAgentDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	staleAuth := filepath.Join(aureliaPiAgentDir, "auth.json")
+	if err := os.WriteFile(staleAuth, []byte(`{"key":"stale-creds"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Intentionally do NOT create ~/.pi/agent/auth.json — PI CLI auth is absent.
+
+	// Create a minimal bridge target dir so EnsureBridge returns early
+	// (avoids running npm install).
+	targetDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(targetDir, "node_modules"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, "bundle.js"), []byte("// bundle"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := EnsureBridge(targetDir, nil)
+	if err != nil {
+		t.Fatalf("EnsureBridge failed: %v", err)
+	}
+
+	// Verify the stale auth file was removed.
+	if _, err := os.Stat(staleAuth); !os.IsNotExist(err) {
+		if err != nil {
+			t.Errorf("unexpected error checking auth: %v", err)
+		} else {
+			t.Error("stale auth.json was NOT removed when PI CLI auth is absent")
+		}
+	}
+}

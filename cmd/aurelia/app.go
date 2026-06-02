@@ -59,7 +59,9 @@ var runClaudeAuthStatus = func() ([]byte, error) {
 	if claudePath == "" {
 		return nil, err
 	}
-	return exec.Command(claudePath, "auth", "status").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, claudePath, "auth", "status").Output()
 }
 
 func bootstrapApp() (*app, error) {
@@ -306,7 +308,7 @@ func bootstrapApp() (*app, error) {
 	jsonPath := runtime.PersistPath(filepath.Join(homeDir, ".aurelia"))
 	projectIndex := runtime.NewProjectIndex(nil, jsonPath)
 	bot.SetProjectIndex(projectIndex)
-	go func() {
+	goSafe("project index rebuild", func() {
 		rebuildCtx, rebuildCancel := context.WithCancel(context.Background())
 		defer rebuildCancel()
 		// Initial rebuild in background.
@@ -325,7 +327,7 @@ func bootstrapApp() (*app, error) {
 				return
 			}
 		}
-	}()
+	})
 
 	scheduler, err := setupCronScheduler(cronStore, br, agentReg, personaSvc, bot, resolver.Memory(), cfg.DefaultProvider, exePath, users.NewResolver(resolver.Root()))
 	if err != nil {
@@ -472,14 +474,14 @@ func setupCronScheduler(
 
 func (a *app) start() {
 	if a.scheduler != nil {
-		go func() {
+		goSafe("cron scheduler", func() {
 			if err := a.scheduler.Start(a.cronCtx); err != nil && err != context.Canceled {
 				log.Printf("Warning: cron scheduler stopped with error: %v", err)
 			}
-		}()
+		})
 	}
 	a.startSessionGC()
-	go a.bot.Start()
+	goSafe("bot", func() { a.bot.Start() })
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -493,6 +495,19 @@ func (a *app) start() {
 
 	// Reconcile stale run_journal rows from before this process start
 	go a.reconcileStaleRuns()
+}
+
+// goSafe launches fn in a new goroutine with a top-level defer recover().
+// If fn panics, the panic is logged instead of crashing the daemon.
+func goSafe(name string, fn func()) {
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("panic in goroutine %q: %v", name, r)
+			}
+		}()
+		fn()
+	}()
 }
 
 func (a *app) reconcileStaleRuns() {
@@ -526,7 +541,7 @@ func (a *app) startSessionGC() {
 		ttlHours = 168
 	}
 	maxAge := time.Duration(ttlHours) * time.Hour
-	go func() {
+	goSafe("session GC", func() {
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
 		for {
@@ -537,7 +552,7 @@ func (a *app) startSessionGC() {
 				a.sessions.GC(maxAge)
 			}
 		}
-	}()
+	})
 }
 
 func (a *app) shutdown(ctx context.Context) {
@@ -645,19 +660,26 @@ func hasPIAuth(provider string) bool {
 	if err != nil {
 		return false
 	}
+	return hasPIAuthAt(home, provider)
+}
 
-	// Check isolated dir first, then fall back to PI CLI dir for users who
-	// configured PI CLI after the initial one-time inheritance.
-	candidates := []string{
-		filepath.Join(home, ".aurelia", "pi-agent", "auth.json"),
-		filepath.Join(home, ".pi", "agent", "auth.json"),
-	}
-	for _, path := range candidates {
-		if providerInAuthFile(path, provider) {
+// hasPIAuthAt is the testable core of hasPIAuth, accepting an explicit home
+// directory to avoid coupling tests to os.UserHomeDir().
+func hasPIAuthAt(home, provider string) bool {
+	// Check the isolated path ONLY if it is the required symlink to PI CLI.
+	// A regular file at this path means stale credentials from before the
+	// symlink was established — reject it so we don't trust stale isolated auth.
+	isolatedPath := filepath.Join(home, ".aurelia", "pi-agent", "auth.json")
+	piCliPath := filepath.Join(home, ".pi", "agent", "auth.json")
+	if linkTarget, linkErr := os.Readlink(isolatedPath); linkErr == nil && linkTarget == piCliPath {
+		// Valid symlink — check if it resolves to an auth file with this provider.
+		if providerInAuthFile(isolatedPath, provider) {
 			return true
 		}
 	}
-	return false
+
+	// Fall back to PI CLI directory directly.
+	return providerInAuthFile(piCliPath, provider)
 }
 
 func providerInAuthFile(path, provider string) bool {
