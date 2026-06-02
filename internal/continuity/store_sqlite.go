@@ -94,33 +94,38 @@ func (s *SQLiteStore) initialize() error {
 // ensureUserIDColumn migrates from the old (chat_id, thread_id) primary key
 // to the new (chat_id, thread_id, user_id) primary key. This is safe to run
 // on every startup — it detects whether the migration is needed.
+// The migration runs inside a single transaction for atomicity: if the daemon
+// crashes mid-migration, SQLite rolls back and the old table is untouched.
 func (s *SQLiteStore) ensureUserIDColumn() error {
-	// Check if user_id column exists.
-	var colCount int
+	// Check if user_id is already part of the PK using pragma_table_info.pk.
+	// pk=0 means the column is NOT in the primary key; pk>0 means it is.
+	// This correctly handles the edge case where user_id exists as a regular
+	// column but was never promoted to the PK (e.g., manual ALTER TABLE).
+	var pkPosition int
 	err := s.db.QueryRow(`
-		SELECT COUNT(*) FROM pragma_table_info('conversation_state')
-		WHERE name = 'user_id'`).Scan(&colCount)
+		SELECT pk FROM pragma_table_info('conversation_state')
+		WHERE name = 'user_id'`).Scan(&pkPosition)
 	if err != nil {
-		return fmt.Errorf("check user_id column: %w", err)
+		// Column doesn't exist or query failed — proceed to migration.
+		// sql.ErrNoRows means the column is absent, which is fine.
+		if err.Error() != "sql: no rows in result set" {
+			return fmt.Errorf("check user_id PK: %w", err)
+		}
 	}
-	if colCount > 0 {
-		// Column exists — check if it's already in the PK.
-		// SQLite doesn't support ALTER TABLE ... ALTER COLUMN, so we check
-		// by looking at the table SQL.
-		var sql string
-		err = s.db.QueryRow("SELECT sql FROM sqlite_master WHERE type='table' AND name='conversation_state'").Scan(&sql)
-		if err != nil {
-			return fmt.Errorf("check table schema: %w", err)
-		}
-		if strings.Contains(sql, "user_id") {
-			// Already migrated — nothing to do.
-			return nil
-		}
+	if pkPosition > 0 {
+		// Already migrated — user_id is part of the PK.
+		return nil
 	}
 
-	// Migration needed: recreate the table with the new PK.
+	// Migration needed: recreate the table with the new PK inside a transaction.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin migration transaction: %w", err)
+	}
+	defer tx.Rollback() // no-op after successful Commit
+
 	// Step 1: Create new table.
-	_, err = s.db.Exec(`
+	_, err = tx.Exec(`
 	CREATE TABLE IF NOT EXISTS conversation_state_new (
 		chat_id INTEGER NOT NULL,
 		thread_id INTEGER NOT NULL,
@@ -144,7 +149,7 @@ func (s *SQLiteStore) ensureUserIDColumn() error {
 	}
 
 	// Step 2: Copy data (user_id defaults to 0 for legacy rows).
-	_, err = s.db.Exec(`
+	_, err = tx.Exec(`
 	INSERT OR IGNORE INTO conversation_state_new
 		(chat_id, thread_id, user_id, cwd, active_goal, last_user_intent,
 		 last_assistant_summary, last_checkpoint, last_run_id,
@@ -159,23 +164,27 @@ func (s *SQLiteStore) ensureUserIDColumn() error {
 		return fmt.Errorf("copy conversation_state data: %w", err)
 	}
 
-	// Step 3: Swap tables atomically.
-	_, err = s.db.Exec(`
-	DROP TABLE conversation_state;
-	ALTER TABLE conversation_state_new RENAME TO conversation_state`)
+	// Step 3: Drop old table.
+	_, err = tx.Exec(`DROP TABLE conversation_state`)
 	if err != nil {
-		return fmt.Errorf("swap conversation_state tables: %w", err)
+		return fmt.Errorf("drop old conversation_state: %w", err)
 	}
 
-	// Step 4: Recreate index.
-	_, err = s.db.Exec(`
+	// Step 4: Rename new table to replace the old one.
+	_, err = tx.Exec(`ALTER TABLE conversation_state_new RENAME TO conversation_state`)
+	if err != nil {
+		return fmt.Errorf("rename conversation_state_new: %w", err)
+	}
+
+	// Step 5: Recreate index.
+	_, err = tx.Exec(`
 	CREATE INDEX IF NOT EXISTS idx_conversation_state_cwd
 	ON conversation_state(cwd)`)
 	if err != nil {
 		return fmt.Errorf("recreate cwd index: %w", err)
 	}
 
-	return nil
+	return tx.Commit()
 }
 
 // Get retrieves the current state for a chat/thread, or nil if absent.

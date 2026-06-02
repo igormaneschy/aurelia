@@ -212,7 +212,7 @@ func (d *Dreamer) run(userID int64) {
 			AllowedTools:   []string{},
 			NoUserSettings: true,
 			PersistSession: boolPtr(false),
-			ChatID:         0, // dream is background — no specific chat
+			ChatID:  0, // dream is background; (0,0,userID) bucket = user-scoped continuity
 			ThreadID:       0,
 			UserID:          userID,
 			Security: &bridge.SecurityContext{

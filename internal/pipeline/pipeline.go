@@ -961,13 +961,6 @@ func timeoutDetails(trackers ...*runTimeoutTracker) (string, time.Duration) {
 	return trackers[0].snapshot()
 }
 
-func sessionUserID(userID ...int64) int64 {
-	if len(userID) == 0 {
-		return 0
-	}
-	return userID[0]
-}
-
 func (s *Service) handleRetryOutcome(chatID int64, threadID int, messageID int, outcome Outcome, userID int64) {
 	switch outcome {
 	case OutcomeSuccess:

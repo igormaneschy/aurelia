@@ -671,7 +671,7 @@ func truncateToBudget(content string, budget int) string {
 // when the session is cold/inactive, or when userText suggests a continuation.
 // The checkpoint data is wrapped in <checkpoint_untrusted> to prevent prompt injection.
 // Returns empty string when no relevant last-run state exists.
-func (bc *Service) buildLastRunStateSection(chatID int64, threadID int, userText string, userID ...int64) string {
+func (bc *Service) buildLastRunStateSection(chatID int64, threadID int, userText string, userID int64) string {
 	if bc.runLog == nil {
 		return ""
 	}
@@ -695,7 +695,7 @@ func (bc *Service) buildLastRunStateSection(chatID int64, threadID int, userText
 	}
 
 	if bc.sessions != nil {
-		_, active := bc.sessions.GetSessionWithState(chatID, threadID, sessionUserID(userID...))
+		_, active := bc.sessions.GetSessionWithState(chatID, threadID, userID)
 		if !active {
 			// Cold session with completed run — inject for context
 			return bc.formatCheckpointSection(record)
@@ -759,7 +759,7 @@ func (bc *Service) buildSecurityPromptSection(chatID int64, threadID int, agent 
 // buildContinuitySection returns the prompt block for durable conversation
 // recovery context. Returns empty when no recent state exists in the store.
 // The block is redacted and wrapped in untrusted delimiters.
-func (bc *Service) buildContinuitySection(chatID int64, threadID int, userText string, userID ...int64) string {
+func (bc *Service) buildContinuitySection(chatID int64, threadID int, userText string, userID int64) string {
 	if bc.continuity == nil {
 		return ""
 	}
@@ -767,8 +767,7 @@ func (bc *Service) buildContinuitySection(chatID int64, threadID int, userText s
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	uid := sessionUserID(userID...)
-	state, err := bc.continuity.Get(ctx, chatID, threadID, uid)
+	state, err := bc.continuity.Get(ctx, chatID, threadID, userID)
 	if err != nil {
 		log.Printf("continuity: failed to get state chat=%d thread=%d: %v", chatID, threadID, err)
 		return ""
@@ -786,7 +785,7 @@ func (bc *Service) buildContinuitySection(chatID int64, threadID int, userText s
 	// unavailable (should not happen in practice, but nil-safe).
 	sessionIsActive := false
 	if bc.sessions != nil {
-		_, sessionIsActive = bc.sessions.GetSessionWithState(chatID, threadID, sessionUserID(userID...))
+		_, sessionIsActive = bc.sessions.GetSessionWithState(chatID, threadID, userID)
 	}
 
 	switch freshness := continuity.Freshness(state); {

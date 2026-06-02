@@ -386,7 +386,7 @@ func (f *fakeRunLog) Close() error { return nil }
 
 func TestBuildLastRunStateSection_ReturnsEmptyWhenNoRunLog(t *testing.T) {
 	bc := &Service{}
-	got := bc.buildLastRunStateSection(1, 0, "hello")
+	got := bc.buildLastRunStateSection(1, 0, "hello", 0)
 	if got != "" {
 		t.Fatalf("expected empty without runlog, got %q", got)
 	}
@@ -407,7 +407,7 @@ func TestBuildLastRunStateSection_CompletedRunSkipsWithoutContinuation(t *testin
 	// Active session + completed run + casual text = skip
 	bc.sessions.Set(1, 0, "/tmp/test-session.jsonl")
 
-	got := bc.buildLastRunStateSection(1, 0, "good morning")
+	got := bc.buildLastRunStateSection(1, 0, "good morning", 0)
 	if got != "" {
 		t.Fatalf("expected empty for completed run without continuation, got %q", got)
 	}
@@ -427,7 +427,7 @@ func TestBuildLastRunStateSection_FailedRunInjectsCheckpoint(t *testing.T) {
 	}
 	bc.sessions.Set(1, 0, "/tmp/test-session.jsonl")
 
-	got := bc.buildLastRunStateSection(1, 0, "good morning")
+	got := bc.buildLastRunStateSection(1, 0, "good morning", 0)
 	if got == "" {
 		t.Fatal("expected checkpoint for failed run")
 	}
@@ -453,7 +453,7 @@ func TestBuildLastRunStateSection_ContinuationTriggersInjection(t *testing.T) {
 	}
 	bc.sessions.Set(1, 0, "/tmp/test-session.jsonl")
 
-	got := bc.buildLastRunStateSection(1, 0, "continua a análise")
+	got := bc.buildLastRunStateSection(1, 0, "continua a análise", 0)
 	if got == "" {
 		t.Fatal("expected checkpoint for continuation trigger")
 	}
@@ -476,7 +476,7 @@ func TestBuildLastRunStateSection_RedactsSecrets(t *testing.T) {
 	}
 	bc.sessions.Set(1, 0, "/tmp/test-session.jsonl")
 
-	got := bc.buildLastRunStateSection(1, 0, "retoma")
+	got := bc.buildLastRunStateSection(1, 0, "retoma", 0)
 	if !strings.Contains(got, "API_KEY_REDACTED") && !strings.Contains(got, "REDACTED") {
 		t.Fatalf("expected secrets to be redacted in checkpoint, got %q", got)
 	}
@@ -589,7 +589,7 @@ func TestBuildContinuitySection_HotActive_Skips(t *testing.T) {
 	ss.Set(42, 0, "sid-hot-active")
 	svc := &Service{continuity: contStore, sessions: ss}
 
-	got := svc.buildContinuitySection(42, 0, "bom dia")
+	got := svc.buildContinuitySection(42, 0, "bom dia", 0)
 	if got != "" {
 		t.Fatal("expected empty continuity for hot+active session, got non-empty block")
 	}
@@ -619,7 +619,7 @@ func TestBuildContinuitySection_HotCold_Injects(t *testing.T) {
 	// Session key exists but no session was Set → GetWithState returns ("", false)
 	svc := &Service{continuity: contStore, sessions: ss}
 
-	got := svc.buildContinuitySection(42, 0, "bom dia")
+	got := svc.buildContinuitySection(42, 0, "bom dia", 0)
 	if got == "" {
 		t.Fatal("expected continuity for hot+cold session, got empty")
 	}
@@ -651,7 +651,7 @@ func TestBuildContinuitySection_WarmCold_Injects(t *testing.T) {
 	ss := session.NewStore()
 	svc := &Service{continuity: contStore, sessions: ss}
 
-	got := svc.buildContinuitySection(42, 0, "bom dia")
+	got := svc.buildContinuitySection(42, 0, "bom dia", 0)
 	if got == "" {
 		t.Fatal("expected continuity for warm+cold session, got empty")
 	}
@@ -683,7 +683,7 @@ func TestBuildContinuitySection_WarmActive_Skips(t *testing.T) {
 	ss.Set(42, 0, "sid-warm-active")
 	svc := &Service{continuity: contStore, sessions: ss}
 
-	got := svc.buildContinuitySection(42, 0, "bom dia")
+	got := svc.buildContinuitySection(42, 0, "bom dia", 0)
 	if got != "" {
 		t.Fatal("expected empty continuity for warm+active session, got non-empty block")
 	}
@@ -712,13 +712,13 @@ func TestBuildContinuitySection_Stale_Skips(t *testing.T) {
 	svc := &Service{continuity: contStore, sessions: ss}
 
 	// Even with inactive session, stale state should not inject
-	got := svc.buildContinuitySection(42, 0, "bom dia")
+	got := svc.buildContinuitySection(42, 0, "bom dia", 0)
 	if got != "" {
 		t.Fatal("expected empty continuity for stale state, got non-empty block")
 	}
 
 	// Also verify with continuation text (continuation should still trigger)
-	got2 := svc.buildContinuitySection(42, 0, "continua")
+	got2 := svc.buildContinuitySection(42, 0, "continua", 0)
 	if got2 == "" {
 		t.Fatal("expected continuity for stale state with continuation text")
 	}
@@ -749,7 +749,7 @@ func TestBuildContinuitySection_ContinuationAlwaysInjects(t *testing.T) {
 
 	// With hot + active — normally skipped, but continuation overrides
 	svc := &Service{continuity: contStore, sessions: ss}
-	got := svc.buildContinuitySection(42, 0, "continua a análise")
+	got := svc.buildContinuitySection(42, 0, "continua a análise", 0)
 	if got == "" {
 		t.Fatal("expected continuity for continuation text, got empty")
 	}
@@ -768,7 +768,7 @@ func TestBuildContinuitySection_NoState_Skips(t *testing.T) {
 	ss.Set(42, 0, "sid-no-state")
 	svc := &Service{continuity: contStore, sessions: ss}
 
-	got := svc.buildContinuitySection(42, 0, "continua")
+	got := svc.buildContinuitySection(42, 0, "continua", 0)
 	if got != "" {
 		t.Fatal("expected empty continuity when no state exists, got non-empty")
 	}
@@ -778,7 +778,7 @@ func TestBuildContinuitySection_NoState_Skips(t *testing.T) {
 // store produces no section.
 func TestBuildContinuitySection_NilStore_ReturnsEmpty(t *testing.T) {
 	svc := &Service{continuity: nil, sessions: session.NewStore()}
-	got := svc.buildContinuitySection(42, 0, "hello")
+	got := svc.buildContinuitySection(42, 0, "hello", 0)
 	if got != "" {
 		t.Fatal("expected empty continuity when store is nil")
 	}
@@ -807,7 +807,7 @@ func TestBuildContinuitySection_NilSessions_DefaultsCold(t *testing.T) {
 	// sessions is nil — defaults to inactive (cold)
 	svc := &Service{continuity: contStore, sessions: nil}
 
-	got := svc.buildContinuitySection(42, 0, "bom dia")
+	got := svc.buildContinuitySection(42, 0, "bom dia", 0)
 	if got == "" {
 		t.Fatal("expected continuity when sessions is nil (defaults to cold), got empty")
 	}

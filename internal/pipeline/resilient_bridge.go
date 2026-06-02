@@ -26,7 +26,7 @@ type ResilientBridge struct {
 	// ContinuitySnapshot is called before fallback to capture current context.
 	// Returns a compact summary string to inject into the fallback prompt.
 	// The summary is already redacted, escaped, and capped. May be empty string.
-	ContinuitySnapshot func(ctx context.Context, chatID int64, threadID int, userID ...int64) string
+	ContinuitySnapshot func(ctx context.Context, chatID int64, threadID int, userID int64) string
 
 	// OnEvent is called when the resilient bridge emits an observable event
 	// (retry, fallback, circuit breaker). The callback must be fast and
