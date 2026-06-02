@@ -14,7 +14,8 @@ Quando a sessão PI fica fria, o daemon reinicia, o prompt budget omite memória
 
 ## Goals
 
-- [x] Persistir um `ConversationState` por `ConversationKey{chat_id, thread_id}`.
+- [x] Persistir um `ConversationState` por `ConversationKey{chat_id, thread_id, user_id}`.
+- [x] Isolar contexto de continuity entre usuários em grupos (v0.20.4).
 - [x] Atualizar esse estado em sucesso, falha, timeout, empty result, auto-reset, checkpoint e mudança de `cwd`.
 - [x] Injetar um `ContinuityBlock` pequeno e determinístico no prompt antes de memórias longas.
 - [x] Tratar continuidade como obrigatória: não pode ser vencida por memória global grande.
@@ -29,7 +30,7 @@ Quando a sessão PI fica fria, o daemon reinicia, o prompt budget omite memória
 - Sub-agente LLM bloqueante antes de toda resposta.
 - Reescrever nudge/dream.
 - Substituir Markdown memory.
-- Resolver multi-user isolation além dos contratos já previstos em `project-memory`.
+- Resolver multi-user isolation além dos contratos já previstos em `project-memory`. ~~(implementado v0.20.4: `ConversationKey` inclui `UserID`)~~
 
 ---
 
@@ -92,7 +93,7 @@ CREATE TABLE IF NOT EXISTS conversation_state (
     session_cold INTEGER NOT NULL DEFAULT 0,
     reset_reason TEXT DEFAULT '',
     updated_at INTEGER NOT NULL,
-    PRIMARY KEY (chat_id, thread_id)
+    PRIMARY KEY (chat_id, thread_id, user_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_conversation_state_cwd

@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.20.4 - 2026-06-02
+
+### Security
+- **Context isolation in groups**: `ConversationKey` now includes `UserID`
+  (3-column PK: `chat_id`, `thread_id`, `user_id`). Prevents user B in a
+  group from seeing user A's continuity context. Legacy rows migrate
+  automatically with `user_id=0` and remain accessible.
+- **Session deactivation on crash**: `NewPersistentStore` now explicitly
+  calls `DeactivateAll()` after loading the snapshot, guarding against
+  stale active state on daemon crash between writes.
+
+### Changed
+- **Migration safety**: `ensureUserIDColumn()` runs inside a single SQLite
+  transaction. If the daemon crashes mid-migration, the old table is
+  untouched. Detection now uses `pragma_table_info.pk` instead of a
+  fragile `strings.Contains` on the DDL.
+- **Dream/nudge session accountability**: `SecurityContext` now includes
+  `ChatID`, `ThreadID`, `UserID` in dream and nudge runs, enabling
+  proper audit logging.
+
+### Removed
+- **Variadic `userID` from internal pipeline functions**: 8 functions now
+  take `userID int64` directly instead of `...int64`. Removed the
+  `sessionUserID()` helper — all call sites are explicit.
+
 ## v0.20.3 - 2026-06-01
 
 ### Fixed
