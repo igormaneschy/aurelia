@@ -258,7 +258,7 @@ Prompt assembly por TurnContext:
 ## 7. Session/Profile Operability
 
 **Spec:** `.specs/features/session-profile-operability/`  
-**Status:** 🔴 Draft — próxima prioridade recomendada  
+**Status:** ✅ Concluído em v0.21.0 (2026-06-02)  
 **Depende de:** User Isolation + Operational Observability/runlog + Project Binding + Security Guard-Rails
 
 **Problem:** antes de aprofundar memória/nudge, Aurelia precisa fechar lacunas operacionais básicas: correlação durável entre Pi session e mensagens Telegram, perfis de modo por usuário, timezone de cron e fallback de cwd para chats privados.

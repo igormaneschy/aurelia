@@ -4,6 +4,90 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.21.0 - 2026-06-02
+
+### Added
+- **Runlog Message Bridge** — `RunRecord` and `RunUpdate` now carry
+  `InboundMessageID` and `OutboundMessageID`. Idempotent SQLite migration
+  adds the columns on startup (zero default, COALESCE for legacy rows);
+  the `idx_run_journal_session_outbound` index makes
+  `GetLastOutboundMessage(session_file)` O(log n). Pipeline sets the
+  inbound id at `Start` and best-effort updates the outbound id after
+  the final `SendReply`. Content privacy preserved — only message IDs
+  are persisted, never message text.
+- **Mode Profiles** — per-user behavioural overlay system. New
+  `Profile.ActiveMode` field (with PT/EN aliases: developer/dev/
+  desenvolvedor, researcher/research/pesquisa/pesquisador, general/
+  geral/auto). `mode_<name>.md` files in
+  `users/<id>/personas/` are appended LAST in `BuildPromptForUser`
+  (after IDENTITY/SOUL/USER/owner/project). Missing or invalid mode
+  files are silently ignored. New `/mode` slash + natural-language
+  command (registered via `bot.Handle` so Telegram's `@botname`
+  suffix in groups is stripped). Active mode shown in `/agents` output
+  with `(● ativo)` marker. Memory checkpoints get a `[mode:xxx]` tag
+  in the note.
+- **Profile enrichment** — new `Profile.Timezone` (IANA, empty = UTC)
+  and `Profile.DefaultCWD` fields. Both decode from old JSON
+  profiles as empty strings (backward-compat). `NormalizeTimezone`
+  validates the IANA name and falls back to UTC on any error. Cron
+  parser (`cronFastParse` + `parseCronWithLLM`) now uses
+  user-local `now` and the timezone-aware prompt. Recurring cron
+  jobs persist the timezone; the scheduler uses
+  `computeNextRunInLocation` and normalizes the result to UTC so
+  `ListDueJobs` comparisons remain correct. `DefaultCWD` is a final
+  fallback in the CWD chain (agent > binding > session >
+  `DefaultCWD`), applied only in private chats with no topic — never
+  in groups or topics. Onboarding collects timezone (4 presets +
+  manual IANA) after the profile step.
+
+### Changed
+- **Slash command dispatch is mandatory for new commands** — added
+  `stripBotMention` defense in `MatchCommand` so any future slash
+  command accidentally routed through text matching still works in
+  groups/topics where Telegram appends `@<bot_username>`. The right
+  fix remains `bc.bot.Handle("/cmd", handler)` so telebot strips the
+  suffix and populates `c.Message().Payload`.
+- **Cron time semantics use user-local time everywhere** — `now`
+  passed through `cronFastParse` and the LLM prompt builder
+  preserves the user's timezone, including in the rendered example
+  (`%%s` placeholder ambiguity removed by substituting the actual
+  offset directly).
+
+### Fixed
+- **`/mode` and `/agents` thread routing** — both now use
+  `SendTextWithThread` so the reply stays in the forum topic where
+  the command was sent. `/agents` was consolidated with the
+  natural-language path (`lista agents` / `quais agents`) to use the
+  same markdown + mode section output.
+- **Stale-cache validation in `/model <name>`** — `cmdSetModel`
+  now always force-refreshes from PI before validating, so a model
+  added to PI 30 seconds ago can be set immediately. Cache is also
+  cleared after the provider env refresh so the next listing
+  reflects the new API key configuration.
+- **`/model refresh` exposed as natural language** — `atualiza
+  modelos`, `atualizar modelos`, `refresh modelos`, `recarregar
+  modelos`, `atualiza a lista` all route to `cmdRefreshModels`.
+- **Dead wrapper code** — removed the unused
+  `BotController.buildSystemPrompt` wrapper in `telegram/pipeline.go`
+  (it hardcoded `isPrivateChat: false`, which would have skipped the
+  `DefaultCWD` fallback in private chats if ever called). The
+  underlying `pipeline.Service.BuildSystemPrompt` is already
+  thoroughly tested in `prompt_builder_test.go`.
+- **Cron `%%s` in LLM prompt example** — was producing the literal
+  `%s` in the rendered prompt, which could confuse the model into
+  treating it as a format placeholder. Now substituted with the
+  actual `offsetText` so the example is concrete
+  (`2026-03-27T15:00:00-03:00`).
+
+### Migration Safety
+- **Profile JSON** — new fields (`active_mode`, `timezone`,
+  `default_cwd`) all use `omitempty` so existing profiles decode
+  cleanly with empty values. No manual migration needed.
+- **Runlog SQLite** — new columns are nullable with zero default;
+  legacy rows return `0` via `COALESCE(...)` and remain valid.
+- **Cron jobs** — no destructive change; existing rows have empty
+  `timezone` and continue to run in UTC (the previous behavior).
+
 ## v0.20.4 - 2026-06-02
 
 ### Security
