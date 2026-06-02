@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime/debug"
 	"time"
 
 	"github.com/igormaneschy/aurelia/internal/agents"
@@ -498,12 +499,13 @@ func (a *app) start() {
 }
 
 // goSafe launches fn in a new goroutine with a top-level defer recover().
-// If fn panics, the panic is logged instead of crashing the daemon.
+// If fn panics, the panic is logged with a stack trace instead of crashing
+// the daemon.
 func goSafe(name string, fn func()) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("panic in goroutine %q: %v", name, r)
+				log.Printf("panic in goroutine %q: %v\n%s", name, r, debug.Stack())
 			}
 		}()
 		fn()
@@ -671,10 +673,15 @@ func hasPIAuthAt(home, provider string) bool {
 	// symlink was established — reject it so we don't trust stale isolated auth.
 	isolatedPath := filepath.Join(home, ".aurelia", "pi-agent", "auth.json")
 	piCliPath := filepath.Join(home, ".pi", "agent", "auth.json")
-	if linkTarget, linkErr := os.Readlink(isolatedPath); linkErr == nil && linkTarget == piCliPath {
-		// Valid symlink — check if it resolves to an auth file with this provider.
-		if providerInAuthFile(isolatedPath, provider) {
-			return true
+	if _, linkErr := os.Readlink(isolatedPath); linkErr == nil {
+		// Normalize the link target to handle relative symlinks (e.g.
+		// ../../.pi/agent/auth.json). EvalSymlinks resolves to the
+		// canonical absolute path, so comparison works reliably.
+		if resolved, evalErr := filepath.EvalSymlinks(isolatedPath); evalErr == nil && resolved == piCliPath {
+			// Valid symlink — check if it resolves to an auth file with this provider.
+			if providerInAuthFile(isolatedPath, provider) {
+				return true
+			}
 		}
 	}
 

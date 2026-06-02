@@ -1198,7 +1198,10 @@ func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, e
 			s.sessions.SetSession(chatID, threadID, userID, ev.SessionFile)
 			s.patchContinuitySessionID(chatID, threadID, ev.SessionFile, userID)
 		}
-		// Also persist session_file to runlog as fallback.
+		// Also persist session_file to runlog as fallback in case the system
+		// event was missed or arrived before the runlog entry existed. This is
+		// an intentional redundant write — the value is idempotent (same
+		// session_file), and the DB update is a no-op when the value is unchanged.
 		s.updateRunLogSessionFile(chatID, threadID, ev.SessionFile)
 	}
 

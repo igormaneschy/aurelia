@@ -111,6 +111,10 @@ func TestSourceHashDetection(t *testing.T) {
 // cannot consume stale credentials.
 func TestEnsureBridge_RemovesStaleAuthWhenPICLIAuthAbsent(t *testing.T) {
 	homeDir := t.TempDir()
+	// t.Setenv("HOME") is compatible with os.UserHomeDir() on Unix because
+	// UserHomeDir reads $HOME first before falling back to os/user.Current.
+	// On macOS/Linux this test path is reliable; on Windows it would skip
+	// silently because the project does not use %USERPROFILE%.
 	t.Setenv("HOME", homeDir)
 
 	// Create isolated PI agent dir with a stale regular-file auth.json.

@@ -147,14 +147,20 @@ func EnsureBridge(targetDir string, bundleJS []byte) (string, error) {
 		installCtx, installCancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer installCancel()
 		cmd := exec.CommandContext(installCtx, "npm", "install", "--production", "--no-optional")
+		// SysProcAttr.Setpgid is Unix-only (Linux/macOS). This project targets
+		// Unix daemons exclusively; Windows support would require a different
+		// strategy for process group cleanup.
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		cmd.Dir = targetDir
 		cmd.Stdout = os.Stderr
 		cmd.Stderr = os.Stderr
 		// Kill the entire process group on context cancellation so npm's children
 		// (e.g. esbuild) are also terminated rather than becoming orphans.
+		// cmd.Process may be nil if the context is canceled before the process starts.
 		cmd.Cancel = func() error {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			if cmd.Process != nil {
+				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+			}
 			return nil
 		}
 		if err := cmd.Run(); err != nil {
@@ -189,8 +195,11 @@ func EnsureBridge(targetDir string, bundleJS []byte) (string, error) {
 			cmd.Stdout = os.Stderr
 			cmd.Stderr = os.Stderr
 			// Kill the entire process group on context cancellation.
+			// cmd.Process may be nil if the context is canceled before the process starts.
 			cmd.Cancel = func() error {
-				_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				if cmd.Process != nil {
+					_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+				}
 				return nil
 			}
 			if err := cmd.Run(); err != nil {
