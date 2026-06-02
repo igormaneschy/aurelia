@@ -36,6 +36,7 @@ const (
 	CmdListAgents
 	CmdListModels
 	CmdSetModel
+	CmdRefreshModels
 	CmdMemoryStatus
 	CmdMemoryCheckpoint
 	CmdUsers
@@ -131,6 +132,12 @@ var commandRules = []commandRule{
 		"muda modelo", "mudar modelo", "troca modelo", "trocar modelo",
 		"escolhe modelo", "seleciona modelo",
 		"/model ",
+	}, false},
+	// refresh_models — natural-language alias for /model refresh.
+	// Substring match keeps "atualiza a lista de modelos" and variants working.
+	{CmdRefreshModels, []string{
+		"atualiza modelos", "atualizar modelos", "atualiza a lista",
+		"refresh modelos", "recarregar modelos",
 	}, false},
 	// memory_status
 	{CmdMemoryStatus, []string{
@@ -295,6 +302,12 @@ func (bc *BotController) handleCommand(c telebot.Context, cmd *MatchedCommand) e
 			break
 		}
 		reply, err = bc.cmdSetModel(c, cmd.Text)
+	case CmdRefreshModels:
+		if !bc.isOwner(c) {
+			reply = "Permissão negada. Apenas o owner pode atualizar a lista de modelos."
+			break
+		}
+		reply, err = bc.cmdRefreshModels()
 	case CmdMemoryStatus:
 		reply, err = bc.cmdMemoryStatus(c.Chat().ID, c.Message().ThreadID)
 	case CmdMemoryCheckpoint:
@@ -923,6 +936,7 @@ func (bc *BotController) cmdListModels() (string, error) {
 	}
 
 	lines = append(lines, "\n\nUse /model <nome> para trocar ou /model auto para usar o PI default.")
+	lines = append(lines, "Lista em cache (5 min) — diga 'atualiza modelos' para refresh imediato.")
 	return strings.Join(lines, "\n"), nil
 }
 
@@ -991,21 +1005,18 @@ func (bc *BotController) cmdSetModel(c telebot.Context, text string) (string, er
 		return "Processador não disponível.", nil
 	}
 
-	// Validate: check if the model exists in PI registry
+	// Validate: check if the model exists in PI registry.
+	// Always force-refresh: the user just typed a specific model name, so they
+	// expect validation against the current PI state, not a 5-min-old cache.
+	// A stale cache would falsely reject a model added to PI moments ago,
+	// forcing the user to run /model refresh first. The 1-15s latency is
+	// a fair price for accurate validation.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	available, err := bc.getModels(ctx, false)
+	available, err := bc.getModels(ctx, true)
 	if err != nil {
 		return "", fmt.Errorf("falha ao consultar modelos: %w", err)
-	}
-
-	// If cache was empty (e.g. first request after restart), force-refresh once.
-	if len(available) == 0 {
-		available, err = bc.getModels(ctx, true)
-		if err != nil {
-			return "", fmt.Errorf("falha ao consultar modelos: %w", err)
-		}
 	}
 
 	var matched *bridge.ModelInfo
@@ -1035,6 +1046,12 @@ func (bc *BotController) cmdSetModel(c telebot.Context, text string) (string, er
 	if bc.refreshProviderEnv != nil {
 		bc.refreshProviderEnv()
 	}
+
+	// Invalidate the model cache after provider env changes so the next
+	// /model listing reflects the new API key + provider configuration.
+	// Without this, a stale cache could list models from the previous
+	// provider (whose API key may no longer be valid).
+	bc.invalidateModelCache()
 
 	userID := safeSenderID(c.Sender())
 	resetMsg := bc.resetCurrentModelSession(c.Chat().ID, c.Message().ThreadID, userID)
