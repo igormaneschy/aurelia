@@ -49,21 +49,25 @@ func (t *toolCallTracker) increment(toolName string) {
 	t.mu.Unlock()
 
 	elapsed := time.Since(t.startedAt).Round(time.Second)
+	elapsedStr := elapsed.String()
+	if elapsed < time.Second {
+		elapsedStr = "<1s"
+	}
 	switch count {
 	case toolCallWarningThreshold:
 		t.sendWarning("🔍 Estou analisando bastante contexto. Vou consolidar os achados antes de continuar.")
 		t.steer("Você já usou ferramentas %d vezes (%s) em %s. "+
-			"Consolide o que já descobriu e apresente um resumo parcial agora.", count, toolName, elapsed)
+			"Consolide o que já descobriu e apresente um resumo parcial agora.", count, toolName, elapsedStr)
 	case toolCallCriticalThreshold:
 		t.sendWarning("⚠️ A análise está ficando extensa. Vou consolidar o progresso e apresentar um resumo parcial.")
 		t.steer("Você já usou ferramentas %d vezes (%s) em %s. "+
 			"Conclua imediatamente o que está fazendo e apresente um resumo parcial. "+
-			"O limite de tempo está próximo.", count, toolName, elapsed)
+			"O limite de tempo está próximo.", count, toolName, elapsedStr)
 	default:
 		if count > toolCallCriticalThreshold && count%toolCallCriticalThreshold == 0 {
 			t.sendWarning("⏳ Continuo analisando. Vou concluir em breve com um resumo dos resultados.")
 			t.steer("Você já usou ferramentas %d vezes em %s. "+
-				"Conclua e apresente um resumo parcial imediatamente.", count, elapsed)
+				"Conclua e apresente um resumo parcial imediatamente.", count, elapsedStr)
 		}
 	}
 }
@@ -94,14 +98,19 @@ func (t *toolCallTracker) countLocked() int {
 	return t.count
 }
 
-// ResetForNewTurn resets the warning flag so a new turn can trigger a fresh
-// loop warning. Called on turn_start events during multi-turn PI sessions.
+// ResetForNewTurn resets the loop detector for a new turn in a multi-turn
+// PI session. Resets the warning flag, clears the call history (ring buffer
+// and count), so patterns from previous turns don't trigger false positives.
+// Called on turn_start events during multi-turn PI sessions.
 func (d *loopDetector) ResetForNewTurn() {
 	if d == nil {
 		return
 	}
 	d.mu.Lock()
 	d.warned = false
+	d.ring = make([]toolCallSnapshot, loopDetectorWindow)
+	d.next = 0
+	d.count = 0
 	d.mu.Unlock()
 }
 
@@ -259,6 +268,12 @@ func detectToolSpiral(calls []toolCallSnapshot, toolName string, minLen int) boo
 	if n < minLen {
 		return false
 	}
+	// Apply HasPrefix for case-insensitive prefix matching (not exact equality).
+	// This intentionally casts a wide net: any tool whose name starts with
+	// toolName (e.g. "read") is treated as part of the spiral, including
+	// "Read", "ReadFile", "reading", etc. This is a conscious trade-off: we
+	// prefer catching real read spirals over avoiding false positives on
+	// tool names like "readme_parser" which are unlikely in practice.
 	for i := n - minLen; i < n; i++ {
 		if !strings.HasPrefix(strings.ToLower(calls[i].name), strings.ToLower(toolName)) {
 			return false
