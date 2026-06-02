@@ -87,10 +87,9 @@ func TestBootstrapProjectMemory_CreatesDirectoriesAndIndex(t *testing.T) {
 		t.Fatalf("BootstrapProjectMemory() error: %v", err)
 	}
 
-	privateDir := r.ProjectMemoryDir(cwd)
-	teamDir := r.ProjectTeamMemoryDir(cwd)
+	privateDir := r.ProjectTeamMemoryDir(cwd)
 
-	for _, dir := range []string{privateDir, teamDir} {
+	for _, dir := range []string{privateDir} {
 		info, err := os.Stat(dir)
 		if err != nil || !info.IsDir() {
 			t.Errorf("directory not created: %s (err=%v)", dir, err)
@@ -119,7 +118,7 @@ func TestBootstrapProjectMemory_EmptyCwd(t *testing.T) {
 	}
 }
 
-func TestBootstrapConversationProjectMemory_CreatesPrivateAndTeamIndexes(t *testing.T) {
+func TestBootstrapConversationProjectMemory_CreatesCwdOverlayAndTeamIndexes(t *testing.T) {
 	root := t.TempDir()
 	r := &PathResolver{root: root}
 	cwd := "/home/user/myproject"
@@ -129,7 +128,7 @@ func TestBootstrapConversationProjectMemory_CreatesPrivateAndTeamIndexes(t *test
 	}
 
 	dirs := []string{
-		r.ConversationProjectMemoryDir(cwd, 42, 99),
+		r.TopicCwdOverlayDir(42, 99),
 		r.ProjectTeamMemoryDir(cwd),
 	}
 	for _, dir := range dirs {
@@ -139,11 +138,6 @@ func TestBootstrapConversationProjectMemory_CreatesPrivateAndTeamIndexes(t *test
 		if _, err := os.Stat(filepath.Join(dir, "MEMORY.md")); err != nil {
 			t.Fatalf("MEMORY.md not created in %s: %v", dir, err)
 		}
-	}
-
-	legacyPrivate := r.ProjectMemoryDir(cwd)
-	if _, err := os.Stat(filepath.Join(legacyPrivate, "MEMORY.md")); err == nil {
-		t.Fatalf("legacy project-private index should not be created at %s", legacyPrivate)
 	}
 }
 

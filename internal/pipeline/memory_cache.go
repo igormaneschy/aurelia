@@ -1,15 +1,11 @@
 package pipeline
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/igormaneschy/aurelia/internal/runtime"
-	"github.com/igormaneschy/aurelia/internal/users"
 )
 
 // defaultMemoryCacheTTL is the period during which a cached entry is trusted
@@ -150,39 +146,31 @@ func (bc *Service) InvalidateMemoryDirs(chatID int64, threadID int, userID int64
 		return
 	}
 
-	// Invalidate user memory dir
-	if bc.userResolver != nil && userID != 0 {
-		bc.memoryCache.invalidate(bc.userResolver.MemoryDir(userID))
+	// Invalidate user memory dir via canonical PathResolver
+	if bc.resolver != nil && userID != 0 {
+		if userDir := bc.resolver.UserMemoryDir(userID); userDir != "" {
+			bc.memoryCache.invalidate(userDir)
+		}
 	} else {
 		bc.memoryCache.invalidate(bc.memoryDir)
 	}
 
-	if topicDir := topicMemoryDirFromResolver(chatID, threadID, bc.userResolver); topicDir != "" {
-		bc.memoryCache.invalidate(topicDir)
+	// Invalidate topic memory dir via canonical PathResolver
+	if bc.resolver != nil {
+		if topicDir := bc.resolver.TopicMemoryDir(chatID, threadID); topicDir != "" {
+			bc.memoryCache.invalidate(topicDir)
+		}
 	}
 
 	if cwd != "" && bc.resolver != nil {
-		if projectDir := bc.resolver.ConversationProjectMemoryDir(cwd, chatID, threadID); projectDir != "" {
-			bc.memoryCache.invalidate(projectDir)
+		// CWD overlay — scoped by (chat_id, thread_id) already
+		if overlayDir := bc.resolver.TopicCwdOverlayDir(chatID, threadID); overlayDir != "" {
+			bc.memoryCache.invalidate(overlayDir)
 		}
+		// Project team memory
 		if teamDir := bc.resolver.ProjectTeamMemoryDir(cwd); teamDir != "" {
 			bc.memoryCache.invalidate(teamDir)
-		}
-		// User × Project private memory
-		if bc.userResolver != nil && userID != 0 {
-			slug := runtime.ProjectSlug(cwd)
-			upDir := bc.userResolver.ProjectMemoryDir(userID, slug)
-			if upDir != "" {
-				bc.memoryCache.invalidate(upDir)
-			}
 		}
 	}
 }
 
-// topicMemoryDirFromResolver returns the topic memory directory using the user resolver.
-func topicMemoryDirFromResolver(chatID int64, threadID int, userResolver *users.Resolver) string {
-	if threadID <= 0 || userResolver == nil {
-		return ""
-	}
-	return filepath.Join(userResolver.TopicsDir(), fmt.Sprintf("chat_%d", chatID), fmt.Sprintf("thread_%d", threadID))
-}

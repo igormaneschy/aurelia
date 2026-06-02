@@ -52,11 +52,6 @@ func (r *Resolver) ProfilePath(userID int64) string {
 	return filepath.Join(r.UserRoot(userID), "profile.json")
 }
 
-// ProjectMemoryDir returns the project memory directory for a user and project slug.
-func (r *Resolver) ProjectMemoryDir(userID int64, slug string) string {
-	return filepath.Join(r.UserRoot(userID), "projects", slug)
-}
-
 // SkillsDir returns the skills directory for a user.
 func (r *Resolver) SkillsDir(userID int64) string {
 	return filepath.Join(r.UserRoot(userID), "skills")

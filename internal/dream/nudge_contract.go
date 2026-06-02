@@ -21,7 +21,7 @@ var suspiciousPrefixes = []string{
 // memoryUpdate describes one file to update during nudge extraction.
 // The model produces these as structured JSON (not via file tools).
 type memoryUpdate struct {
-	Layer    string   `json:"layer"`    // global, topic, project, team
+	Layer    string   `json:"layer"`    // user_global, topic, cwd_overlay, project_team
 	Filename string   `json:"filename"` // basename .md only
 	Title    string   `json:"title,omitempty"`
 	Facts    []string `json:"facts"`

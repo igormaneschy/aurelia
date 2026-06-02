@@ -229,27 +229,6 @@ func rejectSensitiveProjectCwd(cwd string) error {
 // ProjectSlug returns the filesystem-safe key used for project-scoped state.
 func ProjectSlug(cwd string) string { return SanitizeCwd(cwd) }
 
-// ProjectMemoryDir returns the per-project private memory directory:
-// ~/.aurelia/projects/<sanitized-cwd>/memory/
-//
-// Deprecated: use TopicCwdOverlayDir for context-scoped private memory.
-// Kept for backward compatibility with legacy callers (bootstrap, cache, memoryux).
-// TODO(sprint-f): remove once all callers migrate to TopicCwdOverlayDir.
-func (r *PathResolver) ProjectMemoryDir(cwd string) string {
-	return filepath.Join(r.root, "projects", ProjectSlug(cwd), "memory")
-}
-
-// ConversationProjectMemoryDir returns project-private memory for one
-// conversation. This prevents notes from one Telegram group/topic leaking into
-// another conversation that happens to bind the same repository.
-//
-// Deprecated: use TopicCwdOverlayDir which already scopes by (chat_id, thread_id).
-// Kept for backward compatibility with legacy callers (bootstrap, cache, memoryux).
-// TODO(sprint-f): remove once all callers migrate to TopicCwdOverlayDir.
-func (r *PathResolver) ConversationProjectMemoryDir(cwd string, chatID int64, threadID int) string {
-	return filepath.Join(r.ProjectMemoryDir(cwd), "conversations", fmt.Sprintf("chat_%d", chatID), fmt.Sprintf("thread_%d", threadID))
-}
-
 // ProjectTeamMemoryDir returns the per-project team (shared) memory directory:
 // ~/.aurelia/projects/<sanitized-cwd>/team/
 func (r *PathResolver) ProjectTeamMemoryDir(cwd string) string {
@@ -264,7 +243,7 @@ func (r *PathResolver) UserMemoryDir(userID int64) string {
 
 // TopicMemoryDir returns the topic-scoped memory directory.
 // ~/.aurelia/topics/chat_<chatID>/thread_<threadID>/
-// Returns empty string when threadID <= 0 (topic memory only exists in threads).
+// Returns empty string when threadID <= 0 (topic memory only exists in forum threads).
 func (r *PathResolver) TopicMemoryDir(chatID int64, threadID int) string {
 	if threadID <= 0 {
 		return ""
@@ -274,11 +253,15 @@ func (r *PathResolver) TopicMemoryDir(chatID int64, threadID int) string {
 
 // TopicCwdOverlayDir returns the cwd overlay memory directory for a topic.
 // ~/.aurelia/topics/chat_<chatID>/thread_<threadID>/cwd_overlay/
-// Only valid when /cwd is declared for the topic. Returns empty string when
-// threadID <= 0.
+// For private chats (threadID == 0), returns ~/.aurelia/topics/chat_<chatID>/cwd_overlay/
+// Only valid when /cwd is declared for the chat/topic.
+// Returns empty string when chatID == 0.
 func (r *PathResolver) TopicCwdOverlayDir(chatID int64, threadID int) string {
-	if threadID <= 0 {
+	if chatID == 0 {
 		return ""
+	}
+	if threadID <= 0 {
+		return filepath.Join(r.root, "topics", fmt.Sprintf("chat_%d", chatID), "cwd_overlay")
 	}
 	return filepath.Join(r.root, "topics", fmt.Sprintf("chat_%d", chatID), fmt.Sprintf("thread_%d", threadID), "cwd_overlay")
 }

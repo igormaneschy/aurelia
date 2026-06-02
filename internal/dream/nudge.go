@@ -152,7 +152,7 @@ Return ONLY a JSON object. No markdown fences. No explanation.
 }
 
 Rules:
-- "layer" must be one of: "global", "topic", "project", "team".
+- "layer" must be one of: "user_global", "topic", "cwd_overlay", "project_team".
 - "filename" must be a name like "topic_name.md" (letters, numbers, underscores, hyphens, .md).
 - Maximum %d files changed per run.
 - Maximum %d facts per file.
