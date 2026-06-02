@@ -1,6 +1,9 @@
 package session
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestNudgeBuffer_AddAndCount(t *testing.T) {
 	b := NewNudgeBuffer()
@@ -258,5 +261,95 @@ func TestNudgeBuffer_PerUserIsolation(t *testing.T) {
 	}
 	if got := b.TurnCount(1, 0, 200); got != 1 {
 		t.Errorf("TurnCount(user B) after reset = %d, want 1", got)
+	}
+}
+
+func TestNudgeBuffer_AddToolEvent(t *testing.T) {
+	b := NewNudgeBuffer()
+
+	// Empty buffer — AddToolEvent should be silently dropped
+	b.AddToolEvent(1, 0, 100, "tool: read file")
+	msgs, _ := b.Snapshot(1, 0, 100)
+	if len(msgs) != 0 {
+		t.Fatal("AddToolEvent on empty buffer should be a no-op")
+	}
+
+	// Add a turn, then attach tool event to the assistant message
+	b.AddTurn(1, 0, 100, "read this", "ok processing")
+	b.AddToolEvent(1, 0, 100, "tool: Read(file=main.go)")
+	b.AddToolEvent(1, 0, 100, "tool: Grep(pattern=func)")
+
+	msgs, _ = b.Snapshot(1, 0, 100)
+	if len(msgs) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(msgs))
+	}
+	// User message should NOT have ToolSummary
+	if msgs[0].ToolSummary != "" {
+		t.Error("user message should not have ToolSummary")
+	}
+	// Assistant message should have accumulated ToolSummary
+	if !strings.Contains(msgs[1].ToolSummary, "Read(file=main.go)") {
+		t.Error("assistant message should have Read tool in ToolSummary")
+	}
+	if !strings.Contains(msgs[1].ToolSummary, "Grep(pattern=func)") {
+		t.Error("assistant message should have Grep tool in ToolSummary")
+	}
+}
+
+func TestNudgeBuffer_AddToolEvent_EmptyStringNoOp(t *testing.T) {
+	b := NewNudgeBuffer()
+	b.AddTurn(1, 0, 100, "hi", "hello")
+	b.AddToolEvent(1, 0, 100, "") // empty — should not change anything
+	msgs, _ := b.Snapshot(1, 0, 100)
+	if msgs[1].ToolSummary != "" {
+		t.Error("empty tool summary should not be stored")
+	}
+}
+
+func TestNudgeBuffer_ClearUser(t *testing.T) {
+	b := NewNudgeBuffer()
+
+	// User A in multiple chats
+	b.AddTurn(1, 0, 100, "a1", "ar1")
+	b.AddTurn(2, 5, 100, "a2", "ar2")
+	// User B in same chat
+	b.AddTurn(1, 0, 200, "b1", "br1")
+
+	if b.TurnCount(1, 0, 100) != 1 || b.TurnCount(2, 5, 100) != 1 || b.TurnCount(1, 0, 200) != 1 {
+		t.Fatal("expected all buffers to have data before ClearUser")
+	}
+
+	b.ClearUser(100)
+
+	// User A should be gone
+	if b.TurnCount(1, 0, 100) != 0 {
+		t.Error("user A chat 1 should be cleared")
+	}
+	if b.TurnCount(2, 5, 100) != 0 {
+		t.Error("user A chat 2 should be cleared")
+	}
+	// User B should still have data
+	if b.TurnCount(1, 0, 200) != 1 {
+		t.Error("user B should NOT be cleared")
+	}
+}
+
+func TestNudgeBuffer_TotalChars(t *testing.T) {
+	b := NewNudgeBuffer()
+
+	if got := b.TotalChars(1, 0, 100); got != 0 {
+		t.Fatalf("TotalChars empty = %d, want 0", got)
+	}
+
+	b.AddTurn(1, 0, 100, "hello", "world")
+	// "hello" + "world" = 10 chars
+	if got := b.TotalChars(1, 0, 100); got != 10 {
+		t.Fatalf("TotalChars after AddTurn = %d, want 10", got)
+	}
+
+	b.AddToolEvent(1, 0, 100, "tool: Read(file=main.go)")
+	// 10 + 24 = 34
+	if got := b.TotalChars(1, 0, 100); got != 34 {
+		t.Fatalf("TotalChars after AddToolEvent = %d, want 34", got)
 	}
 }

@@ -8,6 +8,9 @@ const maxNudgeBufferedMessages = 40
 type NudgeMessage struct {
 	Role    string // "user" or "assistant"
 	Content string
+	// ToolSummary, when non-empty, describes tool calls that happened during
+	// the assistant turn. Populated by AddToolEvent; never set by AddTurn.
+	ToolSummary string
 }
 
 // NudgeBuffer accumulates conversation turns per chat thread for periodic nudge review.
@@ -57,6 +60,31 @@ func (b *NudgeBuffer) AddTurn(chatID int64, threadID int, userID int64, userMsg,
 		b.messages[key] = b.messages[key][excess:]
 		// Recalculate turns: each turn is 2 messages
 		b.turns[key] = len(b.messages[key]) / 2
+	}
+	b.bumpVersion(key)
+}
+
+// AddToolEvent appends tool call context to the most recent assistant message
+// in the buffer. This enriches the transcript with tool_use/tool_result summaries
+// without altering the AddTurn signature or message-pair structure.
+// If the buffer is empty or the last message is not from the assistant, the
+// event is silently dropped.
+func (b *NudgeBuffer) AddToolEvent(chatID int64, threadID int, userID int64, toolSummary string) {
+	if toolSummary == "" {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	key := SessionKeyFor(chatID, threadID, userID)
+	msgs := b.messages[key]
+	if len(msgs) == 0 || msgs[len(msgs)-1].Role != "assistant" {
+		return
+	}
+	last := &msgs[len(msgs)-1]
+	if last.ToolSummary != "" {
+		last.ToolSummary += "\n" + toolSummary
+	} else {
+		last.ToolSummary = toolSummary
 	}
 	b.bumpVersion(key)
 }
@@ -129,4 +157,31 @@ func (b *NudgeBuffer) GetAndReset(chatID int64, threadID int, userID int64) []Nu
 	delete(b.turns, key)
 	b.bumpVersion(key)
 	return msgs
+}
+
+// ClearUser removes all buffered messages for a user across all chats and
+// threads. Called when a user invokes /forget-me to erase their data.
+func (b *NudgeBuffer) ClearUser(userID int64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for key := range b.messages {
+		if key.UserID == userID {
+			delete(b.messages, key)
+			delete(b.turns, key)
+			b.bumpVersion(key)
+		}
+	}
+}
+
+// TotalChars returns the total character count of all buffered messages.
+func (b *NudgeBuffer) TotalChars(chatID int64, threadID int, userID int64) int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	key := SessionKeyFor(chatID, threadID, userID)
+	total := 0
+	for _, m := range b.messages[key] {
+		total += len(m.Content)
+		total += len(m.ToolSummary)
+	}
+	return total
 }

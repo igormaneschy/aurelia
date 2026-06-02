@@ -161,9 +161,11 @@ type AppConfig struct {
 	DreamModel   string `json:"dream_model,omitempty"`
 	ExtractModel string `json:"extract_model,omitempty"`
 
-	NudgeEnabled *bool  `json:"nudge_enabled,omitempty"` // nil = default true
-	NudgeTurns   int    `json:"nudge_turns,omitempty"`
-	NudgeModel   string `json:"nudge_model,omitempty"`
+	NudgeEnabled       *bool  `json:"nudge_enabled,omitempty"`        // nil = default true
+	NudgeTurns         int    `json:"nudge_turns,omitempty"`
+	NudgeModel         string `json:"nudge_model,omitempty"`
+	NudgeMinTranscript int    `json:"nudge_min_transcript_len,omitempty"`
+	NudgeMaxTranscript int    `json:"nudge_max_transcript_bytes,omitempty"`
 
 	VisionModel    string `json:"vision_model,omitempty"`
 	VisionProvider string `json:"vision_provider,omitempty"`
