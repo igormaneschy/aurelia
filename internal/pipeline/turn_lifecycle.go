@@ -161,6 +161,9 @@ func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText strin
 		sessionFile = s.sessions.GetSession(chatID, threadID, userID)
 	}
 	s.nudgeBuffer.AddTurn(chatID, threadID, userID, userText, finalText)
+	if toolSummary := s.getRunToolSummary(chatID, threadID); toolSummary != "" {
+		s.nudgeBuffer.AddToolEvent(chatID, threadID, userID, toolSummary)
+	}
 	s.dreamer.AfterTurnNudge(chatID, threadID, userID, cwd, sessionFile, s.nudgeBuffer)
 	s.InvalidateMemoryDirs(chatID, threadID, userID, cwd)
 }
