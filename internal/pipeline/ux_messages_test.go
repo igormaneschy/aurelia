@@ -77,7 +77,7 @@ func TestClassifyBridgeErrorOutcomeTimeoutOrigins(t *testing.T) {
 func TestToolCallTracker_WarningMessageOmitsTechnicalTerms(t *testing.T) {
 	capOut := &captureOutput{}
 	var steers []string
-	tracker := newToolCallTracker(1, 2, capOut, func(s string) { steers = append(steers, s) })
+	tracker := newToolCallTracker(1, 2, capOut, func(s string) { steers = append(steers, s) }, 0, 0)
 
 	// Trigger warning threshold
 	for i := 0; i < toolCallWarningThreshold; i++ {
@@ -112,7 +112,7 @@ func TestToolCallTracker_WarningMessageOmitsTechnicalTerms(t *testing.T) {
 func TestToolCallTracker_CriticalMessageOmitsTechnicalTerms(t *testing.T) {
 	capOut := &captureOutput{}
 	var steers []string
-	tracker := newToolCallTracker(1, 2, capOut, func(s string) { steers = append(steers, s) })
+	tracker := newToolCallTracker(1, 2, capOut, func(s string) { steers = append(steers, s) }, 0, 0)
 
 	// Trigger critical threshold
 	for i := 0; i < toolCallCriticalThreshold; i++ {
@@ -138,7 +138,7 @@ func TestToolCallTracker_CriticalMessageOmitsTechnicalTerms(t *testing.T) {
 
 func TestToolCallTracker_EveryNMessageOmitsTechnicalTerms(t *testing.T) {
 	capOut := &captureOutput{}
-	tracker := newToolCallTracker(1, 2, capOut, func(s string) {})
+	tracker := newToolCallTracker(1, 2, capOut, func(s string) {}, 0, 0)
 
 	// Trigger twice the critical threshold to get the every-N message
 	for i := 0; i < toolCallCriticalThreshold*2; i++ {

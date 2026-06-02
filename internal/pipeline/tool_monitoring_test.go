@@ -280,10 +280,12 @@ func TestToolCallTracker_SteerIncludesElapsed(t *testing.T) {
 	var steerMsgs []string
 
 	tracker := &toolCallTracker{
-		chatID:    1,
-		threadID:  0,
-		output:    nil,
-		startedAt: time.Now().Add(-42 * time.Second), // simulate 42s elapsed
+		chatID:            1,
+		threadID:          0,
+		output:            nil,
+		startedAt:         time.Now().Add(-42 * time.Second),
+		warningThreshold:  toolCallWarningThreshold,
+		criticalThreshold: toolCallCriticalThreshold,
 		steerFunc: func(msg string) {
 			mu.Lock()
 			steerMsgs = append(steerMsgs, msg)
@@ -293,7 +295,7 @@ func TestToolCallTracker_SteerIncludesElapsed(t *testing.T) {
 
 	// Manually set count to warning threshold to avoid 20 increment calls
 	tracker.mu.Lock()
-	tracker.count = toolCallWarningThreshold - 1
+	tracker.count = tracker.warningThreshold - 1
 	tracker.mu.Unlock()
 	tracker.increment("Bash")
 
@@ -315,5 +317,101 @@ func TestToolCallTracker_NilTracker(t *testing.T) {
 	tracker.increment("read")
 	if tracker.countLocked() != 0 {
 		t.Error("nil tracker countLocked() should return 0")
+	}
+}
+
+// ── GAP 1: Tool budget per agent tests ──────────────────────────────
+
+func TestToolCallTracker_CustomThresholds(t *testing.T) {
+	var mu sync.Mutex
+	var steers []string
+
+	tracker := newToolCallTracker(1, 0, nil, func(msg string) {
+		mu.Lock()
+		steers = append(steers, msg)
+		mu.Unlock()
+	}, 5, 10) // custom: warn at 5, critical at 10
+
+	// Count up to warning threshold.
+	for i := 0; i < 5; i++ {
+		tracker.increment("Read")
+	}
+
+	mu.Lock()
+	got := len(steers)
+	mu.Unlock()
+	if got != 1 {
+		t.Errorf("expected 1 steer at warning threshold (5), got %d steers", got)
+	}
+}
+
+func TestToolCallTracker_DefaultThresholdsWhenZero(t *testing.T) {
+	tracker := newToolCallTracker(1, 0, nil, nil, 0, 0)
+	if tracker.warningThreshold != toolCallWarningThreshold {
+		t.Errorf("expected default warning threshold %d, got %d", toolCallWarningThreshold, tracker.warningThreshold)
+	}
+	if tracker.criticalThreshold != toolCallCriticalThreshold {
+		t.Errorf("expected default critical threshold %d, got %d", toolCallCriticalThreshold, tracker.criticalThreshold)
+	}
+}
+
+// ── GAP 2: Contextual steer tests ───────────────────────────────────
+
+func TestLoopDetector_RecordReturnsPatternType(t *testing.T) {
+	d := newLoopDetector(1, 0, nil, func(s string) {})
+
+	// Fill ring buffer with repeated tool calls to trigger consecutive_repeat.
+	for i := 0; i < loopRepeatThreshold+1; i++ {
+		isLoop, pattern := d.record("read", map[string]any{"path": "/x"})
+		if i == loopRepeatThreshold {
+			if !isLoop {
+				t.Error("expected loop detection after repeated calls")
+			}
+			if pattern != "consecutive_repeat" {
+				t.Errorf("expected pattern 'consecutive_repeat', got %q", pattern)
+			}
+		}
+	}
+}
+
+func TestRecentDistinctTools(t *testing.T) {
+	d := newLoopDetector(1, 0, nil, nil)
+
+	// Fill ring buffer with alternating tools.
+	for i := 0; i < 12; i++ {
+		if i%2 == 0 {
+			d.record("Read", map[string]any{"path": "/a"})
+		} else {
+			d.record("Grep", map[string]any{"pattern": "x"})
+		}
+	}
+
+	d.mu.Lock()
+	tools := d.recentDistinctTools(3)
+	d.mu.Unlock()
+
+	if len(tools) != 2 {
+		t.Errorf("expected 2 distinct tools, got %d: %v", len(tools), tools)
+	}
+}
+
+func TestSteerLoopIncludesToolContext(t *testing.T) {
+	var steerMsg string
+	d := newLoopDetector(1, 0, nil, func(s string) { steerMsg = s })
+
+	// Fill buffer with alternating tools and trigger loop.
+	for i := 0; i < loopPingPongLength; i++ {
+		if i%2 == 0 {
+			d.record("Read", map[string]any{"path": "/a"})
+		} else {
+			d.record("Write", map[string]any{"path": "/a"})
+		}
+	}
+
+	if !strings.Contains(steerMsg, "Read") {
+		t.Errorf("steer message should mention tool 'Read', got: %s", steerMsg)
+	}
+	if !strings.Contains(steerMsg, "→") {
+		t.Errorf("steer message should include arrow-separated tool list, got: %s", steerMsg)
 	}
 }

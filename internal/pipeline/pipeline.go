@@ -74,9 +74,10 @@ const (
 	bridgeExecutionTimeout = 30 * time.Minute // hard safety net, not configurable
 	defaultIdleTimeout     = 15 * time.Minute // fallback when config not available
 
-	// tool call explosion thresholds
-	toolCallWarningThreshold  = 20 // warn user after this many tool calls without result
-	toolCallCriticalThreshold = 50 // critical warning after this many tool calls
+	// Tool call explosion thresholds — defaults. Per-agent overrides use
+	// Agent.ToolBudget (warning = budget, critical = budget * 2.5).
+	toolCallWarningThreshold  = 20
+	toolCallCriticalThreshold = 50
 
 	// timeout warning: warn N minutes before hard 30-min timeout
 	timeoutWarningLead = 5 * time.Minute
@@ -361,7 +362,15 @@ func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, rese
 		return
 	}
 
-	s.executeAsync(reservedCtx, input.chatID, input.threadID, input.messageID, req, userText, input.userID, input.isPrivateChat)
+	// Resolve tool call thresholds from agent budget (or use defaults).
+	warnThreshold := toolCallWarningThreshold
+	critThreshold := toolCallCriticalThreshold
+	if agent != nil && agent.ToolBudget > 0 {
+		warnThreshold = agent.ToolBudget
+		critThreshold = agent.ToolBudget * 5 / 2 // 2.5x budget
+	}
+
+	s.executeAsync(reservedCtx, input.chatID, input.threadID, input.messageID, req, userText, input.userID, input.isPrivateChat, warnThreshold, critThreshold)
 }
 
 func stripAgentPrefix(text string, agent *agents.Agent) string {
@@ -592,7 +601,9 @@ func appendUniqueTools(existing []string, additions ...string) []string {
 }
 
 // executeAsync runs bridge execution with typing/progress reporting.
-func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID int, messageID int, req bridge.Request, userText string, userID int64, isPrivateChat bool) {
+// warningThreshold and criticalThreshold override the global tool call limits
+// when > 0 (set by agent tool_budget). Use 0 for defaults.
+func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID int, messageID int, req bridge.Request, userText string, userID int64, isPrivateChat bool, warningThreshold int, criticalThreshold int) {
 	stopTyping := s.output.StartTyping(chatID, threadID)
 	defer stopTyping()
 
@@ -617,8 +628,10 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 			log.Printf("pipeline: steer failed during execution chat=%d: %v", chatID, err)
 		}
 	}
-	toolTracker := newToolCallTracker(chatID, threadID, s.output, steerDuringExecution)
+	toolTracker := newToolCallTracker(chatID, threadID, s.output, steerDuringExecution, warningThreshold, criticalThreshold)
 	loopDetect := newLoopDetector(chatID, threadID, s.output, steerDuringExecution)
+	s.SetActiveToolState(toolTracker, loopDetect)
+	defer s.ClearActiveToolState()
 
 	// Max timeout goroutine — safety net after 30min
 	go func() {
@@ -1040,7 +1053,11 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 			}
 			// Detect repetitive tool call patterns (loops)
 			if loopDetect != nil {
-				loopDetect.record(toolName, ev.Input)
+				if isLoop, pattern := loopDetect.record(toolName, ev.Input); isLoop {
+					s.recordPipelineEvent(chatID, threadID, observability.NewWarnEvent("",
+						observability.PhaseLoopDetected,
+						fmt.Sprintf("tool=%s pattern=%s", toolName, pattern)))
+				}
 			}
 			// Record bridge_tool_use event.
 			s.recordPipelineEvent(chatID, threadID, observability.NewEvent("",
