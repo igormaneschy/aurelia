@@ -64,7 +64,8 @@ func sendTextWithSender(sender messageSender, chat *telebot.Chat, text string, l
 					continue
 				}
 			}
-			return lastMsgID, err
+			// Unrecoverable chunk error: return 0 so caller knows outbound ID is unreliable.
+			return 0, err
 		}
 		if msg != nil {
 			lastMsgID = int64(msg.ID)

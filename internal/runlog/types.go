@@ -50,7 +50,7 @@ type RunRecord struct {
 
 	// Pi session ↔ Telegram message bridge.
 	InboundMessageID  int64 // Telegram message_id that triggered this run (0 if N/A)
-	OutboundMessageID int64 // Telegram message_id of the final response (0 if none)
+	OutboundMessageID int64 // Telegram message_id of the final response; always 0 at Start, set via Update after sending
 }
 
 // RunRecordRx is the full read schema for scanning rows from run_journal.

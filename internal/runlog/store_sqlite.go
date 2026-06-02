@@ -149,7 +149,7 @@ func (s *SQLiteStore) initialize() error {
 		"CREATE INDEX IF NOT EXISTS idx_run_journal_status_started ON run_journal(status, started_at DESC)",
 		"CREATE INDEX IF NOT EXISTS idx_run_events_run_ts ON run_events(run_id, ts, id)",
 		"CREATE INDEX IF NOT EXISTS idx_run_events_phase_ts ON run_events(phase, ts DESC)",
-		"CREATE INDEX IF NOT EXISTS idx_run_journal_session_outbound ON run_journal(session_file, outbound_message_id DESC)",
+		"CREATE INDEX IF NOT EXISTS idx_run_journal_session_started ON run_journal(session_file, started_at DESC)",
 	}
 	for _, idx := range indexes {
 		if _, err := s.db.Exec(idx); err != nil {
@@ -525,7 +525,7 @@ func (s *SQLiteStore) GetLastOutboundMessage(ctx context.Context, sessionFile st
 		SELECT chat_id, thread_id, outbound_message_id
 		FROM run_journal
 		WHERE session_file = ? AND outbound_message_id != 0
-		ORDER BY started_at DESC
+		ORDER BY started_at DESC, rowid DESC
 		LIMIT 1`, sessionFile).Scan(&chatID, &threadID, &messageID)
 	if err == sql.ErrNoRows {
 		return 0, 0, 0, nil

@@ -741,7 +741,6 @@ func TestSQLiteStore_GetLastOutboundMessage_Found(t *testing.T) {
 	ctx := context.Background()
 
 	sessionFile := "/path/to/session.json"
-	// Create two runs for the same session, only the latest has an outbound message
 	r1 := RunRecord{
 		RunID:             uuid.NewString(),
 		ChatID:            100,
@@ -763,6 +762,8 @@ func TestSQLiteStore_GetLastOutboundMessage_Found(t *testing.T) {
 	if err := s.Start(ctx, r1); err != nil {
 		t.Fatalf("Start r1: %v", err)
 	}
+	// Ensure distinct started_at timestamps (second resolution).
+	time.Sleep(1100 * time.Millisecond)
 	if err := s.Start(ctx, r2); err != nil {
 		t.Fatalf("Start r2: %v", err)
 	}
@@ -835,6 +836,7 @@ func TestSQLiteStore_GetLastOutboundMessage_SkipsZeroOutbound(t *testing.T) {
 	if err := s.Start(ctx, r1); err != nil {
 		t.Fatalf("Start r1: %v", err)
 	}
+	time.Sleep(1100 * time.Millisecond)
 	if err := s.Start(ctx, r2); err != nil {
 		t.Fatalf("Start r2: %v", err)
 	}

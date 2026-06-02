@@ -170,19 +170,10 @@ func (o telegramPipelineOutput) SendError(chatID int64, threadID int, text strin
 }
 
 func (o telegramPipelineOutput) SendReply(chatID int64, threadID int, text string) (int64, error) {
-	if o.tp == nil {
+	if o.bc == nil || o.bc.bot == nil {
 		return 0, nil
 	}
-	if tg, ok := o.tp.(*TelegramTransport); ok && tg != nil && tg.bot != nil {
-		return sendTextWithSender(tg.bot, &telebot.Chat{ID: chatID}, text, telegramMessageLimit, threadID)
-	}
-	// Generic fallback via transport (no message ID tracking).
-	return 0, o.tp.Send(context.Background(), transport.OutgoingMessage{
-		ChatID:   chatID,
-		ThreadID: threadID,
-		Text:     text,
-		Markdown: true,
-	})
+	return sendTextWithSender(o.bc.bot, &telebot.Chat{ID: chatID}, text, telegramMessageLimit, threadID)
 }
 
 func (o telegramPipelineOutput) SendText(chatID int64, threadID int, text string) (any, error) {
