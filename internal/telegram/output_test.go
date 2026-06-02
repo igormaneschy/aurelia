@@ -30,7 +30,7 @@ func TestSendText_SendsTelegramHTML(t *testing.T) {
 	sender := &stubSender{}
 	chat := &telebot.Chat{ID: 123}
 
-	if err := sendTextWithSender(sender, chat, "## Title\n\n- **item**", 200, 0); err != nil {
+	if _, err := sendTextWithSender(sender, chat, "## Title\n\n- **item**", 200, 0); err != nil {
 		t.Fatalf("sendTextWithSender returned error: %v", err)
 	}
 
@@ -59,7 +59,7 @@ func TestSendText_FallsBackToPlainTextWhenHTMLSendFails(t *testing.T) {
 	sender := &stubSender{firstSendErr: errors.New("bad html")}
 	chat := &telebot.Chat{ID: 123}
 
-	if err := sendTextWithSender(sender, chat, "## Title", 200, 0); err != nil {
+	if _, err := sendTextWithSender(sender, chat, "## Title", 200, 0); err != nil {
 		t.Fatalf("sendTextWithSender returned error: %v", err)
 	}
 

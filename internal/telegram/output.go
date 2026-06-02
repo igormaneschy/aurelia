@@ -16,25 +16,31 @@ type messageSender interface {
 }
 
 func SendText(bot *telebot.Bot, chat *telebot.Chat, text string) error {
-	return sendTextWithSender(bot, chat, text, telegramMessageLimit, 0)
+	_, err := sendTextWithSender(bot, chat, text, telegramMessageLimit, 0)
+	return err
 }
 
 func SendTextWithThread(bot *telebot.Bot, chat *telebot.Chat, text string, threadID int) error {
-	return sendTextWithSender(bot, chat, text, telegramMessageLimit, threadID)
+	_, err := sendTextWithSender(bot, chat, text, telegramMessageLimit, threadID)
+	return err
 }
 
-func sendTextWithSender(sender messageSender, chat *telebot.Chat, text string, limit int, threadID int) error {
+func sendTextWithSender(sender messageSender, chat *telebot.Chat, text string, limit int, threadID int) (int64, error) {
 	// Convert to HTML first, then split — HTML is larger than markdown due to tags
 	htmlText := MarkdownToHTML(text)
 	chunks := splitHTML(htmlText, limit)
+	var lastMsgID int64
 	for i, chunk := range chunks {
 		isLast := i == len(chunks)-1
 		opts := &telebot.SendOptions{
 			ParseMode: telebot.ModeHTML,
 			ThreadID:  threadID,
 		}
-		_, err := sender.Send(chat, chunk, opts)
+		msg, err := sender.Send(chat, chunk, opts)
 		if err == nil {
+			if msg != nil {
+				lastMsgID = int64(msg.ID)
+			}
 			if !isLast {
 				time.Sleep(interChunkDelay)
 			}
@@ -43,25 +49,31 @@ func sendTextWithSender(sender messageSender, chat *telebot.Chat, text string, l
 
 		log.Printf("Send chunk with HTML failed (%v). Retrying as plain text...", err)
 		opts = &telebot.SendOptions{ThreadID: threadID}
-		_, err = sender.Send(chat, chunk, opts)
+		msg, err = sender.Send(chat, chunk, opts)
 		if err != nil {
 			if floodErr, ok := err.(*telebot.FloodError); ok {
 				log.Printf("Hit rate limit in chunk sending. Retrying in %v...", floodErr.RetryAfter)
 				time.Sleep(time.Duration(floodErr.RetryAfter) * time.Second)
-				if _, retryErr := sender.Send(chat, chunk, opts); retryErr == nil {
+				if msg, retryErr := sender.Send(chat, chunk, opts); retryErr == nil {
+					if msg != nil {
+						lastMsgID = int64(msg.ID)
+					}
 					if !isLast {
 						time.Sleep(interChunkDelay)
 					}
 					continue
 				}
 			}
-			return err
+			return lastMsgID, err
+		}
+		if msg != nil {
+			lastMsgID = int64(msg.ID)
 		}
 		if !isLast {
 			time.Sleep(interChunkDelay)
 		}
 	}
-	return nil
+	return lastMsgID, nil
 }
 
 func splitTelegramMarkdown(text string, limit int) []string {
@@ -197,17 +209,20 @@ func runesEqualAt(runes []rune, idx int, needle []rune) bool {
 // existing callers do not need to switch to SendText; reply quoting was
 // removed in v0.5.0 since the bot is the only participant alongside the user.
 func SendTextReply(bot *telebot.Bot, chat *telebot.Chat, text string) error {
-	return sendTextReplyWithSender(bot, chat, text, telegramMessageLimit, 0)
+	_, err := sendTextReplyWithSender(bot, chat, text, telegramMessageLimit, 0)
+	return err
 }
 
 func SendTextReplyWithThread(bot *telebot.Bot, chat *telebot.Chat, text string, threadID int) error {
-	return sendTextReplyWithSender(bot, chat, text, telegramMessageLimit, threadID)
+	_, err := sendTextReplyWithSender(bot, chat, text, telegramMessageLimit, threadID)
+	return err
 }
 
-func sendTextReplyWithSender(sender messageSender, chat *telebot.Chat, text string, limit int, threadID int) error {
+func sendTextReplyWithSender(sender messageSender, chat *telebot.Chat, text string, limit int, threadID int) (int64, error) {
 	// Convert to HTML first, then split — HTML is larger than markdown due to tags
 	htmlText := MarkdownToHTML(text)
 	chunks := splitHTML(htmlText, limit)
+	var lastMsgID int64
 
 	for i, chunk := range chunks {
 		isLast := i == len(chunks)-1
@@ -216,8 +231,11 @@ func sendTextReplyWithSender(sender messageSender, chat *telebot.Chat, text stri
 			ThreadID:  threadID,
 		}
 
-		_, err := sender.Send(chat, chunk, opts)
+		msg, err := sender.Send(chat, chunk, opts)
 		if err == nil {
+			if msg != nil {
+				lastMsgID = int64(msg.ID)
+			}
 			if !isLast {
 				time.Sleep(interChunkDelay)
 			}
@@ -226,15 +244,18 @@ func sendTextReplyWithSender(sender messageSender, chat *telebot.Chat, text stri
 
 		log.Printf("Send chunk with HTML failed (%v). Retrying as plain text...", err)
 		opts = &telebot.SendOptions{ThreadID: threadID}
-		_, err = sender.Send(chat, chunk, opts)
+		msg, err = sender.Send(chat, chunk, opts)
 		if err != nil {
-			return err
+			return lastMsgID, err
+		}
+		if msg != nil {
+			lastMsgID = int64(msg.ID)
 		}
 		if !isLast {
 			time.Sleep(interChunkDelay)
 		}
 	}
-	return nil
+	return lastMsgID, nil
 }
 
 func ReactToMessage(bot *telebot.Bot, chat *telebot.Chat, messageID int, emoji string) {

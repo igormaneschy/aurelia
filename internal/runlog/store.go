@@ -34,6 +34,11 @@ type Store interface {
 	// Metrics returns aggregate operational metrics over a time window.
 	Metrics(ctx context.Context, filter MetricsFilter) (*MetricsResult, error)
 
+	// GetLastOutboundMessage returns the chat_id, thread_id, and outbound_message_id
+	// of the most recent run that has a non-zero outbound_message_id for the given
+	// session_file. Returns chatID=0, threadID=0, messageID=0 if not found.
+	GetLastOutboundMessage(ctx context.Context, sessionFile string) (chatID int64, threadID int, messageID int64, err error)
+
 	// Close releases the store's resources.
 	Close() error
 }

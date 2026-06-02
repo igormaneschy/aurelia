@@ -729,6 +729,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 		ChatID:    chatID,
 		ThreadID:  threadID,
 		RequestID: req.RequestID,
+		MessageID: messageID,
 		CWD:       cwd,
 		Prompt:    userText,
 		UserID:    userID,
@@ -1281,8 +1282,12 @@ func (s *Service) handlePlanExecution(chatID int64, threadID int, messageID int,
 // handleNormalReply sends the assistant's text response to the chat as a
 // normal reply and finalizes the turn.
 func (s *Service) handleNormalReply(chatID int64, threadID int, messageID int, safeFinalText string, successRunID string, userText string, userID int64) Outcome {
-	if err := s.output.SendReply(chatID, threadID, safeFinalText); err != nil {
+	outboundMsgID, err := s.output.SendReply(chatID, threadID, safeFinalText)
+	if err != nil {
 		log.Printf("Failed to send reply to chat %d: %v", chatID, err)
+	}
+	if outboundMsgID != 0 && successRunID != "" {
+		s.updateRunLogOutboundMessage(successRunID, outboundMsgID)
 	}
 	s.output.ConfirmMessage(chatID, messageID)
 	s.afterSuccessfulTurn(chatID, threadID, userText, safeFinalText, successRunID, userID)
@@ -1326,7 +1331,7 @@ func (s *Service) tryExecutePlan(chatID int64, threadID int, messageID int, fina
 	}
 	log.Printf("Execution plan detected with %d tasks", len(plan.Tasks))
 	if displayText := orchestrator.StripPlanBlock(finalText); displayText != "" {
-		if err := s.output.SendReply(chatID, threadID, displayText); err != nil {
+		if _, err := s.output.SendReply(chatID, threadID, displayText); err != nil {
 			log.Printf("pipeline: SendReply(plan display) failed for chat=%d: %v", chatID, err)
 		}
 	}
@@ -1375,6 +1380,7 @@ type startRunLogParams struct {
 	ChatID    int64
 	ThreadID  int
 	RequestID string
+	MessageID int
 	CWD       string
 	Prompt    string
 	UserID    int64
@@ -1414,6 +1420,7 @@ func (s *Service) startRunLog(p startRunLogParams) bool {
 		Provider:          p.Provider,
 		Model:             p.Model,
 		CapabilityProfile: p.Profile,
+		InboundMessageID:  int64(p.MessageID),
 	})
 	if err != nil {
 		log.Printf("runlog: failed to start %s: %v", p.RequestID, err)
@@ -1470,6 +1477,22 @@ func (s *Service) updateRunLogSession(chatID int64, threadID int, sessionID stri
 		SessionID: &sessionID,
 	}); err != nil {
 		log.Printf("runlog: failed to update session for %s: %v", state.runID, err)
+	}
+}
+
+// updateRunLogOutboundMessage updates the outbound Telegram message_id on a
+// completed runlog entry. Called after the final reply has been sent.
+func (s *Service) updateRunLogOutboundMessage(runID string, outboundMessageID int64) {
+	if s.runLog == nil || runID == "" || outboundMessageID == 0 {
+		return
+	}
+	updateCtx, updateCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer updateCancel()
+	if err := s.runLog.Update(updateCtx, runlog.RunUpdate{
+		RunID:             runID,
+		OutboundMessageID: &outboundMessageID,
+	}); err != nil {
+		log.Printf("runlog: failed to update outbound_message_id for %s: %v", runID, err)
 	}
 }
 

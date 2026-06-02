@@ -18,7 +18,7 @@ type captureOutput struct {
 func (c *captureOutput) StartTyping(_ int64, _ int) func() { return func() {} }
 func (c *captureOutput) NewProgress(_ int64, _ int) ProgressReporter { return &fakeProgress{} }
 func (c *captureOutput) SendError(_ int64, _ int, text string) error { return nil }
-func (c *captureOutput) SendReply(_ int64, _ int, text string) error { return nil }
+func (c *captureOutput) SendReply(_ int64, _ int, text string) (int64, error) { return 0, nil }
 func (c *captureOutput) SendText(_ int64, _ int, text string) (any, error) {
 	c.lastText = text
 	return nil, nil

@@ -47,6 +47,10 @@ type RunRecord struct {
 	UsedFallback     bool
 	SessionFile      string
 	ParentRunID      string
+
+	// Pi session ↔ Telegram message bridge.
+	InboundMessageID  int64 // Telegram message_id that triggered this run (0 if N/A)
+	OutboundMessageID int64 // Telegram message_id of the final response (0 if none)
 }
 
 // RunRecordRx is the full read schema for scanning rows from run_journal.
@@ -85,6 +89,10 @@ type RunUpdate struct {
 	UsedFallback     *bool
 	SessionFile      *string
 	ParentRunID      *string
+
+	// Pi session ↔ Telegram message bridge.
+	InboundMessageID  *int64
+	OutboundMessageID *int64
 }
 
 // RunEvent represents a single point-in-time timeline event.

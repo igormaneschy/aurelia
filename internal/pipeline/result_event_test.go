@@ -32,9 +32,9 @@ func (f *fakeOutput) SendError(_ int64, _ int, text string) error {
 	return nil
 }
 
-func (f *fakeOutput) SendReply(_ int64, _ int, text string) error {
+func (f *fakeOutput) SendReply(_ int64, _ int, text string) (int64, error) {
 	f.lastReply = text
-	return nil
+	return 0, nil
 }
 
 func (f *fakeOutput) SendText(_ int64, _ int, _ string) (any, error) {
