@@ -877,7 +877,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	s.output.DeleteMessage(reconnectMsg)
 	if err != nil {
 		log.Printf("bridge: retry failed for chat=%d: %s", chatID, redactSecrets(err.Error()))
-		s.patchContinuitySessionCold(chatID, threadID, "bridge retry failed: "+redactSecrets(err.Error()))
+		s.patchContinuitySessionCold(chatID, threadID, "bridge retry failed: "+redactSecrets(err.Error()), userID)
 		if runLogStarted {
 			s.recordPipelineEvent(chatID, threadID, observability.NewErrorEvent("",
 				observability.PhaseRetryFailed, "retry failed: process death persisted"))
@@ -961,13 +961,6 @@ func timeoutDetails(trackers ...*runTimeoutTracker) (string, time.Duration) {
 	return trackers[0].snapshot()
 }
 
-func sessionUserID(userID ...int64) int64 {
-	if len(userID) == 0 {
-		return 0
-	}
-	return userID[0]
-}
-
 func (s *Service) handleRetryOutcome(chatID int64, threadID int, messageID int, outcome Outcome, userID int64) {
 	switch outcome {
 	case OutcomeSuccess:
@@ -977,7 +970,7 @@ func (s *Service) handleRetryOutcome(chatID int64, threadID int, messageID int, 
 		if s.sessions != nil {
 			s.sessions.MarkProcessDeath(chatID, threadID, userID)
 		}
-		s.patchContinuitySessionCold(chatID, threadID, "bridge retry process death")
+		s.patchContinuitySessionCold(chatID, threadID, "bridge retry process death", userID)
 		if err := s.output.SendError(chatID, threadID, bridgeRetryFailedMessage); err != nil {
 			log.Printf("pipeline: SendError(retry outcome) failed for chat=%d: %v", chatID, err)
 		}
@@ -1163,7 +1156,7 @@ func (s *Service) handleSystemEvent(chatID int64, threadID int, ev bridge.Event,
 		return
 	}
 	s.sessions.SetSession(chatID, threadID, userID, ev.SessionFile)
-	s.patchContinuitySessionID(chatID, threadID, ev.SessionFile)
+	s.patchContinuitySessionID(chatID, threadID, ev.SessionFile, userID)
 }
 
 func eventContent(ev bridge.Event) string {
@@ -1195,7 +1188,7 @@ func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, e
 		existing := s.sessions.GetSession(chatID, threadID, userID)
 		if existing == "" {
 			s.sessions.SetSession(chatID, threadID, userID, ev.SessionFile)
-			s.patchContinuitySessionID(chatID, threadID, ev.SessionFile)
+			s.patchContinuitySessionID(chatID, threadID, ev.SessionFile, userID)
 		}
 	}
 

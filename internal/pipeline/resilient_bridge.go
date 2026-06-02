@@ -25,8 +25,8 @@ type ResilientBridge struct {
 
 	// ContinuitySnapshot is called before fallback to capture current context.
 	// Returns a compact summary string to inject into the fallback prompt.
-	// The summary is already redacted, escaped, and capped. May be nil.
-	ContinuitySnapshot func(ctx context.Context, chatID int64, threadID int) string
+	// The summary is already redacted, escaped, and capped. May be empty string.
+	ContinuitySnapshot func(ctx context.Context, chatID int64, threadID int, userID int64) string
 
 	// OnEvent is called when the resilient bridge emits an observable event
 	// (retry, fallback, circuit breaker). The callback must be fast and
@@ -87,7 +87,7 @@ func (rb *ResilientBridge) Execute(
 	// Extract chat/thread from security context for fallback snapshot injection.
 	// Must be captured once per Execute call and passed explicitly to tryFallback
 	// to avoid data races (ResilientBridge is shared across goroutines).
-	chatID, threadID := extractChatThread(req)
+	chatID, threadID, userID := extractChatThreadUser(req)
 
 	// 1. Circuit breaker open → skip directly to fallback.
 	if rb.breakers.ShouldSkip(provider) {
@@ -98,10 +98,9 @@ func (rb *ResilientBridge) Execute(
 						log.Printf("resilient_bridge: panic in onNotify: %v", r)
 					}
 				}()
-				onNotify(msg)
-			}()
+				}()
 		}
-		return rb.tryFallback(ctx, req, onNotify, chatID, threadID)
+		return rb.tryFallback(ctx, req, onNotify, chatID, threadID, userID)
 	}
 
 	// 2. Try primary provider with retries.
@@ -146,7 +145,7 @@ func (rb *ResilientBridge) Execute(
 		}
 	}
 
-	return rb.tryFallback(ctx, req, onNotify, chatID, threadID)
+	return rb.tryFallback(ctx, req, onNotify, chatID, threadID, userID)
 }
 
 // executeWithRetry attempts the request up to MaxRetries with exponential backoff.
@@ -268,10 +267,10 @@ func proxyChannel(prefix []bridge.Event, src <-chan bridge.Event) <-chan bridge.
 }
 
 // tryFallback attempts the request with the fallback provider.
-// chatID and threadID are extracted from the request security context by the
+// chatID, threadID, and userID are extracted from the request security context by the
 // caller (Execute) and passed explicitly instead of stored on the struct to
 // avoid data races — ResilientBridge is shared across goroutines.
-func (rb *ResilientBridge) tryFallback(ctx context.Context, req bridge.Request, onNotify func(string), chatID int64, threadID int) ExecuteResult {
+func (rb *ResilientBridge) tryFallback(ctx context.Context, req bridge.Request, onNotify func(string), chatID int64, threadID int, userID int64) ExecuteResult {
 	rb.fireEvent(observability.PhaseFallbackStarted, "warn",
 		fmt.Sprintf("provider=%s model=%s fallback_provider=%s",
 			req.Options.Provider, req.Options.Model, rb.config.FallbackProvider))
@@ -302,7 +301,7 @@ func (rb *ResilientBridge) tryFallback(ctx context.Context, req bridge.Request, 
 					log.Printf("resilient_bridge: panic in ContinuitySnapshot: %v", r)
 				}
 			}()
-			snapshot := rb.ContinuitySnapshot(ctx, chatID, threadID)
+			snapshot := rb.ContinuitySnapshot(ctx, chatID, threadID, userID)
 			if snapshot != "" {
 				snapshotBlock := "\n\n## Previous Session Context (recovered)\n\n" +
 					"The following is recovered context from the previous session that was interrupted. " +
@@ -367,13 +366,13 @@ func (rb *ResilientBridge) fireEvent(phase, level, message string) {
 	rb.OnEvent(phase, level, message)
 }
 
-// extractChatThread reads ChatID and ThreadID from the request's security
+// extractChatThreadUser reads ChatID, ThreadID, and UserID from the request's security
 // context, or returns zero values when no security context is present.
 // Must be called once per Execute invocation and the results passed explicitly
 // to tryFallback to avoid data races on ResilientBridge shared state.
-func extractChatThread(req bridge.Request) (chatID int64, threadID int) {
+func extractChatThreadUser(req bridge.Request) (chatID int64, threadID int, userID int64) {
 	if req.Options.Security != nil {
-		return req.Options.Security.ChatID, req.Options.Security.ThreadID
+		return req.Options.Security.ChatID, req.Options.Security.ThreadID, req.Options.Security.UserID
 	}
-	return 0, 0
+	return 0, 0, 0
 }

@@ -47,17 +47,6 @@ func TestRunTimeoutTrackerKeepsFirstOrigin(t *testing.T) {
 	}
 }
 
-func TestSessionUserIDFallback(t *testing.T) {
-	t.Parallel()
-
-	if got := sessionUserID(); got != 0 {
-		t.Fatalf("sessionUserID() = %d, want 0", got)
-	}
-	if got := sessionUserID(123); got != 123 {
-		t.Fatalf("sessionUserID(123) = %d, want 123", got)
-	}
-}
-
 func TestClassifyBridgeErrorOutcomeTimeoutOrigins(t *testing.T) {
 	t.Parallel()
 

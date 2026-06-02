@@ -2,9 +2,13 @@ package continuity
 
 import (
 	"context"
+	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 func TestStore_UpsertGetRoundtrip(t *testing.T) {
@@ -16,6 +20,7 @@ func TestStore_UpsertGetRoundtrip(t *testing.T) {
 	state := ConversationState{
 		ChatID:               42,
 		ThreadID:             1,
+		UserID:               100,
 		CWD:                  "/repo/project",
 		ActiveGoal:           "Implement feature X",
 		LastUserIntent:       "Please implement X",
@@ -34,7 +39,7 @@ func TestStore_UpsertGetRoundtrip(t *testing.T) {
 		t.Fatalf("Upsert: %v", err)
 	}
 
-	got, err := store.Get(ctx, 42, 1)
+	got, err := store.Get(ctx, 42, 1, 100)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -61,7 +66,7 @@ func TestStore_GetMissingState_ReturnsNil(t *testing.T) {
 	store := newTestStore(t)
 	defer store.Close()
 
-	got, err := store.Get(ctx, 999, 0)
+	got, err := store.Get(ctx, 999, 0, 0)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -79,6 +84,7 @@ func TestStore_UpsertOverwritesExisting(t *testing.T) {
 	_ = store.Upsert(ctx, ConversationState{
 		ChatID:   42,
 		ThreadID: 0,
+		UserID:               1,
 		CWD:      "/old/path",
 		UpdatedAt: now,
 	})
@@ -86,11 +92,12 @@ func TestStore_UpsertOverwritesExisting(t *testing.T) {
 	_ = store.Upsert(ctx, ConversationState{
 		ChatID:   42,
 		ThreadID: 0,
+		UserID:               1,
 		CWD:      "/new/path",
 		UpdatedAt: now.Add(time.Hour),
 	})
 
-	got, _ := store.Get(ctx, 42, 0)
+	got, _ := store.Get(ctx, 42, 0, 1)
 	if got == nil {
 		t.Fatal("expected state after second upsert")
 	}
@@ -108,6 +115,7 @@ func TestStore_PatchOnlyUpdatesProvidedFields(t *testing.T) {
 	_ = store.Upsert(ctx, ConversationState{
 		ChatID:   42,
 		ThreadID: 0,
+		UserID:               1,
 		CWD:      "/repo",
 		ActiveGoal: "Old goal",
 		UpdatedAt: now,
@@ -115,7 +123,7 @@ func TestStore_PatchOnlyUpdatesProvidedFields(t *testing.T) {
 
 	cold := true
 	reason := "auto-reset"
-	err := store.Patch(ctx, ConversationKey{ChatID: 42, ThreadID: 0}, StatePatch{
+	err := store.Patch(ctx, ConversationKeyFor(42, 0, 1), StatePatch{
 		SessionCold: &cold,
 		ResetReason: &reason,
 		UpdatedAt:   now.Add(time.Minute),
@@ -124,7 +132,7 @@ func TestStore_PatchOnlyUpdatesProvidedFields(t *testing.T) {
 		t.Fatalf("Patch: %v", err)
 	}
 
-	got, _ := store.Get(ctx, 42, 0)
+	got, _ := store.Get(ctx, 42, 0, 1)
 	if got == nil {
 		t.Fatal("expected state after patch")
 	}
@@ -153,7 +161,7 @@ func TestStore_PatchCreatesNewRowWhenMissing(t *testing.T) {
 	cold := true
 	reason := "fresh-cold"
 
-	err := store.Patch(ctx, ConversationKey{ChatID: 1, ThreadID: 2}, StatePatch{
+	err := store.Patch(ctx, ConversationKeyFor(1, 2, 0), StatePatch{
 		CWD:         strPtr("/workspace"),
 		SessionCold: &cold,
 		ResetReason: &reason,
@@ -163,7 +171,7 @@ func TestStore_PatchCreatesNewRowWhenMissing(t *testing.T) {
 		t.Fatalf("Patch on missing row: %v", err)
 	}
 
-	got, _ := store.Get(ctx, 1, 2)
+	got, _ := store.Get(ctx, 1, 2, 0)
 	if got == nil {
 		t.Fatal("expected state after patch on missing row")
 	}
@@ -189,6 +197,7 @@ func TestStore_ReopenPreservesState(t *testing.T) {
 	_ = store1.Upsert(ctx, ConversationState{
 		ChatID:   42,
 		ThreadID: 0,
+		UserID:               1,
 		CWD:      "/persisted",
 		UpdatedAt: now,
 	})
@@ -200,7 +209,7 @@ func TestStore_ReopenPreservesState(t *testing.T) {
 	}
 	defer store2.Close()
 
-	got, _ := store2.Get(ctx, 42, 0)
+	got, _ := store2.Get(ctx, 42, 0, 1)
 	if got == nil {
 		t.Fatal("expected state after reopen")
 	}
@@ -218,17 +227,19 @@ func TestStore_GetDifferentThread(t *testing.T) {
 	_ = store.Upsert(ctx, ConversationState{
 		ChatID:   42,
 		ThreadID: 1,
+		UserID:               1,
 		CWD:      "/thread-1",
 		UpdatedAt: now,
 	})
 	_ = store.Upsert(ctx, ConversationState{
 		ChatID:   42,
 		ThreadID: 2,
+		UserID:               1,
 		CWD:      "/thread-2",
 		UpdatedAt: now,
 	})
 
-	got, _ := store.Get(ctx, 42, 1)
+	got, _ := store.Get(ctx, 42, 1, 1)
 	if got == nil {
 		t.Fatal("expected thread 1 state, got nil")
 	}
@@ -236,7 +247,7 @@ func TestStore_GetDifferentThread(t *testing.T) {
 		t.Fatalf("thread 1 CWD = %q, want %q", got.CWD, "/thread-1")
 	}
 
-	got, _ = store.Get(ctx, 42, 2)
+	got, _ = store.Get(ctx, 42, 2, 1)
 	if got == nil {
 		t.Fatal("expected thread 2 state, got nil")
 	}
@@ -244,9 +255,119 @@ func TestStore_GetDifferentThread(t *testing.T) {
 		t.Fatalf("thread 2 CWD = %q, want %q", got.CWD, "/thread-2")
 	}
 
-	got, _ = store.Get(ctx, 42, 3)
+	got, _ = store.Get(ctx, 42, 3, 1)
 	if got != nil {
 		t.Fatal("expected nil for non-existent thread")
+	}
+}
+
+func TestStore_MigrationFromLegacySchema(t *testing.T) {
+	// Create a database with the old 2-column PK schema (pre-UserID migration),
+	// then open with NewSQLiteStore which should detect and migrate it.
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "legacy_continuity.db")
+
+	// Simulate old schema: 2-column PK, no user_id column.
+	f, err := os.OpenFile(dbPath, os.O_RDONLY|os.O_CREATE, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	dsn := dbPath + "?_journal_mode=WAL&_busy_timeout=5000&_synchronous=NORMAL"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	// Create old schema.
+	_, err = db.Exec(`
+	CREATE TABLE IF NOT EXISTS conversation_state (
+		chat_id INTEGER NOT NULL,
+		thread_id INTEGER NOT NULL,
+		cwd TEXT DEFAULT '',
+		active_goal TEXT DEFAULT '',
+		last_user_intent TEXT DEFAULT '',
+		last_assistant_summary TEXT DEFAULT '',
+		last_checkpoint TEXT DEFAULT '',
+		last_run_id TEXT DEFAULT '',
+		last_run_status TEXT DEFAULT '',
+		last_tools TEXT DEFAULT '',
+		session_id TEXT DEFAULT '',
+		session_cold INTEGER NOT NULL DEFAULT 0,
+		reset_reason TEXT DEFAULT '',
+		updated_at INTEGER NOT NULL,
+		PRIMARY KEY (chat_id, thread_id)
+	)`)
+	if err != nil {
+		t.Fatalf("create old schema: %v", err)
+	}
+
+	// Insert a legacy row.
+	_, err = db.Exec(`
+	INSERT INTO conversation_state (chat_id, thread_id, cwd, updated_at)
+	VALUES (1, 0, '/legacy/path', 1000000)`)
+	if err != nil {
+		t.Fatalf("insert legacy row: %v", err)
+	}
+	db.Close()
+
+	// Now open with NewSQLiteStore — migration should run automatically.
+	store, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore after legacy schema: %v", err)
+	}
+	defer store.Close()
+
+	ctx := context.Background()
+
+	// Legacy row should be accessible with userID=0.
+	state, err := store.Get(ctx, 1, 0, 0)
+	if err != nil {
+		t.Fatalf("Get legacy row: %v", err)
+	}
+	if state == nil {
+		t.Fatal("legacy row not found after migration")
+	}
+	if state.CWD != "/legacy/path" {
+		t.Fatalf("CWD = %q, want %q", state.CWD, "/legacy/path")
+	}
+
+	// Write a new row with explicit UserID — should work with new PK.
+	now := time.Now().Truncate(time.Second)
+	err = store.Upsert(ctx, ConversationState{
+		ChatID:    2,
+		ThreadID:  0,
+		UserID:    42,
+		CWD:       "/new/path",
+		UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("Upsert after migration: %v", err)
+	}
+
+	// Read back with matching UserID.
+	state, err = store.Get(ctx, 2, 0, 42)
+	if err != nil {
+		t.Fatalf("Get new row: %v", err)
+	}
+	if state == nil || state.CWD != "/new/path" {
+		t.Fatal("new row with UserID not found")
+	}
+
+	// Reopen — migration should be a no-op (user_id already in PK).
+	store.Close()
+	store2, err := NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore reopen: %v", err)
+	}
+	defer store2.Close()
+
+	state, err = store2.Get(ctx, 1, 0, 0)
+	if err != nil || state == nil || state.CWD != "/legacy/path" {
+		t.Fatal("legacy row lost after reopen")
 	}
 }
 

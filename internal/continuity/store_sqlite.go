@@ -60,10 +60,14 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 }
 
 func (s *SQLiteStore) initialize() error {
+	// Create the table with the new 3-column primary key.
+	// The migration from (chat_id, thread_id) to (chat_id, thread_id, user_id)
+	// is handled by ensureUserIDColumn below.
 	query := `
 	CREATE TABLE IF NOT EXISTS conversation_state (
 		chat_id INTEGER NOT NULL,
 		thread_id INTEGER NOT NULL,
+		user_id INTEGER NOT NULL DEFAULT 0,
 		cwd TEXT DEFAULT '',
 		active_goal TEXT DEFAULT '',
 		last_user_intent TEXT DEFAULT '',
@@ -76,7 +80,7 @@ func (s *SQLiteStore) initialize() error {
 		session_cold INTEGER NOT NULL DEFAULT 0,
 		reset_reason TEXT DEFAULT '',
 		updated_at INTEGER NOT NULL,
-		PRIMARY KEY (chat_id, thread_id)
+		PRIMARY KEY (chat_id, thread_id, user_id)
 	);
 	CREATE INDEX IF NOT EXISTS idx_conversation_state_cwd
 	ON conversation_state(cwd);
@@ -84,19 +88,115 @@ func (s *SQLiteStore) initialize() error {
 	if _, err := s.db.Exec(query); err != nil {
 		return fmt.Errorf("initialize continuity schema: %w", err)
 	}
-	return nil
+	return s.ensureUserIDColumn()
+}
+
+// ensureUserIDColumn migrates from the old (chat_id, thread_id) primary key
+// to the new (chat_id, thread_id, user_id) primary key. This is safe to run
+// on every startup — it detects whether the migration is needed.
+// The migration runs inside a single transaction for atomicity: if the daemon
+// crashes mid-migration, SQLite rolls back and the old table is untouched.
+func (s *SQLiteStore) ensureUserIDColumn() error {
+	// Check if user_id is already part of the PK using pragma_table_info.pk.
+	// pk=0 means the column is NOT in the primary key; pk>0 means it is.
+	// This correctly handles the edge case where user_id exists as a regular
+	// column but was never promoted to the PK (e.g., manual ALTER TABLE).
+	var pkPosition int
+	err := s.db.QueryRow(`
+		SELECT pk FROM pragma_table_info('conversation_state')
+		WHERE name = 'user_id'`).Scan(&pkPosition)
+	if err != nil {
+		// Column doesn't exist or query failed — proceed to migration.
+		// sql.ErrNoRows means the column is absent, which is fine.
+		if err.Error() != "sql: no rows in result set" {
+			return fmt.Errorf("check user_id PK: %w", err)
+		}
+	}
+	if pkPosition > 0 {
+		// Already migrated — user_id is part of the PK.
+		return nil
+	}
+
+	// Migration needed: recreate the table with the new PK inside a transaction.
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin migration transaction: %w", err)
+	}
+	defer tx.Rollback() // no-op after successful Commit
+
+	// Step 1: Create new table.
+	_, err = tx.Exec(`
+	CREATE TABLE IF NOT EXISTS conversation_state_new (
+		chat_id INTEGER NOT NULL,
+		thread_id INTEGER NOT NULL,
+		user_id INTEGER NOT NULL DEFAULT 0,
+		cwd TEXT DEFAULT '',
+		active_goal TEXT DEFAULT '',
+		last_user_intent TEXT DEFAULT '',
+		last_assistant_summary TEXT DEFAULT '',
+		last_checkpoint TEXT DEFAULT '',
+		last_run_id TEXT DEFAULT '',
+		last_run_status TEXT DEFAULT '',
+		last_tools TEXT DEFAULT '',
+		session_id TEXT DEFAULT '',
+		session_cold INTEGER NOT NULL DEFAULT 0,
+		reset_reason TEXT DEFAULT '',
+		updated_at INTEGER NOT NULL,
+		PRIMARY KEY (chat_id, thread_id, user_id)
+	)`)
+	if err != nil {
+		return fmt.Errorf("create conversation_state_new: %w", err)
+	}
+
+	// Step 2: Copy data (user_id defaults to 0 for legacy rows).
+	_, err = tx.Exec(`
+	INSERT OR IGNORE INTO conversation_state_new
+		(chat_id, thread_id, user_id, cwd, active_goal, last_user_intent,
+		 last_assistant_summary, last_checkpoint, last_run_id,
+		 last_run_status, last_tools, session_id, session_cold,
+		 reset_reason, updated_at)
+	SELECT chat_id, thread_id, 0, cwd, active_goal, last_user_intent,
+		 last_assistant_summary, last_checkpoint, last_run_id,
+		 last_run_status, last_tools, session_id, session_cold,
+		 reset_reason, updated_at
+	FROM conversation_state`)
+	if err != nil {
+		return fmt.Errorf("copy conversation_state data: %w", err)
+	}
+
+	// Step 3: Drop old table.
+	_, err = tx.Exec(`DROP TABLE conversation_state`)
+	if err != nil {
+		return fmt.Errorf("drop old conversation_state: %w", err)
+	}
+
+	// Step 4: Rename new table to replace the old one.
+	_, err = tx.Exec(`ALTER TABLE conversation_state_new RENAME TO conversation_state`)
+	if err != nil {
+		return fmt.Errorf("rename conversation_state_new: %w", err)
+	}
+
+	// Step 5: Recreate index.
+	_, err = tx.Exec(`
+	CREATE INDEX IF NOT EXISTS idx_conversation_state_cwd
+	ON conversation_state(cwd)`)
+	if err != nil {
+		return fmt.Errorf("recreate cwd index: %w", err)
+	}
+
+	return tx.Commit()
 }
 
 // Get retrieves the current state for a chat/thread, or nil if absent.
-func (s *SQLiteStore) Get(ctx context.Context, chatID int64, threadID int) (*ConversationState, error) {
+func (s *SQLiteStore) Get(ctx context.Context, chatID int64, threadID int, userID int64) (*ConversationState, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT chat_id, thread_id, cwd,
+		SELECT chat_id, thread_id, user_id, cwd,
 		       active_goal, last_user_intent, last_assistant_summary,
 		       last_checkpoint, last_run_id, last_run_status,
 		       last_tools, session_id, session_cold,
 		       reset_reason, updated_at
 		FROM conversation_state
-		WHERE chat_id = ? AND thread_id = ?`, chatID, threadID)
+		WHERE chat_id = ? AND thread_id = ? AND user_id = ?`, chatID, threadID, userID)
 
 	state, err := scanState(row)
 	if err == sql.ErrNoRows {
@@ -108,7 +208,7 @@ func (s *SQLiteStore) Get(ctx context.Context, chatID int64, threadID int) (*Con
 	return state, nil
 }
 
-// Upsert fully replaces the state for a chat/thread.
+// Upsert fully replaces the state for a chat/thread/user.
 // All text fields are sanitized (redacted + capped) before storage.
 func (s *SQLiteStore) Upsert(ctx context.Context, state ConversationState) error {
 	now := unix(state.UpdatedAt)
@@ -127,12 +227,12 @@ func (s *SQLiteStore) Upsert(ctx context.Context, state ConversationState) error
 
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO conversation_state
-			(chat_id, thread_id, cwd, active_goal, last_user_intent,
+			(chat_id, thread_id, user_id, cwd, active_goal, last_user_intent,
 			 last_assistant_summary, last_checkpoint, last_run_id,
 			 last_run_status, last_tools, session_id, session_cold,
 			 reset_reason, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT(chat_id, thread_id) DO UPDATE SET
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(chat_id, thread_id, user_id) DO UPDATE SET
 			cwd = excluded.cwd,
 			active_goal = excluded.active_goal,
 			last_user_intent = excluded.last_user_intent,
@@ -145,7 +245,7 @@ func (s *SQLiteStore) Upsert(ctx context.Context, state ConversationState) error
 			session_cold = excluded.session_cold,
 			reset_reason = excluded.reset_reason,
 			updated_at = excluded.updated_at`,
-		state.ChatID, state.ThreadID, state.CWD,
+		state.ChatID, state.ThreadID, state.UserID, state.CWD,
 		state.ActiveGoal, state.LastUserIntent,
 		state.LastAssistantSummary, state.LastCheckpoint,
 		state.LastRunID, state.LastRunStatus,
@@ -165,13 +265,13 @@ func (s *SQLiteStore) Upsert(ctx context.Context, state ConversationState) error
 func (s *SQLiteStore) Patch(ctx context.Context, key ConversationKey, patch StatePatch) error {
 	now := unix(patch.UpdatedAt)
 
-	cols := "chat_id, thread_id, updated_at"
-	vals := "?, ?, ?"
+	cols := "chat_id, thread_id, user_id, updated_at"
+	vals := "?, ?, ?, ?"
 	var valueArgs []any // VALUES arguments in column order
 	var setClauses []string
 	var setArgs []any // SET arguments
 
-	valueArgs = append(valueArgs, key.ChatID, key.ThreadID, now)
+	valueArgs = append(valueArgs, key.ChatID, key.ThreadID, key.UserID, now)
 	setClauses = append(setClauses, "updated_at = ?")
 	setArgs = append(setArgs, now)
 
@@ -220,7 +320,7 @@ func (s *SQLiteStore) Patch(ctx context.Context, key ConversationKey, patch Stat
 	q := fmt.Sprintf(`
 		INSERT INTO conversation_state (%s)
 		VALUES (%s)
-		ON CONFLICT(chat_id, thread_id) DO UPDATE SET %s`, cols, vals, setStr)
+		ON CONFLICT(chat_id, thread_id, user_id) DO UPDATE SET %s`, cols, vals, setStr)
 
 	_, err := s.db.ExecContext(ctx, q, allArgs...)
 	if err != nil {
@@ -370,7 +470,7 @@ func scanState(row stateScanner) (*ConversationState, error) {
 	var s ConversationState
 	var sessionCold int
 	var updatedAt int64
-	err := row.Scan(&s.ChatID, &s.ThreadID, &s.CWD,
+	err := row.Scan(&s.ChatID, &s.ThreadID, &s.UserID, &s.CWD,
 		&s.ActiveGoal, &s.LastUserIntent, &s.LastAssistantSummary,
 		&s.LastCheckpoint, &s.LastRunID, &s.LastRunStatus,
 		&s.LastTools, &s.SessionID, &sessionCold,

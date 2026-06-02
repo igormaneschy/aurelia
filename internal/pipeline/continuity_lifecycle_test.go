@@ -30,7 +30,7 @@ func TestContinuityAfterSuccessfulTurn(t *testing.T) {
 	svc.afterSuccessfulTurn(42, 0, "user text", "assistant response", "run-abc", 100)
 
 	ctx := t.Context()
-	state, err := contStore.Get(ctx, 42, 0)
+	state, err := contStore.Get(ctx, 42, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +82,7 @@ func TestContinuityAfterTimeout(t *testing.T) {
 	tracker.mark(timeoutOriginMaxExecution)
 	_ = svc.handleContextOutcome(parentCtx, ctx, 42, 0, 100, tracker)
 
-	state, err := contStore.Get(context.Background(), 42, 0)
+	state, err := contStore.Get(context.Background(), 42, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +132,7 @@ func TestContinuityAfterEmptyResult(t *testing.T) {
 		t.Fatalf("expected OutcomeLLMError, got %v", outcome)
 	}
 
-	state, err := contStore.Get(context.Background(), 42, 0)
+	state, err := contStore.Get(context.Background(), 42, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestContinuityAfterError(t *testing.T) {
 		t.Fatalf("expected OutcomeLLMError, got %v", outcome)
 	}
 
-	state, err := contStore.Get(context.Background(), 42, 0)
+	state, err := contStore.Get(context.Background(), 42, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,10 +201,10 @@ func TestContinuitySessionID(t *testing.T) {
 		sessions:   ss,
 	}
 
-	svc.patchContinuitySessionID(42, 0, "sid-new-session")
+	svc.patchContinuitySessionID(42, 0, "sid-new-session", 100)
 
 	ctx := context.Background()
-	state, err := contStore.Get(ctx, 42, 0)
+	state, err := contStore.Get(ctx, 42, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,19 +225,22 @@ func TestContinuityMarkColdForSessions(t *testing.T) {
 	_ = contStore.Upsert(ctx, continuity.ConversationState{
 		ChatID:    1,
 		ThreadID:  0,
+		UserID:    0,
 		SessionID: "sid-1",
 		UpdatedAt: time.Now(),
 	})
 	_ = contStore.Upsert(ctx, continuity.ConversationState{
 		ChatID:    2,
 		ThreadID:  0,
+		UserID:    0,
 		SessionID: "sid-2",
 		UpdatedAt: time.Now(),
 	})
 	_ = contStore.Upsert(ctx, continuity.ConversationState{
 		ChatID:    3,
 		ThreadID:  0,
-		SessionID: "", // no session — should not be marked
+		UserID:    0,
+		SessionID: "", // no session
 		UpdatedAt: time.Now(),
 	})
 
@@ -248,7 +251,7 @@ func TestContinuityMarkColdForSessions(t *testing.T) {
 
 	// Rows with session_id should be cold
 	for _, chatID := range []int64{1, 2} {
-		state, _ := contStore.Get(ctx, chatID, 0)
+		state, _ := contStore.Get(ctx, chatID, 0, 0)
 		if state == nil {
 			t.Fatalf("expected state for chat %d", chatID)
 		}
@@ -261,7 +264,7 @@ func TestContinuityMarkColdForSessions(t *testing.T) {
 	}
 
 	// Row without session_id should remain unchanged
-	noSession, _ := contStore.Get(ctx, 3, 0)
+	noSession, _ := contStore.Get(ctx, 3, 0, 0)
 	if noSession == nil {
 		t.Fatal("expected state for chat 3")
 	}

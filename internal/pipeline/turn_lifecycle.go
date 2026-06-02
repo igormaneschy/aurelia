@@ -109,7 +109,7 @@ func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText strin
 		s.sessions.ClearFailureState(chatID, threadID, userID)
 	}
 
-	key := continuity.ConversationKey{ChatID: chatID, ThreadID: threadID}
+	key := continuity.ConversationKeyFor(chatID, threadID, userID)
 
 	// Progressive summarization: on non-summary turns, re-read the existing
 	// summary from continuity so LastAssistantSummary accumulates across
@@ -124,7 +124,7 @@ func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText strin
 				readCtx, readCancel := context.WithTimeout(context.Background(), 5*time.Second)
 				defer readCancel()
 
-				state, err := s.continuity.Get(readCtx, chatID, threadID)
+				state, err := s.continuity.Get(readCtx, chatID, threadID, userID)
 				if err == nil && state != nil && state.LastAssistantSummary != "" {
 					// Use background context (not readCtx) so generateProgressiveSummary
 					// can derive its own 10s timeout — a 5s parent would truncate it.
@@ -141,7 +141,7 @@ func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText strin
 			// so subsequent intervals build on the previous summary.
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
-			state, err := s.continuity.Get(ctx, chatID, threadID)
+			state, err := s.continuity.Get(ctx, chatID, threadID, userID)
 			if err == nil && state != nil && state.LastAssistantSummary != "" {
 				finalSummary = state.LastAssistantSummary
 			}
@@ -178,7 +178,7 @@ func (s *Service) getRunID(chatID int64, threadID int) string {
 
 // patchContinuityAfterSuccess writes successful turn state into the continuity store.
 // runID must be captured before completeRunLog (which cleans up runLogStates).
-func (s *Service) patchContinuityAfterSuccess(chatID int64, threadID int, userText string, assistantText string, runID string, userID ...int64) {
+func (s *Service) patchContinuityAfterSuccess(chatID int64, threadID int, userText string, assistantText string, runID string, userID int64) {
 	if s.continuity == nil {
 		return
 	}
@@ -192,10 +192,10 @@ func (s *Service) patchContinuityAfterSuccess(chatID int64, threadID int, userTe
 
 	sessionID := ""
 	if s.sessions != nil {
-		sessionID = s.sessions.GetSession(chatID, threadID, sessionUserID(userID...))
+		sessionID = s.sessions.GetSession(chatID, threadID, userID)
 	}
 
-	err := s.continuity.Patch(ctx, continuity.ConversationKey{ChatID: chatID, ThreadID: threadID}, continuity.StatePatch{
+	err := s.continuity.Patch(ctx, continuity.ConversationKeyFor(chatID, threadID, userID), continuity.StatePatch{
 		CWD:                  &cwd,
 		LastUserIntent:       &userText,
 		LastAssistantSummary: &assistantText,
@@ -212,7 +212,7 @@ func (s *Service) patchContinuityAfterSuccess(chatID int64, threadID int, userTe
 
 // patchContinuityFailure writes failure/timeout/error state into the continuity store.
 // Must be called BEFORE completeRunLog, since that cleans up the run log state.
-func (s *Service) patchContinuityFailure(chatID int64, threadID int, status string, errMsg string, userID ...int64) {
+func (s *Service) patchContinuityFailure(chatID int64, threadID int, status string, errMsg string, userID int64) {
 	if s.continuity == nil {
 		return
 	}
@@ -254,10 +254,10 @@ func (s *Service) patchContinuityFailure(chatID int64, threadID int, status stri
 
 	sid := ""
 	if s.sessions != nil {
-		sid = s.sessions.GetSession(chatID, threadID, sessionUserID(userID...))
+		sid = s.sessions.GetSession(chatID, threadID, userID)
 	}
 
-	err := s.continuity.Patch(ctx, continuity.ConversationKey{ChatID: chatID, ThreadID: threadID}, continuity.StatePatch{
+	err := s.continuity.Patch(ctx, continuity.ConversationKeyFor(chatID, threadID, userID), continuity.StatePatch{
 		CWD:            &cwd,
 		LastRunID:      &runID,
 		LastRunStatus:  &status,
@@ -274,7 +274,7 @@ func (s *Service) patchContinuityFailure(chatID int64, threadID int, status stri
 }
 
 // patchContinuitySessionCold marks the session as cold with a reset reason.
-func (s *Service) patchContinuitySessionCold(chatID int64, threadID int, reason string) {
+func (s *Service) patchContinuitySessionCold(chatID int64, threadID int, reason string, userID int64) {
 	if s.continuity == nil {
 		return
 	}
@@ -282,7 +282,7 @@ func (s *Service) patchContinuitySessionCold(chatID int64, threadID int, reason 
 	defer cancel()
 
 	cold := true
-	err := s.continuity.Patch(ctx, continuity.ConversationKey{ChatID: chatID, ThreadID: threadID}, continuity.StatePatch{
+	err := s.continuity.Patch(ctx, continuity.ConversationKeyFor(chatID, threadID, userID), continuity.StatePatch{
 		SessionCold: &cold,
 		ResetReason: &reason,
 		UpdatedAt:   time.Now(),
@@ -293,14 +293,14 @@ func (s *Service) patchContinuitySessionCold(chatID int64, threadID int, reason 
 }
 
 // patchContinuitySessionID updates the session ID in continuity state.
-func (s *Service) patchContinuitySessionID(chatID int64, threadID int, sessionID string) {
+func (s *Service) patchContinuitySessionID(chatID int64, threadID int, sessionID string, userID int64) {
 	if s.continuity == nil || sessionID == "" {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	err := s.continuity.Patch(ctx, continuity.ConversationKey{ChatID: chatID, ThreadID: threadID}, continuity.StatePatch{
+	err := s.continuity.Patch(ctx, continuity.ConversationKeyFor(chatID, threadID, userID), continuity.StatePatch{
 		SessionID: &sessionID,
 		UpdatedAt: time.Now(),
 	})
@@ -313,14 +313,14 @@ func (s *Service) patchContinuitySessionID(chatID int64, threadID int, sessionID
 // Returns a compact, redacted summary string, or empty if unavailable.
 // All field values are redacted for defense-in-depth, escaped to prevent
 // delimiter injection, and the total is capped at MaxContinuityBlockChars.
-func (s *Service) continuitySnapshot(ctx context.Context, chatID int64, threadID int) string {
+func (s *Service) continuitySnapshot(ctx context.Context, chatID int64, threadID int, userID int64) string {
 	if s.continuity == nil {
 		return ""
 	}
 	getCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
-	state, err := s.continuity.Get(getCtx, chatID, threadID)
+	state, err := s.continuity.Get(getCtx, chatID, threadID, userID)
 	if err != nil || state == nil {
 		return ""
 	}
@@ -391,7 +391,7 @@ func classifyBridgeErrorOutcome(message string) (string, runlog.RunStatus, strin
 	return "failed", runlog.RunFailed, message
 }
 
-func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev bridge.Event, userID ...int64) Outcome {
+func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev bridge.Event, userID int64) Outcome {
 	errMsg := ev.Message
 	if errMsg == "" {
 		errMsg = ev.Content
@@ -401,9 +401,8 @@ func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev
 	}
 	redacted := redactSecrets(errMsg)
 	log.Printf("Bridge error: %s", redacted)
-	uid := sessionUserID(userID...)
 	status, runStatus, reason := classifyBridgeErrorOutcome(redacted)
-	s.patchContinuityFailure(chatID, threadID, status, reason, uid)
+	s.patchContinuityFailure(chatID, threadID, status, reason, userID)
 	s.completeRunLog(chatID, threadID, runStatus, "", reason)
 	s.recordPipelineEvent(chatID, threadID, observability.NewErrorEvent("",
 		observability.PhaseRunFailed, reason))
@@ -411,7 +410,7 @@ func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev
 	// Mark failure for timeout/provider errors so lifecycle manager marks session suspect.
 	// Skip billing errors — they're provider issues, not session failures.
 	if s.sessions != nil && status == "timed_out" && !isBillingError(redacted) {
-		s.sessions.MarkFailure(chatID, threadID, uid, reason)
+		s.sessions.MarkFailure(chatID, threadID, userID, reason)
 	}
 
 	if err := s.output.SendError(chatID, threadID, redacted); err != nil {
