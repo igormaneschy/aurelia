@@ -544,6 +544,12 @@ func TestTruncateTranscriptPairs_PreservesToolSummary(t *testing.T) {
 	if !strings.Contains(got, "Read(file=x.go)") {
 		t.Fatal("tool summary should be preserved in kept messages")
 	}
+	// Tool summary must appear AFTER the assistant label, not between user and assistant
+	asstIdx := strings.Index(got, "**assistant:**")
+	toolIdx := strings.Index(got, "Read(file=x.go)")
+	if toolIdx < asstIdx {
+		t.Fatal("tool summary should appear after assistant label, not before")
+	}
 }
 
 func TestTruncateTranscriptPairs_LargeBudgetKeepsAll(t *testing.T) {
@@ -568,8 +574,9 @@ func TestIsContentStillSuspicious_DetectsAPIKey(t *testing.T) {
 		suspicious bool
 	}{
 		{"sk prefix", "model used: sk-ant-api03-xxx", true},
+		{"sk proj prefix", "key is sk-proj-abc123def", true},
 		{"api_key assignment", "export api_key=secret123", true},
-		{"bearer token", "Authorization: Bearer sk-abc123", true},
+		{"bearer token", "Authorization: Bearer sk-ant-abc123", true},
 		{"PEM key", "-----BEGIN RSA PRIVATE KEY-----", true},
 		{"GitHub token", "GITHUB_TOKEN=ghp_xxxxxxxxxxxx", true},
 		{"Slack bot token", "SLACK_BOT_TOKEN=xoxb-1234", true},
@@ -577,7 +584,9 @@ func TestIsContentStillSuspicious_DetectsAPIKey(t *testing.T) {
 		{"AWS key", "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE", true},
 		{"normal text", "the user asked about deployment", false},
 		{"code snippet", "func main() { fmt.Println(\"hello\") }", false},
-		{"fake sk in sentence", "the word 'sk-' appears in this document about Slovak language codes", true},
+		{"task- not a key", "the task-id is task-12345", false},
+		{"disk- not a key", "disk-space is disk-99", false},
+		{"flask in text", "we use flask for the API", false},
 	}
 
 	for _, tt := range tests {

@@ -154,7 +154,9 @@ func (d *Dreamer) runNudge(messages []session.NudgeMessage, chatID int64, thread
 
 	// Fail-closed post-redaction check: if the transcript still contains
 	// suspicious patterns after redaction, abort to prevent data leakage (Gap #4).
-	if d.config.NudgeMaxTranscript > 0 && isContentStillSuspicious(transcriptStr) {
+	// Must run regardless of other config flags — security does not depend on
+	// transcript size caps.
+	if isContentStillSuspicious(transcriptStr) {
 		log.Printf("[nudge] user=%d chat=%d thread=%d: post-redaction check failed — transcript still suspicious", userID, chatID, threadID)
 		recordNudgeReceipt(nil, 0, 0, "redaction_failed", "post-redaction check found suspicious content")
 		return
@@ -380,17 +382,23 @@ func truncateTranscriptPairs(messages []session.NudgeMessage, maxBytes int) stri
 		text string
 	}
 	var turns []turn
+	orphans := 0
 	for i := 0; i+1 < len(messages); i += 2 {
 		if messages[i].Role != "user" || messages[i+1].Role != "assistant" {
+			orphans++
 			continue
 		}
 		var b strings.Builder
-		fmt.Fprintf(&b, "**user:** %s\n", messages[i].Content)
+		fmt.Fprintf(&b, "**user:** %s\n\n", messages[i].Content)
+		fmt.Fprintf(&b, "**assistant:** %s\n", messages[i+1].Content)
 		if messages[i+1].ToolSummary != "" {
 			fmt.Fprintf(&b, "  [tools used: %s]\n", messages[i+1].ToolSummary)
 		}
-		fmt.Fprintf(&b, "**assistant:** %s\n\n", messages[i+1].Content)
+		b.WriteString("\n")
 		turns = append(turns, turn{idx: i, text: b.String()})
+	}
+	if orphans > 0 {
+		log.Printf("[nudge] truncateTranscriptPairs: skipped %d orphan message(s) with unexpected role order", orphans)
 	}
 
 	// Keep newest turns until we hit the budget.
@@ -412,14 +420,20 @@ func truncateTranscriptPairs(messages []session.NudgeMessage, maxBytes int) stri
 // isContentStillSuspicious checks if redacted content still contains
 // patterns that indicate secrets may have survived redaction.
 // Returns true if the content should be blocked (fail-closed).
+//
+// Patterns are checked case-insensitively. Prefix-based patterns use
+// specific substrings (e.g. "sk-ant-" not just "sk-") to avoid false
+// positives on words like "task-", "disk-", "risk-".
 func isContentStillSuspicious(content string) bool {
-	// Check for API key patterns that RedactSecrets should have caught.
-	// If they're still present, redaction may have failed.
 	suspicious := []string{
-		"sk-",           // OpenAI/Anthropic API key prefix
+		"sk-ant-",       // Anthropic API key prefix
+		"sk-proj-",      // Anthropic project key prefix
+		"sk-or-",        // OpenAI/Anthropic org key prefix
+		"sk-admin-",     // OpenAI admin key prefix
+		"sk-svcacct-",   // OpenAI service account key prefix
 		"api_key=",      // env assignment
 		"apikey=",       // camelCase variant
-		"bearer sk-",    // Bearer token with key
+		"bearer ",       // Bearer token header (followed by key pattern)
 		"-----begin",    // PEM private key (lowered)
 		"private key-----",
 		"ghp_",          // GitHub personal access token

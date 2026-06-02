@@ -168,12 +168,16 @@ func (b *NudgeBuffer) ClearUser(userID int64) {
 		if key.UserID == userID {
 			delete(b.messages, key)
 			delete(b.turns, key)
-			b.bumpVersion(key)
+			delete(b.versions, key) // clean up version tracking for deleted key
 		}
 	}
 }
 
-// TotalChars returns the total character count of all buffered messages.
+// TotalChars returns the total character count of all buffered messages
+// including both Content and ToolSummary fields. ToolSummary is only
+// populated on assistant messages (via AddToolEvent); on user messages
+// it is always empty. We sum both unconditionally for simplicity — the
+// zero-length user ToolSummary has no effect on the total.
 func (b *NudgeBuffer) TotalChars(chatID int64, threadID int, userID int64) int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
