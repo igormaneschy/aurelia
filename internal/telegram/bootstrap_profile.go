@@ -121,7 +121,7 @@ func (bc *BotController) completeBootstrapProfile(c telebot.Context, state boots
 
 	// Transition to timezone collection instead of finishing onboarding.
 	bc.setPendingBootstrap(c.Sender().ID, bootstrapState{Choice: state.Choice, Step: bootstrapStepTimezone, UserID: safeSenderID(c.Sender())})
-	return SendContextText(c, bootstrapTimezoneMessage())
+	return SendContextText(c, bootstrapTimezoneMessage(), newBootstrapTimezoneMenu())
 }
 
 // bootstrapGenerate calls the LLM via bridge to generate persona content.

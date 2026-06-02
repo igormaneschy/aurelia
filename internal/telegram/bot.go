@@ -50,8 +50,8 @@ type BotController struct {
 	botCwd           string // working directory of the aurelia daemon
 	dreamer          interface {
 		AfterTurn(userID int64)
-		AfterTurnNudge(chatID int64, threadID int, userID int64, cwd string, buffer *session.NudgeBuffer)
-		FlushNudge(chatID int64, threadID int, userID int64, cwd string, buffer *session.NudgeBuffer)
+		AfterTurnNudge(chatID int64, threadID int, userID int64, cwd string, sessionFile string, buffer *session.NudgeBuffer)
+		FlushNudge(chatID int64, threadID int, userID int64, cwd string, sessionFile string, buffer *session.NudgeBuffer)
 	}
 	modelCache         []bridge.ModelInfo
 	modelCacheMu       sync.Mutex
@@ -237,8 +237,8 @@ func (bc *BotController) SetProjectIndex(pi *runtime.ProjectIndex) {
 // SetDreamer injects the dream system after construction.
 func (bc *BotController) SetDreamer(d interface {
 	AfterTurn(userID int64)
-	AfterTurnNudge(chatID int64, threadID int, userID int64, cwd string, buffer *session.NudgeBuffer)
-	FlushNudge(chatID int64, threadID int, userID int64, cwd string, buffer *session.NudgeBuffer)
+	AfterTurnNudge(chatID int64, threadID int, userID int64, cwd string, sessionFile string, buffer *session.NudgeBuffer)
+	FlushNudge(chatID int64, threadID int, userID int64, cwd string, sessionFile string, buffer *session.NudgeBuffer)
 }) {
 	bc.dreamer = d
 	bc.ensurePipeline().SetDreamer(d)
@@ -247,6 +247,28 @@ func (bc *BotController) SetDreamer(d interface {
 // ChatSender returns a cron.ChatSender backed by this bot instance.
 func (bc *BotController) ChatSender() cron.ChatSender {
 	return &botChatSender{bot: bc.bot}
+}
+
+// SendNudge sends a nudge receipt, optionally as a reply to a prior Telegram message.
+func (bc *BotController) SendNudge(ctx context.Context, chatID int64, threadID int, replyToMessageID int64, text string) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	chat := &telebot.Chat{ID: chatID}
+	opts := &telebot.SendOptions{ParseMode: telebot.ModeHTML, ThreadID: threadID}
+	if replyToMessageID != 0 {
+		opts.ReplyTo = &telebot.Message{ID: int(replyToMessageID), Chat: chat}
+	}
+	if _, err := bc.bot.Send(chat, MarkdownToHTML(text), opts); err != nil {
+		plainOpts := &telebot.SendOptions{ThreadID: threadID, ReplyTo: opts.ReplyTo}
+		_, retryErr := bc.bot.Send(chat, text, plainOpts)
+		if retryErr != nil {
+			return fmt.Errorf("html send failed: %w; plain text retry also failed: %v", err, retryErr)
+		}
+	}
+	return nil
 }
 
 // botChatSender adapts a telebot.Bot to the cron.ChatSender interface.

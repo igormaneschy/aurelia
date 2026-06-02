@@ -102,7 +102,7 @@ func TestHandleResultEvent_EmptyAfterWork_DeactivatesSession(t *testing.T) {
 	}
 	var assistantText strings.Builder
 
-	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100)
+	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
 
 	if outcome != OutcomeLLMError {
 		t.Fatalf("expected OutcomeLLMError, got %v", outcome)
@@ -139,7 +139,7 @@ func TestHandleResultEvent_EmptyNoWork_UsesGenericMessage(t *testing.T) {
 	ev := bridge.Event{Type: "result", Content: ""}
 	var assistantText strings.Builder
 
-	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100)
+	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
 
 	if outcome != OutcomeLLMError {
 		t.Fatalf("expected OutcomeLLMError, got %v", outcome)
@@ -188,7 +188,7 @@ func TestHandleResultEvent_EmptyAfterWorkWithToolSummary_IncludesToolSummary(t *
 	}
 	var assistantText strings.Builder
 
-	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100)
+	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
 
 	if outcome != OutcomeLLMError {
 		t.Fatalf("expected OutcomeLLMError, got %v", outcome)
@@ -206,7 +206,7 @@ func TestHandleResultEvent_EmptyAfterWorkWithToolSummary_IncludesToolSummary(t *
 // fakeRunLogStore is a no-op runlog.Store for tests that need a non-nil runLog.
 type fakeRunLogStore struct{}
 
-func (f *fakeRunLogStore) Start(_ context.Context, _ runlog.RunRecord) error  { return nil }
+func (f *fakeRunLogStore) Start(_ context.Context, _ runlog.RunRecord) error { return nil }
 func (f *fakeRunLogStore) Update(_ context.Context, _ runlog.RunUpdate) error { return nil }
 func (f *fakeRunLogStore) Complete(_ context.Context, _ string, _ runlog.RunStatus, _, _ string) error {
 	return nil

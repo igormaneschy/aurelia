@@ -165,7 +165,7 @@ func TestCmdSessionReset(t *testing.T) {
 		sessions: sessions,
 	}
 
-	reply, err := bc.cmdSessionReset(42, 0, 100)
+	reply, err := bc.cmdSessionReset(42, 0, 100, false)
 	if err != nil {
 		t.Fatalf("cmdSessionReset() error = %v", err)
 	}
@@ -192,7 +192,7 @@ func TestCmdSessionReset_EmptySessionUsesSimpleMessage(t *testing.T) {
 		sessions: session.NewStore(),
 	}
 
-	reply, err := bc.cmdSessionReset(42, 0, 100)
+	reply, err := bc.cmdSessionReset(42, 0, 100, false)
 	if err != nil {
 		t.Fatalf("cmdSessionReset() error = %v", err)
 	}
@@ -761,7 +761,7 @@ type fakeRunLog struct {
 	latest *runlog.RunRecord
 }
 
-func (f *fakeRunLog) Start(ctx context.Context, record runlog.RunRecord) error  { return nil }
+func (f *fakeRunLog) Start(ctx context.Context, record runlog.RunRecord) error { return nil }
 func (f *fakeRunLog) Update(ctx context.Context, update runlog.RunUpdate) error { return nil }
 func (f *fakeRunLog) Complete(ctx context.Context, runID string, status runlog.RunStatus, checkpoint, errMsg string) error {
 	return nil
@@ -1069,7 +1069,7 @@ func TestHandleModeCommand_ReconstructsText(t *testing.T) {
 		reconstructed string
 		wantTarget    string
 	}{
-		{"/mode", ""},                  // query
+		{"/mode", ""}, // query
 		{"/mode developer", "developer"},
 		{"/mode dev", "dev"},
 		{"/mode general", "general"},
@@ -1155,16 +1155,16 @@ func TestCmdDebugLast_WithRun(t *testing.T) {
 	bc := &BotController{
 		runLog: &fakeRunLog{
 			latest: &runlog.RunRecord{
-				RunID:      "test-run-123",
-				ChatID:     100,
-				ThreadID:   0,
-				Status:     runlog.RunCompleted,
-				Provider:   "kimi",
-				Model:      "kimi-k2",
-				DurationMs: 5000,
-				InputTokens: 100,
+				RunID:        "test-run-123",
+				ChatID:       100,
+				ThreadID:     0,
+				Status:       runlog.RunCompleted,
+				Provider:     "kimi",
+				Model:        "kimi-k2",
+				DurationMs:   5000,
+				InputTokens:  100,
 				OutputTokens: 20,
-				CostUSD:    0.001,
+				CostUSD:      0.001,
 			},
 		},
 	}

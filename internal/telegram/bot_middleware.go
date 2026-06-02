@@ -12,7 +12,6 @@ import (
 	"gopkg.in/telebot.v3"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
-	memoryuxpkg "github.com/igormaneschy/aurelia/internal/memoryux"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 )
@@ -291,7 +290,7 @@ func (bc *BotController) handleResetCommand(c telebot.Context) error {
 	chatID := c.Chat().ID
 	threadID := c.Message().ThreadID
 	userID := safeSenderID(c.Sender())
-	reply, err := bc.resetCurrentSession(chatID, threadID, true, userID)
+	reply, err := bc.resetCurrentSession(chatID, threadID, true, userID, c.Chat().Type == telebot.ChatPrivate)
 	if err != nil {
 		return SendErrorWithThread(bc.bot, c.Chat(), err.Error(), threadID)
 	}
@@ -654,10 +653,9 @@ func (bc *BotController) handleMemoryCommand(c telebot.Context) error {
 	defer bc.confirmMessage(c.Message())
 	chatID := c.Chat().ID
 	threadID := c.Message().ThreadID
+	userID := safeSenderID(c.Sender())
+	isPrivateChat := c.Chat().Type == telebot.ChatPrivate
 	payload := strings.TrimSpace(c.Message().Payload)
-
-	svc := memoryuxpkg.New(bc.memoryDir, bc.resolver)
-	cwd := bc.currentCwd(chatID, threadID)
 
 	parts := strings.Fields(payload)
 	var cmd string
@@ -669,26 +667,19 @@ func (bc *BotController) handleMemoryCommand(c telebot.Context) error {
 		}
 	}
 
-	log.Printf("memory command: action=%s chat=%d thread=%d cwd_set=%t",
-		cmd, chatID, threadID, cwd != "")
-
 	switch cmd {
 	case "", "status":
-		status, err := svc.Status(chatID, threadID, cwd)
+		reply, err := bc.cmdMemoryStatus(chatID, threadID, userID, isPrivateChat)
 		if err != nil {
 			return SendErrorWithThread(bc.bot, c.Chat(), err.Error(), threadID)
 		}
-		log.Printf("memory command: status complete chat=%d layers=%d", chatID, len(status.Layers))
-		return SendTextWithThread(bc.bot, c.Chat(), memoryuxpkg.FormatStatus(status), threadID)
+		return SendTextWithThread(bc.bot, c.Chat(), reply, threadID)
 	case "checkpoint":
-		result, err := svc.WriteCheckpoint(chatID, threadID, cwd, args)
+		reply, err := bc.cmdMemoryCheckpoint(chatID, threadID, userID, isPrivateChat, "memory checkpoint "+args)
 		if err != nil {
 			return SendErrorWithThread(bc.bot, c.Chat(), err.Error(), threadID)
 		}
-		if result.Path != "" {
-			log.Printf("memory command: checkpoint written chat=%d layer=%s path=%s", chatID, result.Layer, result.Path)
-		}
-		return SendTextWithThread(bc.bot, c.Chat(), memoryuxpkg.FormatCheckpoint(result), threadID)
+		return SendTextWithThread(bc.bot, c.Chat(), reply, threadID)
 	default:
 		msg := "🧠 **Memory Commands**\n\n" +
 			"`/memory` or `/memory status` — Show active memory layers\n" +

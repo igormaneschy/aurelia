@@ -103,7 +103,7 @@ Updated summary (max 900 chars, no preamble):`,
 	return runeCap(summary, continuity.MaxAssistantSummary)
 }
 
-func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText string, finalText string, runID string, userID int64) {
+func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText string, finalText string, runID string, userID int64, isPrivateChat bool) {
 	// Clear failure/suspect state after successful completion
 	if s.sessions != nil {
 		s.sessions.ClearFailureState(chatID, threadID, userID)
@@ -155,9 +155,13 @@ func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText strin
 		return
 	}
 	s.dreamer.AfterTurn(userID)
-	cwd := s.effectiveCwd(nil, chatID, threadID)
+	cwd := s.effectiveCwdForContext(nil, chatID, threadID, userID, isPrivateChat)
+	sessionFile := ""
+	if s.sessions != nil {
+		sessionFile = s.sessions.GetSession(chatID, threadID, userID)
+	}
 	s.nudgeBuffer.AddTurn(chatID, threadID, userID, userText, finalText)
-	s.dreamer.AfterTurnNudge(chatID, threadID, userID, cwd, s.nudgeBuffer)
+	s.dreamer.AfterTurnNudge(chatID, threadID, userID, cwd, sessionFile, s.nudgeBuffer)
 	s.InvalidateMemoryDirs(chatID, threadID, userID, cwd)
 }
 

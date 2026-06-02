@@ -186,7 +186,7 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("pipeline: panic in processRun: %v", r)
+					log.Printf("pipeline: panic in processRunWithCancel: %v", r)
 				}
 			}()
 			s.processRunWithCancel(input, run, reservedCtx, reservedCancel)
@@ -262,7 +262,7 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("pipeline: panic in processRun(supersede): %v", r)
+					log.Printf("pipeline: panic in processRunWithCancel(supersede): %v", r)
 				}
 			}()
 			s.processRunWithCancel(input, supersedeRun, supersedeCtx, supersedeCancel)
@@ -344,7 +344,7 @@ func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, rese
 		return
 	}
 
-	req := s.buildBridgeRequest(userText, systemPrompt, agent, input.chatID, input.threadID, input.userID)
+	req := s.buildBridgeRequest(userText, systemPrompt, agent, input.chatID, input.threadID, input.userID, input.isPrivateChat)
 	req.RequestID = fmt.Sprintf("run-%d", time.Now().UnixNano())
 	req.Options.Images = input.images
 	s.applyVisionFallback(&req, input.images)
@@ -361,52 +361,7 @@ func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, rese
 		return
 	}
 
-	s.executeAsync(reservedCtx, input.chatID, input.threadID, input.messageID, req, userText, input.userID)
-}
-
-//nolint:unused // legacy path retained for potential fallback
-func (s *Service) processRun(input pipelineInput) {
-	key := sessionKey(input.chatID, input.threadID, input.userID)
-	ctx, cancel := context.WithCancel(context.Background())
-	s.activeSessions.Store(key, cancel)
-	defer s.activeSessions.Delete(key)
-	defer cancel()
-
-	agent := s.routeAgent(input.text)
-	userText := stripAgentPrefix(input.text, agent)
-
-	if s.checkProjectPreflight(input, agent, userText) {
-		return
-	}
-
-	systemPrompt, err := s.buildSystemPrompt(userText, agent, input.chatID, input.messageID, input.threadID, input.userID, input.isPrivateChat)
-	if err != nil {
-		log.Printf("Failed to build system prompt: %s", redactSecrets(err.Error()))
-		if err := s.output.SendError(input.chatID, input.threadID, "Falha ao montar o prompt de sistema."); err != nil {
-			log.Printf("pipeline: SendError(system prompt) failed for chat=%d: %v", input.chatID, err)
-		}
-		s.output.ConfirmMessage(input.chatID, input.messageID)
-		return
-	}
-
-	req := s.buildBridgeRequest(userText, systemPrompt, agent, input.chatID, input.threadID, input.userID)
-	req.RequestID = fmt.Sprintf("run-%d", time.Now().UnixNano())
-	req.Options.Images = input.images
-	s.applyVisionFallback(&req, input.images)
-
-	// Apply session lifecycle decision before executing
-	if lcResult := s.applyLifecycle(ctx, &req, input.chatID, input.threadID, input.userID); lcResult.SkipExecution {
-		log.Printf("lifecycle: execution skipped for chat=%d: %s", input.chatID, lcResult.ErrorMessage)
-		if lcResult.ErrorMessage != "" {
-			if err := s.output.SendError(input.chatID, input.threadID, lcResult.ErrorMessage); err != nil {
-				log.Printf("pipeline: SendError(lifecycle) failed for chat=%d: %v", input.chatID, err)
-			}
-		}
-		s.output.ConfirmMessage(input.chatID, input.messageID)
-		return
-	}
-
-	s.executeAsync(ctx, input.chatID, input.threadID, input.messageID, req, userText, input.userID)
+	s.executeAsync(reservedCtx, input.chatID, input.threadID, input.messageID, req, userText, input.userID, input.isPrivateChat)
 }
 
 func stripAgentPrefix(text string, agent *agents.Agent) string {
@@ -478,7 +433,7 @@ func (s *Service) classifyFunc() agents.ClassifyFunc {
 
 // buildBridgeRequest assembles the bridge.Request with agent overrides, session
 // resume, and working directory.
-func (s *Service) buildBridgeRequest(userText, systemPrompt string, agent *agents.Agent, chatID int64, threadID int, userID int64) bridge.Request {
+func (s *Service) buildBridgeRequest(userText, systemPrompt string, agent *agents.Agent, chatID int64, threadID int, userID int64, isPrivateChat bool) bridge.Request {
 	req := bridge.Request{
 		Command: "query",
 		Prompt:  userText,
@@ -520,7 +475,7 @@ func (s *Service) buildBridgeRequest(userText, systemPrompt string, agent *agent
 		}
 	}
 
-	cwd := s.effectiveCwd(agent, chatID, threadID)
+	cwd := s.effectiveCwdForContext(agent, chatID, threadID, userID, isPrivateChat)
 	if cwd != "" {
 		req.Options.Cwd = cwd
 	} else {
@@ -637,7 +592,7 @@ func appendUniqueTools(existing []string, additions ...string) []string {
 }
 
 // executeAsync runs bridge execution with typing/progress reporting.
-func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID int, messageID int, req bridge.Request, userText string, userID int64) {
+func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID int, messageID int, req bridge.Request, userText string, userID int64, isPrivateChat bool) {
 	stopTyping := s.output.StartTyping(chatID, threadID)
 	defer stopTyping()
 
@@ -820,7 +775,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	} else {
 		toolUseSignal := make(chan struct{}, 16)
 		go heartbeatMonitor(ctx.Done(), toolUseSignal, toolTracker, chatID, threadID, s.output)
-		outcome = s.ProcessBridgeEvents(chatID, threadID, messageID, ch, progress, userText, toolUseSignal, userID, toolTracker, loopDetect)
+		outcome = s.ProcessBridgeEvents(chatID, threadID, messageID, ch, progress, userText, toolUseSignal, userID, isPrivateChat, toolTracker, loopDetect)
 		if handled := s.handleContextOutcome(parentCtx, ctx, chatID, threadID, userID, timeoutTracker); handled {
 			s.output.ConfirmMessage(chatID, messageID)
 			return
@@ -901,7 +856,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 
 	toolUseSignal := make(chan struct{}, 16)
 	go heartbeatMonitor(ctx.Done(), toolUseSignal, toolTracker, chatID, threadID, s.output)
-	outcome = s.ProcessBridgeEvents(chatID, threadID, messageID, ch, progress, userText, toolUseSignal, userID, toolTracker, loopDetect)
+	outcome = s.ProcessBridgeEvents(chatID, threadID, messageID, ch, progress, userText, toolUseSignal, userID, isPrivateChat, toolTracker, loopDetect)
 	if handled := s.handleContextOutcome(parentCtx, ctx, chatID, threadID, userID, timeoutTracker); handled {
 		s.output.ConfirmMessage(chatID, messageID)
 		return
@@ -1037,7 +992,7 @@ func heartbeatMonitor(doneCh <-chan struct{}, toolUseSignal <-chan struct{}, too
 // toolUseSignal, if non-nil, receives a signal on every tool_use event so a
 // caller can monitor thinking gaps (heartbeat).
 // toolTracker, if non-nil, is used to count tool calls and warn on explosion.
-func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int, ch <-chan bridge.Event, progress ProgressReporter, userText string, toolUseSignal chan<- struct{}, userID int64, toolTracker *toolCallTracker, loopDetect *loopDetector) Outcome {
+func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int, ch <-chan bridge.Event, progress ProgressReporter, userText string, toolUseSignal chan<- struct{}, userID int64, isPrivateChat bool, toolTracker *toolCallTracker, loopDetect *loopDetector) Outcome {
 	var (
 		assistantText       strings.Builder
 		lastStreamFlush     = time.Now()
@@ -1131,7 +1086,7 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 				lastStreamFlush = time.Now()
 			}
 		case "result":
-			return s.handleResultEvent(chatID, threadID, messageID, ev, &assistantText, userText, userID)
+			return s.handleResultEvent(chatID, threadID, messageID, ev, &assistantText, userText, userID, isPrivateChat)
 		case "error":
 			return s.handleErrorEvent(chatID, threadID, messageID, ev, userID)
 		case "compaction_start", "compaction_end":
@@ -1172,7 +1127,7 @@ func eventContent(ev bridge.Event) string {
 	return bridge.EventContent(ev)
 }
 
-func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, ev bridge.Event, assistantText *strings.Builder, userText string, userID int64) Outcome {
+func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, ev bridge.Event, assistantText *strings.Builder, userText string, userID int64, isPrivateChat bool) Outcome {
 	content := eventContent(ev)
 	if content != "" {
 		prior := assistantText.String()
@@ -1231,11 +1186,11 @@ func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, e
 	s.recordPipelineEvent(chatID, threadID, observability.NewEvent(successRunID,
 		observability.PhaseRunCompleted, "status=completed"))
 
-	if ok, outcome := s.handlePlanExecution(chatID, threadID, messageID, finalText, safeFinalText, successRunID, userText, userID); ok {
+	if ok, outcome := s.handlePlanExecution(chatID, threadID, messageID, finalText, safeFinalText, successRunID, userText, userID, isPrivateChat); ok {
 		return outcome
 	}
 
-	return s.handleNormalReply(chatID, threadID, messageID, safeFinalText, successRunID, userText, userID)
+	return s.handleNormalReply(chatID, threadID, messageID, safeFinalText, successRunID, userText, userID, isPrivateChat)
 }
 
 // handleEmptyResult handles the case where the bridge returned no text.
@@ -1281,8 +1236,8 @@ func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, e
 // handlePlanExecution checks whether the assistant output contains an execution
 // plan and, if so, starts the orchestrator. Returns (true, outcome) when a plan
 // was executed, or (false, OutcomeSuccess) to continue with normal reply.
-func (s *Service) handlePlanExecution(chatID int64, threadID int, messageID int, finalText string, safeFinalText string, successRunID string, userText string, userID int64) (bool, Outcome) {
-	handled, outcome := s.tryExecutePlan(chatID, threadID, messageID, finalText, userID)
+func (s *Service) handlePlanExecution(chatID int64, threadID int, messageID int, finalText string, safeFinalText string, successRunID string, userText string, userID int64, isPrivateChat bool) (bool, Outcome) {
+	handled, outcome := s.tryExecutePlan(chatID, threadID, messageID, finalText, userID, isPrivateChat)
 	if !handled {
 		return false, OutcomeSuccess
 	}
@@ -1291,13 +1246,13 @@ func (s *Service) handlePlanExecution(chatID int64, threadID int, messageID int,
 	}
 
 	s.output.ConfirmMessage(chatID, messageID)
-	s.afterSuccessfulTurn(chatID, threadID, userText, safeFinalText, successRunID, userID)
+	s.afterSuccessfulTurn(chatID, threadID, userText, safeFinalText, successRunID, userID, isPrivateChat)
 	return true, OutcomeSuccess
 }
 
 // handleNormalReply sends the assistant's text response to the chat as a
 // normal reply and finalizes the turn.
-func (s *Service) handleNormalReply(chatID int64, threadID int, messageID int, safeFinalText string, successRunID string, userText string, userID int64) Outcome {
+func (s *Service) handleNormalReply(chatID int64, threadID int, messageID int, safeFinalText string, successRunID string, userText string, userID int64, isPrivateChat bool) Outcome {
 	outboundMsgID, err := s.output.SendReply(chatID, threadID, safeFinalText)
 	if err != nil {
 		log.Printf("Failed to send reply to chat %d: %v", chatID, err)
@@ -1306,7 +1261,7 @@ func (s *Service) handleNormalReply(chatID int64, threadID int, messageID int, s
 		s.updateRunLogOutboundMessage(successRunID, outboundMsgID)
 	}
 	s.output.ConfirmMessage(chatID, messageID)
-	s.afterSuccessfulTurn(chatID, threadID, userText, safeFinalText, successRunID, userID)
+	s.afterSuccessfulTurn(chatID, threadID, userText, safeFinalText, successRunID, userID, isPrivateChat)
 	return OutcomeSuccess
 }
 
@@ -1320,7 +1275,7 @@ func (s *Service) recordUsage(chatID int64, threadID int, ev bridge.Event, userI
 		chatID, threadID, userID, ev.CostUSD, ev.NumTurns, ev.InputTokens, ev.OutputTokens)
 }
 
-func (s *Service) tryExecutePlan(chatID int64, threadID int, messageID int, finalText string, userID int64) (bool, Outcome) {
+func (s *Service) tryExecutePlan(chatID int64, threadID int, messageID int, finalText string, userID int64, isPrivateChat bool) (bool, Outcome) {
 	if s.orchestrator == nil {
 		return false, OutcomeSuccess
 	}
@@ -1353,7 +1308,7 @@ func (s *Service) tryExecutePlan(chatID int64, threadID int, messageID int, fina
 	}
 
 	// Resolve effective working directory — refuse execution without one
-	cwd := s.effectiveCwd(nil, chatID, threadID)
+	cwd := s.effectiveCwdForContext(nil, chatID, threadID, userID, isPrivateChat)
 	if cwd == "" {
 		log.Printf("orchestration: refusing plan execution for chat=%d thread=%d: no cwd bound", chatID, threadID)
 		if err := s.output.SendError(chatID, threadID, "Não encontrei um diretório de trabalho (cwd) para executar o plano. Use /cwd para fixar um projeto e tente novamente."); err != nil {
@@ -1746,5 +1701,3 @@ func truncateCheckpoint(s string) string {
 	}
 	return s
 }
-
-

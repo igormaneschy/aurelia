@@ -448,13 +448,17 @@ func TestCurrentCwdForContext_DefaultCWDInPrivateChat(t *testing.T) {
 
 	// Create a real directory that DefaultCWD will point to.
 	repoDir := t.TempDir()
+	want, err := filepath.EvalSymlinks(repoDir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	store := newUserStoreWithDefaultCWD(t, repoDir)
 
 	bc := &BotController{userStore: store}
 	// Private chat, no topic, no /cwd binding, no session CWD → DefaultCWD wins.
 	got := bc.currentCwdForContext(42, 0, 1, true)
-	if got != repoDir {
-		t.Fatalf("currentCwdForContext() = %q, want DefaultCWD %q", got, repoDir)
+	if got != want {
+		t.Fatalf("currentCwdForContext() = %q, want DefaultCWD %q", got, want)
 	}
 }
 

@@ -15,6 +15,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
+	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/security"
 )
 
@@ -22,8 +23,8 @@ const (
 	maxMemoryFileChars        = 8000
 	maxMemoryTotalChars       = 55000 // raised from 40000 to give memory layers more budget
 	maxMemoryIndexChars       = 12000
-	memorySummaryTriggerChars = 45000 // raised from 30000 — switch to compact mode later
-	compactExtraFiles         = 5     // raised from 3 — show more files in compact mode
+	memorySummaryTriggerChars = 45000                     // raised from 30000 — switch to compact mode later
+	compactExtraFiles         = 5                         // raised from 3 — show more files in compact mode
 	maxMemoryFileBytes        = maxMemoryFileChars + 1000 // 9000 bytes — skip oversized files before reading
 )
 
@@ -173,12 +174,11 @@ func (bc *Service) effectiveCwdForContext(agent *agents.Agent, chatID int64, thr
 		if err != nil {
 			log.Printf("cwd: effectiveCwdForContext failed to load profile user=%d: %v", userID, err)
 		} else if profile != nil && profile.DefaultCWD != "" {
-			// Validate: only use path if it exists and is a directory
-			if info, statErr := os.Stat(profile.DefaultCWD); statErr == nil && info.IsDir() {
-				return profile.DefaultCWD
-			} else if statErr != nil {
-				log.Printf("cwd: DefaultCWD user=%d path=%q is invalid/unreadable: %v", userID, profile.DefaultCWD, statErr)
+			cwd, resolveErr := runtime.ResolveProjectCwd(profile.DefaultCWD)
+			if resolveErr == nil {
+				return cwd
 			}
+			log.Printf("cwd: DefaultCWD user=%d path=%q rejected: %v", userID, profile.DefaultCWD, resolveErr)
 		}
 	}
 	return ""
@@ -325,7 +325,7 @@ If the user asks to forget or remove something while a project cwd is active, de
 Never mention internal project files (CLAUDE.md, AGENTS.md) in casual conversation. Only reference them when a working directory is set AND the user asks about project configuration.`)
 
 	// Inject actual memory contents
-	memoryContent := bc.loadMemoryContents(chatID, threadID, userID, agent)
+	memoryContent := bc.loadMemoryContents(chatID, threadID, userID, agent, cwd)
 	if memoryContent != "" {
 		sb.WriteString("\n\n### Current Memory Contents" + topicSuffix + "\n\n")
 		sb.WriteString(`<memory_untrusted>
@@ -389,11 +389,11 @@ func (bc *Service) buildChatMemoryInstructions(chatID int64, threadID int, topic
 // layers switch to compact mode (index + recent files only).
 //
 // Canonical layer order (from spec):
-//   1. User global   — always
-//   2. Topic memory  — always
-//   3. CWD overlay   — only when /cwd is active on the topic
-//   4. Project team  — only when /cwd is active
-func (bc *Service) loadMemoryContents(chatID int64, threadID int, userID int64, agent *agents.Agent) string {
+//  1. User global   — always
+//  2. Topic memory  — always
+//  3. CWD overlay   — only when /cwd is active on the topic
+//  4. Project team  — only when /cwd is active
+func (bc *Service) loadMemoryContents(chatID int64, threadID int, userID int64, agent *agents.Agent, cwd string) string {
 	var sb strings.Builder
 	var total int
 	useCompact := false
@@ -435,7 +435,6 @@ func (bc *Service) loadMemoryContents(chatID int64, threadID int, userID int64, 
 		total += layerSize
 	}
 
-	cwd := bc.effectiveCwd(agent, chatID, threadID)
 	hasProject := cwd != "" && bc.resolver != nil
 
 	// Layer 1: User global — always loaded

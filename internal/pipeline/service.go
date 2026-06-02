@@ -47,8 +47,8 @@ type Output interface {
 // Dreamer receives turn lifecycle notifications for memory/nudge updates.
 type Dreamer interface {
 	AfterTurn(userID int64)
-	AfterTurnNudge(chatID int64, threadID int, userID int64, cwd string, buffer *session.NudgeBuffer)
-	FlushNudge(chatID int64, threadID int, userID int64, cwd string, buffer *session.NudgeBuffer)
+	AfterTurnNudge(chatID int64, threadID int, userID int64, cwd string, sessionFile string, buffer *session.NudgeBuffer)
+	FlushNudge(chatID int64, threadID int, userID int64, cwd string, sessionFile string, buffer *session.NudgeBuffer)
 }
 
 // Config contains dependencies needed by the business pipeline.
@@ -68,9 +68,9 @@ type Config struct {
 	ProjectIndex *runtime.ProjectIndex
 	Bindings     projectbinding.Store
 	RunLog       runlog.Store
-	Continuity     continuity.Store
-	UsersStore     *users.Store
-	UserResolver   *users.Resolver
+	Continuity   continuity.Store
+	UsersStore   *users.Store
+	UserResolver *users.Resolver
 }
 
 // Service owns the LLM/message pipeline independent from Telegram routing.
@@ -97,11 +97,11 @@ type Service struct {
 	runLog          runlog.Store
 	runLogMu        sync.Mutex
 	runLogStates    map[string]*runLogState
-	continuity       continuity.Store
-	summaryCounter   *summaryCounter
-	summaryInterval  int
-	usersStore       *users.Store
-	userResolver     *users.Resolver
+	continuity      continuity.Store
+	summaryCounter  *summaryCounter
+	summaryInterval int
+	usersStore      *users.Store
+	userResolver    *users.Resolver
 }
 
 const defaultSummaryInterval = 5
