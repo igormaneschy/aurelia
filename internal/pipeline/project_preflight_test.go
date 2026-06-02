@@ -22,7 +22,7 @@ type testOutputRecorder struct {
 func (r *testOutputRecorder) StartTyping(int64, int) func() { return func() {} }
 func (r *testOutputRecorder) NewProgress(int64, int) ProgressReporter { return nil }
 func (r *testOutputRecorder) SendError(int64, int, string) error { return nil }
-func (r *testOutputRecorder) SendReply(int64, int, string) error { return nil }
+func (r *testOutputRecorder) SendReply(int64, int, string) (int64, error) { return 0, nil }
 
 func (r *testOutputRecorder) SendText(_ int64, _ int, text string) (any, error) {
 	r.messageSent = true

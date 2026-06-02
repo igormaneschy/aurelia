@@ -169,16 +169,11 @@ func (o telegramPipelineOutput) SendError(chatID int64, threadID int, text strin
 	return o.tp.SendError(context.Background(), chatID, threadID, text)
 }
 
-func (o telegramPipelineOutput) SendReply(chatID int64, threadID int, text string) error {
-	if o.tp == nil {
-		return nil
+func (o telegramPipelineOutput) SendReply(chatID int64, threadID int, text string) (int64, error) {
+	if o.bc == nil || o.bc.bot == nil {
+		return 0, nil
 	}
-	return o.tp.Send(context.Background(), transport.OutgoingMessage{
-		ChatID:   chatID,
-		ThreadID: threadID,
-		Text:     text,
-		Markdown: true,
-	})
+	return sendTextWithSender(o.bc.bot, &telebot.Chat{ID: chatID}, text, telegramMessageLimit, threadID)
 }
 
 func (o telegramPipelineOutput) SendText(chatID int64, threadID int, text string) (any, error) {

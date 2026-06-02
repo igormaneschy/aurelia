@@ -387,7 +387,7 @@ type recordingOutput struct {
 func (r *recordingOutput) StartTyping(_ int64, _ int) func()           { return func() {} }
 func (r *recordingOutput) NewProgress(_ int64, _ int) ProgressReporter { return &fakeProgress{} }
 func (r *recordingOutput) SendError(_ int64, _ int, text string) error { return nil }
-func (r *recordingOutput) SendReply(_ int64, _ int, text string) error { return nil }
+func (r *recordingOutput) SendReply(_ int64, _ int, text string) (int64, error) { return 0, nil }
 func (r *recordingOutput) SendText(_ int64, _ int, text string) (any, error) {
 	r.texts = append(r.texts, text)
 	return nil, nil

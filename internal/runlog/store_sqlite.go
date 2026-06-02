@@ -37,6 +37,8 @@ var observabilityColumns = []columnDef{
 	{name: "used_fallback", typ: "INTEGER", def: "0"},
 	{name: "session_file", typ: "TEXT", def: "''"},
 	{name: "parent_run_id", typ: "TEXT", def: "''"},
+	{name: "inbound_message_id", typ: "INTEGER", def: "0"},
+	{name: "outbound_message_id", typ: "INTEGER", def: "0"},
 }
 
 // SQLiteStore implements Store backed by a SQLite database.
@@ -147,6 +149,7 @@ func (s *SQLiteStore) initialize() error {
 		"CREATE INDEX IF NOT EXISTS idx_run_journal_status_started ON run_journal(status, started_at DESC)",
 		"CREATE INDEX IF NOT EXISTS idx_run_events_run_ts ON run_events(run_id, ts, id)",
 		"CREATE INDEX IF NOT EXISTS idx_run_events_phase_ts ON run_events(phase, ts DESC)",
+		"CREATE INDEX IF NOT EXISTS idx_run_journal_session_started ON run_journal(session_file, started_at DESC)",
 	}
 	for _, idx := range indexes {
 		if _, err := s.db.Exec(idx); err != nil {
@@ -175,16 +178,19 @@ func (s *SQLiteStore) Start(ctx context.Context, record RunRecord) error {
 			 status, checkpoint, tool_summary, error,
 			 started_at, updated_at, completed_at,
 			 user_id, entrypoint, agent_name, provider, model,
-			 capability_profile, session_file, parent_run_id)
+			 capability_profile, session_file, parent_run_id,
+			 inbound_message_id, outbound_message_id)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
 		        ?, ?, ?, ?, ?,
-		        ?, ?, ?)`,
+		        ?, ?, ?,
+		        ?, ?)`,
 		record.RunID, record.ChatID, record.ThreadID,
 		record.RequestID, record.SessionID, record.CWD, record.Prompt,
 		RunRunning, record.Checkpoint, record.ToolSummary, record.Error,
 		startedAt, now, 0,
 		record.UserID, record.EntryPoint, record.AgentName, record.Provider, record.Model,
-		record.CapabilityProfile, record.SessionFile, record.ParentRunID)
+		record.CapabilityProfile, record.SessionFile, record.ParentRunID,
+		record.InboundMessageID, record.OutboundMessageID)
 	if err != nil {
 		return fmt.Errorf("runlog start %s: %w", record.RunID, err)
 	}
@@ -291,6 +297,16 @@ func (s *SQLiteStore) Update(ctx context.Context, update RunUpdate) error {
 	if update.ParentRunID != nil {
 		sets += ", parent_run_id = ?"
 		args = append(args, *update.ParentRunID)
+	}
+
+	// Pi session ↔ Telegram message bridge.
+	if update.InboundMessageID != nil {
+		sets += ", inbound_message_id = ?"
+		args = append(args, *update.InboundMessageID)
+	}
+	if update.OutboundMessageID != nil {
+		sets += ", outbound_message_id = ?"
+		args = append(args, *update.OutboundMessageID)
 	}
 
 	args = append(args, update.RunID)
@@ -404,7 +420,8 @@ func (s *SQLiteStore) GetRun(ctx context.Context, runID string) (*RunRecord, err
 		       COALESCE(cost_usd, 0), COALESCE(tool_count, 0),
 		       COALESCE(error_class, ''), COALESCE(timeout_origin, ''),
 		       COALESCE(used_fallback, 0), COALESCE(session_file, ''),
-		       COALESCE(parent_run_id, '')
+		       COALESCE(parent_run_id, ''),
+		       COALESCE(inbound_message_id, 0), COALESCE(outbound_message_id, 0)
 		FROM run_journal
 		WHERE run_id = ?`, runID)
 
@@ -443,7 +460,8 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, chatID int64, limit int) ([]
 			       COALESCE(cost_usd, 0), COALESCE(tool_count, 0),
 			       COALESCE(error_class, ''), COALESCE(timeout_origin, ''),
 			       COALESCE(used_fallback, 0), COALESCE(session_file, ''),
-			       COALESCE(parent_run_id, '')
+			       COALESCE(parent_run_id, ''),
+			       COALESCE(inbound_message_id, 0), COALESCE(outbound_message_id, 0)
 			FROM run_journal
 			WHERE chat_id = ?
 			ORDER BY started_at DESC
@@ -459,7 +477,8 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, chatID int64, limit int) ([]
 			       COALESCE(cost_usd, 0), COALESCE(tool_count, 0),
 			       COALESCE(error_class, ''), COALESCE(timeout_origin, ''),
 			       COALESCE(used_fallback, 0), COALESCE(session_file, ''),
-			       COALESCE(parent_run_id, '')
+			       COALESCE(parent_run_id, ''),
+			       COALESCE(inbound_message_id, 0), COALESCE(outbound_message_id, 0)
 			FROM run_journal
 			ORDER BY started_at DESC
 			LIMIT ?`, limit)
@@ -491,6 +510,30 @@ func (s *SQLiteStore) Close() error {
 		return nil
 	}
 	return s.db.Close()
+}
+
+// GetLastOutboundMessage returns the chat_id, thread_id, and outbound_message_id
+// of the most recent run that has a non-zero outbound_message_id for the given
+// session_file. Returns chatID=0, threadID=0, messageID=0 if not found.
+func (s *SQLiteStore) GetLastOutboundMessage(ctx context.Context, sessionFile string) (int64, int, int64, error) {
+	if sessionFile == "" {
+		return 0, 0, 0, nil
+	}
+	var chatID, messageID int64
+	var threadID int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT chat_id, thread_id, outbound_message_id
+		FROM run_journal
+		WHERE session_file = ? AND outbound_message_id != 0
+		ORDER BY started_at DESC, rowid DESC
+		LIMIT 1`, sessionFile).Scan(&chatID, &threadID, &messageID)
+	if err == sql.ErrNoRows {
+		return 0, 0, 0, nil
+	}
+	if err != nil {
+		return 0, 0, 0, fmt.Errorf("runlog get_last_outbound session=%s: %w", sessionFile, err)
+	}
+	return chatID, threadID, messageID, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -539,7 +582,8 @@ func scanRecordFull(row recordScanner) (*RunRecord, error) {
 		&r.CostUSD, &r.ToolCount,
 		&r.ErrorClass, &r.TimeoutOrigin,
 		&usedFallback, &r.SessionFile,
-		&r.ParentRunID)
+		&r.ParentRunID,
+		&r.InboundMessageID, &r.OutboundMessageID)
 	if err != nil {
 		return nil, err
 	}

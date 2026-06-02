@@ -227,4 +227,7 @@ func (f *fakeRunLogStore) ListRuns(_ context.Context, _ int64, _ int) ([]runlog.
 func (f *fakeRunLogStore) Metrics(_ context.Context, _ runlog.MetricsFilter) (*runlog.MetricsResult, error) {
 	return nil, nil
 }
+func (f *fakeRunLogStore) GetLastOutboundMessage(_ context.Context, _ string) (int64, int, int64, error) {
+	return 0, 0, 0, nil
+}
 func (f *fakeRunLogStore) Close() error { return nil }

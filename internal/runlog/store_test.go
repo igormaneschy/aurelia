@@ -686,3 +686,172 @@ func TestSQLiteStore_FilePermissions(t *testing.T) {
 		}
 	}
 }
+
+func TestSQLiteStore_InboundOutboundMessageIDs(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	record := RunRecord{
+		RunID:             runID,
+		ChatID:            100,
+		ThreadID:          0,
+		RequestID:         "req-1",
+		Prompt:            "test message bridge",
+		InboundMessageID:  42,
+		OutboundMessageID: 99,
+	}
+	if err := s.Start(ctx, record); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	got, err := s.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got == nil {
+		t.Fatal("GetRun returned nil")
+	}
+	if got.InboundMessageID != 42 {
+		t.Errorf("InboundMessageID = %d, want 42", got.InboundMessageID)
+	}
+	if got.OutboundMessageID != 99 {
+		t.Errorf("OutboundMessageID = %d, want 99", got.OutboundMessageID)
+	}
+
+	// Test Update path for outbound_message_id.
+	newOutbound := int64(150)
+	if err := s.Update(ctx, RunUpdate{
+		RunID:             runID,
+		OutboundMessageID: &newOutbound,
+	}); err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+	got, err = s.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("GetRun after update: %v", err)
+	}
+	if got.OutboundMessageID != 150 {
+		t.Errorf("OutboundMessageID after update = %d, want 150", got.OutboundMessageID)
+	}
+}
+
+func TestSQLiteStore_GetLastOutboundMessage_Found(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	sessionFile := "/path/to/session.json"
+	r1 := RunRecord{
+		RunID:             uuid.NewString(),
+		ChatID:            100,
+		ThreadID:          0,
+		RequestID:         "req-1",
+		Prompt:            "first",
+		SessionFile:       sessionFile,
+		OutboundMessageID: 10,
+	}
+	r2 := RunRecord{
+		RunID:             uuid.NewString(),
+		ChatID:            200,
+		ThreadID:          5,
+		RequestID:         "req-2",
+		Prompt:            "second",
+		SessionFile:       sessionFile,
+		OutboundMessageID: 20,
+	}
+	if err := s.Start(ctx, r1); err != nil {
+		t.Fatalf("Start r1: %v", err)
+	}
+	// Ensure distinct started_at timestamps (second resolution).
+	time.Sleep(1100 * time.Millisecond)
+	if err := s.Start(ctx, r2); err != nil {
+		t.Fatalf("Start r2: %v", err)
+	}
+
+	chatID, threadID, msgID, err := s.GetLastOutboundMessage(ctx, sessionFile)
+	if err != nil {
+		t.Fatalf("GetLastOutboundMessage: %v", err)
+	}
+	if chatID != 200 {
+		t.Errorf("chatID = %d, want 200", chatID)
+	}
+	if threadID != 5 {
+		t.Errorf("threadID = %d, want 5", threadID)
+	}
+	if msgID != 20 {
+		t.Errorf("messageID = %d, want 20", msgID)
+	}
+}
+
+func TestSQLiteStore_GetLastOutboundMessage_NotFound(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	chatID, threadID, msgID, err := s.GetLastOutboundMessage(ctx, "/nonexistent/session.json")
+	if err != nil {
+		t.Fatalf("GetLastOutboundMessage: %v", err)
+	}
+	if chatID != 0 || threadID != 0 || msgID != 0 {
+		t.Errorf("expected zeros for not found, got chat=%d thread=%d msg=%d", chatID, threadID, msgID)
+	}
+}
+
+func TestSQLiteStore_GetLastOutboundMessage_EmptySession(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	chatID, threadID, msgID, err := s.GetLastOutboundMessage(ctx, "")
+	if err != nil {
+		t.Fatalf("GetLastOutboundMessage: %v", err)
+	}
+	if chatID != 0 || threadID != 0 || msgID != 0 {
+		t.Errorf("expected zeros for empty session, got chat=%d thread=%d msg=%d", chatID, threadID, msgID)
+	}
+}
+
+func TestSQLiteStore_GetLastOutboundMessage_SkipsZeroOutbound(t *testing.T) {
+	// Runs with outbound_message_id=0 should be skipped.
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	sessionFile := "/path/to/session.json"
+	r1 := RunRecord{
+		RunID:             uuid.NewString(),
+		ChatID:            100,
+		ThreadID:          0,
+		RequestID:         "req-1",
+		Prompt:            "no outbound",
+		SessionFile:       sessionFile,
+		OutboundMessageID: 0, // no message sent
+	}
+	r2 := RunRecord{
+		RunID:             uuid.NewString(),
+		ChatID:            200,
+		ThreadID:          1,
+		RequestID:         "req-2",
+		Prompt:            "with outbound",
+		SessionFile:       sessionFile,
+		OutboundMessageID: 55,
+	}
+	if err := s.Start(ctx, r1); err != nil {
+		t.Fatalf("Start r1: %v", err)
+	}
+	time.Sleep(1100 * time.Millisecond)
+	if err := s.Start(ctx, r2); err != nil {
+		t.Fatalf("Start r2: %v", err)
+	}
+
+	chatID, threadID, msgID, err := s.GetLastOutboundMessage(ctx, sessionFile)
+	if err != nil {
+		t.Fatalf("GetLastOutboundMessage: %v", err)
+	}
+	if msgID != 55 {
+		t.Errorf("messageID = %d, want 55 (should skip r1 with outbound=0)", msgID)
+	}
+	if chatID != 200 {
+		t.Errorf("chatID = %d, want 200", chatID)
+	}
+	if threadID != 1 {
+		t.Errorf("threadID = %d, want 1", threadID)
+	}
+}

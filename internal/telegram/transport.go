@@ -32,7 +32,8 @@ func (t *TelegramTransport) Name() string { return "telegram" }
 // When Markdown is false the text is sent as-is (plain text).
 func (t *TelegramTransport) Send(ctx context.Context, msg transport.OutgoingMessage) error {
 	if msg.Markdown {
-		return sendTextWithSender(t.bot, &telebot.Chat{ID: msg.ChatID}, msg.Text, telegramMessageLimit, msg.ThreadID)
+		_, err := sendTextWithSender(t.bot, &telebot.Chat{ID: msg.ChatID}, msg.Text, telegramMessageLimit, msg.ThreadID)
+		return err
 	}
 	_, err := t.bot.Send(&telebot.Chat{ID: msg.ChatID}, msg.Text, &telebot.SendOptions{ThreadID: msg.ThreadID})
 	return err

@@ -37,7 +37,7 @@ type Output interface {
 	StartTyping(chatID int64, threadID int) func()
 	NewProgress(chatID int64, threadID int) ProgressReporter
 	SendError(chatID int64, threadID int, text string) error
-	SendReply(chatID int64, threadID int, text string) error
+	SendReply(chatID int64, threadID int, text string) (int64, error)
 	SendText(chatID int64, threadID int, text string) (any, error)
 	DeleteMessage(message any)
 	ConfirmMessage(chatID int64, messageID int)
