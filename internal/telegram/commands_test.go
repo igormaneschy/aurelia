@@ -984,6 +984,57 @@ func TestHelpMessageIncludesNaturalExamples(t *testing.T) {
 	}
 }
 
+// TestHelpMessageIncludesModeCommand verifies that /mode is documented in
+// the inline /help output (regression: was missing after the operability
+// feature — users had to know the command existed by trying it).
+func TestHelpMessageIncludesModeCommand(t *testing.T) {
+	t.Parallel()
+
+	help := helpMessage()
+	if !strings.Contains(help, "/mode") {
+		t.Fatalf("help should document /mode, got: %q", help)
+	}
+	if !strings.Contains(help, "developer") || !strings.Contains(help, "researcher") {
+		t.Fatalf("help /mode description should mention developer/researcher, got: %q", help)
+	}
+}
+
+// TestSlashMenuCommands_IncludesMode verifies that the Telegram slash menu
+// registers the /mode command. Regression: operability feature added
+// cmdSetMode handler but did not register it with bot.SetCommands, so
+// /mode never appeared in the Telegram auto-complete menu.
+func TestSlashMenuCommands_IncludesMode(t *testing.T) {
+	t.Parallel()
+
+	cmds := slashMenuCommands()
+	want := map[string]bool{
+		"new": false, "usage": false, "status": false, "cwd": false,
+		"cron": false, "agents": false, "memory": false, "model": false,
+		"mode": false, "stop": false, "users": false, "forgetme": false,
+		"help": false,
+	}
+	for _, c := range cmds {
+		if _, ok := want[c.Text]; ok {
+			want[c.Text] = true
+		} else {
+			t.Errorf("unexpected command in slash menu: %q", c.Text)
+		}
+	}
+	for name, found := range want {
+		if !found {
+			t.Errorf("command %q missing from slash menu", name)
+		}
+	}
+	if len(cmds) != len(want) {
+		t.Errorf("expected %d commands, got %d", len(want), len(cmds))
+	}
+	for _, c := range cmds {
+		if c.Description == "" {
+			t.Errorf("command %q has empty description (Telegram requires it)", c.Text)
+		}
+	}
+}
+
 func TestCancelActiveRun_NilPipelineReturnsFalse(t *testing.T) {
 	t.Parallel()
 
