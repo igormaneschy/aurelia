@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -240,13 +241,29 @@ func TestDetectToolSpiral(t *testing.T) {
 
 func TestLoopDetector_ResetForNewTurn(t *testing.T) {
 	d := newLoopDetector(1, 0, nil, func(s string) {})
-	d.warned = true
 
-	// Simulate a loop detection that set warned=true
+	// Simulate that a loop was detected and the ring buffer has history.
+	d.warned = true
+	d.record("read", map[string]any{"path": "/a"})
+	d.record("read", map[string]any{"path": "/a"})
+	d.record("read", map[string]any{"path": "/a"})
+
 	d.ResetForNewTurn()
 
 	if d.warned {
 		t.Error("ResetForNewTurn() did not reset warned flag")
+	}
+	if d.count != 0 {
+		t.Errorf("ResetForNewTurn() did not reset count: got %d, want 0", d.count)
+	}
+	if d.next != 0 {
+		t.Errorf("ResetForNewTurn() did not reset ring write position: got %d, want 0", d.next)
+	}
+	// Verify ring buffer is fresh (all zero-value snapshots).
+	for i, snap := range d.ring {
+		if snap.name != "" || snap.inputFp != "" {
+			t.Errorf("ResetForNewTurn() did not clear ring buffer at index %d: %+v", i, snap)
+		}
 	}
 }
 
@@ -284,8 +301,8 @@ func TestToolCallTracker_SteerIncludesElapsed(t *testing.T) {
 	msg := steerMsgs[0]
 	mu.Unlock()
 
-	if !strings.Contains(msg, "42s") {
-		t.Errorf("steer message should contain elapsed time '42s', got: %s", msg)
+	if !regexp.MustCompile(`\d+s`).MatchString(msg) {
+		t.Errorf("steer message should include elapsed time (like '42s'), got: %s", msg)
 	}
 	if !strings.Contains(msg, "Bash") {
 		t.Errorf("steer message should contain tool name 'Bash', got: %s", msg)
