@@ -186,7 +186,7 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("pipeline: panic in processRun: %v", r)
+					log.Printf("pipeline: panic in processRunWithCancel: %v", r)
 				}
 			}()
 			s.processRunWithCancel(input, run, reservedCtx, reservedCancel)
@@ -262,7 +262,7 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("pipeline: panic in processRun(supersede): %v", r)
+					log.Printf("pipeline: panic in processRunWithCancel(supersede): %v", r)
 				}
 			}()
 			s.processRunWithCancel(input, supersedeRun, supersedeCtx, supersedeCancel)
@@ -362,51 +362,6 @@ func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, rese
 	}
 
 	s.executeAsync(reservedCtx, input.chatID, input.threadID, input.messageID, req, userText, input.userID, input.isPrivateChat)
-}
-
-//nolint:unused // legacy path retained for potential fallback
-func (s *Service) processRun(input pipelineInput) {
-	key := sessionKey(input.chatID, input.threadID, input.userID)
-	ctx, cancel := context.WithCancel(context.Background())
-	s.activeSessions.Store(key, cancel)
-	defer s.activeSessions.Delete(key)
-	defer cancel()
-
-	agent := s.routeAgent(input.text)
-	userText := stripAgentPrefix(input.text, agent)
-
-	if s.checkProjectPreflight(input, agent, userText) {
-		return
-	}
-
-	systemPrompt, err := s.buildSystemPrompt(userText, agent, input.chatID, input.messageID, input.threadID, input.userID, input.isPrivateChat)
-	if err != nil {
-		log.Printf("Failed to build system prompt: %s", redactSecrets(err.Error()))
-		if err := s.output.SendError(input.chatID, input.threadID, "Falha ao montar o prompt de sistema."); err != nil {
-			log.Printf("pipeline: SendError(system prompt) failed for chat=%d: %v", input.chatID, err)
-		}
-		s.output.ConfirmMessage(input.chatID, input.messageID)
-		return
-	}
-
-	req := s.buildBridgeRequest(userText, systemPrompt, agent, input.chatID, input.threadID, input.userID, input.isPrivateChat)
-	req.RequestID = fmt.Sprintf("run-%d", time.Now().UnixNano())
-	req.Options.Images = input.images
-	s.applyVisionFallback(&req, input.images)
-
-	// Apply session lifecycle decision before executing
-	if lcResult := s.applyLifecycle(ctx, &req, input.chatID, input.threadID, input.userID); lcResult.SkipExecution {
-		log.Printf("lifecycle: execution skipped for chat=%d: %s", input.chatID, lcResult.ErrorMessage)
-		if lcResult.ErrorMessage != "" {
-			if err := s.output.SendError(input.chatID, input.threadID, lcResult.ErrorMessage); err != nil {
-				log.Printf("pipeline: SendError(lifecycle) failed for chat=%d: %v", input.chatID, err)
-			}
-		}
-		s.output.ConfirmMessage(input.chatID, input.messageID)
-		return
-	}
-
-	s.executeAsync(ctx, input.chatID, input.threadID, input.messageID, req, userText, input.userID, input.isPrivateChat)
 }
 
 func stripAgentPrefix(text string, agent *agents.Agent) string {
