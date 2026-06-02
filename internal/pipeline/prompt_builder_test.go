@@ -1441,7 +1441,10 @@ func TestLoadMemoryContents_TwoUsersSameTopicWithCwd(t *testing.T) {
 		}
 	}
 
-	// cwd_overlay is shared by topic — both see Alice's auth note
+	// cwd_overlay is shared by topic — both see Alice's auth note.
+	// This is intentional: cwd_overlay is scoped by (chat_id, thread_id),
+	// not by (user_id). Two users collaborating in the same topic with the
+	// same /cwd share the work context overlay. Only user_global is per-user.
 	if !strings.Contains(gotA, "Alice: implemented auth module") {
 		t.Fatal("user A should see cwd_overlay (auth module)")
 	}

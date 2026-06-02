@@ -12,10 +12,10 @@ const maxMemoryFileSize = 1 * 1024 * 1024 // 1MB hard limit for memory fact file
 
 var (
 	allowedLayers = map[string]bool{
-		"user_global":  true,
-		"topic":        true,
-		"cwd_overlay":  true,
-		"project_team": true,
+		LayerUserGlobal:  true,
+		LayerTopic:       true,
+		LayerCwdOverlay:  true,
+		LayerProjectTeam: true,
 	}
 
 	errPersonasPath  = fmt.Errorf("path targets personas directory")

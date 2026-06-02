@@ -254,7 +254,11 @@ func (r *PathResolver) TopicMemoryDir(chatID int64, threadID int) string {
 // TopicCwdOverlayDir returns the cwd overlay memory directory for a topic.
 // ~/.aurelia/topics/chat_<chatID>/thread_<threadID>/cwd_overlay/
 // For private chats (threadID == 0), returns ~/.aurelia/topics/chat_<chatID>/cwd_overlay/
-// Only valid when /cwd is declared for the chat/topic.
+//
+// Caller is responsible for verifying that /cwd is actually active for the
+// chat/topic before using the returned path. This method only computes the
+// path; it does not check project binding state.
+//
 // Returns empty string when chatID == 0.
 func (r *PathResolver) TopicCwdOverlayDir(chatID int64, threadID int) string {
 	if chatID == 0 {

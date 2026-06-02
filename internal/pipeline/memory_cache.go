@@ -151,7 +151,7 @@ func (bc *Service) InvalidateMemoryDirs(chatID int64, threadID int, userID int64
 		if userDir := bc.resolver.UserMemoryDir(userID); userDir != "" {
 			bc.memoryCache.invalidate(userDir)
 		}
-	} else {
+	} else if bc.memoryDir != "" {
 		bc.memoryCache.invalidate(bc.memoryDir)
 	}
 

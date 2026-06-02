@@ -18,6 +18,19 @@ var suspiciousPrefixes = []string{
 	"you are now", "you're now", "your task is", "never follow",
 }
 
+// Valid memory layers accepted by the nudge system.
+// Must stay in sync with allowedLayers in memory_writer.go and
+// the nudge prompt templates in prompts/nudge_*.tmpl.
+const (
+	LayerUserGlobal  = "user_global"
+	LayerTopic       = "topic"
+	LayerCwdOverlay  = "cwd_overlay"
+	LayerProjectTeam = "project_team"
+)
+
+// ValidLayers is the authoritative list of accepted layer names.
+var ValidLayers = []string{LayerUserGlobal, LayerTopic, LayerCwdOverlay, LayerProjectTeam}
+
 // memoryUpdate describes one file to update during nudge extraction.
 // The model produces these as structured JSON (not via file tools).
 type memoryUpdate struct {
