@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.22.0 - 2026-06-02
+
+### Added
+- **Per-agent tool budget** — agents can declare `tool_budget:
+  <int>` in frontmatter to override tool-call warning/critical
+  thresholds (default: 20/50). Warning = budget, critical = budget x 2.5.
+- **Live tool state in /status** — active runs expose tool call
+  count, loop detection status, and last 5 distinct tool names.
+- **Loop detection events** — `loop_detected` is now recorded as
+  a warn-level event in the run timeline with pattern type
+  (consecutive_repeat, ping_pong, tool_spiral).
+
+### Changed
+- **Contextual loop steer** — loop warnings to the model now
+  include the last 3 distinct tool names from the ring buffer
+  (e.g. "Read -> Grep -> Read"), replacing the previous generic message.
+
 ## v0.21.1 - 2026-06-02
 
 ### Changed
