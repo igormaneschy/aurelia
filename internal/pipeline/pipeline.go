@@ -1095,7 +1095,12 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 				s.recordPipelineEvent(chatID, threadID, observability.NewEvent("",
 					observability.PhaseBridgeSystem, fmt.Sprintf("event=%s", ev.Type)))
 			}
-		case "agent_start", "agent_end", "turn_start", "turn_end":
+		case "turn_start":
+			// Reset loop detector so a new turn can re-trigger loop warnings.
+			if loopDetect != nil {
+				loopDetect.ResetForNewTurn()
+			}
+		case "agent_start", "agent_end", "turn_end":
 			// Agent/turn lifecycle events reset idle timer.
 		case "auto_retry_start", "auto_retry_end":
 			// Retry events reset idle timer.

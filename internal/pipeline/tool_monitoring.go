@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 )
@@ -47,21 +48,22 @@ func (t *toolCallTracker) increment(toolName string) {
 	count := t.count
 	t.mu.Unlock()
 
+	elapsed := time.Since(t.startedAt).Round(time.Second)
 	switch count {
 	case toolCallWarningThreshold:
 		t.sendWarning("🔍 Estou analisando bastante contexto. Vou consolidar os achados antes de continuar.")
-		t.steer("Você já usou ferramentas %d vezes (%s). "+
-			"Consolide o que já descobriu e apresente um resumo parcial agora.", count, toolName)
+		t.steer("Você já usou ferramentas %d vezes (%s) em %s. "+
+			"Consolide o que já descobriu e apresente um resumo parcial agora.", count, toolName, elapsed)
 	case toolCallCriticalThreshold:
 		t.sendWarning("⚠️ A análise está ficando extensa. Vou consolidar o progresso e apresentar um resumo parcial.")
-		t.steer("Você já usou ferramentas %d vezes (%s). "+
+		t.steer("Você já usou ferramentas %d vezes (%s) em %s. "+
 			"Conclua imediatamente o que está fazendo e apresente um resumo parcial. "+
-			"O limite de tempo está próximo.", count, toolName)
+			"O limite de tempo está próximo.", count, toolName, elapsed)
 	default:
 		if count > toolCallCriticalThreshold && count%toolCallCriticalThreshold == 0 {
 			t.sendWarning("⏳ Continuo analisando. Vou concluir em breve com um resumo dos resultados.")
-			t.steer("Você já usou ferramentas %d vezes. "+
-				"Conclua e apresente um resumo parcial imediatamente.", count)
+			t.steer("Você já usou ferramentas %d vezes em %s. "+
+				"Conclua e apresente um resumo parcial imediatamente.", count, elapsed)
 		}
 	}
 }
@@ -90,6 +92,17 @@ func (t *toolCallTracker) countLocked() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.count
+}
+
+// ResetForNewTurn resets the warning flag so a new turn can trigger a fresh
+// loop warning. Called on turn_start events during multi-turn PI sessions.
+func (d *loopDetector) ResetForNewTurn() {
+	if d == nil {
+		return
+	}
+	d.mu.Lock()
+	d.warned = false
+	d.mu.Unlock()
 }
 
 // ── Loop detection ────────────────────────────────────────────────────────
@@ -247,7 +260,7 @@ func detectToolSpiral(calls []toolCallSnapshot, toolName string, minLen int) boo
 		return false
 	}
 	for i := n - minLen; i < n; i++ {
-		if calls[i].name != toolName {
+		if !strings.HasPrefix(strings.ToLower(calls[i].name), strings.ToLower(toolName)) {
 			return false
 		}
 	}
