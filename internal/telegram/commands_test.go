@@ -93,6 +93,20 @@ func TestMatch(t *testing.T) {
 		{name: "qual o meu modo", text: "qual o meu modo", want: cmdPtr(CmdSetMode)},
 		{name: "meu modo atual", text: "meu modo atual", want: cmdPtr(CmdSetMode)},
 
+		// --- mode in group/topic with @botname suffix ---
+		// Telegram appends "@<bot_username>" to slash commands in groups.
+		// MatchCommand must strip the suffix so the same rules apply in
+		// private and group/topic contexts (regression 2026-06-02).
+		{name: "/mode@bot alone", text: "/mode@ManeDev_bot", want: cmdPtr(CmdSetMode)},
+		{name: "/mode@bot developer", text: "/mode@ManeDev_bot developer", want: cmdPtr(CmdSetMode)},
+		{name: "/modo@bot dev", text: "/modo@ManeDev_bot dev", want: cmdPtr(CmdSetMode)},
+
+		// --- stripBotMention regression: at-mention in middle of text not stripped ---
+		// The regex anchors at ^ and requires a leading "/" — other @mentions
+		// in conversation text must be left alone.
+		{name: "mention in middle not stripped", text: "olá @ManeDev_bot como vai", want: nil},
+		{name: "no slash before mention", text: "oi @ManeDev_bot tudo bem?", want: nil},
+
 		// --- NO match: normal conversation ---
 		{name: "greeting", text: "bom dia", want: nil},
 		{name: "question", text: "como funciona o bridge?", want: nil},
@@ -996,6 +1010,75 @@ func TestHelpMessageIncludesModeCommand(t *testing.T) {
 	}
 	if !strings.Contains(help, "developer") || !strings.Contains(help, "researcher") {
 		t.Fatalf("help /mode description should mention developer/researcher, got: %q", help)
+	}
+}
+
+// TestStripBotMention verifies the helper that strips @botname suffix from
+// slash commands. Telegram appends this in group/topic chats to disambiguate
+// the target bot. The helper must:
+//   - strip when input starts with /<cmd>@<bot>
+//   - leave non-slash text untouched (other @mentions stay)
+//   - leave slash commands without @botname untouched
+func TestStripBotMention(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{name: "slash with botname", in: "/mode@ManeDev_bot", want: "/mode"},
+		{name: "slash with botname + payload", in: "/mode@ManeDev_bot developer", want: "/mode developer"},
+		{name: "slash without botname", in: "/mode", want: "/mode"},
+		{name: "slash without botname + payload", in: "/mode developer", want: "/mode developer"},
+		{name: "modo variant", in: "/modo@ManeDev_bot dev", want: "/modo dev"},
+		{name: "at mention without slash", in: "olá @ManeDev_bot", want: "olá @ManeDev_bot"},
+		{name: "at mention mid text", in: "fala @ManeDev_bot beleza?", want: "fala @ManeDev_bot beleza?"},
+		{name: "empty", in: "", want: ""},
+		{name: "no slash no at", in: "modo dev", want: "modo dev"},
+		{name: "underscore in botname", in: "/agents@ManeDev_bot", want: "/agents"},
+		{name: "digits in command", in: "/m3@ManeDev_bot", want: "/m3"},
+		{name: "botname with digits", in: "/mode@Bot123", want: "/mode"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := stripBotMention(tt.in); got != tt.want {
+				t.Errorf("stripBotMention(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestHandleModeCommand_ReconstructsText verifies that handleModeCommand
+// builds the canonical "/mode <target>" text from telebot's payload before
+// delegating to cmdSetMode. Regression: in groups, telebot strips the
+// @botname and provides only the payload (e.g., "developer"), so the
+// handler must reconstruct the slash form for the existing extractModeTarget
+// logic to work.
+func TestHandleModeCommand_ReconstructsText(t *testing.T) {
+	t.Parallel()
+
+	// We can't easily mock a telebot.Context, but we can verify the text
+	// reconstruction by testing extractModeTarget on the canonical forms
+	// the handler builds. If those parse correctly, the dispatch works.
+	tests := []struct {
+		reconstructed string
+		wantTarget    string
+	}{
+		{"/mode", ""},                  // query
+		{"/mode developer", "developer"},
+		{"/mode dev", "dev"},
+		{"/mode general", "general"},
+		{"/modo dev", "dev"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.reconstructed, func(t *testing.T) {
+			t.Parallel()
+			if got := extractModeTarget(tt.reconstructed); got != tt.wantTarget {
+				t.Errorf("extractModeTarget(%q) = %q, want %q", tt.reconstructed, got, tt.wantTarget)
+			}
+		})
 	}
 }
 

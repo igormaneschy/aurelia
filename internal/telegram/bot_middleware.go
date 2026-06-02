@@ -64,6 +64,14 @@ func (bc *BotController) registerContentRoutes() {
 	bc.bot.Handle("/agents", bc.handleAgentsCommand)
 	bc.bot.Handle("/memory", bc.handleMemoryCommand)
 	bc.bot.Handle("/model", bc.handleModelCommand)
+	// /mode and /modo must be registered as slash handlers so the telebot
+	// dispatcher strips the @botname suffix that Telegram adds in groups
+	// and topics ("/mode@ManeDev_bot developer" → command="/mode",
+	// payload="developer"). Without this, the message falls through to
+	// OnText → MatchCommand, which only knows the bare phrase and
+	// silently fails in group/topic chats. See live bug report 2026-06-02.
+	bc.bot.Handle("/mode", bc.handleModeCommand)
+	bc.bot.Handle("/modo", bc.handleModeCommand)
 	bc.bot.Handle("/users", bc.handleUsersCommand)
 	bc.bot.Handle("/forgetme", bc.handleForgetMeCommand)
 	bc.bot.Handle("\fforget_me_confirm", bc.handleForgetMeConfirm)
@@ -146,6 +154,27 @@ func (bc *BotController) handleAgentsCommand(c telebot.Context) error {
 	}
 	if bc.agents == nil || len(bc.agents.Agents()) == 0 {
 		reply = "Nenhum agente configurado. Crie arquivos .md em ~/.aurelia/agents/"
+	}
+	return SendTextWithThread(bc.bot, c.Chat(), reply, c.Message().ThreadID)
+}
+
+// handleModeCommand serves the /mode and /modo slash commands. Telebot has
+// already stripped the @botname suffix and extracted the payload, so we
+// rebuild the text in the canonical "/mode <target>" form and delegate to
+// cmdSetMode — same code path as the natural-language "modo dev" /
+// "qual meu modo" commands. Thread-safe reply routing.
+func (bc *BotController) handleModeCommand(c telebot.Context) error {
+	defer bc.confirmMessage(c.Message())
+	text := "/mode"
+	if p := strings.TrimSpace(c.Message().Payload); p != "" {
+		text = "/mode " + p
+	}
+	reply, err := bc.cmdSetMode(c, text)
+	if err != nil {
+		return err
+	}
+	if reply == "" {
+		return nil
 	}
 	return SendTextWithThread(bc.bot, c.Chat(), reply, c.Message().ThreadID)
 }

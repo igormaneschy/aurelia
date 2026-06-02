@@ -183,11 +183,29 @@ func stripAccents(s string) string {
 	return accentReplacer.Replace(s)
 }
 
+// slashBotMentionRE matches a slash command followed by an @botname mention
+// (e.g., "/mode@ManeDev_bot"). Telegram clients append this in group and
+// topic chats to disambiguate which bot should handle the command. We strip
+// it before command matching so the same rules work in private and group
+// contexts. Only strips mentions of slash commands — leaves other @mentions
+// in the text untouched.
+var slashBotMentionRE = regexp.MustCompile(`^(/[A-Za-z0-9_]+)@[A-Za-z0-9_]+`)
+
+// stripBotMention removes an optional @botname suffix from a slash command
+// at the start of text. Returns text unchanged when no match.
+func stripBotMention(text string) string {
+	return slashBotMentionRE.ReplaceAllString(text, "$1")
+}
+
 // MatchCommand checks if a message is a system command. Returns nil if no match.
 // Uses keyword matching with a narrative-context heuristic to avoid false positives.
 // Diacritics are stripped so "começa de novo" and "comeca de novo" match equally.
+// A leading @botname suffix on slash commands is stripped so the same rules
+// apply in private chats and in group/topic chats (where Telegram appends
+// "@ManeDev_bot" to disambiguate the target bot).
 func MatchCommand(text string) *MatchedCommand {
 	lower := stripAccents(strings.ToLower(strings.TrimSpace(text)))
+	lower = stripBotMention(lower)
 	if lower == "" {
 		return nil
 	}
