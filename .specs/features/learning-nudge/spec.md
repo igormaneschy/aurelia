@@ -2,7 +2,7 @@
 
 **Roadmap step:** 7  
 **Status:** 🔴 Draft revisado  
-**Depende de:** `.specs/features/multi-user-profiles/`, `.specs/features/project-binding/` (✅ done), `.specs/features/project-memory/`, `.specs/features/security-guard-rails/` (✅ done), `.specs/features/wiki-memory/`  
+**Depende de:** `.specs/features/multi-user-profiles/`, `.specs/features/project-binding/` (✅ done), `.specs/features/project-memory/`, `.specs/features/security-guard-rails/` (✅ done), Memory Boundary Realignment  
 **Complementa:** `.specs/features/auto-skills/`
 
 ## Problem Statement
@@ -13,14 +13,14 @@ Por outro lado, um nudge profundo sem escopo correto pode vazar dados entre usu�
 
 A nova direção é um **Learning Nudge escopado**: uma revisão periódica em background, executada pelo PI com contexto suficiente, mas limitada por `SessionKey{chat_id, thread_id, user_id}`, `ConversationKey{chat_id, thread_id}`, project binding/effective `cwd` e `CapabilityProfile=edit_project` sem `Bash`.
 
-O nudge deve escrever através da **Wiki** do Aurelia, não em arquivos soltos ad hoc. Assim, memórias extraídas de conversas no Telegram ficam disponíveis também para PI direto, PI Code/opencode e outros clientes MCP, mantendo o princípio: **acesso transversal, memória escopada**.
+O nudge não deve depender de uma **Wiki interna** do Aurelia. A Wiki transversal pertence ao PI via `ai-memory` MCP. No MVP, o nudge produz sugestões/updates escopados e só persiste memória operacional local do Aurelia quando isso é necessário para UX, continuidade ou prompt context. Escrita em Wiki transversal só pode ser adicionada depois de um caminho PI/`ai-memory` explicitamente configurado e verificado.
 
 ## Goals
 
 - [ ] Rodar revisão periódica em background a cada N turns ou em eventos relevantes
 - [ ] Usar transcript escopado por `SessionKey`, sem ler sessões de outros usuários
 - [ ] Classificar memórias nas camadas de `project-memory`
-- [ ] Persistir memórias via Wiki scopes, com receipts/audit consumíveis por MCP
+- [ ] Produzir sugestões/updates escopados para memória operacional, com receipts/audit locais
 - [ ] Redigir secrets antes de enviar transcript ao nudge
 - [ ] Usar `CapabilityProfile=edit_project` sem `Bash`
 - [ ] Nunca criar skills automaticamente; apenas sugerir candidatos para `auto-skills`
@@ -37,6 +37,8 @@ O nudge deve escrever através da **Wiki** do Aurelia, não em arquivos soltos a
 - Consolidação cross-user
 - Full-text search em histórico antigo
 - UI completa de revisão/edição de memória
+- Implementar gateway Wiki/MCP interno
+- Assumir API específica do `ai-memory` sem verificação no PI instalado
 
 ---
 
@@ -47,9 +49,9 @@ Pipeline turn complete
   → Recorder appends scoped transcript event
   → Nudge gate evaluates interval/budget/running state
   → Background nudge request to PI
-  → PI returns structured Wiki updates
-  → Wiki writer applies allowed scoped writes
-  → Go records receipts/audit and updates search metadata
+  → PI returns structured scoped memory suggestions/updates
+  → Go applies only allowed operational-memory writes or records suggestions
+  → Go records receipts/audit
 ```
 
 ### Trigger gates
@@ -112,18 +114,18 @@ Do **not** depend on PI internal session file paths for MVP.
 
 ---
 
-### P1: Wiki memory review por camadas ⭐ MVP
+### P1: Scoped memory review por camadas ⭐ MVP
 
 **User Story:** Como Aurelia, quero transformar conversas em memória útil no escopo correto.
 
 **Acceptance Criteria:**
 
-1. Nudge prompt SHALL listar Wiki targets permitidos: user global, user project private, project team, topic memory.
-2. Nudge SHALL receber guia de classificação da spec `project-memory` e regras de gateway da spec `wiki-memory`.
+1. Nudge prompt SHALL listar targets operacionais permitidos: user global, topic memory, cwd_overlay e project team.
+2. Nudge SHALL receber guia de classificação da spec `project-memory` e a boundary: Wiki transversal pertence ao PI via `ai-memory`, não ao Aurelia.
 3. Nudge SHALL ser instruído a preferir camada privada quando houver dúvida.
 4. Nudge SHALL nunca escrever fatos pessoais em team memory.
-5. Go SHALL aplicar atualizações através do Wiki writer, reconciliar arquivos alterados e registrar quais camadas foram tocadas.
-6. Writes resultantes SHALL ser consultáveis por clientes externos via Wiki MCP.
+5. Go SHALL aplicar apenas atualizações permitidas de memória operacional ou registrar sugestões pendentes quando a escrita não for segura.
+6. Writes em Wiki transversal SHALL NOT ser implementados no Aurelia sem contrato verificado do PI/`ai-memory`.
 
 **Independent Test:** Transcript com fato pessoal + convenção de projeto resulta em writes nas camadas corretas.
 
@@ -152,7 +154,7 @@ Do **not** depend on PI internal session file paths for MVP.
 **Acceptance Criteria:**
 
 1. Nudge MAY identificar candidato a skill quando detectar procedimento reutilizável.
-2. Nudge SHALL salvar apenas sugestão/resumo em memória ou output estruturado.
+2. Nudge SHALL salvar apenas sugestão/resumo em memória operacional ou output estruturado.
 3. Nudge SHALL NOT escrever em `users/<id>/skills/` nem em `~/.pi/agent/skills`.
 4. `/skill save <slug>` continua sendo o caminho explícito para criar uma skill PI-compatible gerenciada pelo Aurelia.
 5. Auto-Skills MAY consumir sugestões do nudge como contexto para gerar `<slug>/SKILL.md` após confirmação do usuário.
@@ -179,7 +181,7 @@ Nudge prompt deve incluir:
 - SessionKey e ConversationKey como metadados, não como conteúdo narrativo
 - cwd/project slug efetivo
 - camadas de memória permitidas e seus paths
-- Wiki scopes permitidos e regras de classificação
+- camadas operacionais permitidas e regras de classificação
 - transcript redigido/truncado
 - instrução para atualizar arquivos existentes, não duplicar
 - instrução para não salvar secrets/PII desnecessária
@@ -219,8 +221,8 @@ Defaults sugeridos:
 |---|---|
 | `internal/session/` | Transcript buffer keyed by SessionKey |
 | `internal/pipeline/` | Recorder observes turns and tool events |
-| `internal/dream/` | Nudge runner, prompt and reconciliation |
-| `internal/memoryux/` | Wiki writer/status/receipts used by nudge |
+| `internal/dream/` | Nudge runner, prompt, scoped suggestions and reconciliation |
+| `internal/memoryux/` | Operational memory status/receipts used by nudge |
 | `internal/security/` | Redaction + capability profile integration |
 | `internal/runtime/` | Memory target paths |
 | `internal/config/` | Nudge config fields |
@@ -231,7 +233,7 @@ Defaults sugeridos:
 
 - [ ] Nudge never mixes users in same chat/thread
 - [ ] Nudge writes to correct memory layers
-- [ ] Nudge writes are visible through Wiki/MCP-compatible status/query paths
+- [ ] Nudge does not require an internal Wiki/MCP gateway
 - [ ] Nudge runs without Bash
 - [ ] Secrets are redacted before PI call
 - [ ] Auto-Skills remains explicit user-confirmed flow

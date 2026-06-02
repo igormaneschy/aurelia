@@ -3,7 +3,7 @@
 **Roadmap step:** 5
 **Status:** 🟡 Parcial (70% — camadas existem, paths não são per-user; model reformulado em 2026-05-30)
 **Depende de:** `.specs/features/multi-user-profiles/` (para paths `users/<id>/`)
-**Complementa:** `.specs/features/wiki-memory/`, `.specs/features/learning-nudge/`, `.specs/features/auto-skills/`
+**Complementa:** `.specs/features/learning-nudge/`, `.specs/features/auto-skills/`
 
 > **Nota de reformulação (2026-05-30):** A spec original modelava memória de projeto como `(user_id, project_slug)`, com detecção automática de projeto via `scanForProject`. Isso foi reformulado para `(user_id, context_key)` onde o contexto emerge da conversa — alinhando com a remoção do Plan Mode e com o carácter amplo do Aurelia como agente pessoal, não como gestor de projetos. O `/cwd` continua a existir, mas como âncora **declarativa e opt-in** por tópico, não como eixo estruturante da memória.
 
@@ -58,7 +58,7 @@ Grupo Telegram
 - [ ] Dream consolida cada camada sem vazar entre utilizadores ou contextos
 - [ ] Team memory como camada separada e opcional, ligada ao cwd quando declarado
 - [ ] Migração single-user explícita, idempotente e reversível
-- [ ] Layout compatível com Wiki/MCP transversal sem expor memória privada por omissão
+- [ ] Layout claro para memória operacional do Aurelia sem expor memória privada por omissão
 
 ## Out of Scope
 
@@ -66,7 +66,7 @@ Grupo Telegram
 - Abrir memória de um utilizador para outro
 - Multi-tenant entre vários donos/deployments
 - Busca full-text em todo o histórico de sessões
-- Provider externo de memória (Mem0, Honcho, etc.)
+- Implementar provider externo de memória ou gateway MCP próprio
 - Substituir markdown por banco proprietário de memória
 - Sincronização automática da team memory via git no MVP
 - UI web para editar memória
@@ -126,7 +126,7 @@ Grupo Telegram
 | Project team | `~/.aurelia/projects/<slug>/team/` | project shared | apenas quando `/cwd` ativo |
 | Procedural skills | `~/.aurelia/users/<id>/skills/<slug>/SKILL.md` | user private | via Auto-Skills |
 
-Estas camadas são o contrato de escopo para a Wiki. Qualquer gateway MCP ou cliente externo deve resolver operações contra uma destas camadas e falhar fechado quando `user_id`, `chat_id/thread_id` ou classificação de escopo forem insuficientes.
+Estas camadas são o contrato operacional de contexto do Aurelia. A Wiki transversal deixou de ser implementada pelo Aurelia e passa a ser responsabilidade do PI via `ai-memory` MCP; portanto este layout não é contrato de gateway MCP externo.
 
 ### Prompt assembly order
 
@@ -307,7 +307,7 @@ Estas camadas são o contrato de escopo para a Wiki. Qualquer gateway MCP ou cli
 - [ ] Dois tópicos com `/cwd` distintos têm contextos completamente independentes
 - [ ] Dream/nudge não misturam camadas
 - [ ] Nenhum path é calculado por `scanForProject` ou travessia automática
-- [ ] Wiki/MCP pode consumir o mesmo layout sem bypass de isolamento
+- [ ] Memória operacional não bypassa isolamento de user/topic/cwd
 - [ ] Migração single-user preserva dados e é dry-run friendly
 - [ ] `go build ./... && go vet ./... && go test ./...` limpo quando implementado
 

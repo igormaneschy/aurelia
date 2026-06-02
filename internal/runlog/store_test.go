@@ -855,3 +855,113 @@ func TestSQLiteStore_GetLastOutboundMessage_SkipsZeroOutbound(t *testing.T) {
 		t.Errorf("threadID = %d, want 1", threadID)
 	}
 }
+
+func TestSQLiteStore_SessionFileUpdateAndOutboundLookup(t *testing.T) {
+	// Full integration: start a run, update session_file mid-run,
+	// set outbound_message_id, and verify GetLastOutboundMessage
+	// returns the correct IDs for that session_file.
+
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	sessionFile := "/home/user/.pi/agent/sessions/sess-xyz.json"
+	runID := uuid.NewString()
+
+	// Start run
+	rec := RunRecord{
+		RunID:       runID,
+		ChatID:      300,
+		ThreadID:    7,
+		RequestID:   "req-integration",
+		Prompt:      "test session_file bridge",
+		SessionFile: sessionFile,
+	}
+	if err := s.Start(ctx, rec); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Update session_file (simulates bridge system event arriving mid-run)
+	sessionFileUpdate := sessionFile
+	if err := s.Update(ctx, RunUpdate{
+		RunID:       runID,
+		SessionFile: &sessionFileUpdate,
+	}); err != nil {
+		t.Fatalf("Update session_file: %v", err)
+	}
+
+	// Set outbound message (simulates final Telegram reply being sent)
+	outboundID := int64(999)
+	if err := s.Update(ctx, RunUpdate{
+		RunID:             runID,
+		OutboundMessageID: &outboundID,
+	}); err != nil {
+		t.Fatalf("Update outbound_message_id: %v", err)
+	}
+
+	// Complete the run
+	if err := s.Complete(ctx, runID, RunCompleted, "done", ""); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	// Verify GetLastOutboundMessage returns the correct IDs
+	chatID, threadID, msgID, err := s.GetLastOutboundMessage(ctx, sessionFile)
+	if err != nil {
+		t.Fatalf("GetLastOutboundMessage: %v", err)
+	}
+	if chatID != 300 {
+		t.Errorf("chatID = %d, want 300", chatID)
+	}
+	if threadID != 7 {
+		t.Errorf("threadID = %d, want 7", threadID)
+	}
+	if msgID != 999 {
+		t.Errorf("messageID = %d, want 999", msgID)
+	}
+}
+
+func TestSQLiteStore_SessionFileUpdateViaUpdate(t *testing.T) {
+	// Verify session_file can be set/persisted via Update (the path
+	// the pipeline's updateRunLogSessionFile method uses).
+
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	runID := uuid.NewString()
+	rec := RunRecord{
+		RunID:     runID,
+		ChatID:    400,
+		ThreadID:  0,
+		RequestID: "req-sf",
+		Prompt:    "test",
+	}
+	if err := s.Start(ctx, rec); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Set session_file via Update
+	sessionFile := "/tmp/test-session.json"
+	if err := s.Update(ctx, RunUpdate{
+		RunID:       runID,
+		SessionFile: &sessionFile,
+	}); err != nil {
+		t.Fatalf("Update session_file: %v", err)
+	}
+
+	// Verify via GetRun
+	got, err := s.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got == nil {
+		t.Fatal("GetRun returned nil")
+	}
+	if got.SessionFile != sessionFile {
+		t.Errorf("SessionFile = %q, want %q", got.SessionFile, sessionFile)
+	}
+	if got.InboundMessageID != 0 {
+		t.Errorf("InboundMessageID = %d, want 0 (not set)", got.InboundMessageID)
+	}
+	if got.OutboundMessageID != 0 {
+		t.Errorf("OutboundMessageID = %d, want 0 (not set)", got.OutboundMessageID)
+	}
+}

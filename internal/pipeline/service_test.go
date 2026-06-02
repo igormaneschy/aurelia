@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 )
 
@@ -371,5 +372,199 @@ func TestRecordToolUse_NoDeadlockWithCompleteRunLog(t *testing.T) {
 		// success — no deadlock
 	case <-time.After(3 * time.Second):
 		t.Fatal("completeRunLog deadlocked or hung")
+	}
+}
+
+func TestRecordPipelineEvent_RunIDFallback(t *testing.T) {
+	// Ensures recordPipelineEvent uses ev.RunID as fallback when the
+	// runLogStates entry has been deleted by completeRunLog.
+	// This prevents silent dropping of run_completed events.
+
+	spy := &spyRunLogStore{}
+	s := &Service{
+		runLog:       spy,
+		runLogStates: make(map[string]*runLogState),
+		runLogMu:     sync.Mutex{},
+	}
+
+	// Simulate: state was deleted (e.g. by completeRunLog), but caller
+	// passes a captured runID in the event.
+	fallbackRunID := "run-after-state-cleanup"
+	s.recordPipelineEvent(42, 7, observability.NewEvent(fallbackRunID,
+		observability.PhaseRunCompleted, "status=completed"))
+
+	evs := spy.recordedEvents()
+	if len(evs) != 1 {
+		t.Fatalf("expected 1 recorded event, got %d", len(evs))
+	}
+	if evs[0].RunID != fallbackRunID {
+		t.Errorf("RunID = %q, want %q", evs[0].RunID, fallbackRunID)
+	}
+	if evs[0].Phase != string(observability.PhaseRunCompleted) {
+		t.Errorf("Phase = %q, want %q", evs[0].Phase, observability.PhaseRunCompleted)
+	}
+}
+
+func TestUpdateRunLogSessionFile_PersistsSessionFile(t *testing.T) {
+	// Ensures updateRunLogSessionFile writes the session_file through the
+	// runlog.Store Update path, enabling GetLastOutboundMessage to bridge
+	// PI sessions to Telegram outbound messages.
+
+	spy := &spyRunLogStore{}
+	s := &Service{
+		runLog:       spy,
+		runLogStates: make(map[string]*runLogState),
+		runLogMu:     sync.Mutex{},
+	}
+
+	runID := uuid.NewString()
+	key := runLogKey(42, 7)
+	s.runLogMu.Lock()
+	s.runLogStates[key] = &runLogState{runID: runID}
+	s.runLogMu.Unlock()
+
+	sessionFile := "/home/user/.pi/agent/sessions/session-abc.json"
+	s.updateRunLogSessionFile(42, 7, sessionFile)
+
+	updates := spy.recordedUpdates()
+	if len(updates) != 1 {
+		t.Fatalf("expected 1 update, got %d", len(updates))
+	}
+	if updates[0].RunID != runID {
+		t.Errorf("RunID = %q, want %q", updates[0].RunID, runID)
+	}
+	if updates[0].SessionFile == nil {
+		t.Fatal("SessionFile should not be nil")
+	}
+	if *updates[0].SessionFile != sessionFile {
+		t.Errorf("SessionFile = %q, want %q", *updates[0].SessionFile, sessionFile)
+	}
+}
+
+// spyRunLogStore captures RecordEvent and Update calls for test assertions.
+type spyRunLogStore struct {
+	mu      sync.Mutex
+	events  []runlog.RunEvent
+	updates []runlog.RunUpdate
+}
+
+func (s *spyRunLogStore) Start(_ context.Context, _ runlog.RunRecord) error { return nil }
+func (s *spyRunLogStore) Update(_ context.Context, u runlog.RunUpdate) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.updates = append(s.updates, u)
+	return nil
+}
+func (s *spyRunLogStore) Complete(_ context.Context, _ string, _ runlog.RunStatus, _, _ string) error {
+	return nil
+}
+func (s *spyRunLogStore) Latest(_ context.Context, _ int64, _ int) (*runlog.RunRecord, error) {
+	return nil, nil
+}
+func (s *spyRunLogStore) RecordEvent(_ context.Context, ev runlog.RunEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, ev)
+	return nil
+}
+func (s *spyRunLogStore) ListEvents(_ context.Context, _ string) ([]runlog.RunEvent, error) {
+	return nil, nil
+}
+func (s *spyRunLogStore) GetRun(_ context.Context, _ string) (*runlog.RunRecord, error) {
+	return nil, nil
+}
+func (s *spyRunLogStore) ListRuns(_ context.Context, _ int64, _ int) ([]runlog.RunRecord, error) {
+	return nil, nil
+}
+func (s *spyRunLogStore) Metrics(_ context.Context, _ runlog.MetricsFilter) (*runlog.MetricsResult, error) {
+	return nil, nil
+}
+func (s *spyRunLogStore) GetLastOutboundMessage(_ context.Context, _ string) (int64, int, int64, error) {
+	return 0, 0, 0, nil
+}
+func (s *spyRunLogStore) Close() error { return nil }
+
+func (s *spyRunLogStore) recordedEvents() []runlog.RunEvent {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]runlog.RunEvent, len(s.events))
+	copy(out, s.events)
+	return out
+}
+
+func (s *spyRunLogStore) recordedUpdates() []runlog.RunUpdate {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]runlog.RunUpdate, len(s.updates))
+	copy(out, s.updates)
+	return out
+}
+
+// TestRecordPipelineEvent_DropsEventWithoutRunID ensures events with empty RunID
+// are silently dropped when no runLogState exists (e.g. after completeRunLog without
+// capturing the runID first). This is the failure mode that the fixes in
+// handleContextOutcome and executeAsync prevent.
+func TestRecordPipelineEvent_DropsEventWithoutRunID(t *testing.T) {
+	spy := &spyRunLogStore{}
+	s := &Service{
+		runLog:       spy,
+		runLogStates: make(map[string]*runLogState),
+		runLogMu:     sync.Mutex{},
+	}
+
+	// No state exists — caller passes empty runID.
+	s.recordPipelineEvent(42, 7, observability.NewEvent("",
+		observability.PhaseRunCanceled, "cancelado pelo usuário"))
+
+	evs := spy.recordedEvents()
+	if len(evs) != 0 {
+		t.Fatalf("expected 0 recorded events (should be dropped), got %d", len(evs))
+	}
+}
+
+// TestHandleContextOutcome_CancelledCapturesRunID verifies that handleContextOutcome
+// captures the runID before calling completeRunLog, so the terminal run_canceled
+// event is recorded even after state deletion.
+func TestHandleContextOutcome_CancelledCapturesRunID(t *testing.T) {
+	spy := &spyRunLogStore{}
+	runID := uuid.NewString()
+	s := &Service{
+		runLog:       spy,
+		runLogStates: map[string]*runLogState{
+			runLogKey(1, 0): {runID: runID},
+		},
+		runLogMu: sync.Mutex{},
+	}
+
+	// Create a cancelled parent context to trigger the cancel path.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	handled := s.handleContextOutcome(ctx, context.Background(), 1, 0, 100)
+	if !handled {
+		t.Fatal("expected handleContextOutcome to return true for cancelled parentCtx")
+	}
+
+	// Verify the run_canceled event was recorded with the correct runID.
+	evs := spy.recordedEvents()
+	var found bool
+	for _, ev := range evs {
+		if ev.Phase == string(observability.PhaseRunCanceled) {
+			found = true
+			if ev.RunID != runID {
+				t.Errorf("run_canceled event has runID=%q, want %q", ev.RunID, runID)
+			}
+		}
+	}
+	if !found {
+		t.Error("no run_canceled event recorded")
+	}
+
+	// Verify completeRunLog cleaned up the state.
+	s.runLogMu.Lock()
+	_, exists := s.runLogStates[runLogKey(1, 0)]
+	s.runLogMu.Unlock()
+	if exists {
+		t.Error("runLogState was not cleaned up by completeRunLog")
 	}
 }

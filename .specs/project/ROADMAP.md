@@ -19,12 +19,13 @@ Estas features já foram implementadas ou têm validação registrada. Elas são
 
 ## Current Evolution Track
 
-Aurelia continua sendo um **personal agent persistente via Telegram**, com PI como motor de execução e Go como camada de produto: Telegram UX, identidade/persona, memória, scheduling, project binding, governância e orquestração.
+Aurelia continua sendo um **personal agent persistente via Telegram**, com PI como motor de execução e Go como camada de produto: Telegram UX, identidade/persona, memória operacional, scheduling, project binding, governância e orquestração.
 
 O conceito central está fechado assim:
 
-- **PI SDK owns**: modelo, sessão/compaction, execução de tools, context files do projeto e capacidades agentic nativas.
-- **Aurelia owns**: experiência Telegram, identidade, memória persistente, cron, multi-projeto, user/project scoping, auditoria, roadmap e workflows.
+- **PI SDK owns**: modelo, sessão/compaction, execução de tools, context files do projeto, MCP tools e capacidades agentic nativas.
+- **PI + ai-memory MCP owns**: memória Wiki transversal usada diretamente por PI/PI Code/opencode.
+- **Aurelia owns**: experiência Telegram, identidade, memória operacional/produto, cron, multi-projeto, user/project scoping, auditoria, roadmap e workflows.
 - **Regra de arquitetura**: quando algo já existe no PI, Aurelia só adapta/orquestra; não reimplementa.
 
 Formulação-alvo:
@@ -33,7 +34,7 @@ Formulação-alvo:
 Telegram / CLI / Cron / Interfaces
         ↓
 Aurelia Product Layer
-identidade · persona · UX · workflows · memória · Wiki · políticas · continuidade
+identidade · persona · UX · workflows · memória operacional · políticas · continuidade
         ↓
 PI SDK
 reasoning · tools · sessions · agent runtime · providers/models
@@ -41,7 +42,7 @@ reasoning · tools · sessions · agent runtime · providers/models
 Ferramentas / FS / Web / APIs / Projetos
 ```
 
-O objetivo é evitar dois extremos: o Aurélia não deve virar apenas um wrapper fino do PI, nem deve reconstruir o runtime agentic que o PI já entrega. A Wiki é parte central dessa estratégia: ela transforma memória em conhecimento operacional transversal, local-first e auditável.
+O objetivo é evitar dois extremos: o Aurélia não deve virar apenas um wrapper fino do PI, nem deve reconstruir o runtime agentic que o PI já entrega. A memória Wiki transversal agora fica no PI via `ai-memory` MCP; Aurelia mantém apenas o contexto operacional necessário para UX, continuidade e workflows Telegram.
 
 A próxima onda foca em tornar o sistema seguro e estável para trabalho autônomo em projetos reais:
 
@@ -50,7 +51,7 @@ A próxima onda foca em tornar o sistema seguro e estável para trabalho autôno
 3. usar a base de User Isolation já auditada para fechar o ciclo de execução orquestrada;
 4. planejamento permanece conversacional, sem Plan Mode explícito (removido em 2026-05-24);
 5. escopar memória por utilizador e contexto conversacional — **topic/thread como eixo primário, `/cwd` como overlay declarativo opt-in** (reformulado em 2026-05-30; ver Sprint 5);
-6. promover a memória para uma Wiki transversal via MCP;
+6. realinhar a boundary de memória, descartando o Wiki MCP interno em favor de PI + `ai-memory` MCP;
 7. só então ativar nudge profundo, agent comms e auto-skills.
 
 **Ordem é importante:** cada spec depende da anterior, técnica e conceitualmente. O refactoring do PI SDK pode ser feito em paralelo com User Isolation, mas deve ser merged antes para reduzir a superfície de código.
@@ -229,28 +230,27 @@ Prompt assembly por TurnContext:
 - prompt assembly com camadas corretas por `TurnContext`;
 - dream/nudge com targets escopados por camada.
 
-**Por que antes da Wiki:** a Wiki MCP vai expor as mesmas camadas; precisa estar correta e sem heurísticas primeiro.
+**Por que antes do nudge:** estas camadas continuam sendo o contrato operacional de contexto do Aurelia; precisam estar corretas antes de qualquer aprendizado em background.
 
 ---
 
-## 6. Wiki Memory Gateway
+## 6. Memory Boundary Realignment
 
 **Spec:** `.specs/features/wiki-memory/`  
-**Status:** 🔴 Spec arquitetural apenas  
+**Status:** 🗑️ Wiki Gateway interno descartado; boundary documentada  
 **Depende de:** User Isolation + Context-Scoped Memory
 
-**Problem:** a memória atual é útil dentro do Aurelia, mas não é transversal para outros pontos de entrada como PI/PI Code/opencode.
+**Problem:** o plano anterior criava um Wiki MCP interno no Aurelia. Isso duplicaria o `ai-memory` MCP já usado diretamente pelo PI e violaria a regra de não competir com capacidades do PI/MCP.
 
 **Scope:**
 
-- Wiki como LLM Wiki local-first do Aurelia;
-- MCP gateway para query/save/ingest/lint/status;
-- markdown como fonte auditável, SQLite/FTS como índice opcional;
-- escopos alinhados com Context-Scoped Memory: `user_global`, `topic`, `cwd_overlay`, `project_team`, `procedural`;
-- query-before-inject para reduzir prompt bloat;
-- receipts/audit para escritas externas.
+- descartar servidor MCP Wiki interno no Aurelia;
+- registrar `ai-memory` MCP como camada Wiki transversal no PI;
+- separar memória operacional/produto do Aurelia de memória Wiki transversal;
+- revisar `project-memory`, `learning-nudge`, `PROJECT.md`, `README.md` e responsibility model;
+- não especificar chamadas PI/`ai-memory` não verificadas.
 
-**Princípio:** acesso transversal, memória escopada.
+**Princípio:** PI + `ai-memory` MCP owns Wiki memory; Aurelia owns product context and guard-rails.
 
 ---
 
@@ -258,16 +258,16 @@ Prompt assembly por TurnContext:
 
 **Spec:** `.specs/features/learning-nudge/`  
 **Status:** 🔴 Draft revisado  
-**Depende de:** User Isolation + Context-Scoped Memory + Security Guard-Rails + Wiki Memory Gateway
+**Depende de:** User Isolation + Context-Scoped Memory + Security Guard-Rails + Memory Boundary Realignment
 
-**Problem:** extração por-turn/snippet perde contexto; nudge profundo precisa ser escopado para não vazar entre usuários/contextos e deve escrever através da Wiki.
+**Problem:** extração por-turn/snippet perde contexto; nudge profundo precisa ser escopado para não vazar entre usuários/contextos e não deve depender de uma Wiki interna do Aurelia.
 
 **Scope:**
 
 - transcript recorder por `SessionKey`;
 - redaction antes de chamar PI;
 - `CapabilityProfile=edit_project`, sem `Bash`;
-- escrita nas camadas de memória corretas via Wiki (topic, cwd_overlay ou user_global);
+- sugestões/updates escopados para memória operacional; escrita em Wiki transversal só via PI/`ai-memory` quando houver caminho explicitamente configurado e verificado;
 - sugestões de Auto-Skills, sem criar skills automaticamente.
 
 ---
@@ -319,7 +319,7 @@ Prompt assembly por TurnContext:
 
 **Spec:** `docs/aurelia-tui-roadmap.md`  
 **Status:** 🔴 Proposta  
-**Depende de:** Context-Scoped Memory (Sprint E) + Wiki Memory Gateway (Sprint F)
+**Depende de:** Context-Scoped Memory (Sprint E) + Memory Boundary Realignment (Sprint F)
 
 **Problem:** o Telegram é hoje o único ponto de entrada conversacional da Aurelia. Isso cria fricção no contexto de terminal, sessões não retomáveis cross-surface e dependência de conectividade externa.
 
@@ -359,7 +359,7 @@ D0. Memory Contract & Spec Hygiene ✅
 5. Context-Scoped Memory  ← próximo
       │
       ▼
-6. Wiki Memory Gateway
+6. Memory Boundary Realignment
       │
       ▼
 7. Learning Nudge
@@ -423,7 +423,7 @@ Sprint C: Close Orchestration Cycle (T0–T12 do tasks.md) ✅ v0.16.0
 Sprint D0: Memory Contract & Spec Hygiene ✅ v0.16.1
   ├─ AGENT_RESPONSIBILITY_MODEL.md — canonical PI↔Aurelia boundary
   ├─ project-memory spec: topic path `~/.aurelia/topics/`, team path `~/.aurelia/projects/<slug>/team/`
-  ├─ wiki-memory spec: layers aligned with project-memory
+  ├─ wiki-memory spec: layers aligned with project-memory (superseded later by PI + ai-memory MCP)
   ├─ ARCHITECTURE.md: remove stale orchestration statements (cycle wired since v0.16.0)
   ├─ STACK.md: Go 1.26.3, Node >=20.6.0
   ├─ memoryux/ + pipeline/ topic dirs canonicalized to `~/.aurelia/topics/`
@@ -443,15 +443,16 @@ Sprint E: Context-Scoped Memory  ← próximo
   ├─ prompt assembly: user_global + topic + cwd_overlay + team
   └─ dream/nudge com targets escopados por camada
 
-Sprint F: Wiki Memory Gateway
-  ├─ MCP server interno
-  ├─ wiki_query/save/status com escopos: user_global, topic, cwd_overlay, project_team
-  └─ query-before-inject
+Sprint F: Memory Boundary Realignment
+  ├─ descartar MCP Wiki interno
+  ├─ registrar PI + ai-memory MCP como Wiki transversal
+  ├─ separar memória operacional do Aurelia de Wiki memory do PI
+  └─ ajustar specs dependentes
 
 Sprint G: Learning Nudge
   ├─ transcript recorder por SessionKey
   ├─ redaction + profile edit_project
-  └─ escrita via Wiki scopes (topic, cwd_overlay ou user_global)
+  └─ sugestões/updates escopados; Wiki transversal só via PI + ai-memory quando configurado
 
 Sprint H: Agent Comms
   ├─ Agent Bus local por run

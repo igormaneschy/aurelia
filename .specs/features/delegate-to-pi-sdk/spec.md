@@ -2,7 +2,7 @@
 
 **Status:** 🟡 Parcialmente implementado (Tasks 0–5 + 7–8 concluídas; Task 6 pendente para sprint futuro)  
 **Companion specs:** `.specs/features/security-guard-rails/`, `.specs/features/project-binding/`  
-**Related:** `.specs/features/wiki-memory/`, `.specs/features/project-memory/`, `ROADMAP.md`  
+**Related:** `.specs/features/project-memory/`, `.specs/features/wiki-memory/` (superseded), `ROADMAP.md`  
 **Prerequisite:** `security-guard-rails` (v0.8.0) — must be stable before removing Go policy engine  
 
 ---
@@ -29,7 +29,7 @@ A análise completa (ver research session) identificou **7 áreas** de duplicaç
 - Complexidade desnecessária no prompt builder (861 linhas)
 - Risco de divergência entre implementações
 
-**O que NÃO muda:** Persona, Memory, Wiki, Cron, Telegram, Orchestrator — esses são diferenciais do Aurélia sem equivalente no PI SDK.
+**O que NÃO muda:** Persona, memória operacional, Cron, Telegram e Orchestrator continuam diferenciais do Aurélia. Wiki memory transversal é delegada ao PI via `ai-memory` MCP quando disponível.
 
 ---
 
@@ -78,8 +78,8 @@ A análise completa (ver research session) identificou **7 áreas** de duplicaç
 ## Out of Scope
 
 - **Persona system** (`internal/persona/`) — sem equivalente no PI SDK; é diferencial do Aurélia
-- **Memory layers** (`internal/dream/`, `internal/pipeline/memory_*`, nudge) — PI não tem memória cross-session
-- **Wiki Memory Gateway** (Sprint F) — diferencial estratégico, não existe no PI
+- **Operational memory layers** (`internal/dream/`, `internal/pipeline/memory_*`, nudge) — usadas para UX/continuidade/prompt context do Aurelia
+- **Wiki memory transversal** — fora do Aurelia; usar PI + `ai-memory` MCP, não implementar gateway próprio
 - **Cron scheduler** (`internal/cron/`) — PI não tem scheduling
 - **Telegram interface** (`internal/telegram/`) — PI é agnóstico de interface
 - **Orchestrator** (`internal/orchestrator/`) — específico do fluxo Aurélia
