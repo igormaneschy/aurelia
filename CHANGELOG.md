@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.21.1 - 2026-06-02
+
+### Changed
+- **Tool monitoring improvements** — `loopDetector.ResetForNewTurn()` resets
+  warned flag and call history on `turn_start`, preventing stuck warnings and
+  cross-turn false positives in multi-turn PI sessions.
+- **Tool steer messages** now include elapsed time since run start
+  (e.g. "Você já usou ferramentas 20 vezes (Bash) em 42s"), aiding
+  diagnosis of tool-call explosions.
+- **detectToolSpiral** uses case-insensitive prefix matching instead of exact
+  equality, catching "Read", "ReadFile", "reading" and similar variants.
+
+### Added
+- **nudgeBuffer.AddToolEvent** — tool call summary from each successful turn
+  is now attached to the nudge transcript, enriching nudge review context.
+
 ## v0.21.0 - 2026-06-02
 
 ### Added
