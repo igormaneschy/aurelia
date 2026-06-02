@@ -1232,3 +1232,237 @@ func TestLoadMemoryDir_SkipsOversizedMEMORYMd(t *testing.T) {
 		t.Fatal("oversized MEMORY.md content should be skipped (M-01)")
 	}
 }
+
+// TestLoadMemoryContents_NoCwdExcludesProjectLayers verifies that without /cwd,
+// loadMemoryContents does NOT inject cwd_overlay or project_team layers (E9.2).
+func TestLoadMemoryContents_NoCwdExcludesProjectLayers(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AURELIA_HOME", dir)
+	resolver, err := runtime.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Set up user global memory
+	userDir := resolver.UserMemoryDir(42)
+	if err := os.MkdirAll(userDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userDir, "prefs.md"), []byte("user prefers dark mode"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set up topic memory
+	topicDir := resolver.TopicMemoryDir(42, 99)
+	if err := os.MkdirAll(topicDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(topicDir, "discussion.md"), []byte("topic discussion notes"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Also set up project team memory to verify it's NOT included
+	teamDir := resolver.ProjectTeamMemoryDir("/repo/test")
+	if err := os.MkdirAll(teamDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(teamDir, "architecture.md"), []byte("project architecture"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	bc := &Service{resolver: resolver, memoryCache: newMemoryCache()}
+	// cwd="" means no project binding
+	got := bc.loadMemoryContents(42, 99, 42, nil, "")
+
+	// Should include user global
+	if !strings.Contains(got, "dark mode") {
+		t.Fatal("expected user global memory (dark mode) in output")
+	}
+	// Should include topic memory
+	if !strings.Contains(got, "discussion notes") {
+		t.Fatal("expected topic memory (discussion notes) in output")
+	}
+	// Should NOT include project team
+	if strings.Contains(got, "project architecture") {
+		t.Fatal("project team memory leaked into prompt without /cwd")
+	}
+	// Should NOT contain cwd_overlay header
+	if strings.Contains(got, "cwd overlay") || strings.Contains(got, "CWD Overlay") {
+		t.Fatal("cwd_overlay layer present in prompt without /cwd")
+	}
+	// Should NOT contain project team header
+	if strings.Contains(got, "Project:") && strings.Contains(got, "team") {
+		t.Fatal("project team layer present in prompt without /cwd")
+	}
+}
+
+// TestLoadMemoryContents_TwoUsersSameTopic verifies that two users in the same
+// topic share topic memory but have independent user global memory (E9.3).
+func TestLoadMemoryContents_TwoUsersSameTopic(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AURELIA_HOME", dir)
+	resolver, err := runtime.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// User A global memory
+	userADir := resolver.UserMemoryDir(100)
+	if err := os.MkdirAll(userADir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userADir, "prefs.md"), []byte("Alice: prefers vim"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// User B global memory
+	userBDir := resolver.UserMemoryDir(200)
+	if err := os.MkdirAll(userBDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userBDir, "prefs.md"), []byte("Bob: prefers emacs"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Topic memory (shared between users)
+	topicDir := resolver.TopicMemoryDir(42, 99)
+	if err := os.MkdirAll(topicDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(topicDir, "decision.md"), []byte("topic decision: use Go"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	bc := &Service{resolver: resolver, memoryCache: newMemoryCache()}
+
+	// User A (100) in topic (42, 99) — no /cwd
+	gotA := bc.loadMemoryContents(42, 99, 100, nil, "")
+
+	// User B (200) in same topic (42, 99) — no /cwd
+	// Reset cache to ensure fresh read for user B
+	bc.memoryCache = newMemoryCache()
+	gotB := bc.loadMemoryContents(42, 99, 200, nil, "")
+
+	// Both should see shared topic memory
+	if !strings.Contains(gotA, "topic decision: use Go") {
+		t.Fatal("user A should see topic memory (use Go)")
+	}
+	if !strings.Contains(gotB, "topic decision: use Go") {
+		t.Fatal("user B should see topic memory (use Go)")
+	}
+
+	// User A should see own global, not B's
+	if !strings.Contains(gotA, "Alice: prefers vim") {
+		t.Fatal("user A should see own global memory (vim)")
+	}
+	if strings.Contains(gotA, "Bob: prefers emacs") {
+		t.Fatal("user B's global memory leaked into user A's prompt")
+	}
+
+	// User B should see own global, not A's
+	if !strings.Contains(gotB, "Bob: prefers emacs") {
+		t.Fatal("user B should see own global memory (emacs)")
+	}
+	if strings.Contains(gotB, "Alice: prefers vim") {
+		t.Fatal("user A's global memory leaked into user B's prompt")
+	}
+}
+
+// TestLoadMemoryContents_TwoUsersSameTopicWithCwd verifies that two users in the
+// same topic with /cwd share topic and project team memory, but have independent
+// user global and cwd_overlay (E9.3 with /cwd).
+func TestLoadMemoryContents_TwoUsersSameTopicWithCwd(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AURELIA_HOME", dir)
+	resolver, err := runtime.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cwd := "/repo/shared-project"
+
+	// User A: global + cwd_overlay
+	userADir := resolver.UserMemoryDir(100)
+	if err := os.MkdirAll(userADir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userADir, "prefs.md"), []byte("Alice: typescript expert"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	cwdOverlayA := resolver.TopicCwdOverlayDir(42, 99)
+	if err := os.MkdirAll(cwdOverlayA, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cwdOverlayA, "work.md"), []byte("Alice: implemented auth module"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// User B: global + same cwd_overlay dir (shared by topic)
+	userBDir := resolver.UserMemoryDir(200)
+	if err := os.MkdirAll(userBDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(userBDir, "prefs.md"), []byte("Bob: go expert"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Team memory (shared)
+	teamDir := resolver.ProjectTeamMemoryDir(cwd)
+	if err := os.MkdirAll(teamDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(teamDir, "conventions.md"), []byte("use tabs for indentation"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Topic memory (shared)
+	topicDir := resolver.TopicMemoryDir(42, 99)
+	if err := os.MkdirAll(topicDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(topicDir, "decision.md"), []byte("use postgres"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	bc := &Service{resolver: resolver, memoryCache: newMemoryCache()}
+
+	gotA := bc.loadMemoryContents(42, 99, 100, nil, cwd)
+	bc.memoryCache = newMemoryCache()
+	gotB := bc.loadMemoryContents(42, 99, 200, nil, cwd)
+
+	// Both see shared layers
+	for _, got := range []string{gotA, gotB} {
+		if !strings.Contains(got, "use postgres") {
+			t.Fatal("both users should see shared topic memory")
+		}
+		if !strings.Contains(got, "use tabs for indentation") {
+			t.Fatal("both users should see shared team memory")
+		}
+	}
+
+	// cwd_overlay is shared by topic — both see Alice's auth note
+	if !strings.Contains(gotA, "Alice: implemented auth module") {
+		t.Fatal("user A should see cwd_overlay (auth module)")
+	}
+	if !strings.Contains(gotB, "Alice: implemented auth module") {
+		t.Fatal("user B should see cwd_overlay (auth module) — it's topic-scoped, not per-user")
+	}
+
+	// User A should NOT see Bob's user global
+	if strings.Contains(gotA, "Bob: go expert") {
+		t.Fatal("user B's global memory leaked into user A's prompt")
+	}
+	// User B should NOT see Alice's user global
+	if strings.Contains(gotB, "Alice: typescript expert") {
+		t.Fatal("user A's global memory leaked into user B's prompt")
+	}
+
+	// Each should see own user global
+	if !strings.Contains(gotA, "Alice: typescript expert") {
+		t.Fatal("user A should see own global memory")
+	}
+	if !strings.Contains(gotB, "Bob: go expert") {
+		t.Fatal("user B should see own global memory")
+	}
+}
