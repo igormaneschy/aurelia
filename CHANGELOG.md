@@ -75,9 +75,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   thoroughly tested in `prompt_builder_test.go`.
 - **Cron `%%s` in LLM prompt example** — was producing the literal
   `%s` in the rendered prompt, which could confuse the model into
-  treating it as a format placeholder. Now substituted with the
-  actual `offsetText` so the example is concrete
+  treating it as a format placeholder. Now substituted with the actual
+  `offsetText` so the example is concrete
   (`2026-03-27T15:00:00-03:00`).
+- **Code review remediation (PR #9)**:
+  - `SendNudge` now wraps both HTML and plain-text retry errors
+    instead of silently discarding the retry failure context.
+  - `isMissingReplyTargetError` documented with migration path to
+    `telebot.ErrNotFoundToReply` sentinel.
+  - Dead legacy `processRun` (44 lines, `nolint:unused`) removed;
+    active path is `processRunWithCancel`. Goroutine panic log
+    messages corrected to reference the actual function name.
+  - `GetLastOutboundMessage` error path now tested: when the run
+    log returns an error, the nudge receipt is sent without reply
+    targeting (no crash, no wrong reply).
+  - Double-space formatting artifacts fixed in 3 test files.
 
 ### Migration Safety
 - **Profile JSON** — new fields (`active_mode`, `timezone`,
