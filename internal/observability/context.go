@@ -55,6 +55,7 @@ const (
 	PhaseRetryFailed        = "retry_failed"
 	PhaseFallbackStarted    = "fallback_started"
 	PhaseFallbackResult     = "fallback_result"
+	PhaseLoopDetected       = "loop_detected"
 	PhaseSecurityBlock      = "security_block"
 
 	// Cron phases

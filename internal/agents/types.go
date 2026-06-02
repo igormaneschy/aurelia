@@ -12,6 +12,7 @@ type Agent struct {
 	AllowedTools        []string       `yaml:"allowed_tools,omitempty"`
 	DisallowedTools     []string       `yaml:"disallowed_tools,omitempty"`
 	MaxTurns            int            `yaml:"max_turns,omitempty"`
+	ToolBudget          int            `yaml:"tool_budget,omitempty"` // overrides global tool call thresholds
 	Prompt              string         `yaml:"-"` // body after frontmatter
 }
 

@@ -14,22 +14,33 @@ import (
 // This prevents silent tool-call explosions that lead to 30-min timeouts.
 // Warnings are sent both to the chat (user-facing) and via steer (model-facing).
 type toolCallTracker struct {
-	mu        sync.Mutex
-	count     int
-	chatID    int64
-	threadID  int
-	output    Output
-	steerFunc func(string) // sends a steer command to the active bridge session
-	startedAt time.Time
+	mu                sync.Mutex
+	count             int
+	chatID            int64
+	threadID          int
+	output            Output
+	steerFunc         func(string)
+	startedAt         time.Time
+	warningThreshold  int
+	criticalThreshold int
 }
 
-func newToolCallTracker(chatID int64, threadID int, output Output, steerFunc func(string)) *toolCallTracker {
+func newToolCallTracker(chatID int64, threadID int, output Output, steerFunc func(string), warningThreshold int, criticalThreshold int) *toolCallTracker {
+	// Use defaults when 0 is passed (e.g. no agent override).
+	if warningThreshold <= 0 {
+		warningThreshold = toolCallWarningThreshold
+	}
+	if criticalThreshold <= 0 {
+		criticalThreshold = toolCallCriticalThreshold
+	}
 	return &toolCallTracker{
-		chatID:    chatID,
-		threadID:  threadID,
-		output:    output,
-		steerFunc: steerFunc,
-		startedAt: time.Now(),
+		chatID:            chatID,
+		threadID:          threadID,
+		output:            output,
+		steerFunc:         steerFunc,
+		startedAt:         time.Now(),
+		warningThreshold:  warningThreshold,
+		criticalThreshold: criticalThreshold,
 	}
 }
 
@@ -54,17 +65,17 @@ func (t *toolCallTracker) increment(toolName string) {
 		elapsedStr = "<1s"
 	}
 	switch count {
-	case toolCallWarningThreshold:
+	case t.warningThreshold:
 		t.sendWarning("🔍 Estou analisando bastante contexto. Vou consolidar os achados antes de continuar.")
 		t.steer("Você já usou ferramentas %d vezes (%s) em %s. "+
 			"Consolide o que já descobriu e apresente um resumo parcial agora.", count, toolName, elapsedStr)
-	case toolCallCriticalThreshold:
+	case t.criticalThreshold:
 		t.sendWarning("⚠️ A análise está ficando extensa. Vou consolidar o progresso e apresentar um resumo parcial.")
 		t.steer("Você já usou ferramentas %d vezes (%s) em %s. "+
 			"Conclua imediatamente o que está fazendo e apresente um resumo parcial. "+
 			"O limite de tempo está próximo.", count, toolName, elapsedStr)
 	default:
-		if count > toolCallCriticalThreshold && count%toolCallCriticalThreshold == 0 {
+		if count > t.criticalThreshold && count%t.criticalThreshold == 0 {
 			t.sendWarning("⏳ Continuo analisando. Vou concluir em breve com um resumo dos resultados.")
 			t.steer("Você já usou ferramentas %d vezes em %s. "+
 				"Conclua e apresente um resumo parcial imediatamente.", count, elapsedStr)
@@ -154,10 +165,11 @@ func newLoopDetector(chatID int64, threadID int, output Output, steerFunc func(s
 	}
 }
 
-// record stores one tool call and returns true if a loop pattern was detected.
-func (d *loopDetector) record(toolName string, input any) bool {
+// record stores one tool call and returns (isLoop bool, patternType string).
+// patternType is one of: "consecutive_repeat", "ping_pong", "tool_spiral", or "" if no loop.
+func (d *loopDetector) record(toolName string, input any) (bool, string) {
 	if d == nil {
-		return false
+		return false, ""
 	}
 	fp := fingerprintInput(input)
 	snap := toolCallSnapshot{name: toolName, inputFp: fp}
@@ -166,7 +178,7 @@ func (d *loopDetector) record(toolName string, input any) bool {
 	d.ring[d.next] = snap
 	d.next = (d.next + 1) % loopDetectorWindow
 	d.count++
-	isLoop := d.detectLocked()
+	isLoop, pattern := d.detectLocked()
 	d.mu.Unlock()
 
 	if isLoop && !d.warned {
@@ -174,20 +186,20 @@ func (d *loopDetector) record(toolName string, input any) bool {
 		msg := "🔁 Vou consolidar o que já encontrei para evitar repetição."
 		d.sendWarning(msg)
 		d.steerLoop(msg, toolName)
-		return true
+		return true, pattern
 	}
-	return false
+	return false, ""
 }
 
 // detectLocked checks for loop patterns in the ring buffer.
-// Must be called with d.mu held.
-func (d *loopDetector) detectLocked() bool {
+// Must be called with d.mu held. Returns (isLoop, patternType).
+func (d *loopDetector) detectLocked() (bool, string) {
 	filled := d.count
 	if filled > loopDetectorWindow {
 		filled = loopDetectorWindow
 	}
 	if filled < 4 {
-		return false
+		return false, ""
 	}
 
 	// Build ordered slice from ring buffer for analysis
@@ -201,20 +213,20 @@ func (d *loopDetector) detectLocked() bool {
 
 	// Pattern 1: same tool+input repeated consecutively
 	if detectConsecutiveRepeat(calls, loopRepeatThreshold) {
-		return true
+		return true, "consecutive_repeat"
 	}
 
 	// Pattern 2: alternating A-B-A-B with same inputs
 	if detectPingPong(calls, loopPingPongLength) {
-		return true
+		return true, "ping_pong"
 	}
 
 	// Pattern 3: only "read" calls in the window (read spiral)
 	if detectToolSpiral(calls, "read", loopOnlyReadLength) {
-		return true
+		return true, "tool_spiral"
 	}
 
-	return false
+	return false, ""
 }
 
 // detectConsecutiveRepeat returns true if the same tool+input appears
@@ -312,10 +324,46 @@ func (d *loopDetector) steerLoop(msg string, toolName string) {
 	if d == nil || d.steerFunc == nil {
 		return
 	}
+	// Extract last 3 distinct tools from ring buffer for context.
+	recent := d.recentDistinctTools(3)
+	var ctx string
+	if len(recent) > 1 {
+		ctx = fmt.Sprintf(" (últimas ferramentas: %s)", strings.Join(recent, " → "))
+	}
 	steerMsg := fmt.Sprintf(
-		"Você está repetindo a chamada de ferramenta '%s' em ciclo. "+
+		"Você está repetindo a chamada de ferramenta '%s' em ciclo%s. "+
 			"Pare imediatamente. Apresente um resumo do que já descobriu até agora. "+
 			"Se precisar de mais informações, peça orientação ao usuário.",
-		toolName)
+		toolName, ctx)
 	d.steerFunc(steerMsg)
+}
+
+// recentDistinctTools returns up to n distinct tool names from the ring buffer
+// in chronological order (oldest first, deduplicated by name). Must be called
+// with d.mu held.
+func (d *loopDetector) recentDistinctTools(n int) []string {
+	filled := d.count
+	if filled > loopDetectorWindow {
+		filled = loopDetectorWindow
+	}
+	if filled == 0 {
+		return nil
+	}
+	seen := make(map[string]bool, n)
+	var result []string
+	// Iterate from oldest to newest in ring buffer.
+	for i := filled - 1; i >= 0 && len(result) < n; i-- {
+		pos := (d.next - filled + i + loopDetectorWindow) % loopDetectorWindow
+		name := d.ring[pos].name
+		if seen[name] {
+			continue
+		}
+		seen[name] = true
+		result = append(result, name)
+	}
+	// Since we iterated newest-to-oldest, reverse to get oldest-to-newest.
+	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+		result[i], result[j] = result[j], result[i]
+	}
+	return result
 }

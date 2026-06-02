@@ -102,6 +102,10 @@ type Service struct {
 	summaryInterval int
 	usersStore      *users.Store
 	userResolver    *users.Resolver
+	// active tool monitoring state — set/cleared per-run for /status.
+	toolStateMu       sync.Mutex
+	activeToolTracker *toolCallTracker
+	activeLoopDetect  *loopDetector
 }
 
 const defaultSummaryInterval = 5
@@ -374,6 +378,49 @@ func firstUserID(userID []int64) int64 {
 		return 0
 	}
 	return userID[0]
+}
+
+// ActiveToolSnapshot holds a point-in-time view of the active run's tool state
+// for diagnostic display (e.g. /status). All fields are zero when no run is active.
+type ActiveToolSnapshot struct {
+	ToolCount   int
+	LoopWarned  bool
+	RecentTools []string // up to 5 most recent distinct tool names, oldest first
+}
+
+// SetActiveToolState records the active run's tool monitoring state.
+// Called at the start of executeAsync; cleared on return.
+func (s *Service) SetActiveToolState(tracker *toolCallTracker, detector *loopDetector) {
+	s.toolStateMu.Lock()
+	defer s.toolStateMu.Unlock()
+	s.activeToolTracker = tracker
+	s.activeLoopDetect = detector
+}
+
+// ClearActiveToolState removes the active run's tool monitoring state.
+func (s *Service) ClearActiveToolState() {
+	s.toolStateMu.Lock()
+	defer s.toolStateMu.Unlock()
+	s.activeToolTracker = nil
+	s.activeLoopDetect = nil
+}
+
+// GetActiveToolSnapshot returns a safe snapshot of the active run's tool state.
+// Returns zero values when no run is active.
+func (s *Service) GetActiveToolSnapshot() ActiveToolSnapshot {
+	s.toolStateMu.Lock()
+	defer s.toolStateMu.Unlock()
+	var snap ActiveToolSnapshot
+	if s.activeToolTracker != nil {
+		snap.ToolCount = s.activeToolTracker.countLocked()
+	}
+	if s.activeLoopDetect != nil {
+		s.activeLoopDetect.mu.Lock()
+		snap.LoopWarned = s.activeLoopDetect.warned
+		s.activeLoopDetect.mu.Unlock()
+		snap.RecentTools = s.activeLoopDetect.recentDistinctTools(5)
+	}
+	return snap
 }
 
 const bridgeCommandTimeout = 10 * time.Second

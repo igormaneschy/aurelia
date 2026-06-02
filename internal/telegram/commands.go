@@ -681,6 +681,22 @@ func (bc *BotController) cmdStatus(chatID int64, threadID int, userID int64) (st
 		}
 	}
 
+	// Active run tool calls (live data, not persisted)
+	if bc.pipeline != nil {
+		snap := bc.pipeline.GetActiveToolSnapshot()
+		if snap.ToolCount > 0 {
+			var parts []string
+			parts = append(parts, fmt.Sprintf("🔧 Tool calls (run atual): **%d**", snap.ToolCount))
+			if snap.LoopWarned {
+				parts = append(parts, "  ⚠️ Loop detectado neste turno")
+			}
+			if len(snap.RecentTools) > 0 {
+				parts = append(parts, fmt.Sprintf("  📋 Últimas tools: %s", strings.Join(snap.RecentTools, " → ")))
+			}
+			lines = append(lines, strings.Join(parts, "\n"))
+		}
+	}
+
 	// Run log — latest persisted run status and checkpoint
 	if bc.runLog != nil {
 		if runLines := statusRunLogSummary(bc.runLog, chatID, threadID); runLines != nil {
