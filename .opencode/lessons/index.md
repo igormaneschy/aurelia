@@ -74,3 +74,7 @@
 - [anti-pattern] summary-seeded-session-rotation
 - [process] incident-regression-from-daemon-logs
 - [pattern] cron-persist-cwd-not-prompt
+
+## Change session-profile-operability-remediation (2026-06-02)
+- [anti-pattern] default-cwd-full-stack
+- [pattern] threaded-background-receipts

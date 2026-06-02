@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"gopkg.in/telebot.v3"
-
-	"github.com/igormaneschy/aurelia/internal/users"
 )
 
 func (bc *BotController) setupBootstrapRoutes() {
@@ -62,10 +60,10 @@ func bootstrapIdentityExists(dir string) bool {
 // --- Timezone bootstrap step ---
 
 var bootstrapTimezonePresets = map[string]string{
-	"tz_lisbon":     "Europe/Lisbon",
-	"tz_sao_paulo":  "America/Sao_Paulo",
-	"tz_new_york":   "America/New_York",
-	"tz_utc":        "UTC",
+	"tz_lisbon":    "Europe/Lisbon",
+	"tz_sao_paulo": "America/Sao_Paulo",
+	"tz_new_york":  "America/New_York",
+	"tz_utc":       "UTC",
 }
 
 func bootstrapTimezoneMessage() string {
@@ -144,7 +142,7 @@ func (bc *BotController) saveBootstrapTimezone(c telebot.Context, senderID int64
 		return SendContextText(c, bootstrapFailureMessage())
 	}
 	if profile == nil {
-		profile = &users.Profile{UserID: userID}
+		return SendContextText(c, "Perfil não encontrado. Complete o onboarding primeiro com /start.")
 	}
 	profile.Timezone = tz
 	if err := bc.userStore.Save(profile); err != nil {

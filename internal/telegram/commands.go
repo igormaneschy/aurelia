@@ -283,7 +283,7 @@ func (bc *BotController) handleCommand(c telebot.Context, cmd *MatchedCommand) e
 
 	switch cmd.Type {
 	case CmdSessionReset:
-		reply, err = bc.cmdSessionReset(chatID, threadID, userID)
+		reply, err = bc.cmdSessionReset(chatID, threadID, userID, c.Chat().Type == telebot.ChatPrivate)
 	case CmdCronList:
 		reply, err = bc.cmdCronList(chatID, threadID, userID)
 	case CmdCronCancel:
@@ -309,9 +309,9 @@ func (bc *BotController) handleCommand(c telebot.Context, cmd *MatchedCommand) e
 		}
 		reply, err = bc.cmdRefreshModels()
 	case CmdMemoryStatus:
-		reply, err = bc.cmdMemoryStatus(c.Chat().ID, c.Message().ThreadID)
+		reply, err = bc.cmdMemoryStatus(c.Chat().ID, c.Message().ThreadID, userID, c.Chat().Type == telebot.ChatPrivate)
 	case CmdMemoryCheckpoint:
-		reply, err = bc.cmdMemoryCheckpoint(c.Chat().ID, c.Message().ThreadID, userID, cmd.Text)
+		reply, err = bc.cmdMemoryCheckpoint(c.Chat().ID, c.Message().ThreadID, userID, c.Chat().Type == telebot.ChatPrivate, cmd.Text)
 	case CmdUsers:
 		reply, err = bc.cmdUsers(c)
 	case CmdForgetMe:
@@ -350,15 +350,16 @@ func (bc *BotController) handleCommand(c telebot.Context, cmd *MatchedCommand) e
 
 // --- P1 handlers ---
 
-func (bc *BotController) cmdSessionReset(chatID int64, threadID int, userID int64) (string, error) {
-	return bc.resetCurrentSession(chatID, threadID, true, userID)
+func (bc *BotController) cmdSessionReset(chatID int64, threadID int, userID int64, isPrivateChat bool) (string, error) {
+	return bc.resetCurrentSession(chatID, threadID, true, userID, isPrivateChat)
 }
 
-func (bc *BotController) resetCurrentSession(chatID int64, threadID int, invalidate bool, userID int64) (string, error) {
+func (bc *BotController) resetCurrentSession(chatID int64, threadID int, invalidate bool, userID int64, isPrivateChat bool) (string, error) {
 	canceledActive := bc.cancelActiveRun(chatID, threadID, userID)
 	if bc.dreamer != nil && bc.sessions != nil {
-		cwd := bc.currentCwd(chatID, threadID)
-		bc.dreamer.FlushNudge(chatID, threadID, userID, cwd, bc.nudgeBuffer)
+		cwd := bc.currentCwdForContext(chatID, threadID, userID, isPrivateChat)
+		sessionFile := bc.sessions.GetSession(chatID, threadID, userID)
+		bc.dreamer.FlushNudge(chatID, threadID, userID, cwd, sessionFile, bc.nudgeBuffer)
 		if invalidate {
 			bc.invalidateMemoryDirs(chatID, threadID, userID, cwd)
 		}
@@ -1160,9 +1161,9 @@ func (bc *BotController) invalidateModelCache() {
 	bc.modelCacheExpiry = time.Time{}
 }
 
-func (bc *BotController) cmdMemoryStatus(chatID int64, threadID int) (string, error) {
+func (bc *BotController) cmdMemoryStatus(chatID int64, threadID int, userID int64, isPrivateChat bool) (string, error) {
 	svc := memoryuxpkg.New(bc.memoryDir, bc.resolver)
-	cwd := bc.currentCwd(chatID, threadID)
+	cwd := bc.currentCwdForContext(chatID, threadID, userID, isPrivateChat)
 	log.Printf("memory command: action=status chat=%d thread=%d cwd_set=%t", chatID, threadID, cwd != "")
 	status, err := svc.Status(chatID, threadID, cwd)
 	if err != nil {
@@ -1172,7 +1173,7 @@ func (bc *BotController) cmdMemoryStatus(chatID int64, threadID int) (string, er
 	return memoryuxpkg.FormatStatus(status), nil
 }
 
-func (bc *BotController) cmdMemoryCheckpoint(chatID int64, threadID int, userID int64, text string) (string, error) {
+func (bc *BotController) cmdMemoryCheckpoint(chatID int64, threadID int, userID int64, isPrivateChat bool, text string) (string, error) {
 	// Extract note after the command phrase
 	trimmed := strings.TrimSpace(text)
 	lower := strings.ToLower(trimmed)
@@ -1194,7 +1195,7 @@ func (bc *BotController) cmdMemoryCheckpoint(chatID int64, threadID int, userID 
 	note = appendModeTag(note, bc.userActiveMode(userID))
 
 	svc := memoryuxpkg.New(bc.memoryDir, bc.resolver)
-	cwd := bc.currentCwd(chatID, threadID)
+	cwd := bc.currentCwdForContext(chatID, threadID, userID, isPrivateChat)
 	log.Printf("memory command: action=checkpoint chat=%d thread=%d cwd_set=%t", chatID, threadID, cwd != "")
 	result, err := svc.WriteCheckpoint(chatID, threadID, cwd, note)
 	if err != nil {

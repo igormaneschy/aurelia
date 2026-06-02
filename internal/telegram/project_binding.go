@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
 	"strings"
 	"time"
 
@@ -40,11 +39,11 @@ func (bc *BotController) currentCwdForContext(chatID int64, threadID int, userID
 		if err != nil {
 			log.Printf("cwd: currentCwdForContext failed to load profile user=%d: %v", userID, err)
 		} else if profile != nil && profile.DefaultCWD != "" {
-			if info, statErr := os.Stat(profile.DefaultCWD); statErr == nil && info.IsDir() {
-				return profile.DefaultCWD
-			} else if statErr != nil {
-				log.Printf("cwd: DefaultCWD user=%d path=%q is invalid/unreadable: %v", userID, profile.DefaultCWD, statErr)
+			cwd, resolveErr := runtime.ResolveProjectCwd(profile.DefaultCWD)
+			if resolveErr == nil {
+				return cwd
 			}
+			log.Printf("cwd: DefaultCWD user=%d path=%q rejected: %v", userID, profile.DefaultCWD, resolveErr)
 		}
 	}
 	return ""

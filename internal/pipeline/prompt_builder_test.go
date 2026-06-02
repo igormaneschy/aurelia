@@ -40,7 +40,7 @@ func TestLoadMemoryContents_RespectsTotalCap(t *testing.T) {
 	}
 
 	bc := &Service{resolver: resolver, memoryCache: newMemoryCache(), sessions: session.NewStore()}
-	got := bc.loadMemoryContents(1, 2, 42, nil)
+	got := bc.loadMemoryContents(1, 2, 42, nil, "")
 
 	if len(got) > maxMemoryTotalChars {
 		t.Fatalf("memory content length = %d, want <= %d", len(got), maxMemoryTotalChars)
@@ -87,6 +87,10 @@ func TestEffectiveCwd_UsesPersistedBindingWithTopicFallback(t *testing.T) {
 
 func TestEffectiveCwdForContext_UsesDefaultCWDWhenPrivateNoBinding(t *testing.T) {
 	dir := t.TempDir()
+	want, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
 	resolver := users.NewResolver(dir)
 	store := users.NewStore(resolver)
 
@@ -100,8 +104,8 @@ func TestEffectiveCwdForContext_UsesDefaultCWDWhenPrivateNoBinding(t *testing.T)
 
 	bc := &Service{usersStore: store}
 	got := bc.effectiveCwdForContext(nil, 42, 0, 1, true)
-	if got != dir {
-		t.Fatalf("effectiveCwdForContext() = %q, want DefaultCWD %q", got, dir)
+	if got != want {
+		t.Fatalf("effectiveCwdForContext() = %q, want DefaultCWD %q", got, want)
 	}
 }
 
@@ -308,7 +312,7 @@ func TestLoadMemoryContents_TriggersCompactModeAtThreshold(t *testing.T) {
 		t.Fatal(err)
 	}
 	bc := &Service{memoryDir: dir, resolver: resolver, memoryCache: newMemoryCache(), sessions: session.NewStore()}
-	got := bc.loadMemoryContents(1, 2, 0, nil)
+	got := bc.loadMemoryContents(1, 2, 0, nil, "")
 
 	// Total should be within budget
 	if len(got) > maxMemoryTotalChars {
@@ -373,7 +377,7 @@ func TestLoadMemoryContents_ProjectPrivateSurvivesWhenGlobalIsHuge(t *testing.T)
 	sessions := session.NewStore()
 	sessions.SetCwd(42, 10, cwd)
 	bc := &Service{resolver: resolver, sessions: sessions, memoryCache: newMemoryCache()}
-	got := bc.loadMemoryContents(42, 10, 42, nil)
+	got := bc.loadMemoryContents(42, 10, 42, nil, cwd)
 
 	// CWD overlay current_task.md must survive even when user global is huge
 	if !strings.Contains(got, "High-priority task") {
@@ -440,7 +444,7 @@ func TestLoadMemoryContents_IsolatesProjectPrivateByThread(t *testing.T) {
 	sessions := session.NewStore()
 	sessions.SetCwd(42, 10, cwd)
 	bc := &Service{resolver: resolver, sessions: sessions, memoryCache: newMemoryCache()}
-	got := bc.loadMemoryContents(42, 10, 0, nil)
+	got := bc.loadMemoryContents(42, 10, 0, nil, cwd)
 	if !strings.Contains(got, "thread ten cwd overlay") {
 		t.Fatalf("expected thread 10 cwd overlay memory, got %q", got)
 	}
@@ -454,7 +458,7 @@ type fakeRunLog struct {
 	latest *runlog.RunRecord
 }
 
-func (f *fakeRunLog) Start(ctx context.Context, record runlog.RunRecord) error { return nil }
+func (f *fakeRunLog) Start(ctx context.Context, record runlog.RunRecord) error  { return nil }
 func (f *fakeRunLog) Update(ctx context.Context, update runlog.RunUpdate) error { return nil }
 func (f *fakeRunLog) Complete(ctx context.Context, runID string, status runlog.RunStatus, checkpoint, errMsg string) error {
 	return nil
@@ -653,7 +657,7 @@ func TestIsContinuation(t *testing.T) {
 		{"bom dia", false},
 		{"qual o status", false},
 		{"", false},
-		{"continuação", false},                     // word boundary: must not match "continua"
+		{"continuação", false}, // word boundary: must not match "continua"
 		{"analisa isso", false},
 	}
 	for _, tc := range tests {
@@ -1027,9 +1031,9 @@ func TestBuildSystemPrompt_AllSectionsPresent(t *testing.T) {
 
 	// Use fakeRunLog to inject a failed run checkpoint
 	svc := &Service{
-		config:      &config.AppConfig{DefaultProvider: "test", DefaultModel: "test"},
-		continuity:  contStore,
-		sessions:    sessionStore,
+		config:     &config.AppConfig{DefaultProvider: "test", DefaultModel: "test"},
+		continuity: contStore,
+		sessions:   sessionStore,
 		runLog: &fakeRunLog{
 			latest: &runlog.RunRecord{
 				ChatID:     42,

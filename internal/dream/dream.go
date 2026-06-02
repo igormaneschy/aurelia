@@ -21,18 +21,30 @@ import (
 	"github.com/igormaneschy/aurelia/internal/users"
 )
 
+// NudgeSender sends optional user-facing nudge receipts back to chat.
+type NudgeSender interface {
+	SendNudge(ctx context.Context, chatID int64, threadID int, replyToMessageID int64, text string) error
+}
+
+// NudgeRunLog resolves PI session files to prior Telegram outbound messages.
+type NudgeRunLog interface {
+	GetLastOutboundMessage(ctx context.Context, sessionFile string) (chatID int64, threadID int, messageID int64, err error)
+}
+
 // DreamConfig holds tuning parameters for the dreamer.
 type DreamConfig struct {
-	Enabled      bool
-	MinInterval  time.Duration // minimum time between dreams
-	MinTurns     int           // minimum user turns before a dream can fire
-	Provider     string        // PI provider to use for consolidation/extraction
-	Model        string        // model to use for consolidation (dream)
-	ExtractModel string        // model to use for memory extraction (legacy, unused with nudge)
-	NudgeEnabled bool          // enable periodic nudge review
-	NudgeTurns   int           // turns between nudge reviews
-	NudgeModel   string        // model for nudge review
+	Enabled          bool
+	MinInterval      time.Duration // minimum time between dreams
+	MinTurns         int           // minimum user turns before a dream can fire
+	Provider         string        // PI provider to use for consolidation/extraction
+	Model            string        // model to use for consolidation (dream)
+	ExtractModel     string        // model to use for memory extraction (legacy, unused with nudge)
+	NudgeEnabled     bool          // enable periodic nudge review
+	NudgeTurns       int           // turns between nudge reviews
+	NudgeModel       string        // model for nudge review
 	NudgeMinInterval time.Duration // minimum time between nudge reviews per chat/thread
+	RunLog           NudgeRunLog
+	NudgeSender      NudgeSender
 }
 
 // DefaultConfig returns sensible defaults.
@@ -56,9 +68,11 @@ type Dreamer struct {
 	resolver     *runtime.PathResolver
 	bridge       *bridge.Bridge
 	config       DreamConfig
+	runLog       NudgeRunLog
+	nudgeSender  NudgeSender
 
-	turnsMu  sync.Mutex
-	turns    map[int64]*atomic.Int32 // userID → turn counter
+	turnsMu   sync.Mutex
+	turns     map[int64]*atomic.Int32 // userID → turn counter
 	runningMu sync.Mutex
 	running   map[int64]*atomic.Bool // userID → running flag
 
@@ -74,6 +88,8 @@ func New(userResolver *users.Resolver, resolver *runtime.PathResolver, br *bridg
 		resolver:     resolver,
 		bridge:       br,
 		config:       cfg,
+		runLog:       cfg.RunLog,
+		nudgeSender:  cfg.NudgeSender,
 		turns:        make(map[int64]*atomic.Int32),
 		running:      make(map[int64]*atomic.Bool),
 		nudgeRunning: make(map[session.SessionKey]struct{}),
@@ -212,9 +228,9 @@ func (d *Dreamer) run(userID int64) {
 			AllowedTools:   []string{},
 			NoUserSettings: true,
 			PersistSession: boolPtr(false),
-			ChatID:  0, // dream is background; (0,0,userID) bucket = user-scoped continuity
+			ChatID:         0, // dream is background; (0,0,userID) bucket = user-scoped continuity
 			ThreadID:       0,
-			UserID:          userID,
+			UserID:         userID,
 			Security: &bridge.SecurityContext{
 				Enabled:   true,
 				Profile:   string(security.ProfileEditProject),

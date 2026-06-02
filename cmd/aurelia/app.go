@@ -298,6 +298,8 @@ func bootstrapApp() (*app, error) {
 	if cfg.NudgeModel != "" {
 		dreamCfg.NudgeModel = cfg.NudgeModel
 	}
+	dreamCfg.RunLog = runLogStore
+	dreamCfg.NudgeSender = bot
 	userResolver := users.NewResolver(resolver.Root())
 	dreamer := dream.New(userResolver, resolver, br, dreamCfg)
 	bot.SetDreamer(dreamer)

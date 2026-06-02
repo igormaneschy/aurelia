@@ -1,6 +1,7 @@
 package pipeline
 
 import (
+	"path/filepath"
 	"slices"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/session"
+	"github.com/igormaneschy/aurelia/internal/users"
 )
 
 func TestBuildBridgeRequest_DisablesFileToolsInChatMode(t *testing.T) {
@@ -18,7 +20,7 @@ func TestBuildBridgeRequest_DisablesFileToolsInChatMode(t *testing.T) {
 		botCwd:   "/tmp/aurelia-daemon",
 	}
 
-	req := svc.buildBridgeRequest("oi", "system", nil, 42, 0, 0)
+	req := svc.buildBridgeRequest("oi", "system", nil, 42, 0, 0, false)
 	for _, tool := range chatModeDisallowedTools {
 		if !slices.Contains(req.Options.DisallowedTools, tool) {
 			t.Fatalf("expected %s to be disallowed in chat mode, got %v", tool, req.Options.DisallowedTools)
@@ -33,7 +35,7 @@ func TestBuildBridgeRequest_OmitsModelOptionsInAutoMode(t *testing.T) {
 		botCwd:   "/tmp/aurelia-daemon",
 	}
 
-	req := svc.buildBridgeRequest("oi", "system", nil, 42, 0, 100)
+	req := svc.buildBridgeRequest("oi", "system", nil, 42, 0, 100, false)
 	if req.Options.Provider != "" || req.Options.Model != "" {
 		t.Fatalf("expected auto mode to omit provider/model, got provider=%q model=%q", req.Options.Provider, req.Options.Model)
 	}
@@ -49,7 +51,7 @@ func TestBuildBridgeRequest_SendsExplicitModelOptions(t *testing.T) {
 		botCwd:   "/tmp/aurelia-daemon",
 	}
 
-	req := svc.buildBridgeRequest("oi", "system", nil, 42, 0, 100)
+	req := svc.buildBridgeRequest("oi", "system", nil, 42, 0, 100, false)
 	if req.Options.Provider != "anthropic" || req.Options.Model != "claude-sonnet-4-6" {
 		t.Fatalf("expected explicit provider/model, got provider=%q model=%q", req.Options.Provider, req.Options.Model)
 	}
@@ -63,7 +65,7 @@ func TestBuildBridgeRequest_AgentModelOverrideWorksWithAutoMode(t *testing.T) {
 	}
 	agent := &agents.Agent{Model: "openai/gpt-5.4"}
 
-	req := svc.buildBridgeRequest("oi", "system", agent, 42, 0, 100)
+	req := svc.buildBridgeRequest("oi", "system", agent, 42, 0, 100, false)
 	if req.Options.Provider != "" || req.Options.Model != "openai/gpt-5.4" {
 		t.Fatalf("expected only agent model override, got provider=%q model=%q", req.Options.Provider, req.Options.Model)
 	}
@@ -78,12 +80,41 @@ func TestBuildBridgeRequest_AllowsFileToolsWhenCwdBound(t *testing.T) {
 		botCwd:   "/tmp/aurelia-daemon",
 	}
 
-	req := svc.buildBridgeRequest("oi", "system", nil, 42, 0, 0)
+	req := svc.buildBridgeRequest("oi", "system", nil, 42, 0, 0, false)
 	if len(req.Options.DisallowedTools) != 0 {
 		t.Fatalf("expected no chat-mode disallowed tools when cwd is bound, got %v", req.Options.DisallowedTools)
 	}
 	if req.Options.Cwd != "/repo/aurelia" {
 		t.Fatalf("Cwd = %q, want bound cwd", req.Options.Cwd)
+	}
+}
+
+func TestBuildBridgeRequest_UsesPrivateDefaultCWD(t *testing.T) {
+	dir := t.TempDir()
+	want, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := users.NewResolver(t.TempDir())
+	store := users.NewStore(resolver)
+	if err := store.Save(&users.Profile{UserID: 100, DefaultCWD: dir}); err != nil {
+		t.Fatal(err)
+	}
+	svc := &Service{
+		config:     &config.AppConfig{},
+		sessions:   session.NewStore(),
+		usersStore: store,
+		botCwd:     "/tmp/aurelia-daemon",
+	}
+
+	req := svc.buildBridgeRequest("oi", "system", nil, 42, 0, 100, true)
+	if req.Options.Cwd != want {
+		t.Fatalf("Cwd = %q, want DefaultCWD %q", req.Options.Cwd, want)
+	}
+	for _, tool := range chatModeDisallowedTools {
+		if slices.Contains(req.Options.DisallowedTools, tool) {
+			t.Fatalf("did not expect chat-mode tool %s to be disallowed with DefaultCWD: %v", tool, req.Options.DisallowedTools)
+		}
 	}
 }
 
@@ -98,7 +129,7 @@ func TestTryExecutePlan_RequiresCWD(t *testing.T) {
 	}
 
 	planText := "Here is the plan:\n```aurelia-plan\n{\"tasks\":[{\"id\":\"1\",\"description\":\"task 1\",\"prompt\":\"do it\",\"needs_worktree\":false}]}\n```\n"
-	handled, _ := s.tryExecutePlan(1, 0, 100, planText, 42)
+	handled, _ := s.tryExecutePlan(1, 0, 100, planText, 42, false)
 	if !handled {
 		t.Fatal("expected true (plan found, execution refused)")
 	}
@@ -124,7 +155,7 @@ func TestTryExecutePlan_PassesThreadAndCWD(t *testing.T) {
 	}
 
 	planText := "Here is the plan:\n```aurelia-plan\n{\"tasks\":[{\"id\":\"1\",\"description\":\"task 1\",\"prompt\":\"do it\",\"needs_worktree\":false}]}\n```\n"
-	_, _ = s.tryExecutePlan(1, 5, 100, planText, 42)
+	_, _ = s.tryExecutePlan(1, 5, 100, planText, 42, false)
 
 	// Wait for async goroutine to set planExecuted
 	for i := 0; i < 100 && !fo.planExecuted; i++ {
@@ -141,5 +172,37 @@ func TestTryExecutePlan_PassesThreadAndCWD(t *testing.T) {
 	}
 	if fo.planUserID != 42 {
 		t.Errorf("planUserID = %d, want %d", fo.planUserID, 42)
+	}
+}
+
+func TestTryExecutePlan_UsesPrivateDefaultCWD(t *testing.T) {
+	dir := t.TempDir()
+	want, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := users.NewStore(users.NewResolver(t.TempDir()))
+	if err := store.Save(&users.Profile{UserID: 42, DefaultCWD: dir}); err != nil {
+		t.Fatal(err)
+	}
+	fo := &fakeOutput{}
+	s := &Service{
+		output:       fo,
+		orchestrator: orchestrator.NewOrchestrator(nil, orchestrator.OrchestratorConfig{}),
+		sessions:     session.NewStore(),
+		usersStore:   store,
+	}
+
+	planText := "Here is the plan:\n```aurelia-plan\n{\"tasks\":[{\"id\":\"1\",\"description\":\"task 1\",\"prompt\":\"do it\",\"needs_worktree\":false}]}\n```\n"
+	_, _ = s.tryExecutePlan(1, 0, 100, planText, 42, true)
+
+	for i := 0; i < 100 && !fo.planExecuted; i++ {
+		time.Sleep(time.Millisecond)
+	}
+	if !fo.planExecuted {
+		t.Fatal("ExecuteApprovedPlan should be called with private DefaultCWD")
+	}
+	if fo.planCwd != want {
+		t.Fatalf("planCwd = %q, want DefaultCWD %q", fo.planCwd, want)
 	}
 }

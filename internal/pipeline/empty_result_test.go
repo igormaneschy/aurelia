@@ -102,7 +102,7 @@ func TestHandleResultEvent_EmptyAfterWork_DeactivatesSession(t *testing.T) {
 	}
 	var assistantText strings.Builder
 
-	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100)
+	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
 
 	if outcome != OutcomeLLMError {
 		t.Fatalf("expected OutcomeLLMError, got %v", outcome)
@@ -139,7 +139,7 @@ func TestHandleResultEvent_EmptyNoWork_UsesGenericMessage(t *testing.T) {
 	ev := bridge.Event{Type: "result", Content: ""}
 	var assistantText strings.Builder
 
-	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100)
+	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
 
 	if outcome != OutcomeLLMError {
 		t.Fatalf("expected OutcomeLLMError, got %v", outcome)
@@ -188,7 +188,7 @@ func TestHandleResultEvent_EmptyAfterWorkWithToolSummary_IncludesToolSummary(t *
 	}
 	var assistantText strings.Builder
 
-	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100)
+	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
 
 	if outcome != OutcomeLLMError {
 		t.Fatalf("expected OutcomeLLMError, got %v", outcome)

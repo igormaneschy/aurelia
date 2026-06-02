@@ -20,7 +20,7 @@ func (s *Service) checkProjectPreflight(input pipelineInput, agent *agents.Agent
 	if !looksLikeCodebaseRead(userText) {
 		return false
 	}
-	if s.effectiveCwd(agent, input.chatID, input.threadID) != "" {
+	if s.effectiveCwdForContext(agent, input.chatID, input.threadID, input.userID, input.isPrivateChat) != "" {
 		return false
 	}
 
