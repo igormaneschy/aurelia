@@ -295,7 +295,13 @@ func (bc *BotController) handleCronCommand(c telebot.Context) error {
 	threadID := c.Message().ThreadID
 	text := c.Message().Text
 
-	reply, err := bc.cronHandler.HandleText(context.Background(), userID, chatID, threadID, text)
+	// Resolve sender's profile timezone for recurring cron jobs.
+	// userTimezone validates the IANA name and falls back to UTC on any
+	// error (with a log line), matching the natural-language cron path so
+	// a corrupt profile timezone can't fail job creation.
+	tzName, _ := bc.userTimezone(safeSenderID(c.Sender()))
+
+	reply, err := bc.cronHandler.HandleText(context.Background(), userID, chatID, threadID, text, tzName)
 	if err != nil {
 		return SendErrorWithThread(bc.bot, c.Chat(), err.Error(), threadID)
 	}
