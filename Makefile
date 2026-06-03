@@ -10,12 +10,13 @@ LOG_DIR       := $(HOME)/.aurelia/logs
 STDERR_LOG    := $(LOG_DIR)/aurelia.stderr.log
 STDOUT_LOG    := $(LOG_DIR)/aurelia.stdout.log
 
-.PHONY: help build test vet lint sec cover check bridge install install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
+.PHONY: help build test race vet lint sec cover check bridge install install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
 
 help:
 	@echo "Common targets:"
 	@echo "  make build            Compile the binary to $(BINARY)"
 	@echo "  make test             Run go test ./... -short"
+	@echo "  make race             Run race tests for async hot paths"
 	@echo "  make cover            Run go test with coverage profile"
 	@echo "  make vet              Run go vet ./..."
 	@echo "  make lint             Run golangci-lint"
@@ -57,6 +58,9 @@ install:
 test:
 	go test ./... -short -count=1
 
+race:
+	go test -race ./internal/pipeline ./internal/telegram
+
 cover:
 	go test -coverprofile=coverage.out ./...
 	go tool cover -func=coverage.out | tail -1
@@ -73,7 +77,7 @@ sec:
 	gosec -include=G401,G402,G404,G501,G502,G503,G504,G505,G506,G507,G601,G602 ./...
 	go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
-check: lint sec test vet
+check: lint sec test race vet
 	@echo "✅ All checks passed"
 
 bridge:

@@ -117,6 +117,9 @@ jobs:
       - name: Test
         run: go test -coverprofile=coverage.out ./...
 
+      - name: Race test async hot paths
+        run: go test -race ./internal/pipeline ./internal/telegram
+
       - name: Coverage
         run: go tool cover -func=coverage.out | tail -1
 

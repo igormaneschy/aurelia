@@ -1363,12 +1363,8 @@ func sanitizeExecutionPlanForChat(text string) string {
 
 // --- Run log lifecycle ---
 
-func runLogKey(chatID int64, threadID int, userID ...int64) string {
-	uid := int64(0)
-	if len(userID) > 0 {
-		uid = userID[0]
-	}
-	return fmt.Sprintf("%d:%d:%d", chatID, threadID, uid)
+func runLogKey(chatID int64, threadID int, userID int64) string {
+	return fmt.Sprintf("%d:%d:%d", chatID, threadID, userID)
 }
 
 // startRunLogParams carries the extended context needed to populate a
@@ -1588,8 +1584,7 @@ func (s *Service) savePartialAssistant(chatID int64, threadID int, userID int64,
 		return
 	}
 	state.mu.Lock()
-	text = redactSecrets(text)
-	state.partialAssistant = truncateCheckpoint(text)
+	state.partialAssistant = redactAndTruncate(text, maxCheckpointRunes)
 	state.mu.Unlock()
 }
 
@@ -1720,19 +1715,8 @@ func truncatePrompt(prompt string) string {
 	return prompt
 }
 
+const maxCheckpointRunes = 2000
+
 func truncateCheckpoint(s string) string {
-	const maxCheckpointRunes = 2000
-	if len([]rune(s)) <= maxCheckpointRunes {
-		return s
-	}
-	var b strings.Builder
-	count := 0
-	for _, r := range s {
-		if count >= maxCheckpointRunes {
-			break
-		}
-		b.WriteRune(r)
-		count++
-	}
-	return b.String() + "..."
+	return truncateRunes(s, maxCheckpointRunes)
 }

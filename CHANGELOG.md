@@ -4,6 +4,44 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Security
+- **Orchestrator verify allowlist** — plan/task `verify` commands no longer
+  execute through free-form `sh -c`. Verification is parsed into an argv and
+  accepted only for explicit build/test/typecheck commands (`go test/vet/build`,
+  npm/pnpm/yarn test/typecheck/build/lint, `npx tsc`, `pytest`, `rspec`). Shell
+  metacharacters are rejected before execution. This closes a repeated policy
+  bypass class where execution paths outside the Bridge skipped Bridge Bash
+  guardrails.
+- **Read-like Bridge tools respect cwd boundary** — `Grep`, `Glob`, and `LS` now
+  share the same `cwd` containment check as `Read`, preventing directory/content
+  enumeration outside the bound project unless explicitly allowlisted.
+- **Checkpoint redaction helper** — partial assistant checkpoints now use a
+  redaction-before-truncation helper before persistence, preventing recurrence of
+  the previously fixed secret-slicing class.
+
+### Fixed
+- **Runlog/tool state user isolation** — runlog state and live tool monitoring are
+  keyed by `chatID:threadID:userID`, preventing users in the same group/topic from
+  overwriting each other's run state, tool summaries, and `/status` diagnostics.
+- **Bridge side-channel event routing** — `steer` and `follow-up` no longer replace
+  the active query `request_id`, preventing live events from being emitted to a
+  completed side-channel request and silently dropped.
+- **Loop detector race/deadlock** — loop warning state and recent-tool snapshots
+  are read under one mutex contract; race tests cover the pipeline/Telegram hot
+  paths.
+- **Silent error handling** — `/forgetme` now fails closed if cron job cleanup
+  fails, `/debug run` surfaces `ListEvents` errors, and circuit-breaker open
+  notifications are actually sent instead of computed and discarded.
+
+### Changed
+- **Validation guardrails** — `make check` now runs targeted race tests
+  (`go test -race ./internal/pipeline ./internal/telegram`), CI runs the same race
+  gate, and the PR template calls it out for async/session/pipeline/Telegram
+  changes. `runLogKey` now requires an explicit `userID`, making user scoping a
+  compile-time requirement instead of a convention.
+
 ## v0.22.0 - 2026-06-02
 
 ### Added
