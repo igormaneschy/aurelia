@@ -645,26 +645,24 @@ func TestSafeWriter_PrivatePermissions(t *testing.T) {
 	}
 }
 
-// TestUpdateMemoryIndex_FailsOnReadOnlyDir verifies that updateMemoryIndex
+// TestUpdateMemoryIndex_FailsOnUnwritableDir verifies that updateMemoryIndex
 // returns an error when it cannot write to the target directory.
 func TestUpdateMemoryIndex_FailsOnUnwritableDir(t *testing.T) {
 	dir := t.TempDir()
 
-	// Create MEMORY.md successfully first
-	if err := updateMemoryIndex(dir, "existing.md", "Existing"); err != nil {
-		t.Fatalf("expected first MEMORY.md write to succeed: %v", err)
+	// Create a file where a directory component would be expected.
+	// When updateMemoryIndex tries to write blocked/MEMORY.md,
+	// it fails because "blocked" is a file, not a directory.
+	// This avoids chmod-based tests which are unreliable on CI runners
+	// (root bypasses permissions; filesystem quirks vary).
+	blocked := filepath.Join(dir, "blocked")
+	if err := os.WriteFile(blocked, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
 	}
 
-	// Make the directory read-only (permission 0500 = r-x------)
-	if err := os.Chmod(dir, 0500); err != nil {
-		t.Skipf("cannot chmod temp dir: %v", err)
-	}
-	defer os.Chmod(dir, 0700) // restore for cleanup
-
-	// Attempting to write another entry should fail
-	err := updateMemoryIndex(dir, "new_file.md", "New")
+	err := updateMemoryIndex(blocked, "new_file.md", "New")
 	if err == nil {
-		t.Fatal("expected updateMemoryIndex to fail on read-only directory")
+		t.Fatal("expected updateMemoryIndex to fail when parent is a file, not a directory")
 	}
 }
 
