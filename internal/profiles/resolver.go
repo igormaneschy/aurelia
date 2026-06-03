@@ -274,7 +274,6 @@ func (r *Resolver) parseAtProfile(text string) (*PromptProfile, string, bool) {
 
 	// Extract name after @, before the first space.
 	rest := text[1:]
-	name := rest
 	spaceIdx := strings.IndexByte(rest, ' ')
 	if spaceIdx == -1 {
 		// "@name" with no text after — treat as profile invocation without content.
@@ -283,7 +282,7 @@ func (r *Resolver) parseAtProfile(text string) (*PromptProfile, string, bool) {
 		return profile, text, true
 	}
 
-	name = rest[:spaceIdx]
+	name := rest[:spaceIdx]
 	profile := r.Get(name)
 	stripped := strings.TrimSpace(rest[spaceIdx+1:])
 	if stripped == "" {

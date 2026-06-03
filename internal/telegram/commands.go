@@ -21,7 +21,6 @@ import (
 	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
-	"github.com/igormaneschy/aurelia/internal/session"
 	"github.com/igormaneschy/aurelia/internal/users"
 )
 
@@ -1884,11 +1883,3 @@ func formatTelegramRunDetail(r *runlog.RunRecord, events []runlog.RunEvent) stri
 	return sb.String()
 }
 
-// defaultLifecyclePolicy returns the session lifecycle policy from config,
-// or a safe default if config is not available.
-func (bc *BotController) defaultLifecyclePolicy() session.LifecyclePolicy {
-	if bc.config == nil {
-		return session.DefaultLifecyclePolicy()
-	}
-	return bc.config.SessionLifecycle.LifecyclePolicy()
-}
