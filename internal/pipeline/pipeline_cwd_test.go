@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
+	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/session"
 	"github.com/igormaneschy/aurelia/internal/users"
 )
@@ -63,9 +63,9 @@ func TestBuildBridgeRequest_AgentModelOverrideWorksWithAutoMode(t *testing.T) {
 		sessions: session.NewStore(),
 		botCwd:   "/tmp/aurelia-daemon",
 	}
-	agent := &agents.Agent{Model: "openai/gpt-5.4"}
+	pp := &profiles.PromptProfile{Model: "openai/gpt-5.4"}
 
-	req := svc.buildBridgeRequest("oi", "system", agent, 42, 0, 100, false)
+	req := svc.buildBridgeRequest("oi", "system", pp, 42, 0, 100, false)
 	if req.Options.Provider != "" || req.Options.Model != "openai/gpt-5.4" {
 		t.Fatalf("expected only agent model override, got provider=%q model=%q", req.Options.Provider, req.Options.Model)
 	}

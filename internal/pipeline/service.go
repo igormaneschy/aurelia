@@ -17,6 +17,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/persona"
+	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
@@ -57,6 +58,7 @@ type Config struct {
 	AppConfig    *config.AppConfig
 	Bridge       *bridge.Bridge
 	Agents       *agents.Registry
+	Profiles     *profiles.Resolver // Phase 1: canonical profile resolver
 	Persona      *persona.CanonicalIdentityService
 	Sessions     *session.Store
 	Resolver     *runtime.PathResolver
@@ -80,6 +82,7 @@ type Service struct {
 	bridge          *bridge.Bridge
 	resilient       *ResilientBridge
 	agents          *agents.Registry
+	profiles        *profiles.Resolver // Phase 1: canonical profile resolver
 	persona         *persona.CanonicalIdentityService
 	sessions        *session.Store
 	resolver        *runtime.PathResolver
@@ -121,6 +124,7 @@ func NewService(cfg Config) *Service {
 		config:           cfg.AppConfig,
 		bridge:           cfg.Bridge,
 		agents:           cfg.Agents,
+		profiles:         cfg.Profiles,
 		persona:          cfg.Persona,
 		sessions:         cfg.Sessions,
 		resolver:         cfg.Resolver,

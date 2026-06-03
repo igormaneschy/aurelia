@@ -17,6 +17,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
+	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/security"
 )
@@ -320,22 +321,33 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, reservedCtx context.Context, reservedCancel context.CancelFunc) {
 	key := sessionKey(input.chatID, input.threadID, input.userID)
 	defer func() {
-		// Atomic ownership check: only delete if the stored value still points to
-		// our run. This prevents a cancel/supersede-then-new-run cycle from
-		// nuking the new run's entry. CompareAndDelete is atomic in sync.Map.
 		s.activeSessions.CompareAndDelete(key, run)
 	}()
 	defer reservedCancel()
-	_ = reservedCtx // available for cancellation via reservedCancel
+	_ = reservedCtx
 
-	agent := s.routeAgent(input.text)
-	userText := stripAgentPrefix(input.text, agent)
-
-	if s.checkProjectPreflight(input, agent, userText) {
+	// Resolve effective Prompt Profile: @name > active mode > general.
+	activeMode := s.userActiveMode(input.userID)
+	profile, userText, resolveErr := s.resolveEffectiveProfile(input.text, activeMode)
+	if resolveErr != nil {
+		if pfErr, ok := resolveErr.(*profiles.ErrProfileNotFound); ok {
+			log.Printf("pipeline: unknown @profile chat=%d name=%s", input.chatID, pfErr.Name)
+			if err := s.output.SendError(input.chatID, input.threadID,
+				fmt.Sprintf("Perfil @%s não encontrado. Use /agents para ver os perfis disponíveis.", pfErr.Name)); err != nil {
+				log.Printf("pipeline: SendError(unknown profile) failed for chat=%d: %v", input.chatID, err)
+			}
+		} else {
+			log.Printf("pipeline: profile resolution error chat=%d: %v", input.chatID, resolveErr)
+		}
+		s.output.ConfirmMessage(input.chatID, input.messageID)
 		return
 	}
 
-	systemPrompt, err := s.buildSystemPrompt(userText, agent, input.chatID, input.messageID, input.threadID, input.userID, input.isPrivateChat)
+	if s.checkProjectPreflight(input, profile, userText) {
+		return
+	}
+
+	systemPrompt, err := s.buildSystemPrompt(userText, profile, input.chatID, input.messageID, input.threadID, input.userID, input.isPrivateChat)
 	if err != nil {
 		log.Printf("Failed to build system prompt: %s", redactSecrets(err.Error()))
 		if err := s.output.SendError(input.chatID, input.threadID, "Falha ao montar o prompt de sistema."); err != nil {
@@ -345,12 +357,11 @@ func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, rese
 		return
 	}
 
-	req := s.buildBridgeRequest(userText, systemPrompt, agent, input.chatID, input.threadID, input.userID, input.isPrivateChat)
+	req := s.buildBridgeRequest(userText, systemPrompt, profile, input.chatID, input.threadID, input.userID, input.isPrivateChat)
 	req.RequestID = fmt.Sprintf("run-%d", time.Now().UnixNano())
 	req.Options.Images = input.images
 	s.applyVisionFallback(&req, input.images)
 
-	// Apply session lifecycle decision before executing
 	if lcResult := s.applyLifecycle(reservedCtx, &req, input.chatID, input.threadID, input.userID); lcResult.SkipExecution {
 		log.Printf("lifecycle: execution skipped for chat=%d: %s", input.chatID, lcResult.ErrorMessage)
 		if lcResult.ErrorMessage != "" {
@@ -362,27 +373,51 @@ func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, rese
 		return
 	}
 
-	// Resolve tool call thresholds from agent budget (or use defaults).
 	warnThreshold := toolCallWarningThreshold
 	critThreshold := toolCallCriticalThreshold
-	if agent != nil && agent.ToolBudget > 0 {
-		warnThreshold = agent.ToolBudget
-		critThreshold = agent.ToolBudget * 5 / 2 // 2.5x budget
+	if profile != nil && profile.ToolBudget > 0 {
+		warnThreshold = profile.ToolBudget
+		critThreshold = profile.ToolBudget * 5 / 2
 	}
 
 	s.executeAsync(reservedCtx, input.chatID, input.threadID, input.messageID, req, userText, input.userID, input.isPrivateChat, warnThreshold, critThreshold)
 }
 
-func stripAgentPrefix(text string, agent *agents.Agent) string {
-	if agent == nil {
-		return text
-	}
-	if idx := strings.IndexByte(text[1:], ' '); idx != -1 {
-		if stripped := strings.TrimSpace(text[idx+2:]); stripped != "" {
-			return stripped
+// userActiveMode returns the normalized active mode from the user's profile.
+// Returns "" for general/default mode or when the store is unavailable.
+func (s *Service) userActiveMode(userID int64) string {
+	if s.usersStore != nil {
+		if profile, err := s.usersStore.Get(userID); err == nil && profile != nil {
+			return profile.ActiveMode
 		}
 	}
-	return text
+	return ""
+}
+
+// resolveEffectiveProfile resolves the Prompt Profile for a message turn.
+// Uses profiles.Resolver for @name > active mode > general precedence.
+// Returns the resolved profile, stripped user text, and any error.
+func (s *Service) resolveEffectiveProfile(text string, activeDefault string) (*profiles.PromptProfile, string, error) {
+	if s.profiles != nil {
+		return s.profiles.ResolveEffective(text, activeDefault)
+	}
+	// Fallback when resolver not available — route legacy-style via agents registry.
+	// This is a transitional path; will be removed when agents.Registry is fully deprecated.
+	if s.agents != nil {
+		agent := s.routeAgent(text)
+		if agent != nil {
+			// Strip @name prefix from text (legacy behavior).
+			stripped := text
+			if idx := strings.IndexByte(text[1:], ' '); idx != -1 {
+				if s := strings.TrimSpace(text[idx+2:]); s != "" {
+					stripped = s
+				}
+			}
+			return profiles.FromAgent(agent), stripped, nil
+		}
+	}
+	// No resolver and no legacy agents — return general builtin.
+	return nil, text, nil
 }
 
 func (s *Service) applyVisionFallback(req *bridge.Request, images []bridge.ImageAttachment) {
@@ -442,7 +477,7 @@ func (s *Service) classifyFunc() agents.ClassifyFunc {
 
 // buildBridgeRequest assembles the bridge.Request with agent overrides, session
 // resume, and working directory.
-func (s *Service) buildBridgeRequest(userText, systemPrompt string, agent *agents.Agent, chatID int64, threadID int, userID int64, isPrivateChat bool) bridge.Request {
+func (s *Service) buildBridgeRequest(userText, systemPrompt string, pp *profiles.PromptProfile, chatID int64, threadID int, userID int64, isPrivateChat bool) bridge.Request {
 	req := bridge.Request{
 		Command: "query",
 		Prompt:  userText,
@@ -455,18 +490,18 @@ func (s *Service) buildBridgeRequest(userText, systemPrompt string, agent *agent
 	}
 	s.applyConfiguredModelOptions(&req.Options)
 
-	if agent != nil {
-		if agent.Model != "" {
-			req.Options.Model = agent.Model
+	if pp != nil {
+		if pp.Model != "" {
+			req.Options.Model = pp.Model
 		}
-		if agent.Cwd != "" {
-			req.Options.Cwd = agent.Cwd
+		if pp.Cwd != "" {
+			req.Options.Cwd = pp.Cwd
 		}
-		if len(agent.AllowedTools) > 0 {
-			req.Options.AllowedTools = agent.AllowedTools
+		if len(pp.AllowedTools) > 0 {
+			req.Options.AllowedTools = pp.AllowedTools
 		}
-		if len(agent.DisallowedTools) > 0 {
-			req.Options.DisallowedTools = agent.DisallowedTools
+		if len(pp.DisallowedTools) > 0 {
+			req.Options.DisallowedTools = pp.DisallowedTools
 		}
 	}
 
@@ -484,7 +519,7 @@ func (s *Service) buildBridgeRequest(userText, systemPrompt string, agent *agent
 		}
 	}
 
-	cwd := s.effectiveCwdForContext(agent, chatID, threadID, userID, isPrivateChat)
+	cwd := s.effectiveCwdForContext(pp, chatID, threadID, userID, isPrivateChat)
 	if cwd != "" {
 		req.Options.Cwd = cwd
 	} else {
@@ -503,11 +538,11 @@ func (s *Service) buildBridgeRequest(userText, systemPrompt string, agent *agent
 
 	// ── Resolve and attach security context ──
 	cwd = req.Options.Cwd
-	profile := security.DefaultProfileForContext(cwd != "", agent != nil && agent.CapabilityProfile == "", needsWriteTools(agent))
+	profile := security.DefaultProfileForContext(cwd != "", pp != nil && pp.CapabilityProfile == "", needsWriteTools(pp))
 
 	// Allow agent-level capability_profile override
-	if agent != nil && agent.CapabilityProfile != "" {
-		profile = security.CapabilityProfile(agent.CapabilityProfile)
+	if pp != nil && pp.CapabilityProfile != "" {
+		profile = security.CapabilityProfile(pp.CapabilityProfile)
 	}
 
 	// Intersect agent allowed_tools with profile limits
@@ -524,8 +559,8 @@ func (s *Service) buildBridgeRequest(userText, systemPrompt string, agent *agent
 	// Attach security context
 	secCfg := s.getSecurityConfig()
 	agentName := ""
-	if agent != nil {
-		agentName = agent.Name
+	if pp != nil {
+		agentName = pp.Name
 	}
 	req.Options.Security = &bridge.SecurityContext{
 		Enabled:   true,
@@ -561,26 +596,23 @@ func (s *Service) applyConfiguredModelOptions(options *bridge.RequestOptions) {
 	}
 }
 
-// needsWriteTools returns true if the agent requires write-capable tools.
-func needsWriteTools(agent *agents.Agent) bool {
-	if agent == nil {
+// needsWriteTools returns true if the profile requires write-capable tools.
+func needsWriteTools(pp *profiles.PromptProfile) bool {
+	if pp == nil {
 		return true // default to write-capable
 	}
-	// If agent has explicit allowed_tools, check if it includes write tools
-	for _, t := range agent.AllowedTools {
+	for _, t := range pp.AllowedTools {
 		if t == "Write" || t == "Edit" || t == "Bash" {
 			return true
 		}
 	}
-	// If agent has a capability profile, check if it's write-capable
-	switch agent.CapabilityProfile {
+	switch pp.CapabilityProfile {
 	case "edit_project", "execute_safe", "privileged":
 		return true
 	case "observe", "read_only":
 		return false
 	}
-	// Default: check IsReadOnly
-	return !agent.IsReadOnly()
+	return !pp.IsReadOnly()
 }
 
 var chatModeDisallowedTools = []string{"Read", "Write", "Edit", "Bash", "Glob", "Grep", "LS", "List"}

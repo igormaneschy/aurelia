@@ -18,6 +18,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/persona"
 	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
+	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
@@ -34,6 +35,7 @@ type BotController struct {
 	bridge           *bridge.Bridge
 	modelLister      modelLister
 	agents           *agents.Registry
+	profiles         *profiles.Resolver // Phase 1: canonical profile resolver
 	persona          *persona.CanonicalIdentityService
 	stt              stt.Transcriber
 	cronHandler      *CronCommandHandler
@@ -147,6 +149,7 @@ func NewBotController(
 		bridge:           br,
 		modelLister:      br,
 		agents:           ag,
+		profiles:         profiles.NewResolverFromRegistry(ag),
 		persona:          p,
 		stt:              s,
 		cronHandler:      cronHandler,
@@ -172,6 +175,7 @@ func NewBotController(
 		AppConfig:    bc.config,
 		Bridge:       bc.bridge,
 		Agents:       bc.agents,
+		Profiles:     bc.profiles,
 		Persona:      bc.persona,
 		Sessions:     bc.sessions,
 		Resolver:     bc.resolver,

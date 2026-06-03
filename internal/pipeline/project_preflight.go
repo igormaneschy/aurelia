@@ -5,7 +5,7 @@ import (
 	"log"
 	"strings"
 
-	"github.com/igormaneschy/aurelia/internal/agents"
+	"github.com/igormaneschy/aurelia/internal/profiles"
 )
 
 // preflightMessageNoProjects is the local response sent when user asks to
@@ -16,11 +16,11 @@ const preflightMessageNoProjects = "Este chat/tópico ainda não tem projeto fix
 // asks to read/analyze a codebase or project but no working directory (CWD)
 // is bound for this chat. Returns true when the request was handled locally
 // and the bridge should NOT be called.
-func (s *Service) checkProjectPreflight(input pipelineInput, agent *agents.Agent, userText string) bool {
+func (s *Service) checkProjectPreflight(input pipelineInput, pp *profiles.PromptProfile, userText string) bool {
 	if !looksLikeCodebaseRead(userText) {
 		return false
 	}
-	if s.effectiveCwdForContext(agent, input.chatID, input.threadID, input.userID, input.isPrivateChat) != "" {
+	if s.effectiveCwdForContext(pp, input.chatID, input.threadID, input.userID, input.isPrivateChat) != "" {
 		return false
 	}
 

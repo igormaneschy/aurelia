@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
+	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/session"
 )
@@ -298,7 +298,7 @@ func TestCheckProjectPreflight_NoCrossChatForUserIDZero(t *testing.T) {
 
 func TestCheckProjectPreflight_AgentCwdOverride(t *testing.T) {
 	// Agent with a CWD set should bypass preflight even without session/binding cwd
-	agent := &agents.Agent{
+	pp := &profiles.PromptProfile{
 		Name: "test-agent",
 		Cwd:  "/agent/path",
 	}
@@ -318,7 +318,7 @@ func TestCheckProjectPreflight_AgentCwdOverride(t *testing.T) {
 		text:      "leia o código do projeto",
 	}
 
-	handled := svc.checkProjectPreflight(input, agent, "leia o código do projeto")
+	handled := svc.checkProjectPreflight(input, pp, "leia o código do projeto")
 	if handled {
 		t.Fatal("expected preflight to NOT intercept when agent has CWD set")
 	}

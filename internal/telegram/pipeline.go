@@ -120,6 +120,7 @@ func (bc *BotController) ensurePipeline() *pipelinepkg.Service {
 		AppConfig:    bc.config,
 		Bridge:       bc.bridge,
 		Agents:       bc.agents,
+		Profiles:     bc.profiles,
 		Persona:      bc.persona,
 		Sessions:     bc.sessions,
 		Resolver:     bc.resolver,
