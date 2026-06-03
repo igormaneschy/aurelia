@@ -14,6 +14,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/continuity"
+	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/persona"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
@@ -103,9 +104,13 @@ type Service struct {
 	usersStore      *users.Store
 	userResolver    *users.Resolver
 	// active tool monitoring state — set/cleared per-run for /status.
-	toolStateMu       sync.Mutex
-	activeToolTracker *toolCallTracker
-	activeLoopDetect  *loopDetector
+	toolStateMu      sync.Mutex
+	activeToolStates map[string]activeToolState
+}
+
+type activeToolState struct {
+	tracker  *toolCallTracker
+	detector *loopDetector
 }
 
 const defaultSummaryInterval = 5
@@ -113,29 +118,30 @@ const defaultSummaryInterval = 5
 // NewService builds a pipeline service with explicit dependencies.
 func NewService(cfg Config) *Service {
 	s := &Service{
-		config:          cfg.AppConfig,
-		bridge:          cfg.Bridge,
-		agents:          cfg.Agents,
-		persona:         cfg.Persona,
-		sessions:        cfg.Sessions,
-		resolver:        cfg.Resolver,
-		memoryDir:       cfg.MemoryDir,
-		exePath:         cfg.ExePath,
-		botCwd:          cfg.BotCwd,
-		output:          cfg.Output,
-		orchestrator:    cfg.Orchestrator,
-		dreamer:         cfg.Dreamer,
-		nudgeBuffer:     session.NewNudgeBuffer(),
-		memoryCache:     newMemoryCache(),
-		projectIndex:    cfg.ProjectIndex,
-		bindings:        cfg.Bindings,
-		runLog:          cfg.RunLog,
-		runLogStates:    make(map[string]*runLogState),
-		continuity:      cfg.Continuity,
-		summaryCounter:  &summaryCounter{counts: make(map[continuity.ConversationKey]int)},
-		summaryInterval: defaultSummaryInterval,
-		usersStore:      cfg.UsersStore,
-		userResolver:    cfg.UserResolver,
+		config:           cfg.AppConfig,
+		bridge:           cfg.Bridge,
+		agents:           cfg.Agents,
+		persona:          cfg.Persona,
+		sessions:         cfg.Sessions,
+		resolver:         cfg.Resolver,
+		memoryDir:        cfg.MemoryDir,
+		exePath:          cfg.ExePath,
+		botCwd:           cfg.BotCwd,
+		output:           cfg.Output,
+		orchestrator:     cfg.Orchestrator,
+		dreamer:          cfg.Dreamer,
+		nudgeBuffer:      session.NewNudgeBuffer(),
+		memoryCache:      newMemoryCache(),
+		projectIndex:     cfg.ProjectIndex,
+		bindings:         cfg.Bindings,
+		runLog:           cfg.RunLog,
+		runLogStates:     make(map[string]*runLogState),
+		continuity:       cfg.Continuity,
+		summaryCounter:   &summaryCounter{counts: make(map[continuity.ConversationKey]int)},
+		summaryInterval:  defaultSummaryInterval,
+		usersStore:       cfg.UsersStore,
+		userResolver:     cfg.UserResolver,
+		activeToolStates: make(map[string]activeToolState),
 	}
 
 	if cfg.Bridge != nil {
@@ -145,24 +151,12 @@ func NewService(cfg Config) *Service {
 		}
 		s.resilient = NewResilientBridge(cfg.Bridge, rbCfg)
 		s.resilient.ContinuitySnapshot = s.continuitySnapshot
-		s.resilient.OnEvent = func(phase, level, message string) {
-			s.runLogMu.Lock()
-			for _, state := range s.runLogStates {
-				if state != nil && state.runID != "" {
-					runID := state.runID
-					s.runLogMu.Unlock()
-					ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-					_ = s.runLog.RecordEvent(ctx, runlog.RunEvent{
-						RunID:   runID,
-						Phase:   phase,
-						Level:   level,
-						Message: message,
-					})
-					cancel()
-					return
-				}
-			}
-			s.runLogMu.Unlock()
+		s.resilient.OnEvent = func(chatID int64, threadID int, userID int64, phase, level, message string) {
+			s.recordPipelineEvent(chatID, threadID, userID, observability.RunEvent{
+				Phase:   phase,
+				Level:   level,
+				Message: message,
+			})
 		}
 	}
 
@@ -390,35 +384,38 @@ type ActiveToolSnapshot struct {
 
 // SetActiveToolState records the active run's tool monitoring state.
 // Called at the start of executeAsync; cleared on return.
-func (s *Service) SetActiveToolState(tracker *toolCallTracker, detector *loopDetector) {
+func (s *Service) SetActiveToolState(chatID int64, threadID int, userID int64, tracker *toolCallTracker, detector *loopDetector) {
 	s.toolStateMu.Lock()
 	defer s.toolStateMu.Unlock()
-	s.activeToolTracker = tracker
-	s.activeLoopDetect = detector
+	if s.activeToolStates == nil {
+		s.activeToolStates = make(map[string]activeToolState)
+	}
+	s.activeToolStates[sessionKey(chatID, threadID, userID)] = activeToolState{tracker: tracker, detector: detector}
 }
 
 // ClearActiveToolState removes the active run's tool monitoring state.
-func (s *Service) ClearActiveToolState() {
+func (s *Service) ClearActiveToolState(chatID int64, threadID int, userID int64) {
 	s.toolStateMu.Lock()
 	defer s.toolStateMu.Unlock()
-	s.activeToolTracker = nil
-	s.activeLoopDetect = nil
+	delete(s.activeToolStates, sessionKey(chatID, threadID, userID))
 }
 
 // GetActiveToolSnapshot returns a safe snapshot of the active run's tool state.
 // Returns zero values when no run is active.
-func (s *Service) GetActiveToolSnapshot() ActiveToolSnapshot {
+func (s *Service) GetActiveToolSnapshot(chatID int64, threadID int, userID int64) ActiveToolSnapshot {
 	s.toolStateMu.Lock()
-	defer s.toolStateMu.Unlock()
+	state := s.activeToolStates[sessionKey(chatID, threadID, userID)]
+	s.toolStateMu.Unlock()
+
 	var snap ActiveToolSnapshot
-	if s.activeToolTracker != nil {
-		snap.ToolCount = s.activeToolTracker.countLocked()
+	if state.tracker != nil {
+		snap.ToolCount = state.tracker.countLocked()
 	}
-	if s.activeLoopDetect != nil {
-		s.activeLoopDetect.mu.Lock()
-		snap.LoopWarned = s.activeLoopDetect.warned
-		s.activeLoopDetect.mu.Unlock()
-		snap.RecentTools = s.activeLoopDetect.recentDistinctTools(5)
+	if state.detector != nil {
+		state.detector.mu.Lock()
+		snap.LoopWarned = state.detector.warned
+		snap.RecentTools = state.detector.recentDistinctToolsLocked(5)
+		state.detector.mu.Unlock()
 	}
 	return snap
 }

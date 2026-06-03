@@ -118,15 +118,11 @@ func splitCronArgs(input string) []string {
 	}
 
 	for _, r := range input {
-		switch {
-		case r == '"':
-			if inQuotes {
-				flush()
-			} else {
-				flush()
-			}
+		switch r {
+		case '"':
+			flush()
 			inQuotes = !inQuotes
-		case r == ' ' || r == '\t':
+		case ' ', '\t':
 			if inQuotes {
 				current.WriteRune(r)
 			} else {

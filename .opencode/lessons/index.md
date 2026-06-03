@@ -78,3 +78,6 @@
 ## Change session-profile-operability-remediation (2026-06-02)
 - [anti-pattern] default-cwd-full-stack
 - [pattern] threaded-background-receipts
+
+## Change review-gap-remediation (2026-06-02)
+- [process] scope-security-redaction-automation

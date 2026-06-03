@@ -17,6 +17,7 @@ Explain the problem or goal this PR addresses.
 ## Validation
 
 - [ ] `go test ./...`
+- [ ] `go test -race ./internal/pipeline ./internal/telegram` when touching async/session/pipeline/Telegram state
 - [ ] relevant manual validation was performed when needed
 - [ ] docs were updated if behavior or policy changed
 

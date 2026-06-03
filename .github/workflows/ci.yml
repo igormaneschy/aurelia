@@ -87,6 +87,13 @@ jobs:
         working-directory: bridge
         run: npm test
 
+      - name: Verify bridge bundle is in sync
+        run: |
+          if ! git diff --stat --exit-code bridge/bundle.js internal/bridge/bundle.js; then
+            echo "ERROR: bridge bundle is out of sync. Run 'cd bridge && npm run build && cp bundle.js ../internal/bridge/bundle.js' and commit the changes."
+            exit 1
+          fi
+
   test-build:
     runs-on: ubuntu-latest
 
@@ -117,8 +124,11 @@ jobs:
       - name: Test
         run: go test -coverprofile=coverage.out ./...
 
+      - name: Race test async hot paths
+        run: go test -race ./internal/pipeline ./internal/telegram
+
       - name: Coverage
         run: go tool cover -func=coverage.out | tail -1
 
-      - name: Build
+      - name: Verify Go build compiles cleanly
         run: go build -trimpath -ldflags "-s -w" -o ./build/aurelia ./cmd/aurelia

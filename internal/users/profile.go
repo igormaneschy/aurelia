@@ -17,9 +17,9 @@ type Profile struct {
 	Name        string    `json:"name"`
 	Language    string    `json:"language"` // "pt" or "en"
 	IsOwner     bool      `json:"is_owner"`
-	ActiveMode  string    `json:"active_mode,omitempty"`  // developer | researcher | "" (general)
-	Timezone    string    `json:"timezone,omitempty"`     // IANA tz; empty = UTC
-	DefaultCWD  string    `json:"default_cwd,omitempty"`  // fallback CWD for private chats
+	ActiveMode  string    `json:"active_mode,omitempty"` // developer | researcher | "" (general)
+	Timezone    string    `json:"timezone,omitempty"`    // IANA tz; empty = UTC
+	DefaultCWD  string    `json:"default_cwd,omitempty"` // fallback CWD for private chats
 	OnboardedAt time.Time `json:"onboarded_at"`
 	LastSeenAt  time.Time `json:"last_seen_at"`
 }
@@ -93,20 +93,20 @@ func Save(path string, p *Profile) error {
 	}
 	tmpPath := f.Name()
 	if _, err := f.Write(data); err != nil {
-		f.Close()
-		os.Remove(tmpPath)
+		_ = f.Close()
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("write temp file: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("close temp file: %w", err)
 	}
 	if err := os.Chmod(tmpPath, 0o600); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("chmod temp file: %w", err)
 	}
 	if err := os.Rename(tmpPath, path); err != nil {
-		os.Remove(tmpPath)
+		_ = os.Remove(tmpPath)
 		return fmt.Errorf("rename profile: %w", err)
 	}
 	return nil

@@ -679,8 +679,9 @@ export function evaluateToolPolicy(
         return { decision: "block", reason };
       }
 
-      // Check cwd boundary for reads that access file contents.
-      if (toolName === "Read" && cfg.cwd && !isPathInsideCwd(path, cfg.cwd, cfg.allowed_outside_cwd || [])) {
+      // Check cwd boundary for file/directory read-like tools. Grep/Glob/LS can
+      // expose content or project structure, so they must not escape the bound cwd.
+      if (cfg.cwd && !isPathInsideCwd(path, cfg.cwd, cfg.allowed_outside_cwd || [])) {
         const reason = `path outside working directory: ${path}`;
         if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
         return { decision: "block", reason };
@@ -1316,9 +1317,6 @@ async function handleQuery(req: Request): Promise<void> {
         }
       }
 
-      // Diagnostic logging (temporary — remove after confirming detection works)
-      redactedLog(`query done: rid=${reqId} stopReason=${stopReason ?? "none"} piError=${piError ?? "none"} lastErrorMsg=${lastErrorMsg ?? "none"} msgs=${lastMessages.length} tokens=${stats.tokens.input}+${stats.tokens.output} cost=${stats.cost} turns=${turnCount} assistantMsgs=${stats.assistantMessages}`);
-
       const hasExplicitError = piError || stopReason === "error" || lastErrorMsg;
       const zeroTokens = stats.tokens.input === 0
         && stats.tokens.output === 0
@@ -1401,7 +1399,6 @@ async function handleSteer(req: Request): Promise<void> {
   }
 
   clearTimeout(cs.idleTimer);
-  cs.currentReqId = reqId;
   redactedLog(`steer — rid=${reqId} chat=${chatID} thread=${threadID} user=${userID}`);
 
   try {
@@ -1432,7 +1429,6 @@ async function handleFollowUp(req: Request): Promise<void> {
   }
 
   clearTimeout(cs.idleTimer);
-  cs.currentReqId = reqId;
   redactedLog(`followUp — rid=${reqId} chat=${chatID} thread=${threadID} user=${userID}`);
 
   try {

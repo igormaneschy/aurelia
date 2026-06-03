@@ -2,6 +2,7 @@ package telegram
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"sort"
@@ -723,16 +724,33 @@ func (bc *BotController) handleForgetMeConfirm(c telebot.Context) error {
 	// Cancel active runs for this user
 	_ = bc.cancelActiveRunForUser(senderID)
 
-	// Delete cron jobs
+	// Delete cron jobs before deleting the profile. Fail closed so the user is
+	// not told all data was erased while scheduled jobs may still exist.
 	if bc.cronHandler != nil {
-		ctx := context.Background()
-		jobs, _ := bc.cronHandler.service.ListJobsByOwner(ctx, fmt.Sprintf("%d", senderID))
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		ownerID := fmt.Sprintf("%d", senderID)
+		jobs, err := bc.cronHandler.service.ListJobsByOwner(ctx, ownerID)
+		if err != nil {
+			_ = SendTextWithThread(bc.bot, c.Chat(), "❌ Erro ao listar seus agendamentos. Tente novamente ou contacte o admin.", callbackThreadID(c))
+			return fmt.Errorf("listar agendamentos para apagar dados: %w", err)
+		}
+		var deleteErrs []error
 		for _, j := range jobs {
-			_ = bc.cronHandler.service.DeleteJobByOwner(ctx, fmt.Sprintf("%d", senderID), j.ID)
+			if err := bc.cronHandler.service.DeleteJobByOwner(ctx, ownerID, j.ID); err != nil {
+				deleteErrs = append(deleteErrs, fmt.Errorf("apagar agendamento %s: %w", j.ID, err))
+			}
+		}
+		if err := errors.Join(deleteErrs...); err != nil {
+			_ = SendTextWithThread(bc.bot, c.Chat(), "❌ Erro ao apagar seus agendamentos. Tente novamente ou contacte o admin.", callbackThreadID(c))
+			return err
 		}
 	}
 
 	// Delete user data
+	if bc.userStore == nil {
+		return fmt.Errorf("user store unavailable")
+	}
 	if err := bc.userStore.Delete(senderID); err != nil {
 		return err
 	}

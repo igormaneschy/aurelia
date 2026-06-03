@@ -172,7 +172,7 @@ func TestHandleResultEvent_EmptyAfterWorkWithToolSummary_IncludesToolSummary(t *
 	}
 
 	// Pre-populate the in-memory tool summary
-	key := runLogKey(1, 0)
+	key := runLogKey(1, 0, 100)
 	state := &runLogState{runID: "test-run-id"}
 	state.summary.WriteString("Read, Write")
 	state.summaryCount = 2
@@ -206,7 +206,7 @@ func TestHandleResultEvent_EmptyAfterWorkWithToolSummary_IncludesToolSummary(t *
 // fakeRunLogStore is a no-op runlog.Store for tests that need a non-nil runLog.
 type fakeRunLogStore struct{}
 
-func (f *fakeRunLogStore) Start(_ context.Context, _ runlog.RunRecord) error { return nil }
+func (f *fakeRunLogStore) Start(_ context.Context, _ runlog.RunRecord) error  { return nil }
 func (f *fakeRunLogStore) Update(_ context.Context, _ runlog.RunUpdate) error { return nil }
 func (f *fakeRunLogStore) Complete(_ context.Context, _ string, _ runlog.RunStatus, _, _ string) error {
 	return nil

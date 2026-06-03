@@ -179,10 +179,13 @@ func (d *loopDetector) record(toolName string, input any) (bool, string) {
 	d.next = (d.next + 1) % loopDetectorWindow
 	d.count++
 	isLoop, pattern := d.detectLocked()
+	shouldWarn := isLoop && !d.warned
+	if shouldWarn {
+		d.warned = true
+	}
 	d.mu.Unlock()
 
-	if isLoop && !d.warned {
-		d.warned = true
+	if shouldWarn {
 		msg := "🔁 Vou consolidar o que já encontrei para evitar repetição."
 		d.sendWarning(msg)
 		d.steerLoop(msg, toolName)
@@ -339,9 +342,19 @@ func (d *loopDetector) steerLoop(msg string, toolName string) {
 }
 
 // recentDistinctTools returns up to n distinct tool names from the ring buffer
-// in chronological order (oldest first, deduplicated by name). Must be called
-// with d.mu held.
+// in chronological order (oldest first, deduplicated by name).
 func (d *loopDetector) recentDistinctTools(n int) []string {
+	if d == nil {
+		return nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.recentDistinctToolsLocked(n)
+}
+
+// recentDistinctToolsLocked returns up to n distinct tool names from the ring
+// buffer. The caller must hold d.mu.
+func (d *loopDetector) recentDistinctToolsLocked(n int) []string {
 	filled := d.count
 	if filled > loopDetectorWindow {
 		filled = loopDetectorWindow
@@ -351,7 +364,7 @@ func (d *loopDetector) recentDistinctTools(n int) []string {
 	}
 	seen := make(map[string]bool, n)
 	var result []string
-	// Iterate from oldest to newest in ring buffer.
+	// Iterate from newest to oldest, collecting distinct names.
 	for i := filled - 1; i >= 0 && len(result) < n; i-- {
 		pos := (d.next - filled + i + loopDetectorWindow) % loopDetectorWindow
 		name := d.ring[pos].name

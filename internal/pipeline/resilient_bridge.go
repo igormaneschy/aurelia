@@ -19,9 +19,9 @@ type BridgeExecutor interface {
 
 // ResilientBridge wraps a real bridge with retry, circuit breaker, and fallback.
 type ResilientBridge struct {
-	bridge    BridgeExecutor
-	breakers  *circuitBreakerRegistry
-	config    ResilientConfig
+	bridge   BridgeExecutor
+	breakers *circuitBreakerRegistry
+	config   ResilientConfig
 
 	// ContinuitySnapshot is called before fallback to capture current context.
 	// Returns a compact summary string to inject into the fallback prompt.
@@ -31,16 +31,16 @@ type ResilientBridge struct {
 	// OnEvent is called when the resilient bridge emits an observable event
 	// (retry, fallback, circuit breaker). The callback must be fast and
 	// fail-open. May be nil.
-	OnEvent func(phase, level, message string)
+	OnEvent func(chatID int64, threadID int, userID int64, phase, level, message string)
 }
 
 // ResilientConfig configures retry and fallback behavior.
 type ResilientConfig struct {
-	MaxRetries          int
-	RetryBackoffBase    time.Duration
-	FallbackProvider    string
-	FallbackModel       string
-	OpenRouterAPIKey    string // empty = fallback disabled
+	MaxRetries       int
+	RetryBackoffBase time.Duration
+	FallbackProvider string
+	FallbackModel    string
+	OpenRouterAPIKey string // empty = fallback disabled
 }
 
 // DefaultResilientConfig returns sensible defaults.
@@ -91,20 +91,14 @@ func (rb *ResilientBridge) Execute(
 
 	// 1. Circuit breaker open → skip directly to fallback.
 	if rb.breakers.ShouldSkip(provider) {
-		if msg := rb.breakers.NotifyMessage(provider); msg != "" && onNotify != nil {
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						log.Printf("resilient_bridge: panic in onNotify: %v", r)
-					}
-				}()
-				}()
+		if msg := rb.breakers.NotifyMessage(provider); msg != "" {
+			safeNotify(onNotify, msg)
 		}
 		return rb.tryFallback(ctx, req, onNotify, chatID, threadID, userID)
 	}
 
 	// 2. Try primary provider with retries.
-	result := rb.executeWithRetry(ctx, req)
+	result := rb.executeWithRetry(ctx, req, chatID, threadID, userID)
 	if result.Err == nil {
 		rb.breakers.RecordResult(provider, true)
 		return result
@@ -150,12 +144,12 @@ func (rb *ResilientBridge) Execute(
 
 // executeWithRetry attempts the request up to MaxRetries with exponential backoff.
 // Only transient errors trigger retry; others fail fast.
-func (rb *ResilientBridge) executeWithRetry(ctx context.Context, req bridge.Request) ExecuteResult {
+func (rb *ResilientBridge) executeWithRetry(ctx context.Context, req bridge.Request, chatID int64, threadID int, userID int64) ExecuteResult {
 	var lastErr error
 
 	for attempt := 0; attempt <= rb.config.MaxRetries; attempt++ {
 		if attempt > 0 {
-			rb.fireEvent(observability.PhaseRetryStarted, "warn",
+			rb.fireEvent(chatID, threadID, userID, observability.PhaseRetryStarted, "warn",
 				fmt.Sprintf("attempt=%d/%d provider=%s model=%s", attempt, rb.config.MaxRetries, req.Options.Provider, req.Options.Model))
 			delay := rb.config.RetryBackoffBase * (1 << (attempt - 1))
 			select {
@@ -271,7 +265,7 @@ func proxyChannel(prefix []bridge.Event, src <-chan bridge.Event) <-chan bridge.
 // caller (Execute) and passed explicitly instead of stored on the struct to
 // avoid data races — ResilientBridge is shared across goroutines.
 func (rb *ResilientBridge) tryFallback(ctx context.Context, req bridge.Request, onNotify func(string), chatID int64, threadID int, userID int64) ExecuteResult {
-	rb.fireEvent(observability.PhaseFallbackStarted, "warn",
+	rb.fireEvent(chatID, threadID, userID, observability.PhaseFallbackStarted, "warn",
 		fmt.Sprintf("provider=%s model=%s fallback_provider=%s",
 			req.Options.Provider, req.Options.Model, rb.config.FallbackProvider))
 
@@ -354,7 +348,7 @@ func safeNotify(onNotify func(string), msg string) {
 }
 
 // fireEvent calls OnEvent if set, with panic recovery.
-func (rb *ResilientBridge) fireEvent(phase, level, message string) {
+func (rb *ResilientBridge) fireEvent(chatID int64, threadID int, userID int64, phase, level, message string) {
 	if rb.OnEvent == nil {
 		return
 	}
@@ -363,7 +357,7 @@ func (rb *ResilientBridge) fireEvent(phase, level, message string) {
 			log.Printf("resilient_bridge: panic in OnEvent: %v", r)
 		}
 	}()
-	rb.OnEvent(phase, level, message)
+	rb.OnEvent(chatID, threadID, userID, phase, level, message)
 }
 
 // extractChatThreadUser reads ChatID, ThreadID, and UserID from the request's security

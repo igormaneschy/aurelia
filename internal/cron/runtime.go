@@ -239,7 +239,6 @@ func (r *BridgeCronRuntime) ExecuteJob(ctx context.Context, job CronJob) (*Execu
 			log.Printf("cron: job=%s cwd_source=%s invalid cwd: %v", job.ID, cwdSource, validateErr)
 			cwd = ""
 			opts.Cwd = ""
-			cwdSource = "none"
 			cwdAllowsExecution = false
 		} else {
 			cwd = validated

@@ -147,7 +147,7 @@ func TestTryExecutePlan_PassesThreadAndCWD(t *testing.T) {
 	sessions := session.NewStore()
 	sessions.SetCwd(1, 5, "/repo/project")
 
-	fo := &fakeOutput{}
+	fo := &fakeOutput{planDone: make(chan struct{})}
 	s := &Service{
 		output:       fo,
 		orchestrator: orchestrator.NewOrchestrator(nil, orchestrator.OrchestratorConfig{}),
@@ -157,9 +157,10 @@ func TestTryExecutePlan_PassesThreadAndCWD(t *testing.T) {
 	planText := "Here is the plan:\n```aurelia-plan\n{\"tasks\":[{\"id\":\"1\",\"description\":\"task 1\",\"prompt\":\"do it\",\"needs_worktree\":false}]}\n```\n"
 	_, _ = s.tryExecutePlan(1, 5, 100, planText, 42, false)
 
-	// Wait for async goroutine to set planExecuted
-	for i := 0; i < 100 && !fo.planExecuted; i++ {
-		time.Sleep(time.Millisecond)
+	select {
+	case <-fo.planDone:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("ExecuteApprovedPlan should be called when cwd is set")
 	}
 	if !fo.planExecuted {
 		t.Fatal("ExecuteApprovedPlan should be called when cwd is set")
@@ -185,7 +186,7 @@ func TestTryExecutePlan_UsesPrivateDefaultCWD(t *testing.T) {
 	if err := store.Save(&users.Profile{UserID: 42, DefaultCWD: dir}); err != nil {
 		t.Fatal(err)
 	}
-	fo := &fakeOutput{}
+	fo := &fakeOutput{planDone: make(chan struct{})}
 	s := &Service{
 		output:       fo,
 		orchestrator: orchestrator.NewOrchestrator(nil, orchestrator.OrchestratorConfig{}),
@@ -196,8 +197,10 @@ func TestTryExecutePlan_UsesPrivateDefaultCWD(t *testing.T) {
 	planText := "Here is the plan:\n```aurelia-plan\n{\"tasks\":[{\"id\":\"1\",\"description\":\"task 1\",\"prompt\":\"do it\",\"needs_worktree\":false}]}\n```\n"
 	_, _ = s.tryExecutePlan(1, 0, 100, planText, 42, true)
 
-	for i := 0; i < 100 && !fo.planExecuted; i++ {
-		time.Sleep(time.Millisecond)
+	select {
+	case <-fo.planDone:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("ExecuteApprovedPlan should be called with private DefaultCWD")
 	}
 	if !fo.planExecuted {
 		t.Fatal("ExecuteApprovedPlan should be called with private DefaultCWD")

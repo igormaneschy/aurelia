@@ -10,14 +10,29 @@ func summarizeToolResult(content string) string {
 	if content == "" {
 		return ""
 	}
-	// Redact common secret patterns (API keys, tokens, etc.)
-	redacted := redactSecrets(content)
-	// Take first 1KB
-	truncated := strings.TrimSpace(redacted)
-	if len(truncated) > 1024 {
-		truncated = truncated[:1024]
+	return strings.TrimSpace(redactAndTruncate(content, 1024))
+}
+
+// redactAndTruncate redacts credentials before rune-aware truncation. Use this
+// for any content that will be logged, persisted, or injected into prompts.
+func redactAndTruncate(content string, maxRunes int) string {
+	return truncateRunes(redactSecrets(content), maxRunes)
+}
+
+func truncateRunes(content string, maxRunes int) string {
+	if maxRunes <= 0 || len([]rune(content)) <= maxRunes {
+		return content
 	}
-	return truncated
+	var b strings.Builder
+	count := 0
+	for _, r := range content {
+		if count >= maxRunes {
+			break
+		}
+		b.WriteRune(r)
+		count++
+	}
+	return b.String() + "..."
 }
 
 // Pre-compiled redaction regexes to avoid re-parsing on every call.
