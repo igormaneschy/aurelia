@@ -158,17 +158,17 @@ go test ./internal/telegram/ -run TestProgress -v
 
 **Implementation details**:
 - Remover linha de session ID (`sid=... (warm)`)
-- Adicionar: diretório atual (CWD), resumo da sessão (mensagens, tokens)
+- Adicionar: diretório atual (CWD) e estado simples da sessão (ativa/nenhuma conversa ativa)
 - Manter: bridge status, modelo, agendamentos
 - Usar emojis para tornar visualmente escaneável
 
 **Done when**:
 - [ ] Session ID removido da saída
 - [ ] CWD adicionado quando disponível
-- [ ] Resumo de sessão (turns + tokens) adicionado
+- [ ] Estado simples da sessão adicionado sem contagem de mensagens/tokens
 - [ ] Emojis aplicados a cada linha
 - [ ] Teste: saída não contém "sid=" nem "warm" nem "cold"
-- [ ] Teste: saída contém "mensagens" quando há uso
+- [ ] Teste: saída não contém jargão técnico nem métricas inventadas
 - [ ] Tests pass: `go test ./internal/telegram/...`
 
 **Verify:**
@@ -178,30 +178,28 @@ go test ./internal/telegram/ -run TestStatus -v
 
 ---
 
-### T6: Reset com Memória
+### T6: Reset Curto
 
-**What**: Mostrar resumo da sessão ao resetar.
+**What**: Confirmar reset sem inventar métricas de mensagens/tokens que pertencem ao PI SDK.
 **Where**: `internal/telegram/commands.go:cmdSessionReset`, `internal/telegram/bot_middleware.go:handleResetCommand`
 **Depends on**: None
-**Reuses**: `session.Tracker.Get()`
+**Reuses**: fluxo existente de clear/cancel
 
 **Implementation details**:
-- Antes de `Clear()`, capturar `usage := bc.tracker.Get(chatID)`
-- Se `usage.NumTurns > 0`, retornar mensagem com resumo
-- Se vazio, manter mensagem original
-- `handleResetCommand` também deve usar o resumo (reutilizar `cmdSessionReset` ou duplicar lógica)
+- Não consultar nem estimar uso de tokens/mensagens em Aurelia.
+- Resposta padrão: `🗑️ Sessão resetada. Próxima mensagem inicia conversa nova.`
+- Se havia processamento ativo, prefixar com a interrupção.
+- Reset por troca de modelo continua mostrando apenas escopo (privado/tópico).
 
 **Done when**:
-- [ ] `cmdSessionReset` captura usage antes de limpar
-- [ ] Mensagem com resumo quando aplicável
-- [ ] `handleResetCommand` mostra resumo
-- [ ] Teste: 3 mensagens → reset mostra "3 mensagens"
-- [ ] Teste: 0 mensagens → reset mostra mensagem simples
+- [ ] `/new` retorna mensagem curta
+- [ ] Resposta não contém "mensagens" nem "tokens"
+- [ ] Reset com processamento ativo ainda informa interrupção
 - [ ] Tests pass: `go test ./internal/telegram/...`
 
 **Verify:**
 ```bash
-go test ./internal/telegram/ -run TestResetSummary -v
+go test ./internal/telegram/ -run TestCmdSessionReset -v
 ```
 
 ---
@@ -302,7 +300,7 @@ Phase 1 (Parallel, independentes):
 Phase 2 (Parallel, independentes entre si):
   T4 ── Progresso Rico
   T5 ── Status para Humanos
-  T6 ── Reset com Memória
+  T6 ── Reset Curto
   T7 ── Erros + Help + Documentos
 
 Phase 3 (Sequential, após T1–T7):
@@ -332,7 +330,7 @@ T7 ─────────────────────────�
 | T3: Model Switch Local | 2 lugares + mensagem | Granular |
 | T4: Progresso Rico | 1 struct + 2 métodos + testes | Granular |
 | T5: Status | 1 função refatorada + testes | Granular |
-| T6: Reset com Memória | 1 função refatorada + 1 handler | Granular |
+| T6: Reset Curto | 1 função de mensagem + testes | Granular |
 | T7: Mensagens | 6 constantes/mensagens atualizadas | Granular (mas coeso) |
 | T8: Concorrência delegada | ajuste de mensagens/requisitos, sem fila paralela | Granular |
 | T9: Integration | Testes e build | Granular |

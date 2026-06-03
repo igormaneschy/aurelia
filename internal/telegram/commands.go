@@ -368,7 +368,7 @@ func (bc *BotController) resetCurrentSession(chatID int64, threadID int, invalid
 		bc.sessions.ClearSessionForUser(chatID, threadID, userID)
 	}
 	log.Printf("command: session reset for chat=%d thread=%d user=%d", chatID, threadID, userID)
-	return formatResetSummary(session.Usage{}, canceledActive), nil
+	return formatResetSummary(canceledActive), nil
 }
 
 func (bc *BotController) cancelActiveRun(chatID int64, threadID int, userID ...int64) bool {
@@ -378,25 +378,12 @@ func (bc *BotController) cancelActiveRun(chatID int64, threadID int, userID ...i
 	return bc.pipeline.Cancel(chatID, threadID, userID...)
 }
 
-func formatResetSummary(usage session.Usage, canceledActive bool) string {
+func formatResetSummary(canceledActive bool) string {
 	prefix := ""
 	if canceledActive {
 		prefix = "🛑 Processamento em andamento interrompido.\n"
 	}
-	if usage.NumTurns <= 0 {
-		return prefix + "Sessão resetada. Próxima mensagem inicia conversa nova."
-	}
-	return prefix + fmt.Sprintf("🗑️ Sessão resetada (%d mensagens, %s tokens).\nPróxima mensagem inicia conversa nova.", usage.NumTurns, formatTokenCount(usage))
-}
-
-// formatTokenCount prefixes "~" only when the displayed total is a turn-based
-// estimate rather than a real count from the bridge.
-func formatTokenCount(u session.Usage) string {
-	total := u.TotalTokens()
-	if u.EstimatedTokens > u.InputTokens+u.OutputTokens {
-		return fmt.Sprintf("~%d", total)
-	}
-	return fmt.Sprintf("%d", total)
+	return prefix + "🗑️ Sessão resetada. Próxima mensagem inicia conversa nova."
 }
 
 func (bc *BotController) cmdCronList(chatID int64, threadID int, userID int64) (string, error) {
@@ -1057,18 +1044,14 @@ func (bc *BotController) resetCurrentModelSession(chatID int64, threadID int, us
 	if bc.sessions != nil {
 		bc.sessions.ClearSessionForUser(chatID, threadID, uid)
 	}
-	return formatModelResetSummary(threadID, session.Usage{})
+	return formatModelResetSummary(threadID)
 }
 
-func formatModelResetSummary(threadID int, usage session.Usage) string {
-	scope := "Sessão privada resetada."
+func formatModelResetSummary(threadID int) string {
 	if threadID > 0 {
-		scope = "Sessão deste tópico foi resetada."
+		return "Sessão deste tópico foi resetada."
 	}
-	if usage.NumTurns <= 0 {
-		return scope
-	}
-	return fmt.Sprintf("%s (%d mensagens, %s tokens).", strings.TrimSuffix(scope, "."), usage.NumTurns, formatTokenCount(usage))
+	return "Sessão privada resetada."
 }
 
 // extractModelName pulls the model name from a set-model command. Returns

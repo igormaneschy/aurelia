@@ -178,9 +178,11 @@ func TestCmdSessionReset(t *testing.T) {
 		t.Fatalf("other user session should be preserved, got %q", sid)
 	}
 
-	// Since tracker is removed, we only check that reset reply still works
-	if !strings.Contains(reply, "resetada") {
-		t.Fatalf("expected reset summary in reply, got %q", reply)
+	if reply != "🗑️ Sessão resetada. Próxima mensagem inicia conversa nova." {
+		t.Fatalf("unexpected reset reply: %q", reply)
+	}
+	if strings.Contains(reply, "mensagens") || strings.Contains(reply, "tokens") {
+		t.Fatalf("reset reply must not invent PI SDK usage stats: %q", reply)
 	}
 }
 
@@ -196,7 +198,7 @@ func TestCmdSessionReset_EmptySessionUsesSimpleMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cmdSessionReset() error = %v", err)
 	}
-	if reply != "Sessão resetada. Próxima mensagem inicia conversa nova." {
+	if reply != "🗑️ Sessão resetada. Próxima mensagem inicia conversa nova." {
 		t.Fatalf("unexpected empty reset reply: %q", reply)
 	}
 }

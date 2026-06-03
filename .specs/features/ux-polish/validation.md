@@ -14,7 +14,7 @@
 | T3: Model Switch Local | Done | `ClearSession(chatID, threadID)` preserves other topics and CWD |
 | T4: Progresso Rico | Done | Timer + 8 tools + tests |
 | T5: Status para Humanos | Done | `/status` remove jargão técnico do usuário; detalhes ficam em `/debug` |
-| T6: Reset com Memória | Partial | `/new` reseta corretamente, mas revisão 2026-06-03 apontou que resumo com contagem real ainda não tem fonte confiável |
+| T6: Reset Curto | Done | `/new` confirma reset sem inventar contagem de mensagens/tokens do PI SDK |
 | T7: Erros + Help + Documentos | Done | Actionable messages + help examples + unsupported document hint |
 | T8: Concorrência delegada | Revised | PI SDK gerencia mensagens subsequentes; Aurelia não deve prometer posição de fila própria |
 | T9: Integration & Regression | Done | `go test ./... -short`; `go build -o /tmp/aurelia-build ./cmd/aurelia/` |
@@ -106,7 +106,7 @@
 | # | Criterion | Result | Evidence |
 |---|-----------|--------|----------|
 | 1 | WHEN /status THEN sem session ID ou warm/cold | Passed | `TestCmdStatus` |
-| 2 | WHEN /status THEN com modelo, projeto, mensagens, tokens | Passed | `TestCmdStatus` |
+| 2 | WHEN /status THEN com modelo, projeto e sessão simples, sem mensagens/tokens inventados | Passed | `TestCmdStatus` |
 | 3 | WHEN sem sessão THEN "nenhuma conversa ativa" | Passed | `TestCmdStatus_NoActiveSessionUsesClearText` |
 | 4 | WHEN agendamentos THEN contagem amigável | Passed | `TestCmdStatus` |
 
@@ -114,13 +114,13 @@
 
 ---
 
-### P2: Reset com Memória — Should Have
+### P2: Reset Curto — Should Have
 
 | # | Criterion | Result | Evidence |
 |---|-----------|--------|----------|
-| 1 | WHEN /new com sessão THEN resumo (mensagens + tokens) | Passed | `TestCmdSessionReset` |
-| 2 | WHEN /new vazio THEN mensagem simples | Passed | `TestCmdSessionReset_EmptySessionUsesSimpleMessage` |
-| 3 | WHEN reset via troca de modelo THEN resumo também | Passed | `formatModelResetSummary()` tests via model reset tests |
+| 1 | WHEN /new THEN confirmação curta | Passed | `TestCmdSessionReset` |
+| 2 | WHEN /new vazio THEN mesma mensagem curta | Passed | `TestCmdSessionReset_EmptySessionUsesSimpleMessage` |
+| 3 | WHEN reset via troca de modelo THEN só escopo privado/tópico | Passed | `formatModelResetSummary()` tests via model reset tests |
 
 **Status**: Passed automated validation.
 
@@ -190,7 +190,7 @@
 **Overall**: Automated validation passed; manual Telegram UX smoke test pending.
 
 **O que funciona (verificado por teste)**:
-- Human bytes, progress timer/8 tools, `/status` sem jargão técnico, model switch scoped to thread, actionable error strings, help examples, unsupported document hints. Revisão posterior apontou que reset summaries ainda não usam dados reais.
+- Human bytes, progress timer/8 tools, `/status` sem jargão técnico, `/new` curto sem métricas inventadas, model switch scoped to thread, actionable error strings, help examples, unsupported document hints.
 
 **Teste manual**:
 - Pending: verify 👀 appears within 500ms and becomes ✅ in Telegram; verify forum topic model switch preserves other topic context.
