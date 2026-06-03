@@ -2,9 +2,9 @@
 
 ## Vision
 
-Aurelia OS is an autonomous agent operating system accessible via Telegram. The goal is not to reimplement what PI already does — it's to **orchestrate it**, adding persistence, scheduling, multi-project support, and a natural Telegram interface on top.
+Aurelia OS is a personality, context, and product layer accessible via Telegram. The goal is not to reimplement what PI or future SDK harnesses already do — it's to **wrap and orchestrate them**, adding identity, Prompt Profiles, persistence, scheduling, multi-project support, and a natural Telegram interface on top.
 
-One persistent Go daemon, many projects, many agents.
+One persistent Go daemon, many projects, many prompt profiles.
 
 ## Architectural Thesis
 
@@ -15,6 +15,7 @@ Telegram / CLI / Cron / future interfaces
         ↓
 Aurelia Product Layer
 - identity and persona
+- Prompt Profile selection/injection (`/mode`, `/agents`, `@profile`)
 - Telegram-native UX
 - workflows and conversational planning
 - operational memory and continuity context
@@ -38,7 +39,7 @@ The strategic differentiator is the persistent Telegram product layer: identity,
 ## Goals
 
 - **Natural interface** — Talk to an AI assistant via Telegram with text, photos, voice, documents. No CLI required for daily use.
-- **Agent orchestration** — Route messages to specialist agents, schedule autonomous execution, deliver results back to Telegram.
+- **Prompt Profile orchestration** — Package each request with the right personality/context profile, schedule autonomous execution, and deliver results back to Telegram.
 - **Local-first** — Single binary, SQLite, no cloud dependencies beyond LLM providers. Runs on your machine, owns your data.
 - **Stay light** — Don't rebuild what the PI SDK already provides. Wrap it, orchestrate it, extend it.
 - **Multi-provider** — Not locked to Anthropic. Support Kimi, OpenRouter, Zai, Alibaba, and whatever comes next.
@@ -54,12 +55,12 @@ The strategic differentiator is the persistent Telegram product layer: identity,
 ## Current State (June 2026)
 
 ### Core operational
-- Core loop working: Telegram → Agent routing → Bridge → PI SDK → Response
+- Core loop working: Telegram → Prompt Profile resolution → Bridge → PI SDK → Response
 - Persona system: IDENTITY.md + SOUL.md + USER.md assembled into system prompts
 - Cron scheduler: SQLite-backed, recurring and one-time jobs, Telegram delivery
 - Multi-modal input: text, photos (albums), voice (Groq STT), documents
 - Session continuity: resume via PI `session_file`; context pruning delegated to PI SDK compaction
-- Agent registry: markdown-defined Aurelia specialists with model/tool/MCP overrides (migration to PI-native agents remains open)
+- Prompt Profile registry: markdown-defined Aurelia context profiles with optional model/tool/MCP hints; legacy storage remains `~/.aurelia/agents/` for compatibility
 - Onboarding CLI: interactive setup for providers, tokens, and configuration
 - Vision model fallback + Groq STT + bridge image format (PI SDK compatible)
 - Tool monitoring: `toolCallTracker` + `loopDetector` + heartbeat monitor prevent silent explosions and loop cycles
@@ -79,8 +80,8 @@ The strategic differentiator is the persistent Telegram product layer: identity,
 - **Tool Monitoring hardening (Jun 2026)**: `loopDetector.ResetForNewTurn()`, elapsed time in steer messages, `detectToolSpiral` prefix-match, `AddToolEvent` nudge integration.
 
 ### In progress
-- Closing the conceptual boundary: PI owns model/session/context/tool execution; Aurelia owns Telegram UX, identity/persona, persistence, scheduling, memory, project binding, policy/audit and orchestration.
-- Agent registry boundary decision: keep Aurelia specialists as a product-layer feature for now; investigate PI-native parsing/discovery later via `agentsFilesOverride` rather than forcing a user-facing migration.
+- Closing the conceptual boundary: SDK harnesses own model/session/context/tool execution; Aurelia owns Telegram UX, identity/persona, Prompt Profile injection, persistence, scheduling, memory, project binding, policy/audit and orchestration.
+- Prompt Profile boundary decision: keep Aurelia profiles as a product-layer context feature for now; investigate SDK-native parsing/discovery later via adapter-specific mappings rather than forcing a user-facing migration.
 - Memory boundary realignment: project memory scopes remain Aurelia operational context; transversal Wiki memory is handled by PI via `ai-memory` MCP.
 
 ## Roadmap
@@ -88,15 +89,16 @@ The strategic differentiator is the persistent Telegram product layer: identity,
 Ver `.specs/project/ROADMAP.md` para o sequenciamento completo. Resumo:
 
 ```
-Sprint 0 → Delegate to PI SDK Native core ✅; remaining: agent registry boundary decision
+Sprint 0 → Delegate to PI SDK Native core ✅; remaining registry boundary superseded by Prompt Profiles
 Sprint A → User Isolation MVP + runtime hardening ✅; remaining context-scoped operational memory moved to Sprint E
 Sprint B → Operational Observability (run_id, timeline, /debug, métricas locais)
 Sprint C → Close Orchestration Cycle (conectar scaffold existente)
 Sprint D → ~~Plan Mode Architecture~~ 🗑️ Removido 2026-05-24; planejamento conversational
 Sprint E → Context-Scoped Operational Memory
 Sprint F → Memory Boundary Realignment ✅ (PI + ai-memory MCP, no internal Wiki Gateway)
-Sprint G → Session/Profile Operability
+Sprint G → Session/Profile Operability ✅
+Sprint G2 → Prompt Profiles (`/mode`, `/agents`, `@profile` unification)
 Sprint H → Learning Nudge escopado
-Sprint I → Agent Comms
-Sprint J → Auto-Skills
+Sprint I → Agent Comms 🗑️ descartado; SDK responsibility
+Sprint J → Auto-Skills 🗑️ descartado; SDK responsibility
 ```

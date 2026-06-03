@@ -367,7 +367,7 @@ func (bc *BotController) handleHelpCommand(c telebot.Context) error {
         "/usage — Ver uso de tokens da sessão\n" +
         "/cwd <path> — Definir diretório de trabalho\n" +
         "/cron — Gerenciar agendamentos\n" +
-        "/agents — Listar agentes disponíveis\n" +
+        "/agents — Listar perfis disponíveis\n" +
         "/model — Ver/trocar modelo ativo\n" +
         "/help — Mostrar esta mensagem\n\n" +
         "💡 *Também entendo comandos naturais:*\n" +

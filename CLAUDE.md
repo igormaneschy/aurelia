@@ -61,7 +61,7 @@ For trivial tasks, implement directly and validate.
 | `internal/bridge/` | Go client for the TS Bridge process (PI SDK) |
 | `internal/pipeline/` | Reusable turn driver: prompt + bridge + plan dispatch + resilience + run supervisor |
 | `internal/orchestrator/` | Plan→workers→validate cycle, worktrees, quality gate, git/PR |
-| `internal/agents/` | Agent registry (load markdown definitions) |
+| `internal/agents/` | Legacy Prompt Profile registry (`~/.aurelia/agents/*.md`, `@profile` compatibility) |
 | `internal/session/` | PI session_file resume, cwd state, nudge buffers |
 | `internal/persona/` | Identity files, prompt assembly |
 | `internal/cron/` | Schedule store, scheduler, bridge-backed runtime |

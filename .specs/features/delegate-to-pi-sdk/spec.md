@@ -1,6 +1,6 @@
 # Delegate to PI SDK Native — Eliminate Reimplementations
 
-**Status:** 🟡 Parcialmente implementado (Tasks 0–5 + 7–8 concluídas; Task 6 pendente para sprint futuro)  
+**Status:** 🟡 Parcialmente implementado (Tasks 0–5 + 7–8 concluídas; Task 6 supersedida por Prompt Profiles)  
 **Companion specs:** `.specs/features/security-guard-rails/`, `.specs/features/project-binding/`  
 **Related:** `.specs/features/project-memory/`, `.specs/features/wiki-memory/` (superseded), `ROADMAP.md`  
 **Prerequisite:** `security-guard-rails` (v0.8.0) — must be stable before removing Go policy engine  
@@ -15,7 +15,7 @@ O Aurélia reimplementa em Go e TypeScript várias funcionalidades que o **PI SD
 
 A análise completa (ver research session) identificou **7 áreas** de duplicação:
 
-1. **Agent Registry** — Go parser + indexação manual vs. PI `AGENTS.md` discovery nativo
+1. **Legacy Agent Registry** — Go parser + indexação manual vs. PI `AGENTS.md` discovery nativo. Este ponto foi realinhado por `.specs/features/prompt-profiles/`: arquivos `~/.aurelia/agents/*.md` permanecem como Prompt Profiles Aurelia-managed, não como agentes executores concorrentes.
 2. **Security Policy** — Go policy engine (~514 linhas) + Bridge TS hooks (~300 linhas) vs. PI `beforeToolCall` nativo
 3. **Session Management** — Go in-memory store + Bridge LRU cache vs. PI `SessionManager` persistente
 4. **Token Tracking / Compaction** — Go manual tracker + auto-reset vs. PI `SettingsManager.compaction`
@@ -219,9 +219,11 @@ const settingsManager = SettingsManager.inMemory({
 |------|--------|-------|
 | `internal/pipeline/prompt_builder.go` | Delegate CLAUDE.md/AGENTS.md to PI; simplify assembly | -260 |
 
-### Phase 5: Agent Registry (3 dias)
+### Phase 5: Legacy Agent Registry / Prompt Profiles (superseded)
 
-**Objetivo:** Eliminar `internal/agents/registry.go` e delegar discovery ao PI SDK.
+**Objetivo original:** Eliminar `internal/agents/registry.go` e delegar discovery ao PI SDK.
+
+**Atualização conceitual (Junho 2026):** esta fase foi supersedida pela spec de Prompt Profiles. O diretório `~/.aurelia/agents/` deve ser tratado como storage legado de Prompt Profiles Aurelia-managed. A execução continua no SDK; a Aurelia injeta personalidade/contexto. Delegar parsing nativo ao PI via `agentsFilesOverride` pode ser revisitado por adapter, mas não deve mudar a semântica de produto.
 
 #### Opção A: Migração para diretório PI-native (mais disruptiva)
 

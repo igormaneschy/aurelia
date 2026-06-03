@@ -153,7 +153,7 @@ interface DefaultResourceLoaderOptions {
 
 **Evidence:** Currently used with `noContextFiles: false` in `bridge/index.ts`.
 
-**Conclusion:** PI now auto-discovers `CLAUDE.md` and `AGENTS.md` in the project directory. The `agentsFilesOverride` option remains a future path for delegating specialist-agent parsing/discovery while keeping files under `~/.aurelia/agents/`.
+**Conclusion:** PI now auto-discovers `CLAUDE.md` and `AGENTS.md` in the project directory. The `agentsFilesOverride` option remains a future adapter path if Aurelia wants an SDK-native representation of Prompt Profiles while keeping user-facing files under Aurelia-managed paths. Product semantics should remain stable: Aurelia profiles inject personality/context; PI executes.
 
 ---
 

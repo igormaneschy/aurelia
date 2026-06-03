@@ -124,7 +124,7 @@ This uses `make install` (build → `.new` → `mv` — never corrupts a running
 |---------|---------------|
 | `cmd/aurelia/` | Entrypoint, wiring, onboarding |
 | `internal/bridge/` | Go client for the TS Bridge process |
-| `internal/agents/` | Agent registry (load markdown definitions) |
+| `internal/agents/` | Legacy Prompt Profile registry (`~/.aurelia/agents/*.md`, `@profile` compatibility) |
 | `internal/session/` | PI session_file resume, cwd state, nudge buffers |
 | `internal/persona/` | Identity files, prompt assembly |
 | `internal/cron/` | Schedule store, scheduler, bridge-backed runtime |

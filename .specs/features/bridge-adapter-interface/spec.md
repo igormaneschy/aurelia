@@ -13,7 +13,7 @@ O problema não é o PI SDK em si — é a ausência de costura. Não existe uma
 3. **Bloqueio para multi-engine**: Quando se quiser usar um segundo SDK (ex: API nativa do Anthropic sem PI, um agente local, ou um stub de desenvolvimento), será necessário tocar em dezenas de call sites no pipeline em vez de criar um novo adapter.
 4. **`input any` prolifera**: O campo `bridge.Event.Input` é `any` (deserializado como `map[string]interface{}`). O pipeline faz `json.Marshal(ev.Input)` em múltiplos sítios. Esse problema devia ser resolvido na fronteira, não espalhado.
 
-O momento certo para criar esta abstracção é **agora**, enquanto o código tem um único implementador e o refactor ainda é cirúrgico. Após o Sprint de Agent Comms, cada agente vai querer o seu próprio motor — e nessa altura a abstracção será obrigatória, mas muito mais cara.
+O momento certo para criar esta abstracção é **agora**, enquanto o código tem um único implementador e o refactor ainda é cirúrgico. Após a unificação de Prompt Profiles e o início de multi-harness routing, cada profile poderá declarar preferências de harness/model/tool policy — e nessa altura a abstracção será obrigatória, mas muito mais cara.
 
 ## Goals
 

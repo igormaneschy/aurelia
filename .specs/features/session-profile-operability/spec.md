@@ -234,6 +234,8 @@ Telegram fallback detection should be conservative. Match known messages such as
 
 ## 4. Feature 2 Spec — Mode Profiles
 
+> **Conceptual update (Junho 2026):** this feature shipped as `Mode Profiles` in v0.21.0, but the product concept is now realigned by `.specs/features/prompt-profiles/`. `ActiveMode` remains the backward-compatible storage field, while `/mode` should be understood as selecting the user's default **Prompt Profile**. `@profile` can override it for one message, and `/agents` lists compatible Prompt Profiles. Avoid adding new behavior that composes mode overlays and agent prompts by default.
+
 ### 4.1 Problem
 
 Aurelia has rich persona assembly, but no safe, durable way for an authorized user to switch behavioral focus without editing files. A mode should be a lightweight per-user prompt overlay that changes the next request’s behavior while leaving Pi session history intact.

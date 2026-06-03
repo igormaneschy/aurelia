@@ -142,7 +142,7 @@
 
 1. **Poll:** Scheduler ticks every 15s, queries `ListDueJobs(now, limit=50)`
 2. **Dedup:** `sync.Map.LoadOrStore(jobID)` prevents concurrent runs of same job
-3. **Execute:** `BridgeCronRuntime.ExecuteJob()` builds persona+agent prompt, resolves persisted `cwd` (prompt parsing is fallback-only), calls `bridge.ExecuteSync()`
+3. **Execute:** `BridgeCronRuntime.ExecuteJob()` builds persona + Prompt Profile context, resolves persisted `cwd` (prompt parsing is fallback-only), calls `bridge.ExecuteSync()`
 4. **Record:** Atomic transaction: `RecordExecutionTx` + `UpdateJobTx`
 5. **Deliver:** `TelegramDelivery.Deliver()` sends result to `target_chat_id`
 6. **Schedule:** Compute `nextRunAt` (cron) or deactivate (once)
@@ -160,7 +160,7 @@
 - `internal/cron/` — Scheduler, store, runtime, delivery (self-contained with SQLite)
 - `internal/dream/` — Background memory consolidation (dream) and extraction (nudge)
 - `internal/memoryux/` — Memory layer status, checkpoints, receipts, formatting
-- `internal/agents/` — Agent definition loading, routing, classification
+- `internal/agents/` — Legacy Prompt Profile loading/routing compatibility for `~/.aurelia/agents/*.md` and `@profile`; conceptually profiles inject context, SDK harnesses execute
 - `internal/persona/` — Identity file parsing, system prompt building
 - `internal/session/` — PI `session_file` resume mapping, conversation CWD state, nudge buffers
 - `internal/config/` — App configuration loading, provider management

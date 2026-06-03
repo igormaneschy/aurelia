@@ -292,6 +292,28 @@ Prompt assembly por TurnContext:
 
 ---
 
+## 8b. Prompt Profiles — `/mode`, `/agents`, `@profile`
+
+**Spec:** `.specs/features/prompt-profiles/`
+**Status:** 🔴 Draft — Junho 2026
+**Depende de:** Session/Profile Operability + Security Guard-Rails + Bridge Adapter Interface
+
+**Problem:** `/mode`, `/agents` e `@agent` estavam conceitualmente próximos demais: todos eram prompt injections/context hints enviados ao SDK, mas a documentação tratava parte deles como “agentes” executores. Isso conflita com a boundary canônica: SDKs executam; Aurelia injeta personalidade, contexto e policy.
+
+**Scope:**
+
+- unificar o conceito como **Prompt Profiles**;
+- `/mode <profile>` define o profile padrão;
+- `@profile <pedido>` aplica override one-shot;
+- `/agents` permanece por compatibilidade, mas vira catálogo de profiles;
+- regra de precedência: `@profile` explícito > `/mode` ativo > `general`;
+- evitar composição concorrente de overlays fortes por padrão;
+- esconder metadata operacional no catálogo público/grupo.
+
+**Princípio:** Aurelia é a camada de personalidade/contexto acima dos harnesses. Profiles empacotam o pedido; SDKs executam.
+
+---
+
 ## 9. Agent Comms (Discarded)
 
 **Spec:** `.specs/features/agent-comms/`
@@ -365,10 +387,13 @@ D0. Memory Contract & Spec Hygiene ✅
 6. Memory Boundary Realignment ✅
       │
       ▼
-7. Session/Profile Operability  ← próximo
+ 7. Session/Profile Operability ✅
       │
       ▼
-8. Learning Nudge
+ 8b. Prompt Profiles
+      │
+      ▼
+ 8. Learning Nudge
       │
       ▼
 11. TUI (Terminal User Interface)
@@ -384,7 +409,7 @@ Sprint 0: Delegate to PI SDK Native
   ├─ ✅ Go: simplify session store around PI session_file
   ├─ ✅ Go: remove auto-reset/token-threshold lifecycle
   ├─ 🟡 Go: prompt builder reduced, but still owns Aurelia persona/memory/Telegram sections
-  ├─ 🟡 Decision: keep internal/agents as Aurelia product feature for now; investigate PI-native discovery via agentsFilesOverride
+  ├─ 🟡 Decision superseded by Prompt Profiles: keep legacy `internal/agents` as compatibility loader for Aurelia Prompt Profiles; investigate SDK-native mappings via adapters later
   └─ 🟡 Validation/docs: E2E specialist + stale specs cleanup
 
 Sprint A: User Isolation MVP + runtime hardening
@@ -449,13 +474,20 @@ Sprint F: Memory Boundary Realignment ✅ docs/decision
   ├─ ✅ separar memória operacional do Aurelia de Wiki memory do PI
   └─ ✅ ajustar specs dependentes principais
 
-Sprint G: Session/Profile Operability  ← próximo
+Sprint G: Session/Profile Operability ✅
   ├─ Runlog Message Bridge: completar nudge threading/fallback se ainda pendente
   ├─ Profile fields: ActiveMode, Timezone, DefaultCWD
   ├─ /mode + mode overlays no prompt
   ├─ cron timezone-aware
   ├─ DefaultCWD fallback só em private chat
   └─ onboarding timezone
+
+Sprint G2: Prompt Profiles
+  ├─ `/mode` = default Prompt Profile
+  ├─ `@profile` = one-shot Prompt Profile override
+  ├─ `/agents` = compatible Prompt Profile catalog
+  ├─ no default composition of mode overlay + agent prompt
+  └─ metadata-safe catalog in groups/non-owner contexts
 
 Sprint H: Learning Nudge
   ├─ transcript recorder por SessionKey
