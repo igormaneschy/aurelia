@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.23.1 - 2026-06-03
+
+### Fixed
+- **Model config preserved on failed selection** — When a model selection fails
+  (e.g., invalid model name), the previous model configuration is now preserved
+  instead of being lost. Previously the config would be overwritten with the
+  failed selection attempt.
+- **Reset confirmation concise** — The `/reset` confirmation message is now kept
+  concise, removing unnecessary verbosity.
+
+### Documentation
+- Updated project specs, README, AGENTS.md, and CLAUDE.md
+- Added prompt-profiles feature spec
+- Captured lessons learned on model selection config isolation and test config
+  isolation
+
 ## v0.23.0 - 2026-06-03
 
 ### Security
