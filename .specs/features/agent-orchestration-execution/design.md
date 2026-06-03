@@ -2,7 +2,7 @@
 
 **Spec:** `.specs/features/agent-orchestration-execution/spec.md`
 **Roadmap step:** 3 — Close Orchestration Cycle
-**Status:** 🟡 Parcial (scaffold ~40%, ciclo não fecha)
+**Status:** ✅ Implementado em v0.16.0 (2026-05-24)
 **Depende de:** Project Binding (✅ done), User Isolation runtime hardening (✅), Operational Observability
 
 ---

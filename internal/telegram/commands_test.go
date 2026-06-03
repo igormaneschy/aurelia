@@ -14,6 +14,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/cron"
+	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/session"
@@ -60,6 +61,7 @@ func TestMatch(t *testing.T) {
 		{name: "quais agents", text: "quais agents?", want: cmdPtr(CmdListAgents)},
 		{name: "lista agents", text: "lista agents", want: cmdPtr(CmdListAgents)},
 		{name: "meus agents", text: "meus agents", want: cmdPtr(CmdListAgents)},
+		{name: "/agents explain", text: "/agents explain coder", want: cmdPtr(CmdExplainProfile)},
 
 		// --- list_models ---
 		{name: "quais modelos", text: "quais modelos?", want: cmdPtr(CmdListModels)},
@@ -78,6 +80,7 @@ func TestMatch(t *testing.T) {
 		{name: "checkpoint de memoria", text: "checkpoint de memoria", want: cmdPtr(CmdMemoryCheckpoint)},
 
 		// --- mode_set ---
+		{name: "/mode explain", text: "/mode explain developer", want: cmdPtr(CmdExplainProfile)},
 		{name: "/mode developer", text: "/mode developer", want: cmdPtr(CmdSetMode)},
 		{name: "/mode researcher", text: "/mode researcher", want: cmdPtr(CmdSetMode)},
 		{name: "/mode general", text: "/mode general", want: cmdPtr(CmdSetMode)},
@@ -716,7 +719,7 @@ func TestCmdListAgents_WithAgents(t *testing.T) {
 		agents: reg,
 	}
 
-	reply, err := bc.cmdListAgents(0)
+	reply, err := bc.cmdListAgents(newTestTelegramContext(42, 0, 100, ""))
 	if err != nil {
 		t.Fatalf("cmdListAgents() error = %v", err)
 	}
@@ -732,12 +735,139 @@ func TestCmdListAgents_Empty(t *testing.T) {
 		config: &config.AppConfig{Providers: map[string]config.ProviderConfig{}},
 	}
 
-	reply, err := bc.cmdListAgents(0)
+	reply, err := bc.cmdListAgents(newTestTelegramContext(42, 0, 100, ""))
 	if err != nil {
 		t.Fatalf("cmdListAgents() error = %v", err)
 	}
 	if !strings.Contains(reply, "Nenhum") {
 		t.Fatalf("expected 'nenhum' message, got %q", reply)
+	}
+}
+
+func TestCmdListAgents_HidesPrivateProfilesForNonOwner(t *testing.T) {
+	t.Parallel()
+
+	resolver := buildTestProfileResolver(t, map[string]testProfileFile{
+		"public": {Description: "Visible profile", Public: true, Prompt: "public prompt"},
+		"secret": {Description: "Hidden profile", Public: false, Prompt: "secret prompt"},
+	})
+	bc := &BotController{
+		config:   &config.AppConfig{DefaultOwnerUserID: 1, Providers: map[string]config.ProviderConfig{}},
+		profiles: resolver,
+	}
+
+	nonOwnerReply, err := bc.cmdListAgents(newTestTelegramContext(42, 0, 2, ""))
+	if err != nil {
+		t.Fatalf("cmdListAgents(non-owner) error = %v", err)
+	}
+	if strings.Contains(nonOwnerReply, "secret") || strings.Contains(nonOwnerReply, "Hidden profile") {
+		t.Fatalf("non-owner listing leaked private profile: %q", nonOwnerReply)
+	}
+	if !strings.Contains(nonOwnerReply, "public") {
+		t.Fatalf("non-owner listing should include public profile, got %q", nonOwnerReply)
+	}
+
+	ownerReply, err := bc.cmdListAgents(newTestTelegramContext(42, 0, 1, ""))
+	if err != nil {
+		t.Fatalf("cmdListAgents(owner) error = %v", err)
+	}
+	if !strings.Contains(ownerReply, "secret") {
+		t.Fatalf("owner listing should include private profile, got %q", ownerReply)
+	}
+}
+
+func TestCmdExplainProfile_HidesPromptAndPrivateProfiles(t *testing.T) {
+	t.Parallel()
+
+	resolver := buildTestProfileResolver(t, map[string]testProfileFile{
+		"public": {Description: "Visible profile", Public: true, Prompt: "INTERNAL SECRET PROMPT BODY"},
+		"secret": {Description: "Hidden profile", Public: false, Prompt: "PRIVATE PROMPT BODY"},
+	})
+	bc := &BotController{
+		config:   &config.AppConfig{DefaultOwnerUserID: 1, Providers: map[string]config.ProviderConfig{}},
+		profiles: resolver,
+	}
+	nonOwner := newTestTelegramContext(42, 0, 2, "")
+
+	reply, err := bc.cmdExplainProfile(nonOwner, "/agents explain public")
+	if err != nil {
+		t.Fatalf("cmdExplainProfile(public) error = %v", err)
+	}
+	if strings.Contains(reply, "INTERNAL SECRET PROMPT BODY") {
+		t.Fatalf("explain leaked prompt body: %q", reply)
+	}
+	if !strings.Contains(reply, "Resumo seguro") {
+		t.Fatalf("expected safe summary, got %q", reply)
+	}
+
+	reply, err = bc.cmdExplainProfile(nonOwner, "/agents explain secret")
+	if err != nil {
+		t.Fatalf("cmdExplainProfile(secret) error = %v", err)
+	}
+	if strings.Contains(reply, "Hidden profile") || strings.Contains(reply, "PRIVATE PROMPT BODY") {
+		t.Fatalf("explain leaked private profile: %q", reply)
+	}
+}
+
+func TestCmdSetMode_AllowsVisibleCustomProfile(t *testing.T) {
+	t.Parallel()
+
+	store := newTestUserStore(t)
+	if err := store.Save(&users.Profile{UserID: 2, Name: "Non Owner", Language: "pt"}); err != nil {
+		t.Fatalf("save user profile: %v", err)
+	}
+	bc := &BotController{
+		config: &config.AppConfig{DefaultOwnerUserID: 1, Providers: map[string]config.ProviderConfig{}},
+		profiles: buildTestProfileResolver(t, map[string]testProfileFile{
+			"coder": {Description: "Codes", Public: true, Prompt: "code prompt"},
+		}),
+		userStore: store,
+	}
+
+	reply, err := bc.cmdSetMode(newTestTelegramContext(42, 0, 2, ""), "/mode coder")
+	if err != nil {
+		t.Fatalf("cmdSetMode() error = %v", err)
+	}
+	if !strings.Contains(reply, "coder") {
+		t.Fatalf("expected custom profile confirmation, got %q", reply)
+	}
+	profile, err := store.Get(2)
+	if err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+	if profile.ActiveMode != "coder" {
+		t.Fatalf("ActiveMode = %q, want coder", profile.ActiveMode)
+	}
+}
+
+func TestCmdSetMode_DeniesPrivateCustomProfileForNonOwner(t *testing.T) {
+	t.Parallel()
+
+	store := newTestUserStore(t)
+	if err := store.Save(&users.Profile{UserID: 2, Name: "Non Owner", Language: "pt"}); err != nil {
+		t.Fatalf("save user profile: %v", err)
+	}
+	bc := &BotController{
+		config: &config.AppConfig{DefaultOwnerUserID: 1, Providers: map[string]config.ProviderConfig{}},
+		profiles: buildTestProfileResolver(t, map[string]testProfileFile{
+			"secret": {Description: "Hidden", Public: false, Prompt: "secret prompt"},
+		}),
+		userStore: store,
+	}
+
+	reply, err := bc.cmdSetMode(newTestTelegramContext(42, 0, 2, ""), "/mode secret")
+	if err != nil {
+		t.Fatalf("cmdSetMode() error = %v", err)
+	}
+	if !strings.Contains(reply, "indisponível") {
+		t.Fatalf("expected unavailable message, got %q", reply)
+	}
+	profile, err := store.Get(2)
+	if err != nil {
+		t.Fatalf("get profile: %v", err)
+	}
+	if profile.ActiveMode != "" {
+		t.Fatalf("ActiveMode mutated to %q", profile.ActiveMode)
 	}
 }
 
@@ -757,6 +887,29 @@ func buildTestRegistry(t *testing.T, agentMap map[string]string) *agents.Registr
 		t.Fatalf("agents.Load() error = %v", err)
 	}
 	return reg
+}
+
+type testProfileFile struct {
+	Description string
+	Public      bool
+	Prompt      string
+}
+
+func buildTestProfileResolver(t *testing.T, profileMap map[string]testProfileFile) *profiles.Resolver {
+	t.Helper()
+	dir := t.TempDir()
+	for name, profile := range profileMap {
+		content := fmt.Sprintf("---\nname: %s\ndescription: %s\nkind: prompt_profile\npublic: %t\n---\n%s", name, profile.Description, profile.Public, profile.Prompt)
+		if err := writeTestFile(filepath.Join(dir, name+".md"), content); err != nil {
+			t.Fatalf("failed to write profile file: %v", err)
+		}
+	}
+	return profiles.NewResolverFromRegistry(nil, dir)
+}
+
+func newTestUserStore(t *testing.T) *users.Store {
+	t.Helper()
+	return users.NewStore(users.NewResolver(t.TempDir()))
 }
 
 func writeTestFile(path, content string) error {

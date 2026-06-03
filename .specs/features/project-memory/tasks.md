@@ -2,9 +2,11 @@
 
 **Roadmap:** Sprint E  
 **Spec:** `.specs/features/project-memory/`  
-**Status geral:** 🔴 Não iniciado  
+**Status geral:** ✅ Concluído em v0.20.0 (2026-05-28)  
 **Depende de:** Sprint 1 (User Isolation ✅), Sprint 3 (Project Binding ✅)  
 **Desbloqueia:** Sprint F (Memory Boundary Realignment), Sprint G (Learning Nudge)
+
+> **Nota:** As tasks E1–E10 foram implementadas em v0.20.0. Este documento permanece como registro histórico; o código-fonte de verdade é a codebase atual.
 
 ---
 

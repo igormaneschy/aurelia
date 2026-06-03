@@ -1,6 +1,6 @@
 # Session/Profile Operability Improvements — Specification
 
-**Status:** 🔴 Draft — implementation guide  
+**Status:** ✅ Implementado em v0.21.0 (2026-06-02)  
 **Priority:** P0/P1 candidate  
 **Scope:** Runlog ↔ Telegram message correlation, per-user mode profiles, profile timezone/default CWD enrichment  
 **Decision boundary:** Aurelia remains a coordination/product layer; Pi SDK/Ares remains the reasoning/session-history engine.

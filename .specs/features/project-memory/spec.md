@@ -1,7 +1,7 @@
 # Context-Scoped Memory — Specification
 
 **Roadmap step:** 5
-**Status:** 🟡 Parcial (70% — camadas existem, paths não são per-user; model reformulado em 2026-05-30)
+**Status:** ✅ Concluído em v0.20.0 (2026-05-28)
 **Depende de:** `.specs/features/multi-user-profiles/` (para paths `users/<id>/`)
 **Complementa:** `.specs/features/learning-nudge/`, `.specs/features/auto-skills/`
 

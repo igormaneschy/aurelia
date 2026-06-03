@@ -18,6 +18,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/cron"
 	memoryuxpkg "github.com/igormaneschy/aurelia/internal/memoryux"
 	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
+	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/session"
@@ -45,6 +46,7 @@ const (
 	CmdDebugRun
 	CmdDebugErrors
 	CmdSetMode
+	CmdExplainProfile // Phase 2: /mode explain <name>, /agents explain <name>
 )
 
 // MatchedCommand represents a message that was identified as a system command.
@@ -80,21 +82,32 @@ var commandRules = []commandRule{
 		"deleta agendamento", "deletar agendamento",
 		"apaga agendamento", "apagar agendamento",
 	}, false},
+	// explain_profile — /mode explain <name> and /agents explain <name>.
+	// Keep before the generic /mode rule.
+	{CmdExplainProfile, []string{
+		"/mode explain ", "/modo explain ", "/perfil explain ",
+		"/agents explain ",
+	}, false},
 	// mode_set — slash commands use substring match; natural language uses exact
 	{CmdSetMode, []string{
-		"/mode ", "/modo ",
+		"/mode ", "/modo ", "/perfil ",
 	}, false},
 	// mode_set_exact — natural-language mode commands must be exact (no "modo devops" false positive)
 	{CmdSetMode, []string{
 		"modo dev", "modo desenvolvedor", "modo developer",
 		"modo pesquisa", "modo pesquisador", "modo researcher",
 		"modo geral",
+		"perfil dev", "perfil developer", "perfil desenvolvedor",
+		"perfil pesquisa", "perfil pesquisador", "perfil researcher",
+		"perfil geral",
 	}, true},
 	// mode_query (exact match)
 	{CmdSetMode, []string{
 		"/mode",
 		"qual meu modo", "qual o meu modo",
 		"meu modo atual",
+		"qual meu perfil", "qual o meu perfil",
+		"meu perfil atual",
 	}, true},
 	// cron_create
 	{CmdCronCreate, []string{
@@ -117,11 +130,13 @@ var commandRules = []commandRule{
 		"status",
 		"ta funcionando",
 	}, true},
-	// list_agents
+	// list_agents — exact-only per Prompt Profiles spec §9.2 acceptance 6
 	{CmdListAgents, []string{
-		"quais agents", "lista agents", "listar agents",
-		"meus agents",
-	}, false},
+		"quais agents", "quais perfis",
+		"lista agents", "lista perfis",
+		"listar agents", "listar perfis",
+		"meus agents", "meus perfis",
+	}, true},
 	// list_models
 	{CmdListModels, []string{
 		"quais modelos", "lista modelos", "listar modelos",
@@ -293,7 +308,7 @@ func (bc *BotController) handleCommand(c telebot.Context, cmd *MatchedCommand) e
 	case CmdStatus:
 		reply, err = bc.cmdStatus(chatID, threadID, userID)
 	case CmdListAgents:
-		reply, err = bc.cmdListAgents(userID)
+		reply, err = bc.cmdListAgents(c)
 	case CmdListModels:
 		reply, err = bc.cmdListModels()
 	case CmdSetModel:
@@ -336,6 +351,8 @@ func (bc *BotController) handleCommand(c telebot.Context, cmd *MatchedCommand) e
 		reply, err = bc.cmdDebugErrors()
 	case CmdSetMode:
 		reply, err = bc.cmdSetMode(c, cmd.Text)
+	case CmdExplainProfile:
+		reply, err = bc.cmdExplainProfile(c, cmd.Text)
 	default:
 		return fmt.Errorf("unknown command type: %d", cmd.Type)
 	}
@@ -606,7 +623,7 @@ func (bc *BotController) cmdStatus(chatID int64, threadID int, userID int64) (st
 	if bc.agents != nil {
 		agentCount = len(bc.agents.Agents())
 	}
-	lines = append(lines, fmt.Sprintf("🤖 Agents disponíveis: **%d**", agentCount))
+	lines = append(lines, fmt.Sprintf("🤖 Perfis disponíveis: **%d**", agentCount))
 
 	// Cron jobs
 	if bc.cronHandler != nil {
@@ -779,28 +796,32 @@ func statusWorkLines(description string, queueSize int) []string {
 	return lines
 }
 
-func (bc *BotController) cmdListAgents(userID int64) (string, error) {
-	if bc.agents == nil {
-		return "Nenhum agent configurado.", nil
-	}
+func (bc *BotController) cmdListAgents(c telebot.Context) (string, error) {
+	userID := safeSenderID(c.Sender())
+	isOwner := bc.isOwner(c)
 
-	all := bc.agents.Agents()
+	// Use profiles resolver for canonical list (includes legacy agents + builtins + canonical).
+	var all []*profiles.PromptProfile
+	if bc.profiles != nil {
+		all = bc.profiles.ListVisible(isOwner)
+	} else if bc.agents != nil {
+		// Fallback: legacy agents only when resolver not available.
+		for _, a := range bc.agents.Agents() {
+			all = append(all, profiles.FromAgent(a))
+		}
+	}
 	if len(all) == 0 {
-		return "Nenhum agent configurado.", nil
+		return "Nenhum perfil disponível. Perfis built-in (general, developer, researcher) estão sempre disponíveis.", nil
 	}
 
 	var lines []string
-	lines = append(lines, fmt.Sprintf("**Agents disponíveis** (%d)\n", len(all)))
-	for _, a := range all {
-		desc := a.Description
+	lines = append(lines, fmt.Sprintf("**Perfis disponíveis** (%d)\n", len(all)))
+	for _, p := range all {
+		desc := p.Description
 		if desc == "" {
 			desc = "(sem descrição)"
 		}
-		line := fmt.Sprintf("- **%s**: %s", a.Name, desc)
-		if a.Model != "" {
-			line += fmt.Sprintf(" (modelo: %s)", a.Model)
-		}
-		lines = append(lines, line)
+		lines = append(lines, fmt.Sprintf("- **%s**: %s", p.Name, desc))
 	}
 
 	// Mode section
@@ -828,16 +849,18 @@ func (bc *BotController) buildModeListSection(userID int64) string {
 	if displayActive == "" {
 		displayActive = "general"
 	}
-	modes := []string{"general", "developer", "researcher"}
+	profiles := []string{"general", "developer", "researcher"}
 	var lines []string
-	lines = append(lines, "\n**Modos disponíveis**")
-	for _, m := range modes {
+	lines = append(lines, "\n**Perfis disponíveis**")
+	for _, p := range profiles {
 		marker := ""
-		if m == displayActive {
+		if p == displayActive {
 			marker = " (● ativo)"
 		}
-		lines = append(lines, fmt.Sprintf("- **%s**%s", m, marker))
+		lines = append(lines, fmt.Sprintf("- **%s**%s", p, marker))
 	}
+	lines = append(lines, "\nUse /mode <perfil> para definir o perfil padrão.")
+	lines = append(lines, "Use @perfil <pedido> para aplicar um perfil só nesta mensagem.")
 	return strings.Join(lines, "\n")
 }
 
@@ -1262,14 +1285,17 @@ func (bc *BotController) cmdSetMode(c telebot.Context, text string) (string, err
 		if display == "" {
 			display = "general"
 		}
-		return fmt.Sprintf("Modo atual: **%s**.", display), nil
+		return fmt.Sprintf("Perfil ativo: **%s**.\n\nUse @perfil para aplicar outro perfil só na próxima mensagem.", display), nil
 	}
 
-	// Set mode
-	normalized, err := users.NormalizeMode(modeText)
-	if err != nil {
-		return fmt.Sprintf("Modo inválido %q. Use **general**, **developer** ou **researcher**.", modeText), nil
+	// Set mode. Builtin aliases are normalized; canonical/legacy profiles may
+	// also be used when visible to this user.
+	normalized := normalizeProfileSelection(modeText)
+	selected := bc.getVisibleProfile(normalized, bc.isOwner(c))
+	if selected == nil {
+		return fmt.Sprintf("Perfil %q não encontrado ou indisponível para este usuário. Use /agents para ver os perfis disponíveis.", modeText), nil
 	}
+	normalized = selected.Name
 
 	profile.ActiveMode = normalized
 	if err := bc.userStore.Save(profile); err != nil {
@@ -1280,7 +1306,7 @@ func (bc *BotController) cmdSetMode(c telebot.Context, text string) (string, err
 	if display == "" {
 		display = "general"
 	}
-	return fmt.Sprintf("✅ Modo alterado para **%s**. Próxima mensagem usará o novo perfil.", display), nil
+	return fmt.Sprintf("✅ Perfil alterado para **%s**. O perfil afeta como a Aurelia empacota seu pedido para o SDK.\nUse @perfil para aplicar outro perfil só na próxima mensagem.", display), nil
 }
 
 // extractModeTarget extracts the target mode from a mode command text.
@@ -1294,27 +1320,130 @@ func extractModeTarget(text string) string {
 		return ""
 	}
 	// Query phrases
-	for _, q := range []string{"qual meu modo", "qual o meu modo", "meu modo atual"} {
+	for _, q := range []string{"qual meu modo", "qual o meu modo", "meu modo atual", "qual meu perfil", "qual o meu perfil", "meu perfil atual"} {
 		if lower == q {
 			return ""
 		}
 	}
 
-	// "/mode developer", "/modo dev" etc.
-	for _, prefix := range []string{"/mode ", "/modo "} {
+	// "/mode developer", "/modo dev", "/perfil developer" etc.
+	for _, prefix := range []string{"/mode ", "/modo ", "/perfil "} {
 		if strings.HasPrefix(lower, prefix) {
 			return strings.TrimSpace(trimmed[len(prefix):])
 		}
 	}
 
-	// "modo dev", "modo desenvolvedor" etc.
-	for _, prefix := range []string{"modo "} {
+	// "modo dev", "modo desenvolvedor", "perfil dev", "perfil developer" etc.
+	for _, prefix := range []string{"modo ", "perfil "} {
 		if strings.HasPrefix(lower, prefix) {
 			return strings.TrimSpace(trimmed[len(prefix):])
 		}
 	}
 
 	return ""
+}
+
+// cmdExplainProfile handles /mode explain <name> and /agents explain <name>.
+// Shows the profile's description, usage hints, and safe summary without
+// exposing sensitive metadata (model, cwd, tools).
+func (bc *BotController) cmdExplainProfile(c telebot.Context, text string) (string, error) {
+	trimmed := strings.TrimSpace(text)
+	lower := stripAccents(strings.ToLower(trimmed))
+
+	// Extract profile name after "explain " prefix.
+	var name string
+	for _, prefix := range []string{"/mode explain ", "/modo explain ", "/perfil explain ", "/agents explain "} {
+		if strings.HasPrefix(lower, prefix) {
+			name = strings.TrimSpace(trimmed[len(prefix):])
+			break
+		}
+	}
+	if name == "" {
+		return "Uso: /mode explain <perfil> ou /agents explain <perfil>", nil
+	}
+
+	// Normalize the name.
+	normalized, _ := users.NormalizeMode(name)
+	if normalized == "" {
+		// Not a builtin mode — try profile registry.
+		normalized = name
+	}
+
+	profile := bc.getVisibleProfile(normalized, bc.isOwner(c))
+	if profile == nil {
+		return fmt.Sprintf("Perfil %q não encontrado ou indisponível para este usuário. Use /agents para ver os perfis disponíveis.", name), nil
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("**%s**", profile.Name))
+	if profile.Description != "" {
+		lines = append(lines, profile.Description)
+	}
+
+	// Usage hints.
+	lines = append(lines, "\n**Uso:**")
+	lines = append(lines, fmt.Sprintf("• `/mode %s` — define como perfil padrão", profile.Name))
+	lines = append(lines, fmt.Sprintf("• `@%s <pedido>` — aplica só nesta mensagem", profile.Name))
+
+	lines = append(lines, "\nResumo seguro: instruções internas, cwd, modelo e política de ferramentas ficam ocultos por padrão.")
+
+	if len(profile.Tags) > 0 {
+		tags := make([]string, len(profile.Tags))
+		for i, t := range profile.Tags {
+			tags[i] = "#" + t
+		}
+		lines = append(lines, "\n"+strings.Join(tags, " "))
+	}
+
+	return strings.Join(lines, "\n"), nil
+}
+
+func normalizeProfileSelection(name string) string {
+	if normalized, err := users.NormalizeMode(name); err == nil && normalized != "" {
+		return normalized
+	}
+	return strings.TrimSpace(name)
+}
+
+// getProfile looks up a Prompt Profile by name. Checks the profiles resolver
+// first, then falls back to legacy agent registry.
+func (bc *BotController) getProfile(name string) *profiles.PromptProfile {
+	if bc.profiles != nil {
+		if p := bc.profiles.Get(name); p != nil {
+			return p
+		}
+	}
+	// Fallback: legacy agents.
+	if bc.agents != nil {
+		if a := bc.agents.Get(name); a != nil {
+			return profiles.FromAgent(a)
+		}
+	}
+	// Legacy: builtin mode check.
+	if normalized, err := users.NormalizeMode(name); err == nil && normalized != "" {
+		return bc.getBuiltinProfile(normalized)
+	}
+	if strings.EqualFold(name, "general") {
+		return bc.getBuiltinProfile("general")
+	}
+	return nil
+}
+
+func (bc *BotController) getVisibleProfile(name string, isOwner bool) *profiles.PromptProfile {
+	profile := bc.getProfile(name)
+	if !profiles.ProfileVisible(profile, isOwner) {
+		return nil
+	}
+	return profile
+}
+
+// getBuiltinProfile returns a PromptProfile from the resolver's builtins.
+// Used as fallback in getProfile when no resolver is available.
+func (bc *BotController) getBuiltinProfile(name string) *profiles.PromptProfile {
+	if bc.profiles != nil {
+		return bc.profiles.Get(name)
+	}
+	return nil
 }
 
 // --- Timezone-aware cron parsing ---

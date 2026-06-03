@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/continuity"
+	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
@@ -29,11 +29,11 @@ const (
 )
 
 // BuildSystemPrompt assembles all system prompt sections for a request.
-func (bc *Service) BuildSystemPrompt(userText string, agent *agents.Agent, chatID int64, messageID int, threadID int, userID int64, isPrivateChat bool) (string, error) {
-	return bc.buildSystemPrompt(userText, agent, chatID, messageID, threadID, userID, isPrivateChat)
+func (bc *Service) BuildSystemPrompt(userText string, profile *profiles.PromptProfile, chatID int64, messageID int, threadID int, userID int64, isPrivateChat bool) (string, error) {
+	return bc.buildSystemPrompt(userText, profile, chatID, messageID, threadID, userID, isPrivateChat)
 }
 
-func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatID int64, messageID int, threadID int, userID int64, isPrivateChat bool) (string, error) {
+func (bc *Service) buildSystemPrompt(userText string, profile *profiles.PromptProfile, chatID int64, messageID int, threadID int, userID int64, isPrivateChat bool) (string, error) {
 	var sections []string
 
 	// Runtime identity — tells the model what provider and model it is running on
@@ -43,18 +43,21 @@ func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatI
 		provider = bc.config.DefaultProvider
 		model = bc.config.DefaultModel
 	}
-	if agent != nil && agent.Model != "" {
-		model = agent.Model
+	if profile != nil && profile.Model != "" {
+		model = profile.Model
 	}
 	identitySection := fmt.Sprintf("# Runtime Identity\n\nYou are running via the Aurelia bridge over the PI SDK.\nProvider: %s\nModel: %s\nAlways answer accurately when asked what model you are.", provider, model)
 	sections = append(sections, identitySection)
 
-	// Agent-specific prompt — placed BEFORE persona so the mode overlay
-	// appended last by BuildPromptForUser takes final precedence over
-	// agent instructions (mode is the user's latest behavioural intent).
-	if agent != nil && agent.Prompt != "" {
-		agentSection := "# Agent Instructions\n\n" + agent.Prompt
-		sections = append(sections, agentSection)
+	// Agent-specific prompt — when a profile provides a prompt via @name,
+	// it becomes the effective Prompt Profile and overrides the active mode
+	// overlay (no dual injection per Prompt Profiles spec §7).
+	// Computation: @profile > /mode > general.
+	agentWins := false
+	if profile != nil && profile.Prompt != "" {
+		profileSection := fmt.Sprintf("# Active Prompt Profile: %s\n\n%s", profile.Name, profile.Prompt)
+		sections = append(sections, profileSection)
+		agentWins = true // Agent wins — skip mode overlay in persona below
 	}
 
 	// Persona prompt — prefer per-user persona when userID and resolver are available
@@ -73,6 +76,9 @@ func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatI
 					activeMode = profile.ActiveMode
 				}
 			}
+			if agentWins {
+				activeMode = "" // Agent overrides mode overlay — Prompt Profiles spec §7
+			}
 			personaPrompt, err = bc.persona.BuildPromptForUser(userID, bc.userResolver, isOwner, activeMode)
 		} else {
 			personaPrompt, err = bc.persona.BuildPrompt()
@@ -89,13 +95,13 @@ func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatI
 	sections = append(sections, cronSection)
 
 	// Telegram interaction instructions
-	telegramSection := bc.buildTelegramInstructions(chatID, messageID, threadID, agent, userID, isPrivateChat)
+	telegramSection := bc.buildTelegramInstructions(chatID, messageID, threadID, profile, userID, isPrivateChat)
 	sections = append(sections, telegramSection)
 
 	// Security Boundaries — capability profile and rules for tool usage.
 	// Injected before continuity so the model sees its restrictions early.
 	// Skipped for observe profile (no tools at all).
-	securitySection := bc.buildSecurityPromptSection(chatID, threadID, agent)
+	securitySection := bc.buildSecurityPromptSection(chatID, threadID, profile)
 	if securitySection != "" {
 		sections = append(sections, securitySection)
 	}
@@ -117,11 +123,11 @@ func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatI
 
 	// Auto-memory instructions (SDK auto-memory doesn't activate via programmatic API,
 	// so we instruct the model explicitly)
-	memorySection := bc.buildMemoryInstructions(chatID, threadID, userID, agent, isPrivateChat)
+	memorySection := bc.buildMemoryInstructions(chatID, threadID, userID, profile, isPrivateChat)
 	sections = append(sections, memorySection)
 
 	// Long-task guidance — prompt the model to checkpoint when the task looks complex
-	if looksLikeLongTask(userText, bc.effectiveCwdForContext(agent, chatID, threadID, userID, isPrivateChat) != "") {
+	if looksLikeLongTask(userText, bc.effectiveCwdForContext(profile, chatID, threadID, userID, isPrivateChat) != "") {
 		sections = append(sections, "# Long Task Guidance\n\n"+longTaskGuidance())
 	}
 
@@ -129,7 +135,7 @@ func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatI
 	// inject a specific instruction so the model responds with clear /cwd guidance
 	// instead of attempting file operations or giving a vague answer.
 	// When the user has known project bindings from other chats, list them as suggestions.
-	if looksLikeCodebaseRead(userText) && bc.effectiveCwdForContext(agent, chatID, threadID, userID, isPrivateChat) == "" {
+	if looksLikeCodebaseRead(userText) && bc.effectiveCwdForContext(profile, chatID, threadID, userID, isPrivateChat) == "" {
 		knownPaths := bc.listKnownProjectPaths(userID)
 		sections = append(sections, codebaseReadChatModeGuidanceForKnownProjects(knownPaths))
 	}
@@ -141,16 +147,16 @@ func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatI
 
 // effectiveCwd resolves the working directory: agent override → chat-level.
 // Deprecated: prefer effectiveCwdForContext for DefaultCWD fallback in private chats.
-func (bc *Service) effectiveCwd(agent *agents.Agent, chatID int64, threadID int) string {
-	return bc.effectiveCwdForContext(agent, chatID, threadID, 0, false)
+func (bc *Service) effectiveCwd(profile *profiles.PromptProfile, chatID int64, threadID int) string {
+	return bc.effectiveCwdForContext(profile, chatID, threadID, 0, false)
 }
 
 // effectiveCwdForContext resolves the working directory with full context:
-// agent override → projectbinding.Resolve → session.GetCwd → Profile.DefaultCWD
+// profile CWD override → projectbinding.Resolve → session.GetCwd → Profile.DefaultCWD
 // (only for private chats with threadID==0). userID==0 skips profile lookup.
-func (bc *Service) effectiveCwdForContext(agent *agents.Agent, chatID int64, threadID int, userID int64, isPrivateChat bool) string {
-	if agent != nil && agent.Cwd != "" {
-		return agent.Cwd
+func (bc *Service) effectiveCwdForContext(profile *profiles.PromptProfile, chatID int64, threadID int, userID int64, isPrivateChat bool) string {
+	if profile != nil && profile.Cwd != "" {
+		return profile.Cwd
 	}
 	if bc.bindings != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -211,13 +217,13 @@ func (bc *Service) listKnownProjectPaths(userID int64) []string {
 }
 
 // buildTelegramInstructions returns instructions for interacting with the Telegram chat.
-func (bc *Service) buildTelegramInstructions(chatID int64, messageID int, threadID int, agent *agents.Agent, userID int64, isPrivateChat bool) string {
+func (bc *Service) buildTelegramInstructions(chatID int64, messageID int, threadID int, profile *profiles.PromptProfile, userID int64, isPrivateChat bool) string {
 	bin := "aurelia"
 	if bc.exePath != "" {
 		bin = bc.exePath
 	}
 
-	cwd := bc.effectiveCwdForContext(agent, chatID, threadID, userID, isPrivateChat)
+	cwd := bc.effectiveCwdForContext(profile, chatID, threadID, userID, isPrivateChat)
 	cwdDisplay := cwd
 	if cwd == "" {
 		cwdDisplay = "(none — no project set)"
@@ -291,10 +297,10 @@ func (bc *Service) topicMemoryDirCanonical(chatID int64, threadID int) string {
 }
 
 // buildMemoryInstructions returns the system prompt section for persistent memory.
-func (bc *Service) buildMemoryInstructions(chatID int64, threadID int, userID int64, agent *agents.Agent, isPrivateChat bool) string {
+func (bc *Service) buildMemoryInstructions(chatID int64, threadID int, userID int64, profile *profiles.PromptProfile, isPrivateChat bool) string {
 	var sb strings.Builder
 
-	cwd := bc.effectiveCwdForContext(agent, chatID, threadID, userID, isPrivateChat)
+	cwd := bc.effectiveCwdForContext(profile, chatID, threadID, userID, isPrivateChat)
 	hasProject := cwd != "" && bc.resolver != nil
 
 	topicSuffix := ""
@@ -325,7 +331,7 @@ If the user asks to forget or remove something while a project cwd is active, de
 Never mention internal project files (CLAUDE.md, AGENTS.md) in casual conversation. Only reference them when a working directory is set AND the user asks about project configuration.`)
 
 	// Inject actual memory contents
-	memoryContent := bc.loadMemoryContents(chatID, threadID, userID, agent, cwd)
+	memoryContent := bc.loadMemoryContents(chatID, threadID, userID, profile, cwd)
 	if memoryContent != "" {
 		sb.WriteString("\n\n### Current Memory Contents" + topicSuffix + "\n\n")
 		sb.WriteString(`<memory_untrusted>
@@ -393,7 +399,7 @@ func (bc *Service) buildChatMemoryInstructions(chatID int64, threadID int, topic
 //  2. Topic memory  — always
 //  3. CWD overlay   — only when /cwd is active on the topic
 //  4. Project team  — only when /cwd is active
-func (bc *Service) loadMemoryContents(chatID int64, threadID int, userID int64, agent *agents.Agent, cwd string) string {
+func (bc *Service) loadMemoryContents(chatID int64, threadID int, userID int64, profile *profiles.PromptProfile, cwd string) string {
 	var sb strings.Builder
 	var total int
 	useCompact := false
@@ -754,13 +760,13 @@ func (bc *Service) formatCheckpointSection(record *runlog.RunRecord) string {
 // buildSecurityPromptSection returns a prompt block describing the agent's
 // security boundaries: capability profile, working directory, and tool-use
 // restrictions. Returns empty for observe-only profiles (no tools at all).
-func (bc *Service) buildSecurityPromptSection(chatID int64, threadID int, agent *agents.Agent) string {
-	cwd := bc.effectiveCwd(agent, chatID, threadID)
+func (bc *Service) buildSecurityPromptSection(chatID int64, threadID int, pp *profiles.PromptProfile) string {
+	cwd := bc.effectiveCwd(pp, chatID, threadID)
 
 	// Resolve the effective profile for this context
-	profile := security.DefaultProfileForContext(cwd != "", agent != nil && agent.CapabilityProfile == "", needsWriteTools(agent))
-	if agent != nil && agent.CapabilityProfile != "" {
-		profile = security.CapabilityProfile(agent.CapabilityProfile)
+	profile := security.DefaultProfileForContext(cwd != "", pp != nil && pp.CapabilityProfile == "", needsWriteTools(pp))
+	if pp != nil && pp.CapabilityProfile != "" {
+		profile = security.CapabilityProfile(pp.CapabilityProfile)
 	}
 
 	// Observe profile gets no tools, no prompt section (tools already empty)

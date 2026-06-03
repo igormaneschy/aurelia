@@ -1,6 +1,6 @@
 # Delegate to PI SDK Native — Eliminate Reimplementations
 
-**Status:** 🟡 Parcialmente implementado (Tasks 0–5 + 7–8 concluídas; Task 6 supersedida por Prompt Profiles)  
+**Status:** ✅ Concluído em v0.13.7 (2026-05-22)  
 **Companion specs:** `.specs/features/security-guard-rails/`, `.specs/features/project-binding/`  
 **Related:** `.specs/features/project-memory/`, `.specs/features/wiki-memory/` (superseded), `ROADMAP.md`  
 **Prerequisite:** `security-guard-rails` (v0.8.0) — must be stable before removing Go policy engine  

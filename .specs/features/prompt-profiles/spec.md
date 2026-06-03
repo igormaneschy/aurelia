@@ -1,6 +1,6 @@
 # Prompt Profiles — Unificar `/mode`, `/agents` e `@profile`
 
-**Status:** Draft — Junho 2026  
+**Status:** 🟡 Parcial — MVP semantics implementado em v0.21.0; Phase 1 (`internal/profiles` abstraction) pendente  
 **Roadmap step:** pós Session/Profile Operability; antes de multi-engine routing  
 **Depende de:** User Isolation, Session/Profile Operability, Security Guard-Rails, Bridge Adapter Interface  
 **Substitui/realinha:** `Mode Profiles` como comportamento persistente e `internal/agents` como catálogo de perfis de injeção de contexto, sem transformar Aurelia em runtime de execução.

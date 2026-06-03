@@ -123,12 +123,16 @@ func helpMessage() string {
 		"/status — Ver estado atual + trabalho ativo + fila\n" +
 		"/cwd <path> — Definir diretório de trabalho (tópicos herdam do grupo)\n" +
 		"/cron — Gerenciar agendamentos\n" +
-		"/agents — Listar agentes disponíveis (também roteáveis com @nome)\n" +
-		"/mode — Trocar/consultar modo ativo (developer/researcher/general)\n" +
+		"/agents — Listar perfis de Prompt disponíveis\n" +
+		"/mode <perfil> — Definir perfil padrão (ex: developer, researcher)\n" +
 		"/memory — Ver status da memória e criar checkpoints\n" +
 		"/model — Ver/trocar modelo ativo\n" +
 		"/help — Mostrar esta mensagem\n\n" +
 		"---\n\n" +
+		"💡 Prompt Profiles — como a Aurelia empacota seu pedido:\n" +
+		"• /mode <perfil> — define o perfil padrão para suas conversas\n" +
+		"• @perfil <pedido> — usa um perfil só nesta mensagem (ex: @researcher)\n" +
+		"• /agents — lista todos os perfis disponíveis\n\n" +
 		"💡 Também entendo comandos naturais:\n" +
 		"• \"agenda todo dia às 9h revisar emails\"\n" +
 		"• \"muda modelo para claude-sonnet\"\n" +
@@ -144,16 +148,28 @@ func helpMessage() string {
 
 func (bc *BotController) handleAgentsCommand(c telebot.Context) error {
 	defer bc.confirmMessage(c.Message())
+	if payload := strings.TrimSpace(c.Message().Payload); strings.HasPrefix(strings.ToLower(payload), "explain ") {
+		reply, err := bc.cmdExplainProfile(c, "/agents "+payload)
+		if err != nil {
+			return err
+		}
+		return SendTextWithThread(bc.bot, c.Chat(), reply, c.Message().ThreadID)
+	}
+
 	// Delegate to cmdListAgents so the slash command returns the same
 	// output as the natural-language path ("lista agents" / "quais agents"):
 	// markdown formatting + the active mode section, in addition to thread
 	// routing. Keep the "Crie arquivos .md ..." hint for the empty case.
-	reply, err := bc.cmdListAgents(safeSenderID(c.Sender()))
+	reply, err := bc.cmdListAgents(c)
 	if err != nil {
 		return err
 	}
-	if bc.agents == nil || len(bc.agents.Agents()) == 0 {
-		reply = "Nenhum agente configurado. Crie arquivos .md em ~/.aurelia/agents/"
+	// Check if any profiles exist (via resolver or legacy agents).
+	hasProfiles := (bc.profiles != nil && len(bc.profiles.List()) > 0) ||
+		(bc.agents != nil && len(bc.agents.Agents()) > 0)
+	if !hasProfiles {
+		reply = "Nenhum perfil configurado. Crie arquivos .md em ~/.aurelia/profiles/ ou ~/.aurelia/agents/\n\n" +
+			"Perfis built-in (general, developer, researcher) estão sempre disponíveis."
 	}
 	return SendTextWithThread(bc.bot, c.Chat(), reply, c.Message().ThreadID)
 }
@@ -169,7 +185,13 @@ func (bc *BotController) handleModeCommand(c telebot.Context) error {
 	if p := strings.TrimSpace(c.Message().Payload); p != "" {
 		text = "/mode " + p
 	}
-	reply, err := bc.cmdSetMode(c, text)
+	var reply string
+	var err error
+	if strings.HasPrefix(stripAccents(strings.ToLower(text)), "/mode explain ") {
+		reply, err = bc.cmdExplainProfile(c, text)
+	} else {
+		reply, err = bc.cmdSetMode(c, text)
+	}
 	if err != nil {
 		return err
 	}

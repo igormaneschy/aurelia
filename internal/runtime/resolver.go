@@ -53,6 +53,9 @@ func (r *PathResolver) MemoryPersonas() string { return filepath.Join(r.root, "m
 // Agents returns the path to the agents/ subdirectory.
 func (r *PathResolver) Agents() string { return filepath.Join(r.root, "agents") }
 
+// Profiles returns the path to the profiles/ subdirectory (canonical storage).
+func (r *PathResolver) Profiles() string { return filepath.Join(r.root, "profiles") }
+
 // DBPath returns the path to a named database file inside the data/ subdirectory.
 func (r *PathResolver) DBPath(name string) string { return filepath.Join(r.Data(), name) }
 
