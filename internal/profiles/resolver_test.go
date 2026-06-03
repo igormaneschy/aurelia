@@ -1,6 +1,7 @@
 package profiles
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,7 +19,7 @@ func writeAgentFile(t *testing.T, dir, name, description, body string) {
 }
 
 func TestResolver_Get_Builtins(t *testing.T) {
-	r, err := NewResolver("") // no agents dir
+	r, err := NewResolver("", "") // no agents dir, no canonical dir
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -41,7 +42,7 @@ func TestResolver_Get_LegacyAgentOverridesBuiltin(t *testing.T) {
 	dir := t.TempDir()
 	writeAgentFile(t, dir, "developer", "custom dev", "Custom dev prompt.")
 
-	r, err := NewResolver(dir)
+	r, err := NewResolver(dir, "")
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -62,7 +63,7 @@ func TestResolver_List_IncludesBuiltinsAndLegacy(t *testing.T) {
 	dir := t.TempDir()
 	writeAgentFile(t, dir, "coder", "writes code", "Coder body.")
 
-	r, err := NewResolver(dir)
+	r, err := NewResolver(dir, "")
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -85,7 +86,7 @@ func TestResolver_ResolveEffective_AtProfile(t *testing.T) {
 	dir := t.TempDir()
 	writeAgentFile(t, dir, "coder", "writes code", "You are a coder.")
 
-	r, err := NewResolver(dir)
+	r, err := NewResolver(dir, "")
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -107,7 +108,7 @@ func TestResolver_ResolveEffective_AtProfile(t *testing.T) {
 }
 
 func TestResolver_ResolveEffective_AtProfileUnknown(t *testing.T) {
-	r, err := NewResolver("")
+	r, err := NewResolver("", "")
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -125,7 +126,7 @@ func TestResolver_ResolveEffective_MiddleTextNotParsed(t *testing.T) {
 	dir := t.TempDir()
 	writeAgentFile(t, dir, "coder", "writes code", "Coder body.")
 
-	r, err := NewResolver(dir)
+	r, err := NewResolver(dir, "")
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -145,7 +146,7 @@ func TestResolver_ResolveEffective_MiddleTextNotParsed(t *testing.T) {
 }
 
 func TestResolver_ResolveEffective_ActiveDefaultFallback(t *testing.T) {
-	r, err := NewResolver("")
+	r, err := NewResolver("", "")
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -163,7 +164,7 @@ func TestResolver_ResolveEffective_ActiveDefaultFallback(t *testing.T) {
 }
 
 func TestResolver_ResolveEffective_GeneralDefault(t *testing.T) {
-	r, err := NewResolver("")
+	r, err := NewResolver("", "")
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -181,7 +182,7 @@ func TestResolver_AtProfileWinsOverActiveDefault(t *testing.T) {
 	dir := t.TempDir()
 	writeAgentFile(t, dir, "researcher", "research profile", "Researcher prompt.")
 
-	r, err := NewResolver(dir)
+	r, err := NewResolver(dir, "")
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -206,7 +207,7 @@ func TestResolver_InvalidFrontmatterSkipped(t *testing.T) {
 	}
 
 	// Should not crash.
-	r, err := NewResolver(dir)
+	r, err := NewResolver(dir, "")
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -283,5 +284,101 @@ func TestPromptProfile_IsReadOnly(t *testing.T) {
 				t.Errorf("IsReadOnly() = %v, want %v", got, tt.readOnly)
 			}
 		})
+	}
+}
+
+func writeCanonicalFile(t *testing.T, dir, name, description, body string) {
+	t.Helper()
+	content := fmt.Sprintf("---\nname: %s\ndescription: %s\nkind: prompt_profile\npublic: true\ntags: [test]\n---\n%s", name, description, body)
+	if err := os.WriteFile(filepath.Join(dir, name+".md"), []byte(content), 0644); err != nil {
+		t.Fatalf("write canonical file %s: %v", name, err)
+	}
+}
+
+func TestLoadCanonical_Basic(t *testing.T) {
+	dir := t.TempDir()
+	writeCanonicalFile(t, dir, "reviewer", "reviews code", "You are a code reviewer.")
+
+	profiles := LoadCanonical(dir)
+	if len(profiles) != 1 {
+		t.Fatalf("LoadCanonical: got %d profiles, want 1", len(profiles))
+	}
+	p, ok := profiles["reviewer"]
+	if !ok {
+		t.Fatal("reviewer not found in canonical profiles")
+	}
+	if p.Name != "reviewer" || p.Description != "reviews code" || p.Kind != KindGlobal {
+		t.Errorf("reviewer fields: name=%q desc=%q kind=%q", p.Name, p.Description, p.Kind)
+	}
+	if p.Public != true {
+		t.Errorf("Public = %v, want true", p.Public)
+	}
+	if len(p.Tags) != 1 || p.Tags[0] != "test" {
+		t.Errorf("Tags = %v, want [test]", p.Tags)
+	}
+}
+
+func TestLoadCanonical_InvalidFileSkipped(t *testing.T) {
+	dir := t.TempDir()
+	// Write a file with no frontmatter.
+	if err := os.WriteFile(filepath.Join(dir, "bad.md"), []byte("just body, no frontmatter"), 0644); err != nil {
+		t.Fatalf("write bad file: %v", err)
+	}
+	writeCanonicalFile(t, dir, "good", "good profile", "Good body.")
+
+	profiles := LoadCanonical(dir)
+	if len(profiles) != 1 {
+		t.Errorf("LoadCanonical: got %d profiles, want 1 (bad skipped)", len(profiles))
+	}
+}
+
+func TestResolver_CanonicalOverridesLegacy(t *testing.T) {
+	legacyDir := t.TempDir()
+	writeAgentFile(t, legacyDir, "coder", "legacy coder desc", "Legacy coder body.")
+
+	canonicalDir := t.TempDir()
+	writeCanonicalFile(t, canonicalDir, "coder", "canonical coder desc", "Canonical coder body.")
+
+	r := &Resolver{
+		builtins:  builtinProfiles(),
+		canonical: LoadCanonical(canonicalDir),
+	}
+	reg, err := agents.Load(legacyDir)
+	if err != nil {
+		t.Fatalf("Load legacy agents: %v", err)
+	}
+	r.agentsReg = reg
+
+	p := r.Get("coder")
+	if p == nil {
+		t.Fatal("Get(coder) = nil")
+	}
+	if p.Description != "canonical coder desc" {
+		t.Errorf("Description = %q, want canonical coder desc", p.Description)
+	}
+	if p.Kind != KindGlobal {
+		t.Errorf("Kind = %q, want global", p.Kind)
+	}
+}
+
+func TestResolver_CanonicalAppearsInList(t *testing.T) {
+	canonicalDir := t.TempDir()
+	writeCanonicalFile(t, canonicalDir, "reviewer", "reviews", "Reviewer prompt.")
+
+	r := &Resolver{
+		builtins:  builtinProfiles(),
+		canonical: LoadCanonical(canonicalDir),
+	}
+
+	list := r.List()
+	found := false
+	for _, p := range list {
+		if p.Name == "reviewer" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("reviewer not found in List()")
 	}
 }

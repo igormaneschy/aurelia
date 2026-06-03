@@ -18,6 +18,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/cron"
 	memoryuxpkg "github.com/igormaneschy/aurelia/internal/memoryux"
 	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
+	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/session"
@@ -45,6 +46,7 @@ const (
 	CmdDebugRun
 	CmdDebugErrors
 	CmdSetMode
+	CmdExplainProfile // Phase 2: /mode explain <name>, /agents explain <name>
 )
 
 // MatchedCommand represents a message that was identified as a system command.
@@ -101,6 +103,11 @@ var commandRules = []commandRule{
 		"qual meu perfil", "qual o meu perfil",
 		"meu perfil atual",
 	}, true},
+	// explain_profile — /mode explain <name> and /agents explain <name>
+	{CmdExplainProfile, []string{
+		"/mode explain ", "/modo explain ", "/perfil explain ",
+		"/agents explain ",
+	}, false},
 	// cron_create
 	{CmdCronCreate, []string{
 		"agenda ", "agendar ", "agende ",
@@ -343,6 +350,8 @@ func (bc *BotController) handleCommand(c telebot.Context, cmd *MatchedCommand) e
 		reply, err = bc.cmdDebugErrors()
 	case CmdSetMode:
 		reply, err = bc.cmdSetMode(c, cmd.Text)
+	case CmdExplainProfile:
+		reply, err = bc.cmdExplainProfile(c, cmd.Text)
 	default:
 		return fmt.Errorf("unknown command type: %d", cmd.Type)
 	}
@@ -1320,6 +1329,119 @@ func extractModeTarget(text string) string {
 	}
 
 	return ""
+}
+
+// cmdExplainProfile handles /mode explain <name> and /agents explain <name>.
+// Shows the profile's description, usage hints, and safe summary without
+// exposing sensitive metadata (model, cwd, tools).
+func (bc *BotController) cmdExplainProfile(c telebot.Context, text string) (string, error) {
+	trimmed := strings.TrimSpace(text)
+	lower := stripAccents(strings.ToLower(trimmed))
+
+	// Extract profile name after "explain " prefix.
+	var name string
+	for _, prefix := range []string{"/mode explain ", "/modo explain ", "/perfil explain ", "/agents explain "} {
+		if strings.HasPrefix(lower, prefix) {
+			name = strings.TrimSpace(trimmed[len(prefix):])
+			break
+		}
+	}
+	if name == "" {
+		return "Uso: /mode explain <perfil> ou /agents explain <perfil>", nil
+	}
+
+	// Normalize the name.
+	normalized, _ := users.NormalizeMode(name)
+	if normalized == "" {
+		// Not a builtin mode — try profile registry.
+		normalized = name
+	}
+
+	profile := bc.getProfile(normalized)
+	if profile == nil {
+		return fmt.Sprintf("Perfil %q não encontrado. Use /agents para ver os perfis disponíveis.", name), nil
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("**%s**", profile.Name))
+	if profile.Description != "" {
+		lines = append(lines, profile.Description)
+	}
+
+	// Usage hints.
+	lines = append(lines, "\n**Uso:**")
+	lines = append(lines, fmt.Sprintf("• `/mode %s` — define como perfil padrão", profile.Name))
+	lines = append(lines, fmt.Sprintf("• `@%s <pedido>` — aplica só nesta mensagem", profile.Name))
+
+	// Preview first 200 chars of prompt (metadata-safe).
+	if profile.Prompt != "" {
+		preview := profile.Prompt
+		if len(preview) > 200 {
+			preview = preview[:200] + "..."
+		}
+		lines = append(lines, "\n**Prévia:**")
+		lines = append(lines, preview)
+	}
+
+	if len(profile.Tags) > 0 {
+		tags := make([]string, len(profile.Tags))
+		for i, t := range profile.Tags {
+			tags[i] = "#" + t
+		}
+		lines = append(lines, "\n"+strings.Join(tags, " "))
+	}
+
+	return strings.Join(lines, "\n"), nil
+}
+
+// getProfile looks up a Prompt Profile by name. Checks the profiles resolver
+// first, then falls back to legacy agent registry.
+func (bc *BotController) getProfile(name string) *profiles.PromptProfile {
+	if bc.profiles != nil {
+		if p := bc.profiles.Get(name); p != nil {
+			return p
+		}
+	}
+	// Fallback: legacy agents.
+	if bc.agents != nil {
+		if a := bc.agents.Get(name); a != nil {
+			return profiles.FromAgent(a)
+		}
+	}
+	// Legacy: builtin mode check.
+	if normalized, err := users.NormalizeMode(name); err == nil && normalized != "" {
+		return bc.getBuiltinProfile(normalized)
+	}
+	if strings.EqualFold(name, "general") {
+		return bc.getBuiltinProfile("general")
+	}
+	return nil
+}
+
+// getBuiltinProfile returns a synthetic PromptProfile for builtin modes
+// when no resolver is available. Used as fallback in getProfile.
+func (bc *BotController) getBuiltinProfile(name string) *profiles.PromptProfile {
+	switch strings.ToLower(name) {
+	case "general":
+		return &profiles.PromptProfile{
+			Name:        "general",
+			Description: "Conversa geral, equilibrada e útil.",
+			Tags:        []string{"general", "conversation"},
+		}
+	case "developer":
+		return &profiles.PromptProfile{
+			Name:        "developer",
+			Description: "Engenharia de software e produto — prioriza arquitetura, riscos e validação.",
+			Tags:        []string{"developer", "engineering", "code"},
+		}
+	case "researcher":
+		return &profiles.PromptProfile{
+			Name:        "researcher",
+			Description: "Pesquisa, comparação e síntese — distingue evidência de inferência.",
+			Tags:        []string{"researcher", "research", "analysis"},
+		}
+	}
+	return nil
 }
 
 // --- Timezone-aware cron parsing ---

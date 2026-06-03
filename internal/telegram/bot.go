@@ -149,7 +149,7 @@ func NewBotController(
 		bridge:           br,
 		modelLister:      br,
 		agents:           ag,
-		profiles:         profiles.NewResolverFromRegistry(ag),
+		profiles:         profiles.NewResolverFromRegistry(ag, resolver.Profiles()),
 		persona:          p,
 		stt:              s,
 		cronHandler:      cronHandler,

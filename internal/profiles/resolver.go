@@ -14,34 +14,39 @@ import (
 // and resolves the effective profile for a message turn.
 //
 // Load order / precedence (highest to lowest):
-//  1. User-private profiles (~/.aurelia/users/<id>/profiles/*.md) — future P2
-//  2. Canonical global profiles (~/.aurelia/profiles/*.md) — future P2
+//  1. User-private profiles (~/.aurelia/users/<id>/profiles/*.md) — future
+//  2. Canonical global profiles (~/.aurelia/profiles/*.md) — Phase 2
 //  3. Legacy agents (~/.aurelia/agents/*.md)
 //  4. Builtins (general, developer, researcher)
 //
-// Builtins cannot be silently deleted; legacy agents with the same name as
-// a builtin override the builtin's prompt/description but keep the builtin kind.
+// Builtins cannot be silently deleted; profiles at higher levels override
+// lower levels of the same name.
 type Resolver struct {
 	agentsDir string
 	agentsReg *agents.Registry
+	canonical map[string]*PromptProfile // canonical ~/.aurelia/profiles/
 	builtins  map[string]*PromptProfile
 	mu        sync.RWMutex
 }
 
-// NewResolver creates a Resolver that loads legacy agents from agentsDir
-// and always includes builtins. Returns error if the agents directory
-// cannot be read (but builtins are still available).
-func NewResolver(agentsDir string) (*Resolver, error) {
+// NewResolver creates a Resolver that loads legacy agents from agentsDir,
+// canonical profiles from profilesDir, and always includes builtins.
+// Returns error if the directories cannot be read (but builtins are still available).
+func NewResolver(agentsDir, profilesDir string) (*Resolver, error) {
 	r := &Resolver{
 		agentsDir: agentsDir,
 		builtins:  builtinProfiles(),
+		canonical: make(map[string]*PromptProfile),
+	}
+
+	if profilesDir != "" {
+		r.canonical = LoadCanonical(profilesDir)
 	}
 
 	if agentsDir != "" {
 		reg, err := agents.Load(agentsDir)
 		if err != nil {
 			slog.Warn("profiles: failed to load legacy agents, builtins only", "dir", agentsDir, "err", err)
-			// Don't fail — builtins are still available.
 		} else {
 			r.agentsReg = reg
 		}
@@ -51,13 +56,18 @@ func NewResolver(agentsDir string) (*Resolver, error) {
 }
 
 // NewResolverFromRegistry creates a Resolver from an already-loaded
-// agents.Registry. Used when the registry was loaded externally
-// (e.g., in the app entrypoint).
-func NewResolverFromRegistry(reg *agents.Registry) *Resolver {
-	return &Resolver{
+// agents.Registry and canonical profiles directory.
+// Used when the registry was loaded externally (e.g., in the app entrypoint).
+func NewResolverFromRegistry(reg *agents.Registry, profilesDir string) *Resolver {
+	r := &Resolver{
 		agentsReg: reg,
 		builtins:  builtinProfiles(),
+		canonical: make(map[string]*PromptProfile),
 	}
+	if profilesDir != "" {
+		r.canonical = LoadCanonical(profilesDir)
+	}
+	return r
 }
 
 // Get returns the PromptProfile with the given name (case-insensitive),
@@ -74,7 +84,12 @@ func (r *Resolver) Get(name string) *PromptProfile {
 func (r *Resolver) getLocked(name string) *PromptProfile {
 	key := strings.ToLower(name)
 
-	// Legacy agents have higher precedence than builtins.
+	// Canonical global profiles have higher precedence than legacy agents.
+	if pp, ok := r.canonical[key]; ok {
+		return pp
+	}
+
+	// Legacy agents.
 	if r.agentsReg != nil {
 		if agent := r.agentsReg.Get(name); agent != nil {
 			return FromAgent(agent)
@@ -86,8 +101,8 @@ func (r *Resolver) getLocked(name string) *PromptProfile {
 }
 
 // List returns all available Prompt Profiles sorted by name.
-// Builtins are always included; legacy agents override builtins
-// when they share the same name.
+// Precedence: canonical > legacy agents > builtins.
+// Canonical and legacy profiles override builtins when they share the same name.
 func (r *Resolver) List() []*PromptProfile {
 	if r == nil {
 		return nil
@@ -104,12 +119,11 @@ func (r *Resolver) List() []*PromptProfile {
 		result = append(result, bp)
 	}
 
-	// Override with legacy agents when they exist.
+	// Override with legacy agents.
 	if r.agentsReg != nil {
 		for _, agent := range r.agentsReg.Agents() {
 			key := strings.ToLower(agent.Name)
 			if seen[key] {
-				// Replace builtin entry with legacy version.
 				for i, p := range result {
 					if strings.ToLower(p.Name) == key {
 						result[i] = FromAgent(agent)
@@ -120,6 +134,21 @@ func (r *Resolver) List() []*PromptProfile {
 				seen[key] = true
 				result = append(result, FromAgent(agent))
 			}
+		}
+	}
+
+	// Override with canonical profiles (highest precedence for global).
+	for key, cp := range r.canonical {
+		if seen[key] {
+			for i, p := range result {
+				if strings.ToLower(p.Name) == key {
+					result[i] = cp
+					break
+				}
+			}
+		} else {
+			seen[key] = true
+			result = append(result, cp)
 		}
 	}
 
