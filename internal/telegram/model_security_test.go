@@ -239,10 +239,22 @@ func TestRefreshModelsFromCallback_RedrawsProvidersWithNewModel(t *testing.T) {
 // for the live bug: a model added to PI within the last 5 minutes could not
 // be set via /model <name> because validation read the stale 5-min cache.
 // Now validation always force-refreshes, so newly added models are
-// immediately usable. We verify the side effect (bridge fetch) rather than
-// the full save flow because saveDefaultModel requires a real config file.
+// immediately usable. The test uses a temp app config so it can exercise the
+// full save flow without touching ~/.aurelia/config/app.json.
 func TestCmdSetModel_ValidationForceRefreshes(t *testing.T) {
-	t.Parallel()
+	tmpDir := t.TempDir()
+	t.Setenv("AURELIA_HOME", tmpDir)
+	r, err := runtime.New()
+	if err != nil {
+		t.Fatalf("runtime.New() unexpected error: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(r.AppConfig()), 0o700); err != nil {
+		t.Fatalf("MkdirAll() unexpected error: %v", err)
+	}
+	initial := `{"default_provider":"anthropic","default_model":"claude-sonnet-4-6","providers":{}}`
+	if err := os.WriteFile(r.AppConfig(), []byte(initial), 0o600); err != nil {
+		t.Fatalf("WriteFile() unexpected error: %v", err)
+	}
 
 	// The fake returns the NEW list on the first call — the validation
 	// must hit this, not the stale cache populated below.
@@ -260,11 +272,11 @@ func TestCmdSetModel_ValidationForceRefreshes(t *testing.T) {
 	bc.modelCache = []bridge.ModelInfo{{Provider: "oldpi", ID: "old-model"}}
 	bc.modelCacheExpiry = time.Now().Add(5 * time.Minute)
 
-	// Drive cmdSetModel. We discard the result because saveDefaultModel
-	// will fail in the test env (no real config file), but the
-	// validation force-refresh happens BEFORE saveDefaultModel, so we
-	// can observe its side effect via the fake.calls counter.
-	_, _ = bc.cmdSetModel(c, "/model newpi/new-model")
+	// Drive cmdSetModel against the temp config only. This guards against
+	// regressions where tests accidentally overwrite ~/.aurelia/config/app.json.
+	if _, err := bc.cmdSetModel(c, "/model newpi/new-model"); err != nil {
+		t.Fatalf("cmdSetModel() error = %v", err)
+	}
 
 	// The key assertion: validation must have called the bridge
 	// (force=true bypasses cache). If it had used the cache, the
@@ -273,6 +285,53 @@ func TestCmdSetModel_ValidationForceRefreshes(t *testing.T) {
 	if fake.calls < 1 {
 		t.Fatalf("expected at least one bridge fetch during validation, got %d", fake.calls)
 	}
+
+	data, err := os.ReadFile(r.AppConfig())
+	if err != nil {
+		t.Fatalf("ReadFile() unexpected error: %v", err)
+	}
+	if !strings.Contains(string(data), `"default_model": "new-model"`) {
+		t.Fatalf("expected temp config to be updated, got %s", string(data))
+	}
+}
+
+func TestCmdSetModel_SaveFailurePreservesModelAndSession(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("AURELIA_HOME", tmpDir)
+
+	sessions := session.NewStore()
+	sessions.SetSession(42, 0, 100, "/tmp/current-session.jsonl")
+	fake := &fakeModelLister{models: [][]bridge.ModelInfo{{{Provider: "newpi", ID: "new-model"}}}}
+	bc := testModelController(sessions)
+	bc.modelLister = fake
+	bc.bot = newOfflineTestBot(t)
+	c := newTestTelegramContext(42, 0, 100, "")
+
+	_, err := bc.cmdSetModel(c, "/model newpi/new-model")
+	if err == nil {
+		t.Fatal("expected save failure without app config")
+	}
+	assertModelState(t, bc, sessions, 42, 0, 100, "/tmp/current-session.jsonl")
+}
+
+func TestSetModelFromCallback_SaveFailurePreservesModelAndSession(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("AURELIA_HOME", tmpDir)
+
+	sessions := session.NewStore()
+	sessions.SetSession(42, 99, 100, "/tmp/current-topic-session.jsonl")
+	bc := testModelController(sessions)
+	bc.modelCache = []bridge.ModelInfo{{Provider: "newpi", ID: "new-model"}}
+	bc.modelCacheExpiry = time.Now().Add(time.Hour)
+	c := newTestTelegramContext(42, 99, 100, "")
+
+	if err := bc.setModelFromCallback(c, "newpi_new-model"); err != nil {
+		t.Fatalf("setModelFromCallback() error = %v", err)
+	}
+	if !strings.Contains(c.editedText, "não consegui salvar") && !strings.Contains(c.editedText, "Não consegui salvar") {
+		t.Fatalf("expected save failure message, got %q", c.editedText)
+	}
+	assertModelState(t, bc, sessions, 42, 99, 100, "/tmp/current-topic-session.jsonl")
 }
 
 // TestCmdSetModel_InvalidatesCacheAfterProviderEnvChange verifies that

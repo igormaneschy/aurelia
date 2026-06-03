@@ -492,21 +492,26 @@ func TestCmdStatus(t *testing.T) {
 	if !strings.Contains(reply, "1") { // 1 active job
 		t.Fatalf("expected active job count in status, got %q", reply)
 	}
-	if strings.Contains(reply, "sid=") || strings.Contains(reply, "test-session.jsonl") {
-		t.Fatalf("status should not expose session internals, got %q", reply)
+	for _, jargon := range []string{"sid=", "test-session.jsonl", "fria", "Saúde da sessão", "Tool calls", "Última execução"} {
+		if strings.Contains(reply, jargon) {
+			t.Fatalf("status should not expose %q, got %q", jargon, reply)
+		}
 	}
 	if !strings.Contains(reply, "/repo/aurelia") {
 		t.Fatalf("expected cwd in status, got %q", reply)
 	}
 }
 
-func TestStatusWorkLinesIncludeActiveDescriptionAndQueue(t *testing.T) {
+func TestStatusWorkLinesAvoidFakeQueuePosition(t *testing.T) {
 	t.Parallel()
 
-	lines := statusWorkLines("\"teste\" rodando há 12s", 1)
+	lines := statusWorkLines("\"teste\" rodando há 12s", 3)
 	joined := strings.Join(lines, "\n")
-	if !strings.Contains(joined, "teste") || !strings.Contains(joined, "Fila") || !strings.Contains(joined, "1 mensagem") {
-		t.Fatalf("expected active work and queue info, got %q", joined)
+	if !strings.Contains(joined, "teste") || !strings.Contains(joined, "PI SDK") {
+		t.Fatalf("expected active work and PI SDK handoff, got %q", joined)
+	}
+	if strings.Contains(joined, "Fila") || strings.Contains(joined, "3 mensagens") {
+		t.Fatalf("status must not promise a fake queue position/count, got %q", joined)
 	}
 	if got := statusWorkLines("", 1); got != nil {
 		t.Fatalf("empty work should produce no lines, got %v", got)
@@ -761,7 +766,7 @@ type fakeRunLog struct {
 	latest *runlog.RunRecord
 }
 
-func (f *fakeRunLog) Start(ctx context.Context, record runlog.RunRecord) error { return nil }
+func (f *fakeRunLog) Start(ctx context.Context, record runlog.RunRecord) error  { return nil }
 func (f *fakeRunLog) Update(ctx context.Context, update runlog.RunUpdate) error { return nil }
 func (f *fakeRunLog) Complete(ctx context.Context, runID string, status runlog.RunStatus, checkpoint, errMsg string) error {
 	return nil

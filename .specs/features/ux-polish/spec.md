@@ -7,7 +7,7 @@
 A experiência do usuário no Telegram tem vários pontos de fricção pequenos mas cumulativos que deixam a interação menos fluida do que poderia ser:
 
 1. **Silêncio inicial**: Ao enviar uma mensagem (especialmente com imagem ou áudio), há um gap de 1–3 segundos antes de qualquer feedback visual. O usuário não sabe se a mensagem foi recebida.
-2. **Fila opaca**: Quando o bot está ocupado, a mensagem é enfileirada, mas o usuário não sabe sua posição nem o que está rodando.
+2. **Concorrência delegada**: Quando o bot está ocupado, o PI SDK recebe e gerencia as mensagens subsequentes. Aurelia não deve inventar posição de fila; deve apenas sinalizar recebimento/processamento sem criar uma fila paralela enganosa.
 3. **Destruição de contexto**: Trocar de modelo via `/model` limpa **todas** as sessões do chat, incluindo tópicos de fórum não relacionados — surpreendente e destrutivo.
 4. **Erros sem saída**: Mensagens como *"Falha ao conectar com o processador"* não sugerem o que fazer a seguir.
 5. **Progresso limitado**: O reporter de ferramentas trunca em 5 itens, não mostra tempo decorrido, e não distingue "pensando" de "executando".
@@ -22,7 +22,7 @@ Cada um desses pontos é pequeno isoladamente, mas juntos criam a sensação de 
 ## Goals
 
 - [ ] Usuário recebe feedback visual imediato ao enviar qualquer mensagem
-- [ ] Usuário entende o estado da fila quando o bot está ocupado
+- [ ] Usuário recebe feedback sem Aurelia inventar posição de fila quando o PI SDK gerencia concorrência
 - [ ] Troca de modelo afeta apenas o contexto atual (thread), não todo o chat
 - [ ] Toda mensagem de erro sugere um próximo passo concreto
 - [ ] Progresso de ferramentas mostra tempo e mais contexto
@@ -61,20 +61,20 @@ Cada um desses pontos é pequeno isoladamente, mas juntos criam a sensação de 
 
 ---
 
-### P1: Fila Transparente — MVP
+### P1: Concorrência Delegada ao PI SDK — MVP
 
-**User Story**: Como usuário, quando o bot está ocupado, quero saber quantas mensagens estão na minha frente e o que ele está fazendo, pra saber se vale a pena esperar.
+**User Story**: Como usuário, quando envio outra mensagem enquanto o bot ainda trabalha, quero receber feedback de que ela chegou sem Aurelia fingir conhecer uma fila que é gerenciada pelo PI SDK.
 
-**Why P1**: Fila sem contexto é frustrante. "Coloquei na fila" não diz se vai demorar 10s ou 5min.
+**Why P1**: Posição de fila inventada piora a confiança. Como o PI SDK é o dono da execução concorrente, Aurelia deve manter a UX honesta e leve.
 
 **Acceptance Criteria**:
 
-1. WHEN uma mensagem é enfileirada (`admitQueued`) THEN a resposta SHALL incluir a posição na fila: `"📥 Fila: 1 mensagem à frente. Vou processar em seguida."` ou `"📥 Sua mensagem é a próxima na fila."`
-2. WHEN uma mensagem enfileirada é substituída (`admitReplacedQueued`) THEN a resposta SHALL confirmar: `"🔁 Atualizei a próxima instrução na fila."` (sem mudança)
-3. WHEN o usuário pergunta "status" enquanto o bot processa THEN a resposta SHALL incluir a descrição do trabalho atual + tempo rodando + tamanho da fila
-4. WHEN a fila está vazia e o bot está processando THEN a mensagem de status SHALL focar apenas no trabalho atual
+1. WHEN uma mensagem chega durante processamento THEN Aurelia SHALL dar ack visual normalmente.
+2. WHEN o PI SDK aceita a mensagem subsequente THEN Aurelia SHALL evitar prometer posição/ordem que não controla.
+3. WHEN o usuário pergunta "status" enquanto o bot processa THEN a resposta SHALL focar no estado observável: processando/recebido/interrompível.
+4. WHEN houver mensagem de concorrência THEN ela SHALL deixar claro que o processamento é gerenciado pelo PI SDK, sem criar fila paralela.
 
-**Independent Test**: Enviar mensagem A (lenta), depois mensagem B rapidamente. Verificar que B recebe posição na fila.
+**Independent Test**: Enviar mensagem A (lenta), depois mensagem B rapidamente. Verificar que não há promessa falsa de posição na fila.
 
 ---
 
@@ -226,7 +226,7 @@ Cada um desses pontos é pequeno isoladamente, mas juntos criam a sensação de 
 ## Success Criteria
 
 - [ ] Mensagem no Telegram recebe reação 👀 em < 500ms
-- [ ] Fila mostra posição e contexto do trabalho atual
+- [ ] Concorrência não promete posição de fila controlada fora do PI SDK
 - [ ] Troca de modelo em fórum não afeta outros tópicos
 - [ ] 100% dos erros principais incluem dica acionável
 - [ ] Progress reporter mostra timer e até 8 ferramentas

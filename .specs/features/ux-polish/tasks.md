@@ -241,28 +241,27 @@ go test ./internal/pipeline/ -run TestErrorHints -v
 
 ---
 
-### T8: Fila Transparente
+### T8: Concorrência Delegada ao PI SDK
 
-**What**: Melhorar mensagens de fila para incluir contexto do trabalho atual.
-**Where**: `internal/pipeline/pipeline.go` (mensagens `admitQueued`, `admitReplacedQueued`, `admitStatus`)
-**Depends on**: T4, T5 (opcional — pode rodar em paralelo)
-**Reuses**: `runSupervisor.activeDescription()`
+**What**: Evitar que Aurelia prometa posição/ordem de fila quando quem gerencia mensagens subsequentes é o PI SDK.
+**Where**: `internal/pipeline/pipeline.go` e mensagens de status/concorrência
+**Depends on**: T1
+**Reuses**: estado observável do PI SDK quando disponível
 
 **Implementation details**:
-- Adicionar `activeDescription()` e `queueSize()` no `runSupervisor` (se ainda não feito)
-- Mensagem `admitQueued`: "📥 Ainda estou processando seu pedido anterior. Sua mensagem será a próxima."
-- Mensagem `admitReplacedQueued`: manter "🔁 Atualizei a próxima instrução na fila."
-- Mensagem `admitStatus`: incluir descrição do trabalho atual: "⏳ Ainda estou processando: %s"
+- Não criar fila paralela em Aurelia para mensagens que o PI SDK já recebe.
+- Evitar texto como "1 mensagem à frente" se Aurelia não controla essa posição.
+- Manter ack visual imediato e mensagens curtas de recebido/processando.
+- Se `/status` consultar o PI SDK, mostrar apenas estado observável e acionável.
 
 **Done when**:
-- [ ] Mensagem `admitQueued` atualizada
-- [ ] Mensagem `admitStatus` inclui descrição do trabalho
-- [ ] Teste: fila mostra contexto do trabalho atual
+- [ ] Mensagens de concorrência não prometem posição de fila própria
+- [ ] `/status` não mistura fila inventada com execução do PI SDK
 - [ ] Tests pass: `go test ./internal/pipeline/...`
 
 **Verify:**
 ```bash
-go test ./internal/pipeline/ -run TestQueueMessages -v
+go test ./internal/pipeline/ -short
 ```
 
 ---
@@ -307,7 +306,7 @@ Phase 2 (Parallel, independentes entre si):
   T7 ── Erros + Help + Documentos
 
 Phase 3 (Sequential, após T1–T7):
-  T8 ── Fila Transparente
+  T8 ── Concorrência Delegada ao PI SDK
   T9 ── Integration & Regression
 ```
 
@@ -335,5 +334,5 @@ T7 ─────────────────────────�
 | T5: Status | 1 função refatorada + testes | Granular |
 | T6: Reset com Memória | 1 função refatorada + 1 handler | Granular |
 | T7: Mensagens | 6 constantes/mensagens atualizadas | Granular (mas coeso) |
-| T8: Fila | 2 métodos + 3 mensagens | Granular |
+| T8: Concorrência delegada | ajuste de mensagens/requisitos, sem fila paralela | Granular |
 | T9: Integration | Testes e build | Granular |

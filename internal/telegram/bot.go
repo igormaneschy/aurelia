@@ -374,11 +374,11 @@ func (bc *BotController) ackMiddleware() telebot.MiddlewareFunc {
 }
 
 func (bc *BotController) ackMessage(msg *telebot.Message) {
-	bc.reactToUserMessage(msg, "👍")
+	bc.reactToUserMessage(msg, "👀")
 }
 
 func (bc *BotController) confirmMessage(msg *telebot.Message) {
-	bc.reactToUserMessage(msg, "🎉")
+	bc.reactToUserMessage(msg, "✅")
 }
 
 func (bc *BotController) reactToUserMessage(msg *telebot.Message, emoji string) {

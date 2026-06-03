@@ -13,10 +13,10 @@
 | T2: Unidades Humanas | Done | `humanBytes` + tests |
 | T3: Model Switch Local | Done | `ClearSession(chatID, threadID)` preserves other topics and CWD |
 | T4: Progresso Rico | Done | Timer + 8 tools + tests |
-| T5: Status para Humanos | Done | `/status` humanized + tests |
-| T6: Reset com Memória | Done | `/new` reset summary + tests |
+| T5: Status para Humanos | Done | `/status` remove jargão técnico do usuário; detalhes ficam em `/debug` |
+| T6: Reset com Memória | Partial | `/new` reseta corretamente, mas revisão 2026-06-03 apontou que resumo com contagem real ainda não tem fonte confiável |
 | T7: Erros + Help + Documentos | Done | Actionable messages + help examples + unsupported document hint |
-| T8: Fila Transparente | Done | Queue messages include active context and queue size |
+| T8: Concorrência delegada | Revised | PI SDK gerencia mensagens subsequentes; Aurelia não deve prometer posição de fila própria |
 | T9: Integration & Regression | Done | `go test ./... -short`; `go build -o /tmp/aurelia-build ./cmd/aurelia/` |
 
 ---
@@ -36,16 +36,16 @@
 
 ---
 
-### P1: Fila Transparente — MVP
+### P1: Concorrência Delegada ao PI SDK — MVP
 
 | # | Criterion | Result | Evidence |
 |---|-----------|--------|----------|
-| 1 | WHEN enfileirado THEN mensagem com posição/contexto | Passed | `queueAdmittedMessage()` + `TestQueueMessagesIncludeActiveContext` |
-| 2 | WHEN substituído na fila THEN confirmação clara | Passed | `admitReplacedQueued` keeps `🔁 Atualizei...` |
-| 3 | WHEN status durante processamento THEN descrição do trabalho atual | Passed | `/status` uses `WorkStatus()`; concurrent status uses `queueStatusMessage()` |
-| 4 | WHEN fila vazia THEN foco apenas no trabalho atual | Passed | `queueStatusSuffix(0)` omits queue line |
+| 1 | WHEN mensagem chega durante processamento THEN ack visual ocorre | Code complete | `ackMiddleware()` roda antes do handler |
+| 2 | WHEN PI SDK gerencia concorrência THEN Aurelia não promete posição de fila própria | Revised | Decisão UX 2026-06-03: remover exigência de posição de fila inventada |
+| 3 | WHEN status durante processamento THEN foco no estado observável | Partial | `/status` mostra trabalho ativo; revisão recomenda separar jargão técnico em `/debug` |
+| 4 | WHEN há mensagem de concorrência THEN não criar fila paralela enganosa | Pending polish | Mensagens ainda podem ser simplificadas, mas posição de fila deixou de ser requisito |
 
-**Status**: Passed automated validation.
+**Status**: Requirement revised; automated validation for fake queue position no longer applies.
 
 ---
 
@@ -190,7 +190,7 @@
 **Overall**: Automated validation passed; manual Telegram UX smoke test pending.
 
 **O que funciona (verificado por teste)**:
-- Human bytes, progress timer/8 tools, status without internals, reset summaries, model switch scoped to thread, queue messaging, actionable error strings, help examples, unsupported document hints.
+- Human bytes, progress timer/8 tools, `/status` sem jargão técnico, model switch scoped to thread, actionable error strings, help examples, unsupported document hints. Revisão posterior apontou que reset summaries ainda não usam dados reais.
 
 **Teste manual**:
 - Pending: verify 👀 appears within 500ms and becomes ✅ in Telegram; verify forum topic model switch preserves other topic context.
