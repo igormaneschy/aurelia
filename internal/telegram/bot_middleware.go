@@ -732,6 +732,7 @@ func (bc *BotController) handleForgetMeConfirm(c telebot.Context) error {
 		ownerID := fmt.Sprintf("%d", senderID)
 		jobs, err := bc.cronHandler.service.ListJobsByOwner(ctx, ownerID)
 		if err != nil {
+			_ = SendTextWithThread(bc.bot, c.Chat(), "❌ Erro ao listar seus agendamentos. Tente novamente ou contacte o admin.", callbackThreadID(c))
 			return fmt.Errorf("listar agendamentos para apagar dados: %w", err)
 		}
 		var deleteErrs []error
@@ -741,6 +742,7 @@ func (bc *BotController) handleForgetMeConfirm(c telebot.Context) error {
 			}
 		}
 		if err := errors.Join(deleteErrs...); err != nil {
+			_ = SendTextWithThread(bc.bot, c.Chat(), "❌ Erro ao apagar seus agendamentos. Tente novamente ou contacte o admin.", callbackThreadID(c))
 			return err
 		}
 	}

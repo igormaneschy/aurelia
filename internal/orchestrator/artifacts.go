@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"os/exec"
 	"strings"
 	"time"
@@ -28,6 +29,7 @@ type VerifyResult struct {
 	Stderr     string
 	DurationMs int64
 	TimedOut   bool
+	Rejected   bool   // true when the command was rejected by parseSafeVerifyCommand
 }
 
 // diffTruncationLimit is the maximum bytes of diff content preserved
@@ -85,6 +87,12 @@ func (o *Orchestrator) CollectArtifacts(ctx context.Context, cwd string, task Ta
 			if vr.Stderr == "" {
 				vr.Stderr = err.Error()
 			}
+			// Log a warning when the verify command was rejected so operators
+			// can diagnose why validation is silently skipped. This is not an
+			// error — the rest of the artifacts (diff, status) are still collected.
+			if vr.Rejected {
+				log.Printf("orchestrator: verify command rejected (chat may see incomplete validation): %s", verifyCmd)
+			}
 		}
 		art.Verify = vr
 	}
@@ -119,7 +127,7 @@ func runVerify(ctx context.Context, cwd, command string, timeout time.Duration) 
 
 	argv, err := parseSafeVerifyCommand(command)
 	if err != nil {
-		return &VerifyResult{Command: command, ExitCode: -1, Stderr: err.Error()}, err
+		return &VerifyResult{Command: command, ExitCode: -1, Stderr: err.Error(), Rejected: true}, err
 	}
 
 	vctx, cancel := context.WithTimeout(ctx, timeout)
@@ -186,18 +194,25 @@ func isAllowedVerifyArgv(argv []string) bool {
 	}
 	switch argv[0] {
 	case "go":
-		return len(argv) >= 2 && oneOf(argv[1], "test", "vet", "build")
+		return len(argv) >= 2 && oneOf(argv[1], "test", "vet", "build", "generate")
 	case "npm":
 		if len(argv) >= 2 && argv[1] == "test" {
 			return true
 		}
 		return len(argv) >= 3 && argv[1] == "run" && oneOf(argv[2], "test", "typecheck", "build", "lint")
 	case "pnpm", "yarn":
+		if len(argv) >= 2 && argv[1] == "run" {
+			return len(argv) >= 3 && oneOf(argv[2], "test", "typecheck", "build", "lint")
+		}
 		return len(argv) >= 2 && oneOf(argv[1], "test", "typecheck", "build", "lint")
 	case "npx":
-		return len(argv) >= 2 && argv[1] == "tsc"
+		return len(argv) >= 2 && oneOf(argv[1], "tsc", "tsx")
 	case "pytest", "rspec":
 		return true
+	case "cargo":
+		return len(argv) >= 2 && oneOf(argv[1], "test", "build", "check", "clippy")
+	case "make":
+		return len(argv) >= 2 && oneOf(argv[1], "test", "build", "lint", "check")
 	default:
 		return false
 	}
