@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
+	"github.com/igormaneschy/aurelia/internal/profiles"
 
 	"gopkg.in/telebot.v3"
 )
@@ -322,16 +323,24 @@ func derivePRBody(plan *orchestrator.Plan, manifest *orchestrator.ExecutionManif
 }
 
 func (bc *BotController) buildAgentSummaries() []orchestrator.AgentSummary {
-	if bc.agents == nil {
+	var list []*profiles.PromptProfile
+	if bc.profiles != nil {
+		list = bc.profiles.List()
+	} else if bc.agents != nil {
+		for _, a := range bc.agents.Agents() {
+			list = append(list, profiles.FromAgent(a))
+		}
+	}
+	if len(list) == 0 {
 		return nil
 	}
 	var summaries []orchestrator.AgentSummary
-	for _, a := range bc.agents.Agents() {
+	for _, p := range list {
 		summaries = append(summaries, orchestrator.AgentSummary{
-			Name:        a.Name,
-			Description: a.Description,
-			Tools:       a.AllowedTools,
-			ReadOnly:    a.IsReadOnly(),
+			Name:        p.Name,
+			Description: p.Description,
+			Tools:       p.AllowedTools,
+			ReadOnly:    p.IsReadOnly(),
 		})
 	}
 	return summaries

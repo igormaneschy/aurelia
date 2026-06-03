@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 
@@ -153,13 +154,9 @@ func (r *Resolver) List() []*PromptProfile {
 	}
 
 	// Sort by name.
-	for i := 0; i < len(result); i++ {
-		for j := i + 1; j < len(result); j++ {
-			if result[i].Name > result[j].Name {
-				result[i], result[j] = result[j], result[i]
-			}
-		}
-	}
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Name < result[j].Name
+	})
 
 	return result
 }
@@ -228,12 +225,12 @@ func (r *Resolver) parseAtProfile(text string) (*PromptProfile, string, bool) {
 	if spaceIdx == -1 {
 		// "@name" with no text after — treat as profile invocation without content.
 		// Return the profile but keep text as-is (stripping would empty it).
-		profile := r.getLocked(rest)
+		profile := r.Get(rest)
 		return profile, text, true
 	}
 
 	name = rest[:spaceIdx]
-	profile := r.getLocked(name)
+	profile := r.Get(name)
 	stripped := strings.TrimSpace(rest[spaceIdx+1:])
 	if stripped == "" {
 		stripped = text // keep original if nothing after @name

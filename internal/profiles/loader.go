@@ -89,11 +89,8 @@ func parseCanonicalFile(data []byte, source string) (*PromptProfile, error) {
 		return nil, nil
 	}
 
-	// Determine profile kind.
+	// Canonical profiles are always KindGlobal.
 	kind := KindGlobal
-	if fm.Kind == "prompt_profile" {
-		kind = KindGlobal
-	}
 
 	// Determine public visibility.
 	public := true

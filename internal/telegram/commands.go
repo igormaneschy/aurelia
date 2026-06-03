@@ -796,23 +796,28 @@ func statusWorkLines(description string, queueSize int) []string {
 }
 
 func (bc *BotController) cmdListAgents(userID int64) (string, error) {
-	if bc.agents == nil {
-		return "Nenhum agent configurado.", nil
+	// Use profiles resolver for canonical list (includes legacy agents + builtins + canonical).
+	var all []*profiles.PromptProfile
+	if bc.profiles != nil {
+		all = bc.profiles.List()
+	} else if bc.agents != nil {
+		// Fallback: legacy agents only when resolver not available.
+		for _, a := range bc.agents.Agents() {
+			all = append(all, profiles.FromAgent(a))
+		}
 	}
-
-	all := bc.agents.Agents()
 	if len(all) == 0 {
-		return "Nenhum agent configurado.", nil
+		return "Nenhum perfil configurado. Perfis built-in (general, developer, researcher) estão sempre disponíveis.", nil
 	}
 
 	var lines []string
 	lines = append(lines, fmt.Sprintf("**Perfis disponíveis** (%d)\n", len(all)))
-	for _, a := range all {
-		desc := a.Description
+	for _, p := range all {
+		desc := p.Description
 		if desc == "" {
 			desc = "(sem descrição)"
 		}
-		lines = append(lines, fmt.Sprintf("- **%s**: %s", a.Name, desc))
+		lines = append(lines, fmt.Sprintf("- **%s**: %s", p.Name, desc))
 	}
 
 	// Mode section
@@ -1418,28 +1423,11 @@ func (bc *BotController) getProfile(name string) *profiles.PromptProfile {
 	return nil
 }
 
-// getBuiltinProfile returns a synthetic PromptProfile for builtin modes
-// when no resolver is available. Used as fallback in getProfile.
+// getBuiltinProfile returns a PromptProfile from the resolver's builtins.
+// Used as fallback in getProfile when no resolver is available.
 func (bc *BotController) getBuiltinProfile(name string) *profiles.PromptProfile {
-	switch strings.ToLower(name) {
-	case "general":
-		return &profiles.PromptProfile{
-			Name:        "general",
-			Description: "Conversa geral, equilibrada e útil.",
-			Tags:        []string{"general", "conversation"},
-		}
-	case "developer":
-		return &profiles.PromptProfile{
-			Name:        "developer",
-			Description: "Engenharia de software e produto — prioriza arquitetura, riscos e validação.",
-			Tags:        []string{"developer", "engineering", "code"},
-		}
-	case "researcher":
-		return &profiles.PromptProfile{
-			Name:        "researcher",
-			Description: "Pesquisa, comparação e síntese — distingue evidência de inferência.",
-			Tags:        []string{"researcher", "research", "analysis"},
-		}
+	if bc.profiles != nil {
+		return bc.profiles.Get(name)
 	}
 	return nil
 }
