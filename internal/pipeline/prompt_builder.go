@@ -49,12 +49,15 @@ func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatI
 	identitySection := fmt.Sprintf("# Runtime Identity\n\nYou are running via the Aurelia bridge over the PI SDK.\nProvider: %s\nModel: %s\nAlways answer accurately when asked what model you are.", provider, model)
 	sections = append(sections, identitySection)
 
-	// Agent-specific prompt — placed BEFORE persona so the mode overlay
-	// appended last by BuildPromptForUser takes final precedence over
-	// agent instructions (mode is the user's latest behavioural intent).
+	// Agent-specific prompt — when an agent provides a prompt via @name,
+	// it becomes the effective Prompt Profile and overrides the active mode
+	// overlay (no dual injection per Prompt Profiles spec §7).
+	// Computation: @profile > /mode > general.
+	agentWins := false
 	if agent != nil && agent.Prompt != "" {
-		agentSection := "# Agent Instructions\n\n" + agent.Prompt
-		sections = append(sections, agentSection)
+		profileSection := fmt.Sprintf("# Active Prompt Profile: %s\n\n%s", agent.Name, agent.Prompt)
+		sections = append(sections, profileSection)
+		agentWins = true // Agent wins — skip mode overlay in persona below
 	}
 
 	// Persona prompt — prefer per-user persona when userID and resolver are available
@@ -72,6 +75,9 @@ func (bc *Service) buildSystemPrompt(userText string, agent *agents.Agent, chatI
 					isOwner = profile.IsOwner
 					activeMode = profile.ActiveMode
 				}
+			}
+			if agentWins {
+				activeMode = "" // Agent overrides mode overlay — Prompt Profiles spec §7
 			}
 			personaPrompt, err = bc.persona.BuildPromptForUser(userID, bc.userResolver, isOwner, activeMode)
 		} else {

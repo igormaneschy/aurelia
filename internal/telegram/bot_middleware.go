@@ -123,12 +123,16 @@ func helpMessage() string {
 		"/status — Ver estado atual + trabalho ativo + fila\n" +
 		"/cwd <path> — Definir diretório de trabalho (tópicos herdam do grupo)\n" +
 		"/cron — Gerenciar agendamentos\n" +
-		"/agents — Listar agentes disponíveis (também roteáveis com @nome)\n" +
-		"/mode — Trocar/consultar modo ativo (developer/researcher/general)\n" +
+		"/agents — Listar perfis de Prompt disponíveis\n" +
+		"/mode <perfil> — Definir perfil padrão (ex: developer, researcher)\n" +
 		"/memory — Ver status da memória e criar checkpoints\n" +
 		"/model — Ver/trocar modelo ativo\n" +
 		"/help — Mostrar esta mensagem\n\n" +
 		"---\n\n" +
+		"💡 Prompt Profiles — como a Aurelia empacota seu pedido:\n" +
+		"• /mode <perfil> — define o perfil padrão para suas conversas\n" +
+		"• @perfil <pedido> — usa um perfil só nesta mensagem (ex: @researcher)\n" +
+		"• /agents — lista todos os perfis disponíveis\n\n" +
 		"💡 Também entendo comandos naturais:\n" +
 		"• \"agenda todo dia às 9h revisar emails\"\n" +
 		"• \"muda modelo para claude-sonnet\"\n" +
@@ -153,7 +157,8 @@ func (bc *BotController) handleAgentsCommand(c telebot.Context) error {
 		return err
 	}
 	if bc.agents == nil || len(bc.agents.Agents()) == 0 {
-		reply = "Nenhum agente configurado. Crie arquivos .md em ~/.aurelia/agents/"
+		reply = "Nenhum perfil configurado. Crie arquivos .md em ~/.aurelia/agents/\n\n" +
+			"Perfis built-in (general, developer, researcher) estão sempre disponíveis."
 	}
 	return SendTextWithThread(bc.bot, c.Chat(), reply, c.Message().ThreadID)
 }

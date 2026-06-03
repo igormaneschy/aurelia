@@ -82,19 +82,24 @@ var commandRules = []commandRule{
 	}, false},
 	// mode_set — slash commands use substring match; natural language uses exact
 	{CmdSetMode, []string{
-		"/mode ", "/modo ",
+		"/mode ", "/modo ", "/perfil ",
 	}, false},
 	// mode_set_exact — natural-language mode commands must be exact (no "modo devops" false positive)
 	{CmdSetMode, []string{
 		"modo dev", "modo desenvolvedor", "modo developer",
 		"modo pesquisa", "modo pesquisador", "modo researcher",
 		"modo geral",
+		"perfil dev", "perfil developer", "perfil desenvolvedor",
+		"perfil pesquisa", "perfil pesquisador", "perfil researcher",
+		"perfil geral",
 	}, true},
 	// mode_query (exact match)
 	{CmdSetMode, []string{
 		"/mode",
 		"qual meu modo", "qual o meu modo",
 		"meu modo atual",
+		"qual meu perfil", "qual o meu perfil",
+		"meu perfil atual",
 	}, true},
 	// cron_create
 	{CmdCronCreate, []string{
@@ -117,11 +122,13 @@ var commandRules = []commandRule{
 		"status",
 		"ta funcionando",
 	}, true},
-	// list_agents
+	// list_agents — exact-only per Prompt Profiles spec §9.2 acceptance 6
 	{CmdListAgents, []string{
-		"quais agents", "lista agents", "listar agents",
-		"meus agents",
-	}, false},
+		"quais agents", "quais perfis",
+		"lista agents", "lista perfis",
+		"listar agents", "listar perfis",
+		"meus agents", "meus perfis",
+	}, true},
 	// list_models
 	{CmdListModels, []string{
 		"quais modelos", "lista modelos", "listar modelos",
@@ -606,7 +613,7 @@ func (bc *BotController) cmdStatus(chatID int64, threadID int, userID int64) (st
 	if bc.agents != nil {
 		agentCount = len(bc.agents.Agents())
 	}
-	lines = append(lines, fmt.Sprintf("🤖 Agents disponíveis: **%d**", agentCount))
+	lines = append(lines, fmt.Sprintf("🤖 Perfis disponíveis: **%d**", agentCount))
 
 	// Cron jobs
 	if bc.cronHandler != nil {
@@ -790,17 +797,13 @@ func (bc *BotController) cmdListAgents(userID int64) (string, error) {
 	}
 
 	var lines []string
-	lines = append(lines, fmt.Sprintf("**Agents disponíveis** (%d)\n", len(all)))
+	lines = append(lines, fmt.Sprintf("**Perfis disponíveis** (%d)\n", len(all)))
 	for _, a := range all {
 		desc := a.Description
 		if desc == "" {
 			desc = "(sem descrição)"
 		}
-		line := fmt.Sprintf("- **%s**: %s", a.Name, desc)
-		if a.Model != "" {
-			line += fmt.Sprintf(" (modelo: %s)", a.Model)
-		}
-		lines = append(lines, line)
+		lines = append(lines, fmt.Sprintf("- **%s**: %s", a.Name, desc))
 	}
 
 	// Mode section
@@ -828,16 +831,18 @@ func (bc *BotController) buildModeListSection(userID int64) string {
 	if displayActive == "" {
 		displayActive = "general"
 	}
-	modes := []string{"general", "developer", "researcher"}
+	profiles := []string{"general", "developer", "researcher"}
 	var lines []string
-	lines = append(lines, "\n**Modos disponíveis**")
-	for _, m := range modes {
+	lines = append(lines, "\n**Perfis disponíveis**")
+	for _, p := range profiles {
 		marker := ""
-		if m == displayActive {
+		if p == displayActive {
 			marker = " (● ativo)"
 		}
-		lines = append(lines, fmt.Sprintf("- **%s**%s", m, marker))
+		lines = append(lines, fmt.Sprintf("- **%s**%s", p, marker))
 	}
+	lines = append(lines, "\nUse /mode <perfil> para definir o perfil padrão.")
+	lines = append(lines, "Use @perfil <pedido> para aplicar um perfil só nesta mensagem.")
 	return strings.Join(lines, "\n")
 }
 
@@ -1262,13 +1267,13 @@ func (bc *BotController) cmdSetMode(c telebot.Context, text string) (string, err
 		if display == "" {
 			display = "general"
 		}
-		return fmt.Sprintf("Modo atual: **%s**.", display), nil
+		return fmt.Sprintf("Perfil ativo: **%s**.\n\nUse @perfil para aplicar outro perfil só na próxima mensagem.", display), nil
 	}
 
 	// Set mode
 	normalized, err := users.NormalizeMode(modeText)
 	if err != nil {
-		return fmt.Sprintf("Modo inválido %q. Use **general**, **developer** ou **researcher**.", modeText), nil
+		return fmt.Sprintf("Perfil inválido %q. Use **general**, **developer** ou **researcher**.", modeText), nil
 	}
 
 	profile.ActiveMode = normalized
@@ -1280,7 +1285,7 @@ func (bc *BotController) cmdSetMode(c telebot.Context, text string) (string, err
 	if display == "" {
 		display = "general"
 	}
-	return fmt.Sprintf("✅ Modo alterado para **%s**. Próxima mensagem usará o novo perfil.", display), nil
+	return fmt.Sprintf("✅ Perfil alterado para **%s**. O perfil afeta como a Aurelia empacota seu pedido para o SDK.\nUse @perfil para aplicar outro perfil só na próxima mensagem.", display), nil
 }
 
 // extractModeTarget extracts the target mode from a mode command text.
@@ -1294,21 +1299,21 @@ func extractModeTarget(text string) string {
 		return ""
 	}
 	// Query phrases
-	for _, q := range []string{"qual meu modo", "qual o meu modo", "meu modo atual"} {
+	for _, q := range []string{"qual meu modo", "qual o meu modo", "meu modo atual", "qual meu perfil", "qual o meu perfil", "meu perfil atual"} {
 		if lower == q {
 			return ""
 		}
 	}
 
-	// "/mode developer", "/modo dev" etc.
-	for _, prefix := range []string{"/mode ", "/modo "} {
+	// "/mode developer", "/modo dev", "/perfil developer" etc.
+	for _, prefix := range []string{"/mode ", "/modo ", "/perfil "} {
 		if strings.HasPrefix(lower, prefix) {
 			return strings.TrimSpace(trimmed[len(prefix):])
 		}
 	}
 
-	// "modo dev", "modo desenvolvedor" etc.
-	for _, prefix := range []string{"modo "} {
+	// "modo dev", "modo desenvolvedor", "perfil dev", "perfil developer" etc.
+	for _, prefix := range []string{"modo ", "perfil "} {
 		if strings.HasPrefix(lower, prefix) {
 			return strings.TrimSpace(trimmed[len(prefix):])
 		}
