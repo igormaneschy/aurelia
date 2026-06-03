@@ -39,8 +39,8 @@ User Message
 |-----------|----------|------------|
 | `BotController` | `internal/telegram/bot.go` | Adicionar método `ackMessage()`; modificar `handleModelCommand`, `handleResetCommand`, `handleHelpCommand`, `handleStatusCommand` |
 | `progressReporter` | `internal/telegram/progress.go` | Adicionar campo `startTime`; aumentar limite de display; prefixar com timer |
-| `runSupervisor` | `internal/pipeline/run_supervisor.go` | Expor `queueSize()` e `activeDescription()` para mensagens de fila |
-| `session.Tracker` | `internal/session/tracker.go` | Usar `Get(chatID)` para resumo no reset e no status |
+| `runSupervisor` | `internal/pipeline/run_supervisor.go` | Expor apenas estado observável; não inventar posição de fila fora do PI SDK |
+| `session.Store` | `internal/session/store.go` | Informar se há sessão ativa, sem estimar tokens/mensagens do PI SDK |
 | `imageTooLargeError` | `internal/telegram/input.go` | Modificar `UserMessage()` para usar `humanBytes()` |
 | `cmdStatus`, `cmdSessionReset` | `internal/telegram/commands.go` | Refatorar mensagens de saída |
 | `SendText`, `SendError` | `internal/telegram/output.go` | Adicionar `ReactToMessage` no path de ack |
@@ -51,8 +51,8 @@ User Message
 | System | Integration Method |
 |--------|--------------------|
 | Telegram Bot API | `bot.React()` para ack; `bot.Edit()` para progress; `bot.Send()` para mensagens |
-| Session Store | `Get(chatID)` para resumo de tokens/mensagens; `Clear(chatID, threadID)` para model switch local |
-| Run Supervisor | Nova interface `QueueInfo(chatID, threadID)` para posição na fila |
+| Session Store | `Clear(chatID, threadID)` para model switch local; estado simples de sessão ativa |
+| PI SDK | Dono do contexto/tokens e da concorrência; Aurelia não estima essas métricas |
 
 ---
 
@@ -269,10 +269,11 @@ func (e imageTooLargeError) UserMessage() string {
 - **Location**: `internal/telegram/commands.go:cmdStatus`
 - **Changes**:
   - Remover session ID e flag warm/cold
-  - Adicionar contagem de mensagens/tokens da sessão
+  - Adicionar estado simples da sessão (ativa/nenhuma conversa ativa)
   - Adicionar diretório atual (CWD)
   - Manter informações úteis: bridge status, modelo, agendamentos
-- **Reuses**: `session.Tracker.Get()`, `session.Store.GetCwd()`
+  - Não exibir contagem de mensagens/tokens sem API explícita do PI SDK
+- **Reuses**: `session.Store.GetCwd()` e estado de sessão
 
 ```go
 // commands.go — cmdStatus refatorado
@@ -303,12 +304,11 @@ func (bc *BotController) cmdStatus(chatID int64, threadID int) (string, error) {
         lines = append(lines, fmt.Sprintf("📁 Projeto: `%s`", cwd))
     }
 
-    // Session summary
-    usage := bc.tracker.Get(chatID)
-    if usage.NumTurns > 0 {
-        lines = append(lines, fmt.Sprintf("💬 Sessão: **%d mensagens** • ~**%d tokens**", usage.NumTurns, usage.TotalTokens))
+    // Session state — PI SDK owns context/token accounting.
+    if activeSession {
+        lines = append(lines, "💬 Sessão: conversa ativa")
     } else {
-        lines = append(lines, "💬 Sessão: nenhuma conversa ativa")
+        lines = append(lines, "💬 Sessão: nenhuma conversa ativa no momento")
     }
 
     // Cron jobs
@@ -330,33 +330,24 @@ func (bc *BotController) cmdStatus(chatID int64, threadID int) (string, error) {
 }
 ```
 
-### 8. Reset com Memória (`cmdSessionReset` refatorado)
+### 8. Reset Curto (`cmdSessionReset` refatorado)
 
-- **Purpose**: Mostrar resumo ao resetar sessão
+- **Purpose**: Confirmar reset sem inventar métricas de contexto/tokens do PI SDK
 - **Location**: `internal/telegram/commands.go:cmdSessionReset`, `internal/telegram/bot_middleware.go:handleResetCommand`
 - **Changes**:
-  - Antes de limpar, capturar `usage` do tracker
-  - Incluir na mensagem se houver dados
-- **Reuses**: `session.Tracker.Get()`
+  - Limpar sessão local/resume normalmente
+  - Não consultar nem estimar tokens/mensagens
+  - Responder apenas: `🗑️ Sessão resetada. Próxima mensagem inicia conversa nova.`
+- **Reuses**: fluxo existente de clear/cancel
 
 ```go
 // commands.go — cmdSessionReset refatorado
-func (bc *BotController) cmdSessionReset(chatID int64, threadID int) (string, error) {
-    // Capture usage before flush/clear
-    usage := bc.tracker.Get(chatID)
-
-    if bc.dreamer != nil {
-        cwd := bc.sessions.GetCwd(chatID, threadID)
-        bc.dreamer.FlushNudge(chatID, threadID, cwd, bc.nudgeBuffer)
+func formatResetSummary(canceledActive bool) string {
+    prefix := ""
+    if canceledActive {
+        prefix = "🛑 Processamento em andamento interrompido.\n"
     }
-    bc.sessions.Clear(chatID, threadID)
-    bc.tracker.Clear(chatID)
-    log.Printf("command: session reset for chat=%d thread=%d", chatID, threadID)
-
-    if usage.NumTurns > 0 {
-        return fmt.Sprintf("🗑️ Sessão resetada (%d mensagens, ~%d tokens).\nPróxima mensagem inicia conversa nova.", usage.NumTurns, usage.TotalTokens), nil
-    }
-    return "Sessão resetada. Próxima mensagem inicia conversa nova.", nil
+    return prefix + "🗑️ Sessão resetada. Próxima mensagem inicia conversa nova."
 }
 ```
 
@@ -376,7 +367,7 @@ func (bc *BotController) handleHelpCommand(c telebot.Context) error {
         "/usage — Ver uso de tokens da sessão\n" +
         "/cwd <path> — Definir diretório de trabalho\n" +
         "/cron — Gerenciar agendamentos\n" +
-        "/agents — Listar agentes disponíveis\n" +
+        "/agents — Listar perfis disponíveis\n" +
         "/model — Ver/trocar modelo ativo\n" +
         "/help — Mostrar esta mensagem\n\n" +
         "💡 *Também entendo comandos naturais:*\n" +
@@ -426,7 +417,7 @@ Nenhum modelo novo. Apenas:
 |----------------|----------|-------------|
 | Falha ao enviar reação 👀 | Log + continuar | Nenhum — ack é best-effort |
 | Falha ao editar mensagem de progresso | Log + continuar | Progresso pode ficar desatualizado |
-| Tracker vazio no reset | Omitir resumo | Comportamento anterior (sem resumo) |
+| Métricas do PI SDK indisponíveis | Omitir contagens de mensagens/tokens | Evita números inventados |
 | Callback sem message (inline keyboard) | Usar chatID=0, threadID=0 | ClearAll como fallback — aceitável |
 | Formatação de bytes com valor negativo | Retornar "0 B" | Não deve acontecer, defensivo |
 
@@ -440,7 +431,7 @@ Nenhum modelo novo. Apenas:
 | Limite de progresso de 5 → 8 | 8 é suficiente para a maioria das tarefas | 10 seria muito longo para Telegram; 8 é bom equilíbrio |
 | Timer no progresso, não no bridge | Bridge não sabe quando o usuário enviou | Progress reporter é criado no início do executeAsync, ponto correto |
 | Model switch local (Clear, não ClearAll) | Preserva contexto de outros tópicos | ClearAll é surpreendente e destrutivo; Clear é o comportamento esperado |
-| Resumo no reset usando tracker | Tracker já tem turns/tokens | Sem custo adicional, apenas formatar |
+| Reset curto sem métricas | PI SDK gerencia contexto/tokens | Evita UX enganosa baseada em estimativas locais |
 | Unidades humanas em helper separado | Reutilizável para outros limites no futuro | PDF size, audio size, etc. |
 | Dicas de erro em constantes centralizadas | Facilita manutenção e revisão | Mensagens de UX devem ser centralizadas |
 | Status simplificado, não removido | Usuários avançados ainda precisam de info | Removemos apenas jargão, não utilidade |
@@ -456,9 +447,8 @@ Nenhum modelo novo. Apenas:
 4. `internal/telegram/commands.go` — `cmdStatus`, `cmdSessionReset`, `cmdCronCreate` (mensagens), `cmdSetModel` (threadID)
 5. `internal/telegram/bot_middleware.go` — `handleHelpCommand`, `handleResetCommand`, `setModelFromCallback`, `handleUsageCommand`
 6. `internal/telegram/bot.go` — `ackMessage()`, `confirmMessage()`, chamadas nos handlers
-7. `internal/pipeline/pipeline.go` — mensagens de fila (`admitQueued`, `admitReplacedQueued`)
-8. `internal/pipeline/run_supervisor.go` — `queueSize()`, `activeDescription()` (opcional, para fila)
-9. `internal/session/tracker.go` — verificar se `TotalTokens` existe (se não, usar estimativa)
+7. `internal/pipeline/pipeline.go` — mensagens de concorrência sem posição de fila inventada
+8. `internal/pipeline/run_supervisor.go` — estado observável quando disponível
 
 **Arquivos de teste:**
 1. `internal/telegram/progress_test.go` — timer, limite 8

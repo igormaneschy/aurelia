@@ -13,10 +13,10 @@
 | T2: Unidades Humanas | Done | `humanBytes` + tests |
 | T3: Model Switch Local | Done | `ClearSession(chatID, threadID)` preserves other topics and CWD |
 | T4: Progresso Rico | Done | Timer + 8 tools + tests |
-| T5: Status para Humanos | Done | `/status` humanized + tests |
-| T6: Reset com Memória | Done | `/new` reset summary + tests |
+| T5: Status para Humanos | Done | `/status` remove jargão técnico do usuário; detalhes ficam em `/debug` |
+| T6: Reset Curto | Done | `/new` confirma reset sem inventar contagem de mensagens/tokens do PI SDK |
 | T7: Erros + Help + Documentos | Done | Actionable messages + help examples + unsupported document hint |
-| T8: Fila Transparente | Done | Queue messages include active context and queue size |
+| T8: Concorrência delegada | Revised | PI SDK gerencia mensagens subsequentes; Aurelia não deve prometer posição de fila própria |
 | T9: Integration & Regression | Done | `go test ./... -short`; `go build -o /tmp/aurelia-build ./cmd/aurelia/` |
 
 ---
@@ -36,16 +36,16 @@
 
 ---
 
-### P1: Fila Transparente — MVP
+### P1: Concorrência Delegada ao PI SDK — MVP
 
 | # | Criterion | Result | Evidence |
 |---|-----------|--------|----------|
-| 1 | WHEN enfileirado THEN mensagem com posição/contexto | Passed | `queueAdmittedMessage()` + `TestQueueMessagesIncludeActiveContext` |
-| 2 | WHEN substituído na fila THEN confirmação clara | Passed | `admitReplacedQueued` keeps `🔁 Atualizei...` |
-| 3 | WHEN status durante processamento THEN descrição do trabalho atual | Passed | `/status` uses `WorkStatus()`; concurrent status uses `queueStatusMessage()` |
-| 4 | WHEN fila vazia THEN foco apenas no trabalho atual | Passed | `queueStatusSuffix(0)` omits queue line |
+| 1 | WHEN mensagem chega durante processamento THEN ack visual ocorre | Code complete | `ackMiddleware()` roda antes do handler |
+| 2 | WHEN PI SDK gerencia concorrência THEN Aurelia não promete posição de fila própria | Revised | Decisão UX 2026-06-03: remover exigência de posição de fila inventada |
+| 3 | WHEN status durante processamento THEN foco no estado observável | Partial | `/status` mostra trabalho ativo; revisão recomenda separar jargão técnico em `/debug` |
+| 4 | WHEN há mensagem de concorrência THEN não criar fila paralela enganosa | Pending polish | Mensagens ainda podem ser simplificadas, mas posição de fila deixou de ser requisito |
 
-**Status**: Passed automated validation.
+**Status**: Requirement revised; automated validation for fake queue position no longer applies.
 
 ---
 
@@ -106,7 +106,7 @@
 | # | Criterion | Result | Evidence |
 |---|-----------|--------|----------|
 | 1 | WHEN /status THEN sem session ID ou warm/cold | Passed | `TestCmdStatus` |
-| 2 | WHEN /status THEN com modelo, projeto, mensagens, tokens | Passed | `TestCmdStatus` |
+| 2 | WHEN /status THEN com modelo, projeto e sessão simples, sem mensagens/tokens inventados | Passed | `TestCmdStatus` |
 | 3 | WHEN sem sessão THEN "nenhuma conversa ativa" | Passed | `TestCmdStatus_NoActiveSessionUsesClearText` |
 | 4 | WHEN agendamentos THEN contagem amigável | Passed | `TestCmdStatus` |
 
@@ -114,13 +114,13 @@
 
 ---
 
-### P2: Reset com Memória — Should Have
+### P2: Reset Curto — Should Have
 
 | # | Criterion | Result | Evidence |
 |---|-----------|--------|----------|
-| 1 | WHEN /new com sessão THEN resumo (mensagens + tokens) | Passed | `TestCmdSessionReset` |
-| 2 | WHEN /new vazio THEN mensagem simples | Passed | `TestCmdSessionReset_EmptySessionUsesSimpleMessage` |
-| 3 | WHEN reset via troca de modelo THEN resumo também | Passed | `formatModelResetSummary()` tests via model reset tests |
+| 1 | WHEN /new THEN confirmação curta | Passed | `TestCmdSessionReset` |
+| 2 | WHEN /new vazio THEN mesma mensagem curta | Passed | `TestCmdSessionReset_EmptySessionUsesSimpleMessage` |
+| 3 | WHEN reset via troca de modelo THEN só escopo privado/tópico | Passed | `formatModelResetSummary()` tests via model reset tests |
 
 **Status**: Passed automated validation.
 
@@ -190,7 +190,7 @@
 **Overall**: Automated validation passed; manual Telegram UX smoke test pending.
 
 **O que funciona (verificado por teste)**:
-- Human bytes, progress timer/8 tools, status without internals, reset summaries, model switch scoped to thread, queue messaging, actionable error strings, help examples, unsupported document hints.
+- Human bytes, progress timer/8 tools, `/status` sem jargão técnico, `/new` curto sem métricas inventadas, model switch scoped to thread, actionable error strings, help examples, unsupported document hints.
 
 **Teste manual**:
 - Pending: verify 👀 appears within 500ms and becomes ✅ in Telegram; verify forum topic model switch preserves other topic context.

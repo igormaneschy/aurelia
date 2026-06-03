@@ -621,22 +621,22 @@ func (bc *BotController) setModelFromCallback(c telebot.Context, data string) er
 		return c.Edit("Modelo indisponível. Abra /model e tente novamente.")
 	}
 
-	bc.config.DefaultModel = modelID
-	bc.config.DefaultProvider = provider
-
-	chatID := c.Chat().ID
-	threadID := callbackThreadID(c)
-	userID := safeSenderID(c.Sender())
-	resetMsg := bc.resetCurrentModelSession(chatID, threadID, userID)
-
+	oldProvider, oldModel := bc.currentModelPair()
 	if err := bc.saveDefaultModel(provider, modelID); err != nil {
 		log.Printf("model callback persist: %v", err)
+		return c.Edit("Não consegui salvar o modelo selecionado. Tente novamente; a sessão atual foi preservada.")
 	}
+	logModelChange("callback", oldProvider, oldModel, provider, modelID)
 	bc.invalidateModelCache()
 
 	if bc.refreshProviderEnv != nil {
 		bc.refreshProviderEnv()
 	}
+
+	chatID := c.Chat().ID
+	threadID := callbackThreadID(c)
+	userID := safeSenderID(c.Sender())
+	resetMsg := bc.resetCurrentModelSession(chatID, threadID, userID)
 
 	return c.Edit(fmt.Sprintf("✅ Modelo alterado para **%s**\nProvedor: **%s**\n\n%s", modelID, provider, resetMsg))
 }

@@ -7,13 +7,13 @@
 A experiência do usuário no Telegram tem vários pontos de fricção pequenos mas cumulativos que deixam a interação menos fluida do que poderia ser:
 
 1. **Silêncio inicial**: Ao enviar uma mensagem (especialmente com imagem ou áudio), há um gap de 1–3 segundos antes de qualquer feedback visual. O usuário não sabe se a mensagem foi recebida.
-2. **Fila opaca**: Quando o bot está ocupado, a mensagem é enfileirada, mas o usuário não sabe sua posição nem o que está rodando.
+2. **Concorrência delegada**: Quando o bot está ocupado, o PI SDK recebe e gerencia as mensagens subsequentes. Aurelia não deve inventar posição de fila; deve apenas sinalizar recebimento/processamento sem criar uma fila paralela enganosa.
 3. **Destruição de contexto**: Trocar de modelo via `/model` limpa **todas** as sessões do chat, incluindo tópicos de fórum não relacionados — surpreendente e destrutivo.
 4. **Erros sem saída**: Mensagens como *"Falha ao conectar com o processador"* não sugerem o que fazer a seguir.
 5. **Progresso limitado**: O reporter de ferramentas trunca em 5 itens, não mostra tempo decorrido, e não distingue "pensando" de "executando".
 6. **Números crus**: Limites de imagem são mostrados em bytes (10485760) em vez de MB (10 MB).
 7. **Status técnico**: `/status` exibe `sid=abc12345 (warm)` — linguagem interna, não útil para o usuário.
-8. **Reset cego**: `/new` não diz o que foi descartado (mensagens, tokens).
+8. **Reset prolixo/enganoso**: `/new` deve confirmar o reset sem inventar contagens de mensagens/tokens, pois contexto e tokens são gerenciados pelo PI SDK.
 9. **Help minimalista**: `/help` lista comandos mas não ensida o uso natural ("agenda todo dia às 9h").
 10. **Formatos bloqueados sem alternativa**: Ao enviar .docx, o bot apenas diz o que não suporta.
 
@@ -22,13 +22,13 @@ Cada um desses pontos é pequeno isoladamente, mas juntos criam a sensação de 
 ## Goals
 
 - [ ] Usuário recebe feedback visual imediato ao enviar qualquer mensagem
-- [ ] Usuário entende o estado da fila quando o bot está ocupado
+- [ ] Usuário recebe feedback sem Aurelia inventar posição de fila quando o PI SDK gerencia concorrência
 - [ ] Troca de modelo afeta apenas o contexto atual (thread), não todo o chat
 - [ ] Toda mensagem de erro sugere um próximo passo concreto
 - [ ] Progresso de ferramentas mostra tempo e mais contexto
 - [ ] Todos os tamanhos de arquivo/arquivos são mostrados em unidades legíveis
 - [ ] `/status` é compreensível para não-desenvolvedores
-- [ ] `/new` informa o que foi resetado
+- [ ] `/new` confirma o reset com mensagem curta e sem métricas que Aurelia não controla
 - [ ] `/help` ensina comandos naturais, não só slash commands
 - [ ] Formatos não suportados vêm com sugestão de alternativa
 
@@ -61,20 +61,20 @@ Cada um desses pontos é pequeno isoladamente, mas juntos criam a sensação de 
 
 ---
 
-### P1: Fila Transparente — MVP
+### P1: Concorrência Delegada ao PI SDK — MVP
 
-**User Story**: Como usuário, quando o bot está ocupado, quero saber quantas mensagens estão na minha frente e o que ele está fazendo, pra saber se vale a pena esperar.
+**User Story**: Como usuário, quando envio outra mensagem enquanto o bot ainda trabalha, quero receber feedback de que ela chegou sem Aurelia fingir conhecer uma fila que é gerenciada pelo PI SDK.
 
-**Why P1**: Fila sem contexto é frustrante. "Coloquei na fila" não diz se vai demorar 10s ou 5min.
+**Why P1**: Posição de fila inventada piora a confiança. Como o PI SDK é o dono da execução concorrente, Aurelia deve manter a UX honesta e leve.
 
 **Acceptance Criteria**:
 
-1. WHEN uma mensagem é enfileirada (`admitQueued`) THEN a resposta SHALL incluir a posição na fila: `"📥 Fila: 1 mensagem à frente. Vou processar em seguida."` ou `"📥 Sua mensagem é a próxima na fila."`
-2. WHEN uma mensagem enfileirada é substituída (`admitReplacedQueued`) THEN a resposta SHALL confirmar: `"🔁 Atualizei a próxima instrução na fila."` (sem mudança)
-3. WHEN o usuário pergunta "status" enquanto o bot processa THEN a resposta SHALL incluir a descrição do trabalho atual + tempo rodando + tamanho da fila
-4. WHEN a fila está vazia e o bot está processando THEN a mensagem de status SHALL focar apenas no trabalho atual
+1. WHEN uma mensagem chega durante processamento THEN Aurelia SHALL dar ack visual normalmente.
+2. WHEN o PI SDK aceita a mensagem subsequente THEN Aurelia SHALL evitar prometer posição/ordem que não controla.
+3. WHEN o usuário pergunta "status" enquanto o bot processa THEN a resposta SHALL focar no estado observável: processando/recebido/interrompível.
+4. WHEN houver mensagem de concorrência THEN ela SHALL deixar claro que o processamento é gerenciado pelo PI SDK, sem criar fila paralela.
 
-**Independent Test**: Enviar mensagem A (lenta), depois mensagem B rapidamente. Verificar que B recebe posição na fila.
+**Independent Test**: Enviar mensagem A (lenta), depois mensagem B rapidamente. Verificar que não há promessa falsa de posição na fila.
 
 ---
 
@@ -155,7 +155,7 @@ Cada um desses pontos é pequeno isoladamente, mas juntos criam a sensação de 
 **Acceptance Criteria**:
 
 1. WHEN o usuário executa `/status` THEN a saída SHALL omitir o session ID e o flag `warm/cold`
-2. WHEN o usuário executa `/status` THEN a saída SHALL incluir, se disponível: modelo atual, projeto/diretório atual, número de mensagens na sessão, tokens usados
+2. WHEN o usuário executa `/status` THEN a saída SHALL incluir, se disponível: modelo atual, projeto/diretório atual e se há conversa ativa, sem estimar mensagens/tokens do PI SDK
 3. WHEN não há sessão ativa THEN a mensagem SHALL ser clara: `"Nenhuma conversa ativa no momento."`
 4. WHEN há agendamentos ativos THEN a mensagem SHALL mostrar a contagem de forma amigável
 
@@ -163,19 +163,19 @@ Cada um desses pontos é pequeno isoladamente, mas juntos criam a sensação de 
 
 ---
 
-### P2: Reset com Memória — Should Have
+### P2: Reset Curto — Should Have
 
-**User Story**: Como usuário, quando reseto a sessão, quero saber o que foi descartado.
+**User Story**: Como usuário, quando reseto a sessão, quero uma confirmação clara e curta de que a próxima mensagem começa uma conversa nova.
 
-**Why P2**: Reset é destrutivo. Saber o "custo" do reset ajuda o usuário a decidir se vale a pena.
+**Why P2**: Contexto e tokens são responsabilidade do PI SDK. Aurelia não deve inventar contagens de mensagens/tokens sem uma API explícita do PI.
 
 **Acceptance Criteria**:
 
-1. WHEN o usuário executa `/new` ou "nova conversa" THEN a resposta SHALL incluir um resumo da sessão que foi resetada: `"🗑️ Sessão resetada (15 mensagens, ~8K tokens).\nPróxima mensagem inicia conversa nova."`
-2. WHEN a sessão está vazia (0 mensagens) THEN a resposta SHALL ser simples: `"Sessão resetada. Próxima mensagem inicia conversa nova."` (sem resumo)
-3. WHEN o reset ocorre via troca de modelo THEN o resumo ainda SHALL ser mostrado (junto com a confirmação de modelo)
+1. WHEN o usuário executa `/new` ou "nova conversa" THEN a resposta SHALL ser: `"🗑️ Sessão resetada. Próxima mensagem inicia conversa nova."`
+2. WHEN o reset interrompe um processamento ativo THEN a resposta SHALL mencionar a interrupção antes da confirmação curta.
+3. WHEN o reset ocorre via troca de modelo THEN a confirmação SHALL mencionar apenas o escopo resetado (privado/tópico), sem contagem de mensagens/tokens.
 
-**Independent Test**: Enviar 5 mensagens, depois /new. Verificar que a resposta menciona "5 mensagens".
+**Independent Test**: Executar /new e verificar a mensagem curta sem "mensagens" ou "tokens".
 
 ---
 
@@ -217,7 +217,7 @@ Cada um desses pontos é pequeno isoladamente, mas juntos criam a sensação de 
 - WHEN o bot recebe múltiplas mensagens em sequência rápida THEN o ack 👀 pode acumular reações — o bot SHALL garantir que no máximo 1 reação 👀 esteja presente por mensagem do usuário
 - WHEN o bot está em cooldown e o usuário envia mensagem THEN o ack 👀 ainda SHALL aparecer antes da mensagem de erro
 - WHEN o progress reporter é deletado e recriado (retry do bridge) THEN o timer SHALL resetar para 0
-- WHEN o tracker de sessão não tem dados (0 mensagens) THEN o resumo do reset SHALL ser omitido graciosamente
+- WHEN Aurelia não possui métricas do PI SDK THEN `/new` e `/status` SHALL omitir contagens de mensagens/tokens em vez de estimar
 - WHEN o `/status` é chamado em grupo sem CWD configurado THEN a mensagem SHALL omitir a seção de projeto em vez de mostrar vazio
 - WHEN o usuário troca de modelo em chat privado e depois em tópico de fórum do mesmo grupo THEN as sessões privada e do tópico SHALL ser independentes
 
@@ -226,13 +226,13 @@ Cada um desses pontos é pequeno isoladamente, mas juntos criam a sensação de 
 ## Success Criteria
 
 - [ ] Mensagem no Telegram recebe reação 👀 em < 500ms
-- [ ] Fila mostra posição e contexto do trabalho atual
+- [ ] Concorrência não promete posição de fila controlada fora do PI SDK
 - [ ] Troca de modelo em fórum não afeta outros tópicos
 - [ ] 100% dos erros principais incluem dica acionável
 - [ ] Progress reporter mostra timer e até 8 ferramentas
 - [ ] Todos os tamanhos de arquivo usam MB/KB/B
 - [ ] /status não contém jargão técnico (session ID, warm/cold)
-- [ ] /new mostra resumo da sessão resetada quando aplicável
+- [ ] /new mostra confirmação curta sem métricas inventadas
 - [ ] /help inclui exemplos de comandos naturais
 - [ ] Formatos não suportados vêm com sugestão de conversão
 - [ ] Testes unitários cobrem todas as mensagens de UX modificadas

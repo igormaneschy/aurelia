@@ -368,7 +368,7 @@ func (bc *BotController) resetCurrentSession(chatID int64, threadID int, invalid
 		bc.sessions.ClearSessionForUser(chatID, threadID, userID)
 	}
 	log.Printf("command: session reset for chat=%d thread=%d user=%d", chatID, threadID, userID)
-	return formatResetSummary(session.Usage{}, canceledActive), nil
+	return formatResetSummary(canceledActive), nil
 }
 
 func (bc *BotController) cancelActiveRun(chatID int64, threadID int, userID ...int64) bool {
@@ -378,25 +378,12 @@ func (bc *BotController) cancelActiveRun(chatID int64, threadID int, userID ...i
 	return bc.pipeline.Cancel(chatID, threadID, userID...)
 }
 
-func formatResetSummary(usage session.Usage, canceledActive bool) string {
+func formatResetSummary(canceledActive bool) string {
 	prefix := ""
 	if canceledActive {
 		prefix = "🛑 Processamento em andamento interrompido.\n"
 	}
-	if usage.NumTurns <= 0 {
-		return prefix + "Sessão resetada. Próxima mensagem inicia conversa nova."
-	}
-	return prefix + fmt.Sprintf("🗑️ Sessão resetada (%d mensagens, %s tokens).\nPróxima mensagem inicia conversa nova.", usage.NumTurns, formatTokenCount(usage))
-}
-
-// formatTokenCount prefixes "~" only when the displayed total is a turn-based
-// estimate rather than a real count from the bridge.
-func formatTokenCount(u session.Usage) string {
-	total := u.TotalTokens()
-	if u.EstimatedTokens > u.InputTokens+u.OutputTokens {
-		return fmt.Sprintf("~%d", total)
-	}
-	return fmt.Sprintf("%d", total)
+	return prefix + "🗑️ Sessão resetada. Próxima mensagem inicia conversa nova."
 }
 
 func (bc *BotController) cmdCronList(chatID int64, threadID int, userID int64) (string, error) {
@@ -647,60 +634,20 @@ func (bc *BotController) cmdStatus(chatID int64, threadID int, userID int64) (st
 			lines = append(lines, fmt.Sprintf("📂 Diretório: `%s`", cwd))
 		}
 
-		if sid, active := bc.sessions.GetSessionWithState(chatID, threadID, userID); sid != "" {
-			if !active {
-				lines = append(lines, "😴 Sessão: **fria** (inativa) — mensagens passadas não estão mais disponíveis para o modelo.")
-			} else {
-				lines = append(lines, "🔥 Sessão: **ativa** — contexto completo disponível.")
-			}
-
-			// Add lifecycle health state based on suspect metadata
-			signals := bc.sessions.GetHealthSignals(chatID, threadID, userID)
-			policy := bc.defaultLifecyclePolicy()
-			if policy.Enabled {
-				dec := session.EvaluateLifecycle(signals, policy)
-				emoji := ""
-				switch dec.State {
-				case session.HealthHealthy:
-					emoji = "✅"
-				case session.HealthLarge:
-					emoji = "📏"
-				case session.HealthCold:
-					emoji = "😴"
-				case session.HealthSuspect:
-					emoji = "⚠️"
-				case session.HealthDangerous:
-					emoji = "🚨"
-				}
-				lines = append(lines, fmt.Sprintf("%s Saúde da sessão: **%s**", emoji, string(dec.State)))
-				if dec.Reason != "" {
-					// Show reason without exposing session file path
-					lines = append(lines, fmt.Sprintf("   └ %s", dec.Reason))
-				}
-			}
+		if _, active := bc.sessions.GetSessionWithState(chatID, threadID, userID); active {
+			lines = append(lines, "💬 Sessão: conversa ativa")
+		} else {
+			lines = append(lines, "💬 Sessão: nenhuma conversa ativa no momento")
 		}
 	}
 
-	// Active run tool calls (live data, not persisted)
 	if bc.pipeline != nil {
 		snap := bc.pipeline.GetActiveToolSnapshot(chatID, threadID, userID)
 		if snap.ToolCount > 0 {
-			var parts []string
-			parts = append(parts, fmt.Sprintf("🔧 Tool calls (run atual): **%d**", snap.ToolCount))
+			lines = append(lines, "🔧 Trabalho atual: usando ferramentas")
 			if snap.LoopWarned {
-				parts = append(parts, "  ⚠️ Loop detectado neste turno")
+				lines = append(lines, "⚠️ Notei repetição no trabalho atual e já pedi uma consolidação.")
 			}
-			if len(snap.RecentTools) > 0 {
-				parts = append(parts, fmt.Sprintf("  📋 Últimas tools: %s", strings.Join(snap.RecentTools, " → ")))
-			}
-			lines = append(lines, strings.Join(parts, "\n"))
-		}
-	}
-
-	// Run log — latest persisted run status and checkpoint
-	if bc.runLog != nil {
-		if runLines := statusRunLogSummary(bc.runLog, chatID, threadID); runLines != nil {
-			lines = append(lines, runLines...)
 		}
 	}
 
@@ -826,10 +773,8 @@ func statusWorkLines(description string, queueSize int) []string {
 		return nil
 	}
 	lines := []string{fmt.Sprintf("⏳ Em andamento: %s", description)}
-	if queueSize == 1 {
-		lines = append(lines, "📥 Fila: **1 mensagem** aguardando")
-	} else if queueSize > 1 {
-		lines = append(lines, fmt.Sprintf("📥 Fila: **%d mensagens** aguardando", queueSize))
+	if queueSize > 0 {
+		lines = append(lines, "📨 Mensagens recentes já foram entregues ao PI SDK.")
 	}
 	return lines
 }
@@ -1050,14 +995,11 @@ func (bc *BotController) cmdSetModel(c telebot.Context, text string) (string, er
 		return fmt.Sprintf("Modelo %q não encontrado. Use 'lista modelos' para ver as opções.", modelName), nil
 	}
 
-	// Update in-memory config
-	bc.config.DefaultModel = matched.ID
-	bc.config.DefaultProvider = matched.Provider
-
-	// Persist to file
+	oldProvider, oldModel := bc.currentModelPair()
 	if err := bc.saveDefaultModel(matched.Provider, matched.ID); err != nil {
 		return "", fmt.Errorf("falha ao salvar configuração: %w", err)
 	}
+	logModelChange("command", oldProvider, oldModel, matched.Provider, matched.ID)
 
 	// Re-export provider env so the bridge sees the new API key on its next query.
 	if bc.refreshProviderEnv != nil {
@@ -1081,9 +1023,11 @@ func (bc *BotController) setModelAuto(c telebot.Context) (string, error) {
 }
 
 func (bc *BotController) setModelAutoForScope(chatID int64, threadID int, userID int64) (string, error) {
+	oldProvider, oldModel := bc.currentModelPair()
 	if err := bc.saveDefaultModel("", ""); err != nil {
 		return "", fmt.Errorf("falha ao salvar configuração: %w", err)
 	}
+	logModelChange("auto", oldProvider, oldModel, "", "")
 	bc.invalidateModelCache()
 	if bc.refreshProviderEnv != nil {
 		bc.refreshProviderEnv()
@@ -1100,18 +1044,14 @@ func (bc *BotController) resetCurrentModelSession(chatID int64, threadID int, us
 	if bc.sessions != nil {
 		bc.sessions.ClearSessionForUser(chatID, threadID, uid)
 	}
-	return formatModelResetSummary(threadID, session.Usage{})
+	return formatModelResetSummary(threadID)
 }
 
-func formatModelResetSummary(threadID int, usage session.Usage) string {
-	scope := "Sessão privada resetada."
+func formatModelResetSummary(threadID int) string {
 	if threadID > 0 {
-		scope = "Sessão deste tópico foi resetada."
+		return "Sessão deste tópico foi resetada."
 	}
-	if usage.NumTurns <= 0 {
-		return scope
-	}
-	return fmt.Sprintf("%s (%d mensagens, %s tokens).", strings.TrimSuffix(scope, "."), usage.NumTurns, formatTokenCount(usage))
+	return "Sessão privada resetada."
 }
 
 // extractModelName pulls the model name from a set-model command. Returns
@@ -1165,6 +1105,17 @@ func (bc *BotController) currentModelLine() string {
 		return "Modelo atual: **PI default** (seleção automática do PI)"
 	}
 	return fmt.Sprintf("Modelo atual: **%s** (provedor: **%s**)", bc.config.DefaultModel, bc.config.DefaultProvider)
+}
+
+func (bc *BotController) currentModelPair() (string, string) {
+	if bc == nil || bc.config == nil {
+		return "", ""
+	}
+	return bc.config.DefaultProvider, bc.config.DefaultModel
+}
+
+func logModelChange(source, oldProvider, oldModel, newProvider, newModel string) {
+	log.Printf("model change: source=%s old_provider=%q old_model=%q new_provider=%q new_model=%q", source, oldProvider, oldModel, newProvider, newModel)
 }
 
 func (bc *BotController) invalidateModelCache() {
@@ -1531,8 +1482,6 @@ func (bc *BotController) saveDefaultModel(provider, model string) error {
 	if bc.config == nil {
 		return fmt.Errorf("config is nil")
 	}
-	bc.config.DefaultProvider = provider
-	bc.config.DefaultModel = model
 
 	// Read current app.json, update, write back
 	resolver, err := runtime.New()
@@ -1570,6 +1519,8 @@ func (bc *BotController) saveDefaultModel(provider, model string) error {
 		return fmt.Errorf("rename config: %w", err)
 	}
 
+	bc.config.DefaultProvider = provider
+	bc.config.DefaultModel = model
 	return nil
 }
 

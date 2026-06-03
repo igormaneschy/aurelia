@@ -26,14 +26,14 @@
 │   └── tsconfig.json
 │
 ├── internal/                  # Core application packages
-│   ├── agents/                # Agent registry & routing
+│   ├── agents/                # Legacy Prompt Profile registry & @profile routing
 │   ├── bridge/                # Go↔TS IPC client (PI SDK)
 │   ├── config/                # App configuration
 │   ├── cron/                  # Scheduled jobs (SQLite-backed)
 │   ├── deps/                  # Runtime dependency checks (Node/npm/git/gh)
 │   ├── dream/                 # Background memory consolidation + nudges
 │   ├── onboarding/            # Interactive setup wizard
-│   ├── orchestrator/          # Agent orchestration (plan/workers/validate/git)
+│   ├── orchestrator/          # Workflow orchestration (plan/workers/validate/git)
 │   ├── persona/               # Identity & prompt assembly
 │   ├── pipeline/              # Turn processing service (resilience + active-run tracking)
 │   ├── runtime/               # Path resolution
@@ -60,7 +60,7 @@
 **Purpose:** Encapsulates a single conversational turn — prompt assembly, bridge call, event handling, recovery, plan detection. Extracted from the Telegram controller so the same logic powers cron jobs and other entrypoints.
 **Key files:** `service.go` (entrypoint + active-run tracking), `pipeline.go` (event loop + plan dispatch), `prompt_builder.go`, `resilient_bridge.go` (retry + circuit breaker), `planning_intent.go` (heuristic plan-mode detection)
 
-### internal/orchestrator — Agent Orchestration
+### internal/orchestrator — Workflow Orchestration
 **Purpose:** Plan→workers→validate cycle. Detects `aurelia-plan` blocks in bridge responses, spawns workers per wave in isolated git worktrees, validates results via a quality gate, and contains scaffold for docs/tasks/git delivery. The full closed cycle is still roadmap work.
 **Key files:** `orchestrator.go` (struct + BridgeExecutor interface), `plan.go` (Plan/Task model + topological ExecutionOrder), `extract.go` (parse `aurelia-plan` blocks), `execute.go` (wave execution + ExecuteTask), `validate.go` (quality gate), `worktree.go` (git worktree CRUD), `defaults.go` (worker fallback + ResolveAgentConfig), `prompt.go` (TLC + worker + validation prompt builders), `agents_md.go` (`AGENTS.md`/`CLAUDE.md` generators), `tasks_status.go` (update `.specs/.../tasks.md` checkboxes), `git.go` (commit + `gh pr create`)
 
@@ -80,9 +80,9 @@
 **Purpose:** Load persona files and assemble system prompts
 **Key files:** `canonical_service.go` (prompt builder), `loader.go` (file parser)
 
-### internal/agents — Agent Registry
-**Purpose:** Load agent definitions from markdown, route messages to agents
-**Key files:** `registry.go` (loading + routing), `types.go` (Agent struct with `AllowedTools`/`DisallowedTools`/`MaxTurns`)
+### internal/agents — Legacy Prompt Profile Registry
+**Purpose:** Load legacy markdown profiles from `~/.aurelia/agents/` and support `@profile` compatibility. Conceptually these files inject context/personality into SDK requests; SDK harnesses execute.
+**Key files:** `registry.go` (loading + routing), `types.go` (legacy Agent/Profile struct with `AllowedTools`/`DisallowedTools`/`MaxTurns`)
 
 ### internal/onboarding — Setup Wizard
 **Purpose:** Interactive first-run flow — provider/model selection, API keys, persona, dependency checks
@@ -105,7 +105,7 @@
 - Markdown→HTML: `internal/telegram/markdown*.go`
 - Orchestrated plans: `internal/telegram/orchestration.go`, `worker_status.go`
 
-**Agent orchestration:**
+**Workflow orchestration:**
 - Plan detection: `internal/orchestrator/extract.go` (called from `internal/pipeline/pipeline.go`)
 - Wave execution: `internal/orchestrator/execute.go`
 - Worktrees: `internal/orchestrator/worktree.go`
@@ -126,6 +126,6 @@
 
 **Runtime configuration:**
 - App config: `~/.aurelia/config/app.json`
-- Agent defs: `~/.aurelia/agents/*.md`
+- Prompt profile defs: `~/.aurelia/agents/*.md` (legacy path; conceptually Prompt Profiles)
 - Personas: `~/.aurelia/memory/personas/` plus per-user `~/.aurelia/users/<id>/personas/USER.md`
 - Database: `~/.aurelia/data/cron.db`

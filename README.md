@@ -4,11 +4,11 @@
 
 <img src="assets/aurelia_cover.png" alt="Aurelia cover" width="720" />
 
-**An autonomous agent operating system in Go.**
+**A personality and context layer for SDK-powered AI execution.**
 
 Telegram-native. PI-powered. Built to stay light.
 
-One persistent daemon, many projects, many agents.
+One persistent daemon, many projects, many prompt profiles.
 
 [![Go](https://img.shields.io/badge/Go-1.26.3-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![Runtime](https://img.shields.io/badge/Runtime-Local--First-0F172A)](#runtime-model)
@@ -36,23 +36,23 @@ Before installing, ensure you have:
 
 ## Why Aurelia OS
 
-Aurelia is an autonomous agent operating system accessible via Telegram. Talk naturally — Aurelia decides whether to respond directly, delegate to a specialist agent, or schedule automated execution.
+Aurelia is a Telegram-native personality layer over AI execution SDKs. Talk naturally — Aurelia adds identity, memory, project context, guard-rails, and a selected prompt profile, then delegates reasoning and tool execution to the SDK harness.
 
 It is built around a practical execution model:
 
 - Go daemon (24/7, lightweight, cross-platform)
 - TypeScript Bridge wrapping the PI SDK
-- PI coding agent as the brain (tools, skills, extensions, sessions)
+- PI SDK as the current execution harness (reasoning, tools, skills, extensions, sessions)
 - Canonical Go module and repository under `github.com/igormaneschy/aurelia`
 - PI-backed session management with `session_file` resume and SDK compaction
 - Persistent scoped memory system with automatic extraction
-- Configurable agents in markdown with cron scheduling
+- Prompt profiles in markdown for context/personality injection, with legacy agent-file compatibility
 - Multi-provider: OpenRouter (recommended), opencode-go, Anthropic, Kimi, Z.ai, Alibaba
 - API key authentication (OpenRouter, opencode-go)
 - Bridge recovery with automatic retry on crash
 
-The goal is not to reimplement what PI already does.
-The goal is to orchestrate it — adding persistence, memory, scheduling, multi-project support, and a natural Telegram interface on top.
+The goal is not to reimplement what PI or future SDKs already do.
+The goal is to wrap them with personality and product context — adding persistence, memory, scheduling, multi-project support, guard-rails, and a natural Telegram interface on top.
 
 ### Architectural Thesis
 
@@ -62,7 +62,7 @@ Aurelia is the **product layer** on top of the PI SDK engine:
 Telegram / CLI / Cron / future interfaces
         ↓
 Aurelia Product Layer
-identity · persona · Telegram UX · workflows · operational memory · policies · continuity
+identity · persona · prompt profiles · Telegram UX · workflows · operational memory · policies · continuity
         ↓
 PI SDK
 reasoning · tool execution · sessions · agent runtime · model/provider abstraction
@@ -74,7 +74,7 @@ The boundary is intentional:
 
 - **PI SDK owns** model/provider resolution, tool execution, session runtime, compaction, context-file loading, skills/extensions, MCP tools, and agentic execution primitives.
 - **PI + ai-memory MCP owns** transversal Wiki memory used by PI, PI Code/opencode, and other MCP-compatible clients.
-- **Aurelia owns** identity, personality, Telegram-native UX, user/project scoping, operational memory, cron, workflows, audit, orchestration, and continuity.
+- **Aurelia owns** identity, personality, Prompt Profile selection/injection, Telegram-native UX, user/project scoping, operational memory, cron, workflows, audit, orchestration, and continuity.
 - When the PI SDK already owns a capability, Aurelia adapts or orchestrates it rather than reimplementing it.
 - When the capability is product-specific continuity, operational memory, policy, UX, or workflow state, Aurelia remains the source of truth.
 
@@ -86,11 +86,12 @@ The long-term differentiator is the persistent Telegram product layer over PI. T
 - **Autonomous coding** — reads, writes, edits files, runs commands, searches code
 - **Multi-project** — work on different projects simultaneously with isolated contexts
 - **Persistent memory** — scoped memory system (global, user, project-private, project-team, topic) that survives across sessions
+- **Prompt profiles** — `/mode` selects the default profile; `@profile` applies a one-shot profile; `/agents` lists available profiles
 - **Learning nudge** — automatic memory extraction from conversations on session reset
 - **Dream consolidation** — periodic background review that organizes and deduplicates memories
 - **Multi-provider** — OpenRouter (recommended), opencode-go, Anthropic, Kimi, Z.ai, Alibaba
 - **Session continuity** — conversation context persists across messages via PI session resume and SDK compaction
-- **Smart routing** — LLM-based classification routes messages to the right agent
+- **Profile routing** — explicit `@profile` or default `/mode` controls how Aurelia packages the request before SDK execution
 - **Persistent scheduling** — create cron jobs via natural conversation, results delivered to Telegram
 - **Bridge recovery** — automatic retry with session resume when the Bridge process crashes
 - **Tool progress** — see what PI is doing in real-time (reading files, running commands...)
@@ -102,7 +103,7 @@ The long-term differentiator is the persistent Telegram product layer over PI. T
 - **Operational observability** — structured slog logging (text/JSON), durable run
   timelines with `run_events`, extended `run_journal` (provider, model, tokens,
   cost, errors, timeout, fallback), metrics queries, and debug commands
-- **Agent orchestration** — close orchestration cycle with `ExecutionContext`, git
+- **Workflow orchestration** — close orchestration cycle with `ExecutionContext`, git
   preflight, artifact collection, fail-closed validation with retry, serial merge,
   dependency skip, commit + optional PR creation
 
@@ -133,7 +134,7 @@ High-level flow:
 flowchart LR
     U[User] --> T[Telegram]
     T --> P[Pipeline]
-    P --> R[Agent Router]
+    P --> R[Prompt Profile Resolver]
     R --> B[Bridge TS]
     B --> SDK[PI SDK]
     SDK --> TOOLS[Tools + Skills + Extensions]
@@ -148,10 +149,10 @@ flowchart LR
 ```
 1. Message arrives on Telegram
 2. Pipeline extracts text/photo/voice/document
-3. Agent router classifies → specialist agent or general
-4. System prompt assembled: persona + agent + cron instructions
+3. Prompt profile resolver selects `@profile`, active `/mode`, or `general`
+4. System prompt assembled: persona + profile + memory/continuity + Telegram context
 5. Request sent to Bridge (long-lived TypeScript process)
-6. Bridge calls PI SDK → PI agent executes
+6. Bridge calls PI SDK → SDK harness executes
 7. Events streamed back: tool_use → progress, assistant → text, result → response
 8. Response delivered to Telegram (reply-to original message)
 9. PI SDK manages context compaction; Aurelia stores the returned `session_file` for resume
@@ -161,8 +162,8 @@ flowchart LR
 
 ```
 1. Scheduler polls every 15 seconds
-2. Due job found → load agent config + persona
-3. Execute via Bridge (Telegram plugin blocked to prevent wrong bot)
+2. Due job found → load prompt profile/context + persona
+3. Execute via Bridge/SDK harness (Telegram plugin blocked to prevent wrong bot)
 4. Result delivered to Telegram via TelegramDelivery
 ```
 
@@ -173,7 +174,7 @@ cmd/aurelia/              CLI entry point, onboarding, cron CLI, telegram CLI
 internal/bridge/          Go <> Bridge client (long-lived, multiplexed, bundle embedded via go:embed)
 internal/telegram/        Telegram I/O, async pipeline, progress, reactions, commands
 internal/session/         Session file store, conversation CWD state, nudge buffer
-internal/agents/          Agent registry (markdown definitions, LLM classification)
+internal/agents/          Legacy prompt-profile registry (`~/.aurelia/agents/*.md`, `@profile` compatibility)
 internal/persona/         Persona loader (IDENTITY / SOUL / USER)
 internal/dream/           Memory consolidation (dream) and extraction (nudge)
 internal/cron/            Persistent cron scheduler with Telegram delivery
@@ -208,9 +209,25 @@ With image attachments:
 
 Multiple requests run concurrently — each with its own `request_id`.
 
-### Agents
+### Prompt Profiles (`/mode`, `/agents`, `@profile`)
 
-Configurable specialists defined in markdown (`~/.aurelia/agents/`):
+Aurelia does not run independent worker agents. It selects a **Prompt Profile** — a markdown-defined set of complementary instructions and optional execution hints — and injects it into the request sent to the SDK harness.
+
+The current legacy storage path is `~/.aurelia/agents/`, kept for compatibility. Conceptually these files are **profiles**, not separate executors.
+
+```text
+/mode developer          # make developer the default profile
+@researcher compare SDKs # use researcher once, without changing the default
+/agents                  # list available profiles
+```
+
+Resolution order for each message:
+
+```text
+explicit @profile > active /mode profile > general
+```
+
+Example profile file:
 
 ```markdown
 ---
@@ -224,13 +241,13 @@ mcp_servers:
 allowed_tools: ["WebSearch", "WebFetch", "Bash"]
 ---
 
-Voce eh um agente de prospeccao comercial.
+Voce eh um perfil de prospeccao comercial.
 Busque empresas no Google Places na regiao configurada.
 ```
 
 Fields: `name`, `description`, `model`, `schedule`, `cwd`, `mcp_servers`, `allowed_tools`.
 
-Agents with `schedule` are automatically registered in the cron scheduler. Their `cwd` is persisted on the cron job so scheduled executions do not depend on prompt parsing.
+`model`, `cwd`, and tool fields are execution hints passed to the current harness when supported; they do not make Aurelia the executor. Profiles with `schedule` are still supported by the legacy cron integration; their `cwd` is persisted on the cron job so scheduled executions do not depend on prompt parsing.
 
 ### Persona
 
@@ -273,7 +290,11 @@ The model sees relevant operational memory layers in its system prompt. Layers a
 | `/usage` | Show session token usage and cost |
 | `/status` | Show daemon status, model, session, and latest run info |
 | `/cron` | Manage schedules (list, add, delete, pause, resume) |
-| `/agents` | List available agents |
+| `/agents` | List available prompt profiles (`@profile` shortcuts) |
+| `/mode` | Show or set the default prompt profile |
+| `@profile <text>` | Use a prompt profile once for the current message |
+| `/model` | Show or change the SDK model selection |
+| `/memory` | Show memory status or create checkpoints |
 | `/debug last` | Show latest run summary (status, provider, cost, duration) — owner only |
 | `/debug run <id>` | Show full metadata and timeline for a specific run — owner only |
 | `/debug errors` | Show recent failed/timed-out runs — owner only |
