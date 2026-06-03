@@ -81,3 +81,7 @@
 
 ## Change review-gap-remediation (2026-06-02)
 - [process] scope-security-redaction-automation
+
+## Change ux-model-persistence-fixes (2026-06-03)
+- [anti-pattern] test-config-isolation
+- [pattern] model-selection-fail-closed
