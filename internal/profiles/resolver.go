@@ -30,6 +30,16 @@ type Resolver struct {
 	mu        sync.RWMutex
 }
 
+// ErrProfileNotAllowed reports an existing profile that is not visible to the
+// caller. The name is safe to echo because the caller supplied it explicitly.
+type ErrProfileNotAllowed struct {
+	Name string
+}
+
+func (e *ErrProfileNotAllowed) Error() string {
+	return fmt.Sprintf("profile %q is not available to this user", e.Name)
+}
+
 // NewResolver creates a Resolver that loads legacy agents from agentsDir,
 // canonical profiles from profilesDir, and always includes builtins.
 // Returns error if the directories cannot be read (but builtins are still available).
@@ -72,7 +82,7 @@ func NewResolverFromRegistry(reg *agents.Registry, profilesDir string) *Resolver
 }
 
 // Get returns the PromptProfile with the given name (case-insensitive),
-// or nil if not found. Precedence: legacy agents override builtins.
+// or nil if not found. Precedence: canonical profiles override legacy agents.
 func (r *Resolver) Get(name string) *PromptProfile {
 	if r == nil {
 		return nil
@@ -80,6 +90,23 @@ func (r *Resolver) Get(name string) *PromptProfile {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.getLocked(name)
+}
+
+// GetVisible returns the profile only when the caller is allowed to see/use it.
+func (r *Resolver) GetVisible(name string, isOwner bool) *PromptProfile {
+	profile := r.Get(name)
+	if !ProfileVisible(profile, isOwner) {
+		return nil
+	}
+	return profile
+}
+
+// ProfileVisible reports whether a profile can be listed, explained, or invoked.
+func ProfileVisible(profile *PromptProfile, isOwner bool) bool {
+	if profile == nil {
+		return false
+	}
+	return isOwner || profile.Public
 }
 
 func (r *Resolver) getLocked(name string) *PromptProfile {
@@ -161,6 +188,21 @@ func (r *Resolver) List() []*PromptProfile {
 	return result
 }
 
+// ListVisible returns all profiles visible to the caller, sorted by name.
+func (r *Resolver) ListVisible(isOwner bool) []*PromptProfile {
+	all := r.List()
+	if isOwner {
+		return all
+	}
+	var visible []*PromptProfile
+	for _, p := range all {
+		if ProfileVisible(p, false) {
+			visible = append(visible, p)
+		}
+	}
+	return visible
+}
+
 // ActiveDefault returns the effective default profile name for display purposes.
 // Returns "general" when activeProfile is empty.
 func ActiveDefault(activeProfile string) string {
@@ -180,6 +222,12 @@ func ActiveDefault(activeProfile string) string {
 // When text does not start with "@name ", the activeDefault profile is used.
 // Falls back to "general" when activeDefault is empty.
 func (r *Resolver) ResolveEffective(text string, activeDefault string) (*PromptProfile, string, error) {
+	return r.ResolveEffectiveForUser(text, activeDefault, true)
+}
+
+// ResolveEffectiveForUser determines the effective profile and enforces
+// visibility for non-owner users.
+func (r *Resolver) ResolveEffectiveForUser(text string, activeDefault string, isOwner bool) (*PromptProfile, string, error) {
 	if r == nil {
 		// No resolver — return general builtin.
 		return builtinProfiles()["general"], text, nil
@@ -190,6 +238,9 @@ func (r *Resolver) ResolveEffective(text string, activeDefault string) (*PromptP
 		if profile == nil {
 			// @name was parsed but profile not found.
 			return nil, "", &ErrProfileNotFound{Name: extractAtName(text)}
+		}
+		if !ProfileVisible(profile, isOwner) {
+			return nil, "", &ErrProfileNotAllowed{Name: extractAtName(text)}
 		}
 		return profile, stripped, nil
 	}
@@ -204,6 +255,9 @@ func (r *Resolver) ResolveEffective(text string, activeDefault string) (*PromptP
 		// Active default not found — fall back to general builtin.
 		log.Printf("profiles: active default %q not found, falling back to general", name)
 		profile = r.builtins["general"]
+	}
+	if !ProfileVisible(profile, isOwner) {
+		return nil, "", &ErrProfileNotAllowed{Name: name}
 	}
 	return profile, text, nil
 }

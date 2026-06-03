@@ -19,8 +19,8 @@ import (
 type profileFrontmatter struct {
 	Name              string   `yaml:"name"`
 	Description       string   `yaml:"description"`
-	Kind              string   `yaml:"kind,omitempty"`          // "prompt_profile"
-	Harness           string   `yaml:"harness,omitempty"`        // "pi" default
+	Kind              string   `yaml:"kind,omitempty"`    // "prompt_profile"
+	Harness           string   `yaml:"harness,omitempty"` // "pi" default
 	Model             string   `yaml:"model,omitempty"`
 	Cwd               string   `yaml:"cwd,omitempty"`
 	CapabilityProfile string   `yaml:"capability_profile,omitempty"`
@@ -126,7 +126,7 @@ func parseCanonicalFile(data []byte, source string) (*PromptProfile, error) {
 
 // LoadCanonicalWithLegacy loads profiles from a canonical directory and
 // a legacy agents directory, merging them with proper precedence.
-// Legacy agents override canonical profiles of the same name.
+// Canonical profiles override legacy agents of the same name.
 func LoadCanonicalWithLegacy(canonicalDir, agentsDir string) *Resolver {
 	r := &Resolver{
 		canonical: make(map[string]*PromptProfile),

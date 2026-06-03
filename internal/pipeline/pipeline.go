@@ -328,13 +328,19 @@ func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, rese
 
 	// Resolve effective Prompt Profile: @name > active mode > general.
 	activeMode := s.userActiveMode(input.userID)
-	profile, userText, resolveErr := s.resolveEffectiveProfile(input.text, activeMode)
+	profile, userText, resolveErr := s.resolveEffectiveProfile(input.text, activeMode, s.isOwnerUser(input.userID))
 	if resolveErr != nil {
 		if pfErr, ok := resolveErr.(*profiles.ErrProfileNotFound); ok {
 			log.Printf("pipeline: unknown @profile chat=%d name=%s", input.chatID, pfErr.Name)
 			if err := s.output.SendError(input.chatID, input.threadID,
 				fmt.Sprintf("Perfil @%s não encontrado. Use /agents para ver os perfis disponíveis.", pfErr.Name)); err != nil {
 				log.Printf("pipeline: SendError(unknown profile) failed for chat=%d: %v", input.chatID, err)
+			}
+		} else if deniedErr, ok := resolveErr.(*profiles.ErrProfileNotAllowed); ok {
+			log.Printf("pipeline: forbidden @profile chat=%d name=%s user=%d", input.chatID, deniedErr.Name, input.userID)
+			if err := s.output.SendError(input.chatID, input.threadID,
+				fmt.Sprintf("Perfil @%s não encontrado ou indisponível. Use /agents para ver os perfis disponíveis.", deniedErr.Name)); err != nil {
+				log.Printf("pipeline: SendError(forbidden profile) failed for chat=%d: %v", input.chatID, err)
 			}
 		} else {
 			log.Printf("pipeline: profile resolution error chat=%d: %v", input.chatID, resolveErr)
@@ -394,12 +400,26 @@ func (s *Service) userActiveMode(userID int64) string {
 	return ""
 }
 
+func (s *Service) isOwnerUser(userID int64) bool {
+	if userID <= 0 {
+		return false
+	}
+	if s.config != nil && userID == s.config.DefaultOwnerUserIDOrFallback() {
+		return true
+	}
+	if s.usersStore != nil {
+		profile, err := s.usersStore.Get(userID)
+		return err == nil && profile != nil && profile.IsOwner
+	}
+	return false
+}
+
 // resolveEffectiveProfile resolves the Prompt Profile for a message turn.
 // Uses profiles.Resolver for @name > active mode > general precedence.
 // Returns the resolved profile, stripped user text, and any error.
-func (s *Service) resolveEffectiveProfile(text string, activeDefault string) (*profiles.PromptProfile, string, error) {
+func (s *Service) resolveEffectiveProfile(text string, activeDefault string, isOwner bool) (*profiles.PromptProfile, string, error) {
 	if s.profiles != nil {
-		return s.profiles.ResolveEffective(text, activeDefault)
+		return s.profiles.ResolveEffectiveForUser(text, activeDefault, isOwner)
 	}
 	// Fallback when resolver not available — route legacy-style via agents registry.
 	// This is a transitional path; will be removed when agents.Registry is fully deprecated.

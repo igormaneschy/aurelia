@@ -1,7 +1,7 @@
 # Context-Scoped Memory — Design Document
 
 **Date:** 2026-05-30  
-**Status:** Design (antes de implementação)  
+**Status:** ✅ Implementado em v0.20.0 (2026-05-28)  
 **Spec:** `.specs/features/project-memory/spec.md`  
 **Tasks:** `.specs/features/project-memory/tasks.md`  
 **Depende de:** Multi-User Profiles (✅), Project Binding (✅)

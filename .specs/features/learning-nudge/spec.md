@@ -1,8 +1,8 @@
 # Learning Nudge — Scoped Memory Review
 
 **Roadmap step:** 7  
-**Status:** 🔴 Draft revisado  
-**Depende de:** `.specs/features/multi-user-profiles/`, `.specs/features/project-binding/` (✅ done), `.specs/features/project-memory/`, `.specs/features/security-guard-rails/` (✅ done), Memory Boundary Realignment  
+**Status:** ✅ Implementado (v0.9.0–v0.21.1, evolução contínua)  
+**Depende de:** `.specs/features/multi-user-profiles/`, `.specs/features/project-binding/` (✅ done), `.specs/features/project-memory/`, `.specs/features/security-guard-rails/` (✅ done), Memory Boundary Realignment
 **Complementa:** `.specs/features/auto-skills/`
 
 ## Problem Statement

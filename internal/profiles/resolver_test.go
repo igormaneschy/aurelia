@@ -289,7 +289,12 @@ func TestPromptProfile_IsReadOnly(t *testing.T) {
 
 func writeCanonicalFile(t *testing.T, dir, name, description, body string) {
 	t.Helper()
-	content := fmt.Sprintf("---\nname: %s\ndescription: %s\nkind: prompt_profile\npublic: true\ntags: [test]\n---\n%s", name, description, body)
+	writeCanonicalFileWithPublic(t, dir, name, description, body, true)
+}
+
+func writeCanonicalFileWithPublic(t *testing.T, dir, name, description, body string, public bool) {
+	t.Helper()
+	content := fmt.Sprintf("---\nname: %s\ndescription: %s\nkind: prompt_profile\npublic: %t\ntags: [test]\n---\n%s", name, description, public, body)
 	if err := os.WriteFile(filepath.Join(dir, name+".md"), []byte(content), 0644); err != nil {
 		t.Fatalf("write canonical file %s: %v", name, err)
 	}
@@ -380,5 +385,51 @@ func TestResolver_CanonicalAppearsInList(t *testing.T) {
 	}
 	if !found {
 		t.Error("reviewer not found in List()")
+	}
+}
+
+func TestResolver_ListVisible_HidesPrivateProfilesForNonOwner(t *testing.T) {
+	canonicalDir := t.TempDir()
+	writeCanonicalFileWithPublic(t, canonicalDir, "public", "public desc", "Public prompt.", true)
+	writeCanonicalFileWithPublic(t, canonicalDir, "secret", "secret desc", "Secret prompt.", false)
+
+	r := &Resolver{builtins: builtinProfiles(), canonical: LoadCanonical(canonicalDir)}
+
+	nonOwnerNames := map[string]bool{}
+	for _, p := range r.ListVisible(false) {
+		nonOwnerNames[p.Name] = true
+	}
+	if nonOwnerNames["secret"] {
+		t.Fatal("non-owner visible list included private profile")
+	}
+	if !nonOwnerNames["public"] {
+		t.Fatal("non-owner visible list omitted public profile")
+	}
+
+	ownerNames := map[string]bool{}
+	for _, p := range r.ListVisible(true) {
+		ownerNames[p.Name] = true
+	}
+	if !ownerNames["secret"] {
+		t.Fatal("owner visible list omitted private profile")
+	}
+}
+
+func TestResolver_ResolveEffectiveForUser_BlocksPrivateProfileForNonOwner(t *testing.T) {
+	canonicalDir := t.TempDir()
+	writeCanonicalFileWithPublic(t, canonicalDir, "secret", "secret desc", "Secret prompt.", false)
+	r := &Resolver{builtins: builtinProfiles(), canonical: LoadCanonical(canonicalDir)}
+
+	_, _, err := r.ResolveEffectiveForUser("@secret do work", "", false)
+	if _, ok := err.(*ErrProfileNotAllowed); !ok {
+		t.Fatalf("ResolveEffectiveForUser non-owner err = %T %v, want ErrProfileNotAllowed", err, err)
+	}
+
+	profile, stripped, err := r.ResolveEffectiveForUser("@secret do work", "", true)
+	if err != nil {
+		t.Fatalf("ResolveEffectiveForUser owner error = %v", err)
+	}
+	if profile == nil || profile.Name != "secret" || stripped != "do work" {
+		t.Fatalf("owner resolve got profile=%v stripped=%q", profile, stripped)
 	}
 }

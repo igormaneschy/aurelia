@@ -128,7 +128,7 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 
 **Fora deste sprint:**
 
-- Memória escopada por contexto conversacional movida para Sprint E (`Context-Scoped Memory`). Hoje há memória pessoal por usuário, mas `runtime.TopicMemoryDir/CwdOverlayDir` ainda não existem.
+- ✅ Memória escopada por contexto conversacional implementada em Sprint E (`Context-Scoped Memory`, v0.20.0). `runtime.TopicMemoryDir` e `TopicCwdOverlayDir` estão em produção.
 - O `continuity.Store` permanece `ConversationKey{chat_id, thread_id}` por semântica atual de conversa/tópico. Os patches usam o `session_file` user-scoped correto; continuidade privada por usuário fica como decisão futura antes de Nudge profundo, se necessário.
 
 **Por que era P0:** sem `user_id` propagado integralmente, Auto-Skills, memória e nudge poderiam vazar estado entre usuários autorizados. O caminho crítico de sessão/runtime está fechado.
@@ -202,7 +202,7 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 ## 5. Context-Scoped Memory
 
 **Spec:** `.specs/features/project-memory/`
-**Status:** 🟡 Parcial (70% - camadas existem, paths não são per-user; modelo reformulado em 2026-05-30)
+**Status:** ✅ Concluído em v0.20.0 (2026-05-28)
 **Depende de:** User Isolation (para paths `users/<id>/`)
 
 > **Decisão de design (2026-05-30):** O modelo original `(user_id, project_slug)` foi substituido por `(user_id, context_key)`. O `project_slug` como eixo central da memória impunha uma estrutura de "projeto" que o Aurelia deliberadamente não quer impor - pela mesma razão que o Plan Mode foi removido. A memória deve emergir do contexto conversacional, não de uma entidade formal.
@@ -277,7 +277,7 @@ Prompt assembly por TurnContext:
 ## 8. Learning Nudge - Scoped Memory Review
 
 **Spec:** `.specs/features/learning-nudge/`
-**Status:** 🔴 Draft revisado
+**Status:** ✅ Implementado (v0.9.0–v0.21.1, evolução contínua)
 **Depende de:** User Isolation + Context-Scoped Memory + Security Guard-Rails + Memory Boundary Realignment + Session/Profile Operability
 
 **Problem:** extração por-turn/snippet perde contexto; nudge profundo precisa ser escopado para não vazar entre usuários/contextos e não deve depender de uma Wiki interna do Aurelia.
@@ -295,7 +295,7 @@ Prompt assembly por TurnContext:
 ## 8b. Prompt Profiles — `/mode`, `/agents`, `@profile`
 
 **Spec:** `.specs/features/prompt-profiles/`
-**Status:** 🔴 Draft — Junho 2026
+**Status:** 🟡 Parcial — MVP semantics implementado em v0.21.0; Phase 1 (`internal/profiles`) pendente
 **Depende de:** Session/Profile Operability + Security Guard-Rails + Bridge Adapter Interface
 
 **Problem:** `/mode`, `/agents` e `@agent` estavam conceitualmente próximos demais: todos eram prompt injections/context hints enviados ao SDK, mas a documentação tratava parte deles como “agentes” executores. Isso conflita com a boundary canônica: SDKs executam; Aurelia injeta personalidade, contexto e policy.
@@ -381,7 +381,7 @@ Foundation validada (Security Guard-Rails + Project Binding + Bridge Resilience)
 D0. Memory Contract & Spec Hygiene ✅
       │
       ▼
-5. Context-Scoped Memory
+5. Context-Scoped Memory ✅
       │
       ▼
 6. Memory Boundary Realignment ✅
@@ -390,13 +390,13 @@ D0. Memory Contract & Spec Hygiene ✅
  7. Session/Profile Operability ✅
       │
       ▼
- 8b. Prompt Profiles
+ 8b. Prompt Profiles 🟡
       │
       ▼
- 8. Learning Nudge
+ 8. Learning Nudge ✅
       │
       ▼
-11. TUI (Terminal User Interface)
+ 11. TUI (Terminal User Interface)
 ```
 
 ## Mapa de implementação por sprint
@@ -460,13 +460,13 @@ Sprint D: ~~Plan Mode (T-1-T13 do tasks.md)~~  🗑️ Removido 2026-05-24
   internal/planning/ removido. /plan* e /execute removidos.
   Orquestrador e aurelia-plan preservados para execução legada.
 
-Sprint E: Context-Scoped Memory
-  ├─ runtime.PathResolver: UserMemoryDir, TopicMemoryDir, TopicCwdOverlayDir
-  ├─ remover scanForProject e travessia automática do filesystem
-  ├─ /cwd como overlay declarativo por ConversationKey (sem auto-detecção)
-  ├─ cwd_overlay em ~/.aurelia/topics/<chat>/<thread>/cwd_overlay/
-  ├─ prompt assembly: user_global + topic + cwd_overlay + team
-  └─ dream/nudge com targets escopados por camada
+Sprint E: Context-Scoped Memory ✅ v0.20.0
+  ├─ ✅ runtime.PathResolver: UserMemoryDir, TopicMemoryDir, TopicCwdOverlayDir
+  ├─ ✅ remover scanForProject e travessia automática do filesystem
+  ├─ ✅ /cwd como overlay declarativo por ConversationKey (sem auto-detecção)
+  ├─ ✅ cwd_overlay em ~/.aurelia/topics/<chat>/<thread>/cwd_overlay/
+  ├─ ✅ prompt assembly: user_global + topic + cwd_overlay + team
+  └─ ✅ dream/nudge com targets escopados por camada
 
 Sprint F: Memory Boundary Realignment ✅ docs/decision
   ├─ ✅ descartar MCP Wiki interno
@@ -482,17 +482,18 @@ Sprint G: Session/Profile Operability ✅
   ├─ DefaultCWD fallback só em private chat
   └─ onboarding timezone
 
-Sprint G2: Prompt Profiles
-  ├─ `/mode` = default Prompt Profile
-  ├─ `@profile` = one-shot Prompt Profile override
-  ├─ `/agents` = compatible Prompt Profile catalog
-  ├─ no default composition of mode overlay + agent prompt
-  └─ metadata-safe catalog in groups/non-owner contexts
+Sprint G2: Prompt Profiles 🟡 (parcial — v0.21.0)
+  ├─ ✅ `/mode` = default Prompt Profile
+  ├─ ✅ `@profile` = one-shot Prompt Profile override (via `agents.Route`)
+  ├─ ✅ `/agents` = compatible Prompt Profile catalog
+  ├─ ✅ no default composition of mode overlay + agent prompt
+  └─ ✅ metadata-safe catalog in groups/non-owner contexts
+  └─ ⏳ `internal/profiles` package abstraction (Phase 1 da spec)
 
-Sprint H: Learning Nudge
-  ├─ transcript recorder por SessionKey
-  ├─ redaction + profile edit_project
-  └─ sugestões/updates escopados; Wiki transversal só via PI + ai-memory quando configurado
+Sprint H: Learning Nudge ✅ (v0.9.0–v0.21.1)
+  ├─ ✅ transcript recorder por SessionKey
+  ├─ ✅ redaction + profile edit_project
+  └─ ✅ sugestões/updates escopados; Wiki transversal só via PI + ai-memory quando configurado
 
 Sprint K: TUI
   ├─ Fase 0: Transport Abstraction (2d) - pode antecipar
@@ -518,7 +519,7 @@ migração CLI
 active run / Bridge commands user-scoped
 ```
 
-O próximo trabalho deve assumir `user_id` real no handoff e evitar novos caminhos com `userID=0`, exceto compatibilidade/testes. O Sprint E pode começar imediatamente: `TopicMemoryDir` e `TopicCwdOverlayDir` são adições ao `PathResolver` existente sem breaking changes.
+O próximo trabalho deve assumir `user_id` real no handoff e evitar novos caminhos com `userID=0`, exceto compatibilidade/testes. Sprint E foi concluído em v0.20.0; `TopicMemoryDir` e `TopicCwdOverlayDir` estão em produção desde então.
 
 ## Backlog futuro
 

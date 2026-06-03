@@ -148,11 +148,19 @@ func helpMessage() string {
 
 func (bc *BotController) handleAgentsCommand(c telebot.Context) error {
 	defer bc.confirmMessage(c.Message())
+	if payload := strings.TrimSpace(c.Message().Payload); strings.HasPrefix(strings.ToLower(payload), "explain ") {
+		reply, err := bc.cmdExplainProfile(c, "/agents "+payload)
+		if err != nil {
+			return err
+		}
+		return SendTextWithThread(bc.bot, c.Chat(), reply, c.Message().ThreadID)
+	}
+
 	// Delegate to cmdListAgents so the slash command returns the same
 	// output as the natural-language path ("lista agents" / "quais agents"):
 	// markdown formatting + the active mode section, in addition to thread
 	// routing. Keep the "Crie arquivos .md ..." hint for the empty case.
-	reply, err := bc.cmdListAgents(safeSenderID(c.Sender()))
+	reply, err := bc.cmdListAgents(c)
 	if err != nil {
 		return err
 	}
@@ -177,7 +185,13 @@ func (bc *BotController) handleModeCommand(c telebot.Context) error {
 	if p := strings.TrimSpace(c.Message().Payload); p != "" {
 		text = "/mode " + p
 	}
-	reply, err := bc.cmdSetMode(c, text)
+	var reply string
+	var err error
+	if strings.HasPrefix(stripAccents(strings.ToLower(text)), "/mode explain ") {
+		reply, err = bc.cmdExplainProfile(c, text)
+	} else {
+		reply, err = bc.cmdSetMode(c, text)
+	}
 	if err != nil {
 		return err
 	}
