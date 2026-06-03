@@ -538,16 +538,16 @@ func (s *Service) buildBridgeRequest(userText, systemPrompt string, pp *profiles
 
 	// ── Resolve and attach security context ──
 	cwd = req.Options.Cwd
-	profile := security.DefaultProfileForContext(cwd != "", pp != nil && pp.CapabilityProfile == "", needsWriteTools(pp))
+	capProfile := security.DefaultProfileForContext(cwd != "", pp != nil && pp.CapabilityProfile == "", needsWriteTools(pp))
 
 	// Allow agent-level capability_profile override
 	if pp != nil && pp.CapabilityProfile != "" {
-		profile = security.CapabilityProfile(pp.CapabilityProfile)
+		capProfile = security.CapabilityProfile(pp.CapabilityProfile)
 	}
 
 	// Intersect agent allowed_tools with profile limits
 	effectiveProfile, effectiveTools := security.ResolveProfile(
-		profile,
+		capProfile,
 		req.Options.AllowedTools,
 		req.Options.DisallowedTools,
 		cwd != "",
