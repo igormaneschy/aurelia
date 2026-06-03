@@ -4,6 +4,54 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.23.2 - 2026-06-03
+
+### Added
+- **Prompt Profiles** — canonical profile storage in `~/.aurelia/profiles/*.md`
+  with YAML frontmatter (`name`, `description`, `public`, `model`, `cwd`,
+  `capability_profile`, `allowed_tools`, `disallowed_tools`, `max_turns`,
+  `tool_budget`, `tags`). Profiles resolve with precedence: canonical > legacy
+  agent > builtin. Builtins (`general`, `developer`, `researcher`) cannot be
+  silently deleted.
+- **`/mode explain <profile>`** and **`/agents explain <profile>`** — show
+  safe profile summary (name, description, tags, usage hints) without exposing
+  prompt body, model, cwd, or tool policy.
+- **`/mode <custom profile>`** — any visible profile (canonical, legacy, or
+  builtin) can be set as the active default, not just the three builtins.
+
+### Changed
+- **`/mode`, `@profile`, `/agents` unified** — all three now share the same
+  `internal/profiles.Resolver` engine, replacing ad-hoc agent routing and
+  mode normalization. `@profile` is a one-shot override; `/mode` sets the
+  persistent default; `/agents` lists available profiles.
+- **Profile visibility enforced** — profiles marked `public: false` are hidden
+  from non-owner users in listings, explain output, and `@profile`/`/mode`
+  invocation. Legacy agents default to `public: true`.
+- **Prompt preview removed** — `/agents explain` no longer shows raw prompt
+  body; replaced with safe curated summary.
+- **User-facing errors unified** — non-owner sees the same message for
+  missing and forbidden profiles (preventing name enumeration); detailed
+  distinction kept in logs only.
+
+### Fixed
+- **CI: bridge typecheck** — `package-lock.json` was gitignored, causing
+  `setup-node` cache resolution to fail. Removed from `.gitignore` and
+  committed.
+- **CI: govulncheck** — Go `1.26.3` had stdlib CVEs (GO-2026-5039
+  `net/textproto`, GO-2026-5037 `crypto/x509`). Bumped to `1.26.4`.
+- **CI: gitleaks** — `gitleaks-action@v2` now requires `GITHUB_TOKEN`
+  explicitly. Added `env: GITHUB_TOKEN` to the workflow step.
+- **CI: missing source file** — `.gitignore` rule `aurelia` (intended for the
+  binary) matched `cmd/aurelia/`, hiding `debug_cli.go`. Changed to `/aurelia`
+  (root-anchored) and committed the file.
+- **Lint warnings** — ineffectual assignment in `resolver.go`; unused
+  `defaultLifecyclePolicy` function and `session` import in `commands.go`.
+- **Flaky test** — `TestUpdateMemoryIndex_FailsOnUnwritableDir` used `chmod
+  0500` (unreliable on CI: root bypasses, filesystem varies). Replaced with a
+  file-as-parent-directory approach that fails reliably on all platforms.
+- **Comment corrected** — loader comment said "Legacy agents override
+  canonical" but code enforces canonical > legacy.
+
 ## v0.23.1 - 2026-06-03
 
 ### Fixed
