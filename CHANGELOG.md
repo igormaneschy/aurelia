@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.23.4 - 2026-06-06
+
+### Fixed
+- **PI: tools MCP e web search sumindo do `system` event** — Quando o
+  perfil definia `allowed_tools`, o bridge passava a lista crua para
+  `createAgentSession({ tools })` e o PI SDK filtrava as tools
+  registradas por extensões (`mcp` do `pi-mcp-adapter`,
+  `code_search`/`fetch_content`/`get_search_content` do `pi-web-access`).
+  O modelo passava a "não conhecer" essas tools e qualquer chamada
+  voltava com 401 sintético do provider de chat. O bridge agora
+  mescla `EXTENSION_UTILITY_TOOLS` (constante) ao allowlist do
+  perfil, respeitando o denylist. Helper legado `discoverMCPTools()`
+  (que sintetizava nomes inacessíveis tipo `notebooklm__query`)
+  removido — o proxy MCP do PI é uma única tool `mcp` com envelope
+  JSON-schema. Log estruturado após o `system` event mostra
+  `profile/active/mcp_proxy/web_search` para diagnóstico futuro.
+
 ## v0.23.3 - 2026-06-06
 
 ### Fixed
