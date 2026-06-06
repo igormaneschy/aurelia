@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.23.3 - 2026-06-06
+
+### Fixed
+- **Regressão: Bash bloqueado nos builtins** — O `DefaultProfileForContext` usava
+  `CapabilityProfile == ""` como heurística para "processo interno", rebaixando
+  silenciosamente os perfis `general`, `developer` e `researcher` para
+  `edit_project` (sem Bash, sem busca web). A heurística foi removida e os 3
+  builtins agora declaram `CapabilityProfile: "execute_safe"` explicitamente.
+  A regressão também afetava agentes legados e perfis canônicos sem
+  `capability_profile` no YAML.
+
 ## v0.23.2 - 2026-06-03
 
 ### Added

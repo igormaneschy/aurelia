@@ -558,7 +558,7 @@ func (s *Service) buildBridgeRequest(userText, systemPrompt string, pp *profiles
 
 	// ── Resolve and attach security context ──
 	cwd = req.Options.Cwd
-	capProfile := security.DefaultProfileForContext(cwd != "", pp != nil && pp.CapabilityProfile == "", needsWriteTools(pp))
+	capProfile := security.DefaultProfileForContext(cwd != "", false, needsWriteTools(pp))
 
 	// Allow agent-level capability_profile override
 	if pp != nil && pp.CapabilityProfile != "" {

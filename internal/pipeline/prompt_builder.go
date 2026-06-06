@@ -764,7 +764,7 @@ func (bc *Service) buildSecurityPromptSection(chatID int64, threadID int, pp *pr
 	cwd := bc.effectiveCwd(pp, chatID, threadID)
 
 	// Resolve the effective profile for this context
-	profile := security.DefaultProfileForContext(cwd != "", pp != nil && pp.CapabilityProfile == "", needsWriteTools(pp))
+	profile := security.DefaultProfileForContext(cwd != "", false, needsWriteTools(pp))
 	if pp != nil && pp.CapabilityProfile != "" {
 		profile = security.CapabilityProfile(pp.CapabilityProfile)
 	}
