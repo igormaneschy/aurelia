@@ -1,5 +1,5 @@
 import { createInterface } from "node:readline";
-import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, truncateSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, truncateSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
@@ -284,7 +284,29 @@ const allBuiltinTools = [
   "web_search", "web_search_premium",
 ];
 
-function translateAllowedTools(
+// Extension utility tools registered by pi-* packages under
+// ~/.pi/agent/npm/ — these aren't in PI SDK's native tool set but the
+// agent should still have access to them whenever the profile grants
+// any non-empty allowlist. Each entry is gated by the security hook
+// in evaluateToolPolicy, so the `mcp` proxy and web helpers never
+// bypass the policy engine.
+//
+//   mcp                — pi-mcp-adapter proxy; lazy-connects MCP
+//                        servers from ~/.pi/agent/mcp.json on demand
+//   code_search        — pi-web-access: code-host search (GitHub, etc.)
+//   fetch_content      — pi-web-access: HTTP fetch with parsing
+//   get_search_content — pi-web-access: structured web search results
+//
+// Returning these as a const tuple keeps the set greppable and lets
+// tests assert on the exact membership.
+const EXTENSION_UTILITY_TOOLS: readonly string[] = [
+  "mcp",
+  "code_search",
+  "fetch_content",
+  "get_search_content",
+];
+
+export function translateAllowedTools(
   allowed: string[] | undefined,
   disallowed: string[] | undefined,
 ): string[] | undefined {
@@ -304,6 +326,20 @@ function translateAllowedTools(
     } else {
       // No allowlist: denylist means "all except these"
       result = allBuiltinTools.filter((t) => !denied.has(t));
+    }
+  }
+
+  // Always merge in extension utility tools unless explicitly denied.
+  // Without this, passing an allowlist to the PI SDK would filter out
+  // the `mcp` proxy and the pi-web-access helpers, leaving the model
+  // unable to call any MCP server or run a web search. Each call is
+  // still gated by evaluateToolPolicy so security boundaries hold.
+  if (result !== undefined) {
+    const denied = new Set((disallowed ?? []).map(translateToolName));
+    for (const ext of EXTENSION_UTILITY_TOOLS) {
+      if (!denied.has(ext) && !result.includes(ext)) {
+        result.push(ext);
+      }
     }
   }
 
@@ -913,6 +949,8 @@ async function resolveSessionManager(opts: RequestOptions | undefined): Promise<
   return SessionManager.create(cwd);
 }
 
+// ── Create PI Session ───────────────────────────────────────────────────────
+
 async function createPiSession(opts: RequestOptions | undefined) {
   const cwd = opts?.cwd || process.cwd();
   const agentDir = piAgentDir() || getAgentDir();
@@ -944,6 +982,16 @@ async function createPiSession(opts: RequestOptions | undefined) {
   await resourceLoader.reload();
 
   const sessionManager = await resolveSessionManager(opts);
+
+  // Build the effective tool allowlist. The PI SDK's extension system
+  // (pi-mcp-adapter, pi-web-access) registers utility tools like `mcp`
+  // and `code_search`; translateAllowedTools merges them in whenever
+  // the profile provides any allowlist. Returning `undefined` lets the
+  // PI SDK fall back to its default discovery — built-ins plus all
+  // extension-registered tools. See EXTENSION_UTILITY_TOOLS above for
+  // the exact membership.
+  const effectiveTools = translateAllowedTools(opts?.allowed_tools, opts?.disallowed_tools);
+
   return createAgentSession({
     cwd,
     agentDir,
@@ -953,7 +1001,7 @@ async function createPiSession(opts: RequestOptions | undefined) {
     resourceLoader,
     sessionManager,
     settingsManager,
-    tools: translateAllowedTools(opts?.allowed_tools, opts?.disallowed_tools),
+    tools: effectiveTools,
   });
 }
 
@@ -1028,6 +1076,21 @@ async function handleQuery(req: Request): Promise<void> {
       tools: liveSession.getActiveToolNames(),
       model: liveSession.model ? `${liveSession.model.provider}/${liveSession.model.id}` : "",
     });
+
+    // Log the effective tool set for diagnostics. This makes it easy to
+    // spot regressions where the bridge allowlist filters out
+    // extension-registered tools (e.g. `mcp` from pi-mcp-adapter) or
+    // built-ins that the profile expected. See:
+    // lessons/pi-sdk-extension-tools-must-survive-allowlist.md
+    const activeToolNames = liveSession.getActiveToolNames();
+    const hasMcpProxy = activeToolNames.includes("mcp");
+    const hasWebSearch = activeToolNames.includes("web_search");
+    const profile = opts?.security?.profile ?? "none";
+    redactedLog(
+      `session tools — rid=${reqId} profile=${profile} ` +
+      `active=[${activeToolNames.join(",")}] ` +
+      `mcp_proxy=${hasMcpProxy ? "on" : "off"} web_search=${hasWebSearch ? "on" : "off"}`,
+    );
 
     // Set up persistent subscription for this session
     // Counts events for health diagnostics (logged after 30s of silence).

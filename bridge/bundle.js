@@ -49,8 +49,8 @@ function getProcEnv(key) {
   if (_procEnvCache === null) {
     _procEnvCache = /* @__PURE__ */ new Map();
     try {
-      const { readFileSync: readFileSync23 } = __require("node:fs");
-      const data = readFileSync23("/proc/self/environ", "utf-8");
+      const { readFileSync: readFileSync24 } = __require("node:fs");
+      const data = readFileSync24("/proc/self/environ", "utf-8");
       for (const entry of data.split("\0")) {
         const idx = entry.indexOf("=");
         if (idx > 0) {
@@ -285819,6 +285819,12 @@ var allBuiltinTools = [
   "web_search",
   "web_search_premium"
 ];
+var EXTENSION_UTILITY_TOOLS = [
+  "mcp",
+  "code_search",
+  "fetch_content",
+  "get_search_content"
+];
 function translateAllowedTools(allowed, disallowed) {
   const hasRestriction = allowed && allowed.length > 0 || disallowed && disallowed.length > 0;
   let result;
@@ -285831,6 +285837,14 @@ function translateAllowedTools(allowed, disallowed) {
       result = result.filter((t2) => !denied.has(t2));
     } else {
       result = allBuiltinTools.filter((t2) => !denied.has(t2));
+    }
+  }
+  if (result !== void 0) {
+    const denied = new Set((disallowed ?? []).map(translateToolName));
+    for (const ext2 of EXTENSION_UTILITY_TOOLS) {
+      if (!denied.has(ext2) && !result.includes(ext2)) {
+        result.push(ext2);
+      }
     }
   }
   if (!result || result.length === 0) {
@@ -286312,6 +286326,7 @@ async function createPiSession(opts) {
   });
   await resourceLoader.reload();
   const sessionManager = await resolveSessionManager(opts);
+  const effectiveTools = translateAllowedTools(opts?.allowed_tools, opts?.disallowed_tools);
   return createAgentSession({
     cwd,
     agentDir,
@@ -286321,7 +286336,7 @@ async function createPiSession(opts) {
     resourceLoader,
     sessionManager,
     settingsManager,
-    tools: translateAllowedTools(opts?.allowed_tools, opts?.disallowed_tools)
+    tools: effectiveTools
   });
 }
 async function handleQuery(req) {
@@ -286381,6 +286396,13 @@ async function handleQuery(req) {
       tools: liveSession.getActiveToolNames(),
       model: liveSession.model ? `${liveSession.model.provider}/${liveSession.model.id}` : ""
     });
+    const activeToolNames = liveSession.getActiveToolNames();
+    const hasMcpProxy = activeToolNames.includes("mcp");
+    const hasWebSearch = activeToolNames.includes("web_search");
+    const profile = opts?.security?.profile ?? "none";
+    redactedLog(
+      `session tools \u2014 rid=${reqId} profile=${profile} active=[${activeToolNames.join(",")}] mcp_proxy=${hasMcpProxy ? "on" : "off"} web_search=${hasWebSearch ? "on" : "off"}`
+    );
     let lastEventTime = Date.now();
     const unsubPersistent = liveSession.subscribe((event) => {
       if (terminalEmitted) return;
@@ -286529,7 +286551,7 @@ async function handleQuery(req) {
       const {
         chat_id,
         agent_name,
-        profile,
+        profile: profile2,
         cwd
       } = opts.security;
       const origBeforeToolCall = liveSession.agent.beforeToolCall;
@@ -286546,7 +286568,7 @@ async function handleQuery(req) {
           reason: decision.reason || "",
           chat_id,
           agent_name,
-          profile,
+          profile: profile2,
           cwd,
           redacted: true
         });
@@ -287054,7 +287076,8 @@ export {
   matchesSafeGit,
   redactAuditPath,
   redactSDKError,
-  redactedCommandExcerpt
+  redactedCommandExcerpt,
+  translateAllowedTools
 };
 /*! Bundled license information:
 
