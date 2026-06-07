@@ -7,6 +7,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## v0.23.4 - 2026-06-06
 
 ### Fixed
+- **Bridge: `createPiSession` serializado com mutex** — O `handleRequest`
+  processa comandos concorrentemente (query + lifecycle `get-session-stats`).
+  Ambos chamavam `createPiSession` → `resourceLoader.reload()` que carrega
+  extensions com I/O real (SQLite, network), causando crash silencioso do
+  Node.js. Agora um lock FIFO garante que só uma sessão é criada por vez.
+
+- **Bridge: report de tools agora usa `translateAllowedTools()` em vez de
+  `getActiveToolNames()`** — O `getActiveToolNames()` do PI SDK retorna
+  `agent.state.tools` que contém apenas as tools built-in (7) durante a
+  inicialização, mesmo quando extensions registram tools adicionais
+  (`mcp`, `code_search`, `fetch_content`, `get_search_content`).
+  O `system` event e o log `session tools` agora usam a lista computada
+  pelo bridge (13 tools), com `pi_active` mostrando a visão do PI SDK
+  para diagnóstico. O modelo SEMPRE teve acesso às tools (o PI SDK as
+  registra internamente), o bug era apenas no report.
+
+- **PI SDK: extensions e MCP compartilhados via symlinks** — Aurelia usa
+  `~/.aurelia/pi-agent/` como `PI_CODING_AGENT_DIR` isolado do PI CLI
+  global. O `setup.go` agora cria symlinks automáticos em todo startup:
+  `pi-mcp-adapter` e `pi-web-access` (extensions),
+  `mcp.json`, `mcp-cache.json` e `mcp-npx-cache.json`. 
+  `pi-hermes-memory` é intencionalmente excluído (seu SQLite pode
+  causar hangs). Sem os symlinks, o modelo tentava usar `web_search` e
+  `mcp` mas as extensions não estavam carregadas e os servidores MCP
+  não eram descobertos.
+
 - **PI: tools MCP e web search sumindo do `system` event** — Quando o
   perfil definia `allowed_tools`, o bridge passava a lista crua para
   `createAgentSession({ tools })` e o PI SDK filtrava as tools

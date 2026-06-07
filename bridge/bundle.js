@@ -286299,7 +286299,21 @@ async function resolveSessionManager(opts) {
   }
   return SessionManager.create(cwd);
 }
+var piSessionLock = Promise.resolve();
 async function createPiSession(opts) {
+  const prev = piSessionLock;
+  let release;
+  piSessionLock = new Promise((resolve16) => {
+    release = resolve16;
+  });
+  await prev;
+  try {
+    return await createPiSessionInner(opts);
+  } finally {
+    release();
+  }
+}
+async function createPiSessionInner(opts) {
   const cwd = opts?.cwd || process.cwd();
   const agentDir = piAgentDir() || getAgentDir();
   const settingsManager = opts?.no_user_settings ? SettingsManager.inMemory({
@@ -286379,6 +286393,10 @@ async function handleQuery(req) {
   }, timeoutMs);
   try {
     cleanupChatSession(cKey);
+    const effectiveToolNames = translateAllowedTools(
+      opts?.allowed_tools,
+      opts?.disallowed_tools
+    ) ?? [];
     const piSession = await createPiSession(opts);
     const liveSession = piSession.session;
     session = liveSession;
@@ -286389,20 +286407,20 @@ async function handleQuery(req) {
     const sessionID = liveSession.sessionId;
     lastSessionID = sessionID;
     rememberSession(sessionID, { id: sessionID, file: liveSession.sessionFile });
+    const piActive = liveSession.getActiveToolNames();
+    const hasMcpProxy = effectiveToolNames.includes("mcp");
+    const hasWebSearch = effectiveToolNames.includes("web_search");
+    const profile = opts?.security?.profile ?? "none";
+    redactedLog(
+      `session tools \u2014 rid=${reqId} profile=${profile} active=[${effectiveToolNames.join(",")}] pi_active=[${piActive.join(",")}] mcp_proxy=${hasMcpProxy ? "on" : "off"} web_search=${hasWebSearch ? "on" : "off"}`
+    );
     emitReq({
       event: "system",
       session_id: sessionID,
       session_file: liveSession.sessionFile,
-      tools: liveSession.getActiveToolNames(),
+      tools: effectiveToolNames,
       model: liveSession.model ? `${liveSession.model.provider}/${liveSession.model.id}` : ""
     });
-    const activeToolNames = liveSession.getActiveToolNames();
-    const hasMcpProxy = activeToolNames.includes("mcp");
-    const hasWebSearch = activeToolNames.includes("web_search");
-    const profile = opts?.security?.profile ?? "none";
-    redactedLog(
-      `session tools \u2014 rid=${reqId} profile=${profile} active=[${activeToolNames.join(",")}] mcp_proxy=${hasMcpProxy ? "on" : "off"} web_search=${hasWebSearch ? "on" : "off"}`
-    );
     let lastEventTime = Date.now();
     const unsubPersistent = liveSession.subscribe((event) => {
       if (terminalEmitted) return;

@@ -951,7 +951,26 @@ async function resolveSessionManager(opts: RequestOptions | undefined): Promise<
 
 // ── Create PI Session ───────────────────────────────────────────────────────
 
+// Serialize createPiSession calls to prevent concurrent extension loading
+// (resourceLoader.reload, SQLite open, etc.) from crashing the bridge when
+// lifecycle get-session-stats runs while a query is in progress.
+let piSessionLock: Promise<void> = Promise.resolve();
+
 async function createPiSession(opts: RequestOptions | undefined) {
+  // Wait for any previous createPiSession to finish.
+  const prev = piSessionLock;
+  let release: () => void;
+  piSessionLock = new Promise<void>((resolve) => { release = resolve; });
+  await prev;
+
+  try {
+    return await createPiSessionInner(opts);
+  } finally {
+    release!();
+  }
+}
+
+async function createPiSessionInner(opts: RequestOptions | undefined) {
   const cwd = opts?.cwd || process.cwd();
   const agentDir = piAgentDir() || getAgentDir();
   const settingsManager = opts?.no_user_settings
@@ -1057,6 +1076,15 @@ async function handleQuery(req: Request): Promise<void> {
     // Clean up any existing session for this chat
     cleanupChatSession(cKey);
 
+    // Compute effective tools before session creation so we can report
+    // the full list (including extension tools like mcp, code_search, etc.)
+    // even if the PI SDK's getActiveToolNames() returns a stale/incomplete
+    // set (see lessons/pi-sdk-extension-tools-must-survive-allowlist.md).
+    const effectiveToolNames = translateAllowedTools(
+      opts?.allowed_tools,
+      opts?.disallowed_tools,
+    ) ?? [];
+
     const piSession = await createPiSession(opts);
     const liveSession = piSession.session;
     session = liveSession;
@@ -1069,28 +1097,27 @@ async function handleQuery(req: Request): Promise<void> {
     lastSessionID = sessionID;
     rememberSession(sessionID, { id: sessionID, file: liveSession.sessionFile });
 
+    // Report tools from our computed allowlist (authoritative) rather than
+    // getActiveToolNames() which may omit extension-registered tools due to
+    // PI SDK internal timing (see _refreshToolRegistry / setActiveToolsByName).
+    const piActive = liveSession.getActiveToolNames();
+    const hasMcpProxy = effectiveToolNames.includes("mcp");
+    const hasWebSearch = effectiveToolNames.includes("web_search");
+    const profile = opts?.security?.profile ?? "none";
+    redactedLog(
+      `session tools — rid=${reqId} profile=${profile} ` +
+      `active=[${effectiveToolNames.join(",")}] ` +
+      `pi_active=[${piActive.join(",")}] ` +
+      `mcp_proxy=${hasMcpProxy ? "on" : "off"} web_search=${hasWebSearch ? "on" : "off"}`,
+    );
+
     emitReq({
       event: "system",
       session_id: sessionID,
       session_file: liveSession.sessionFile,
-      tools: liveSession.getActiveToolNames(),
+      tools: effectiveToolNames,
       model: liveSession.model ? `${liveSession.model.provider}/${liveSession.model.id}` : "",
     });
-
-    // Log the effective tool set for diagnostics. This makes it easy to
-    // spot regressions where the bridge allowlist filters out
-    // extension-registered tools (e.g. `mcp` from pi-mcp-adapter) or
-    // built-ins that the profile expected. See:
-    // lessons/pi-sdk-extension-tools-must-survive-allowlist.md
-    const activeToolNames = liveSession.getActiveToolNames();
-    const hasMcpProxy = activeToolNames.includes("mcp");
-    const hasWebSearch = activeToolNames.includes("web_search");
-    const profile = opts?.security?.profile ?? "none";
-    redactedLog(
-      `session tools — rid=${reqId} profile=${profile} ` +
-      `active=[${activeToolNames.join(",")}] ` +
-      `mcp_proxy=${hasMcpProxy ? "on" : "off"} web_search=${hasWebSearch ? "on" : "off"}`,
-    );
 
     // Set up persistent subscription for this session
     // Counts events for health diagnostics (logged after 30s of silence).
