@@ -7,6 +7,7 @@ import {
   redactAuditPath,
   SecurityContext,
   DEFAULT_SENSITIVE_PATTERNS,
+  translateAllowedTools,
 } from "./index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -567,5 +568,77 @@ describe("redactAuditPath", () => {
 
   it("does not false-positive on .gitignore", () => {
     assert.strictEqual(redactAuditPath("check .gitignore"), "check .gitignore");
+  });
+});
+
+// ── translateAllowedTools: profile + extension utility merging ──────────────
+//
+// Regression coverage for the bug where the bridge's allowlist filtered
+// out the `mcp` proxy and the pi-web-access helpers, leaving the model
+// unable to call any MCP server or run a web search. The fix adds
+// EXTENSION_UTILITY_TOOLS to the result whenever the profile provides
+// an allowlist, subject to the explicit denylist. See:
+// lessons/pi-sdk-extension-tools-must-survive-allowlist.md
+
+describe("translateAllowedTools", () => {
+  it("returns undefined when no restriction is set (PI SDK default)", () => {
+    assert.strictEqual(translateAllowedTools(undefined, undefined), undefined);
+  });
+
+  it("merges extension utility tools into an allowlist", () => {
+    const result = translateAllowedTools(
+      ["Read", "Write", "Edit", "Bash", "Grep", "Glob", "LS", "WebSearch"],
+      undefined,
+    );
+    assert.ok(result, "result should be defined for non-empty allowlist");
+    // Native tools translated to PI SDK names
+    assert.ok(result!.includes("read"));
+    assert.ok(result!.includes("write"));
+    assert.ok(result!.includes("edit"));
+    assert.ok(result!.includes("bash"));
+    assert.ok(result!.includes("grep"));
+    assert.ok(result!.includes("find"));
+    assert.ok(result!.includes("ls"));
+    assert.ok(result!.includes("web_search"));
+    // Extension utility tools must always be present so the model can
+    // call MCPs and the web helpers
+    assert.ok(result!.includes("mcp"), "mcp proxy must survive allowlist");
+    assert.ok(result!.includes("code_search"));
+    assert.ok(result!.includes("fetch_content"));
+    assert.ok(result!.includes("get_search_content"));
+  });
+
+  it("respects explicit denylist for extension tools", () => {
+    const result = translateAllowedTools(
+      ["Read", "Write", "Bash", "WebSearch"],
+      ["mcp"],
+    );
+    assert.ok(result, "result should be defined");
+    assert.ok(!result!.includes("mcp"), "mcp must be excluded when denied");
+    // Other extension tools are still merged
+    assert.ok(result!.includes("code_search"));
+    assert.ok(result!.includes("fetch_content"));
+  });
+
+  it("returns empty array when explicit allowlist is fully denied", () => {
+    const result = translateAllowedTools(
+      ["Read", "Bash"],
+      ["Read", "Bash", "mcp", "code_search", "fetch_content", "get_search_content"],
+    );
+    // hasRestriction is true, result is empty → return []
+    assert.deepStrictEqual(result, []);
+  });
+
+  it("denylist-only mode (no allowlist) excludes the listed tools and still merges extensions", () => {
+    const result = translateAllowedTools(undefined, ["Bash", "mcp"]);
+    assert.ok(result, "result should be defined when denylist is set");
+    assert.ok(!result!.includes("bash"), "bash must be excluded when denied");
+    assert.ok(!result!.includes("mcp"), "mcp must be excluded when denied");
+    // Built-ins that are not denied survive
+    assert.ok(result!.includes("read"));
+    // Extension utility tools merge in by default so the model can
+    // still call code_search and friends.
+    assert.ok(result!.includes("code_search"));
+    assert.ok(result!.includes("fetch_content"));
   });
 });

@@ -101,6 +101,69 @@ func EnsureBridge(targetDir string, bundleJS []byte) (string, error) {
 					slog.Info("Removed stale isolated auth.json — PI CLI auth is absent")
 				}
 			}
+
+			// Share only the PI CLI extensions that Aurelia needs
+			// (pi-mcp-adapter and pi-web-access) via individual
+			// package symlinks. We intentionally exclude
+			// pi-hermes-memory because its SQLite database can
+			// cause startup hangs when locked by another process.
+			aureliaNpmModules := filepath.Join(aureliaPiAgentDir, "npm", "node_modules")
+			piCliNpmModules := filepath.Join(home, ".pi", "agent", "npm", "node_modules")
+			for _, pkg := range []string{"pi-mcp-adapter", "pi-web-access"} {
+				piPkg := filepath.Join(piCliNpmModules, pkg)
+				aureliaPkg := filepath.Join(aureliaNpmModules, pkg)
+				if _, statErr := os.Stat(piPkg); statErr == nil {
+					if err := os.MkdirAll(aureliaNpmModules, 0700); err != nil {
+						slog.Warn("failed to create npm/node_modules dir", "error", err)
+						continue
+					}
+					linkTarget, linkErr := os.Readlink(aureliaPkg)
+					if linkErr != nil || linkTarget != piPkg {
+						_ = os.Remove(aureliaPkg)
+						if err := os.Symlink(piPkg, aureliaPkg); err != nil {
+							slog.Warn("failed to symlink "+pkg+" from PI CLI", "error", err)
+						} else {
+							slog.Info("Linked " + pkg + " from PI CLI")
+						}
+					}
+				}
+			}
+
+			// Share MCP configuration files so Aurelia can discover and
+			// connect to the same MCP servers as PI CLI. The adapter needs
+			// mcp.json (server list), mcp-cache.json (cached manifests),
+			// and mcp-npx-cache.json (npx resolution cache).
+			for _, name := range []string{"mcp.json", "mcp-cache.json", "mcp-npx-cache.json"} {
+				piCliPath := filepath.Join(home, ".pi", "agent", name)
+				aureliaLink := filepath.Join(aureliaPiAgentDir, name)
+				if _, statErr := os.Stat(piCliPath); statErr == nil {
+					linkTarget, linkErr := os.Readlink(aureliaLink)
+					if linkErr != nil || linkTarget != piCliPath {
+						_ = os.Remove(aureliaLink)
+						if err := os.Symlink(piCliPath, aureliaLink); err != nil {
+							slog.Warn("failed to symlink "+name+" from PI CLI", "error", err)
+						} else {
+							slog.Info("Linked " + name + " from PI CLI")
+						}
+					}
+				}
+			}
+
+			// Share AGENTS.md so ai-memory routing rules (memory_query,
+			// memory_write_page, etc.) are available to the model.
+			piAgentsPath := filepath.Join(home, ".pi", "agent", "AGENTS.md")
+			aureliaAgentsLink := filepath.Join(aureliaPiAgentDir, "AGENTS.md")
+			if _, statErr := os.Stat(piAgentsPath); statErr == nil {
+				linkTarget, linkErr := os.Readlink(aureliaAgentsLink)
+				if linkErr != nil || linkTarget != piAgentsPath {
+					_ = os.Remove(aureliaAgentsLink)
+					if err := os.Symlink(piAgentsPath, aureliaAgentsLink); err != nil {
+						slog.Warn("failed to symlink AGENTS.md from PI CLI", "error", err)
+					} else {
+						slog.Info("Linked AGENTS.md from PI CLI")
+					}
+				}
+			}
 		}
 	}
 
