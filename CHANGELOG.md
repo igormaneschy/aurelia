@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.23.5 - 2026-06-13
+
+### Fixed
+- **Telegram `/model` agora reflete o catálogo atual do PI** — `/model` e
+  `lista modelos` passam a forçar refresh do catálogo em vez de reutilizar
+  cache de 5 min. O `models.json` isolado da Aurelia agora é symlink para
+  `~/.pi/agent/models.json`, igual ao `auth.json`, evitando divergência entre
+  PI CLI e Telegram. Bridge atualizado para PI SDK `0.79.2`.
+
 ## v0.23.4 - 2026-06-06
 
 ### Fixed
