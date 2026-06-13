@@ -293,7 +293,7 @@ The model sees relevant operational memory layers in its system prompt. Layers a
 | `/agents` | List available prompt profiles (`@profile` shortcuts) |
 | `/mode` | Show or set the default prompt profile |
 | `@profile <text>` | Use a prompt profile once for the current message |
-| `/model` | Show or change the SDK model selection |
+| `/model` | Show or change the SDK model selection; refreshes from the current PI model catalog |
 | `/memory` | Show memory status or create checkpoints |
 | `/debug last` | Show latest run summary (status, provider, cost, duration) — owner only |
 | `/debug run <id>` | Show full metadata and timeline for a specific run — owner only |
@@ -419,7 +419,10 @@ Aurelia supports local models via [Ollama](https://ollama.com/) or any OpenAI-co
    ollama pull qwen2.5-coder:7b
    ```
 
-2. **Configure Aurelia** by editing `~/.aurelia/pi-agent/models.json`:
+2. **Configure PI models** by editing `~/.pi/agent/models.json`:
+
+   Aurelia keeps `~/.aurelia/pi-agent/models.json` as a symlink to this PI CLI
+   file, so Telegram `/model` and `pi --list-models` read the same catalog.
    ```json
    {
      "providers": {

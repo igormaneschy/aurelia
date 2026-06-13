@@ -24,7 +24,7 @@
 **Service:** PI coding agent (`@earendil-works/pi-coding-agent`)
 **Purpose:** LLM inference, tool use, agentic loops
 **Implementation:** `internal/bridge/` (Go client) + `bridge/index.ts` (TS adapter)
-**Configuration:** PI auth/models/settings in `~/.pi/agent`, with selected credentials exported from Aurelia config as env vars
+**Configuration:** PI auth/models/settings in `~/.pi/agent`, with Aurelia's isolated `~/.aurelia/pi-agent/auth.json` and `models.json` symlinked back to the PI CLI files; selected credentials are exported from Aurelia config as env vars
 **Authentication:** PI auth store (`auth.json`), provider env vars, or custom `models.json`
 
 **Protocol:** NDJSON over stdin/stdout
@@ -47,7 +47,7 @@
 **Service:** Local PI installation
 **Purpose:** Reuse auth, model registry, skills, extensions, sessions, and settings
 **Implementation:** `bridge/index.ts` via PI SDK
-**Configuration:** `~/.pi/agent/auth.json`, `~/.pi/agent/models.json`, `~/.pi/agent/settings.json`
+**Configuration:** `~/.pi/agent/auth.json`, `~/.pi/agent/models.json`, `~/.pi/agent/settings.json`; Aurelia uses `~/.aurelia/pi-agent/` for isolation but symlinks `auth.json` and `models.json` to the PI CLI files
 **Authentication:** PI `AuthStorage` plus provider env vars (`ANTHROPIC_API_KEY`, `KIMI_API_KEY`, `OPENROUTER_API_KEY`, etc.)
 
 **Notes:**
@@ -55,6 +55,7 @@
 2. Agent-defined `mcp_servers` remain in the config schema but need a PI extension/adapter for parity.
 3. PI built-in tools are mapped from Claude-style tool names (`Read` → `read`, `Glob` → `find`, etc.).
 4. PI owns model resolution, sessions, compaction, context-file loading, skills/extensions and tool execution. Aurelia owns Telegram UX, identity/persona, scoped memory, scheduling, audit/policy context and workflows.
+5. Telegram `/model` and natural-language `lista modelos` force-refresh the PI model registry and should match `pi --list-models`; stale isolated `models.json` copies are invalid and replaced by symlinks on startup.
 
 ## Speech-to-Text (Groq)
 
