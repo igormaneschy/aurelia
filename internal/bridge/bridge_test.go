@@ -138,6 +138,44 @@ func TestBridge_ExecuteSync_ReturnsResult(t *testing.T) {
 	}
 }
 
+func TestBridge_ListModels_PropagatesRefreshFlag(t *testing.T) {
+	dir := t.TempDir()
+
+	// The mock fails unless it sees refresh=true, so a regression that drops
+	// the Refresh field or sends false will surface as a test failure.
+	listModelsMockJS := `
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+rl.on('line', (line) => {
+    const req = JSON.parse(line);
+    const rid = req.request_id || "";
+    if (req.command === "list-models") {
+        if (!req.refresh) {
+            process.stdout.write(JSON.stringify({event:"error", request_id:rid, message:"expected refresh=true"}) + "\n");
+            return;
+        }
+        const models = [{provider:"test", id:"model", name:"Model", supportsImages:false}];
+        process.stdout.write(JSON.stringify({event:"result", request_id:rid, content:JSON.stringify(models)}) + "\n");
+    } else {
+        process.stdout.write(JSON.stringify({event:"error", request_id:rid, message:"unknown command"}) + "\n");
+    }
+});
+rl.on('close', () => process.exit(0));
+`
+	b := newMockBridge(t, dir, listModelsMockJS)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	models, err := b.ListModels(ctx, true)
+	if err != nil {
+		t.Fatalf("ListModels() error: %v", err)
+	}
+	if len(models) != 1 || models[0].Provider != "test" || models[0].ID != "model" {
+		t.Fatalf("unexpected models: %+v", models)
+	}
+}
+
 func TestBridge_Execute_ErrorEvent(t *testing.T) {
 	dir := t.TempDir()
 

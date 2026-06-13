@@ -397,12 +397,15 @@ func (bc *BotController) handleModelCommand(c telebot.Context) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	models, err := bc.getModels(ctx, false)
+	// Opening /model is an explicit request to see PI's current catalog.
+	// Bypass Aurelia's 5-minute cache so newly added PI models show up without
+	// requiring the user to know about /model refresh first.
+	models, err := bc.getModels(ctx, true)
 	if err != nil {
 		return SendTextWithThread(bc.bot, c.Chat(), currentLine+fmt.Sprintf("\n\nLista não disponível: %v", err), threadID)
 	}
 	if len(models) == 0 {
-		// Cache was empty — force-refresh once; bridge may have been cold.
+		// Empty responses are not cached; try once more in case the bridge was cold.
 		models, err = bc.getModels(ctx, true)
 		if err != nil {
 			return SendTextWithThread(bc.bot, c.Chat(), currentLine+fmt.Sprintf("\n\nLista não disponível: %v", err), threadID)
@@ -633,9 +636,11 @@ func (bc *BotController) setModelFromCallback(c telebot.Context, data string) er
 	provider := data[:firstUnderscore]
 	modelID := data[firstUnderscore+1:]
 
+	// Validate against current PI state, not the cached menu. A model added
+	// after the menu was rendered should still be selectable.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := bc.getModels(ctx, false)
+	models, err := bc.getModels(ctx, true)
 	if err != nil {
 		return c.Edit("Não consegui validar este modelo. Tente novamente.")
 	}

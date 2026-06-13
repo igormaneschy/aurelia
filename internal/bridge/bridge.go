@@ -689,8 +689,10 @@ type ModelInfo struct {
 }
 
 // ListModels returns all models with configured auth from the PI model registry.
-func (b *Bridge) ListModels(ctx context.Context) ([]ModelInfo, error) {
-	ev, err := b.ExecuteSync(ctx, Request{Command: "list-models"})
+// When refresh is true, the bridge reloads models.json and resets any cached
+// provider state before returning the list.
+func (b *Bridge) ListModels(ctx context.Context, refresh bool) ([]ModelInfo, error) {
+	ev, err := b.ExecuteSync(ctx, Request{Command: "list-models", Refresh: refresh})
 	if err != nil {
 		return nil, fmt.Errorf("bridge: list-models failed: %w", err)
 	}

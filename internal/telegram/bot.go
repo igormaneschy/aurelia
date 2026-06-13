@@ -74,7 +74,7 @@ type BotController struct {
 }
 
 type modelLister interface {
-	ListModels(context.Context) ([]bridge.ModelInfo, error)
+	ListModels(ctx context.Context, refresh bool) ([]bridge.ModelInfo, error)
 }
 
 type albumBuffer struct {
@@ -289,6 +289,8 @@ func (s *botChatSender) SendWithThread(chatID int64, threadID int, text string) 
 }
 
 // getModels returns cached models or fetches from bridge with 5-minute TTL.
+// When force is true, the bridge reloads models.json and resets any cached
+// provider state before returning the list.
 func (bc *BotController) getModels(ctx context.Context, force bool) ([]bridge.ModelInfo, error) {
 	bc.modelCacheMu.Lock()
 	defer bc.modelCacheMu.Unlock()
@@ -301,7 +303,7 @@ func (bc *BotController) getModels(ctx context.Context, force bool) ([]bridge.Mo
 	if lister == nil {
 		return nil, fmt.Errorf("bridge unavailable")
 	}
-	models, err := lister.ListModels(ctx)
+	models, err := lister.ListModels(ctx, force)
 	if err != nil {
 		return nil, err
 	}

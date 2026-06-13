@@ -62,6 +62,7 @@ interface Request {
   prompt: string;
   request_id?: string;
   target_request_id?: string;
+  refresh?: boolean;
   options?: RequestOptions;
 }
 
@@ -1832,6 +1833,13 @@ async function handleRequest(line: string): Promise<void> {
         const agentDir = piAgentDir() || getAgentDir();
         const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
         const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+        // When the caller explicitly asks for a refresh, force the PI SDK to
+        // reload models.json and reset cached provider state. Without this,
+        // edits to models.json or dynamic provider registrations may not be
+        // reflected until the bridge process restarts.
+        if (req.refresh) {
+          modelRegistry.refresh();
+        }
         // Only show models with configured auth (checks auth.json, env vars, and models.json apiKey fallback)
         const available = await modelRegistry.getAvailable();
         // Filter: only expose models that resolveModel can find at query time.
