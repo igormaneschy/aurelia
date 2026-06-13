@@ -1833,7 +1833,7 @@ async function handleRequest(line: string): Promise<void> {
         const agentDir = piAgentDir() || getAgentDir();
         const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
         const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
-        // When the user explicitly asks for a refresh, force the PI SDK to
+        // When the caller explicitly asks for a refresh, force the PI SDK to
         // reload models.json and reset cached provider state. Without this,
         // edits to models.json or dynamic provider registrations may not be
         // reflected until the bridge process restarts.

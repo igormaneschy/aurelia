@@ -10,7 +10,8 @@
     "test": "tsx --test --test-force-exit policy.test.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.74.0"
+    "@earendil-works/pi-ai": "0.79.2",
+    "@earendil-works/pi-coding-agent": "0.79.2"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

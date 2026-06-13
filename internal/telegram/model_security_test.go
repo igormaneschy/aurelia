@@ -246,6 +246,33 @@ func TestRefreshModelsFromCallback_RedrawsProvidersWithNewModel(t *testing.T) {
 	}
 }
 
+func TestHandleModelCommand_ForceRefreshesBeforeMenu(t *testing.T) {
+	t.Parallel()
+
+	fake := &fakeModelLister{models: [][]bridge.ModelInfo{
+		{{Provider: "newpi", ID: "new-model"}},
+	}}
+	bc := testModelController(session.NewStore())
+	bc.modelLister = fake
+	bc.bot = newOfflineTestBot(t)
+	bc.modelCache = []bridge.ModelInfo{{Provider: "old", ID: "old-model"}}
+	bc.modelCacheExpiry = time.Now().Add(time.Hour)
+	c := newTestTelegramContext(42, 99, 100, "")
+
+	// Offline telebot may return a send error after the menu is built; this
+	// test only verifies that /model refreshes the PI catalog before rendering.
+	_ = bc.handleModelCommand(c)
+	if fake.calls != 1 {
+		t.Fatalf("expected /model to bypass fresh cache once, got %d calls", fake.calls)
+	}
+	if len(fake.refreshs) == 0 || !fake.refreshs[len(fake.refreshs)-1] {
+		t.Fatalf("expected /model to force-refresh PI catalog, got %v", fake.refreshs)
+	}
+	if !modelExists(bc.modelCache, "newpi", "new-model") {
+		t.Fatalf("expected new PI model in cache, got %#v", bc.modelCache)
+	}
+}
+
 // TestCmdSetModel_ValidationForceRefreshes verifies the regression fix
 // for the live bug: a model added to PI within the last 5 minutes could not
 // be set via /model <name> because validation read the stale 5-min cache.
@@ -430,7 +457,7 @@ func TestMatchCommand_RefreshModelsNaturalLanguage(t *testing.T) {
 
 // TestCmdListModels_IncludesRefreshHint verifies the user-facing hint
 // that tells the user the list is cached and how to refresh.
-func TestCmdListModels_IncludesRefreshHint(t *testing.T) {
+func TestCmdListModels_ForceRefreshesAndIncludesRefreshHint(t *testing.T) {
 	t.Parallel()
 
 	fake := &fakeModelLister{models: [][]bridge.ModelInfo{{{Provider: "openai", ID: "gpt-5.1"}}}}
@@ -445,8 +472,11 @@ func TestCmdListModels_IncludesRefreshHint(t *testing.T) {
 	if !strings.Contains(reply, "atualiza modelos") {
 		t.Fatalf("cmdListModels output should hint at refresh command, got: %q", reply)
 	}
-	if !strings.Contains(reply, "cache") {
-		t.Fatalf("cmdListModels output should mention cache to set user expectation, got: %q", reply)
+	if !strings.Contains(reply, "Lista atualizada agora") {
+		t.Fatalf("cmdListModels output should set fresh-list expectation, got: %q", reply)
+	}
+	if len(fake.refreshs) == 0 || !fake.refreshs[len(fake.refreshs)-1] {
+		t.Fatalf("expected cmdListModels to force-refresh PI catalog, got %v", fake.refreshs)
 	}
 }
 

@@ -397,12 +397,15 @@ func (bc *BotController) handleModelCommand(c telebot.Context) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	models, err := bc.getModels(ctx, false)
+	// Opening /model is an explicit request to see PI's current catalog.
+	// Bypass Aurelia's 5-minute cache so newly added PI models show up without
+	// requiring the user to know about /model refresh first.
+	models, err := bc.getModels(ctx, true)
 	if err != nil {
 		return SendTextWithThread(bc.bot, c.Chat(), currentLine+fmt.Sprintf("\n\nLista não disponível: %v", err), threadID)
 	}
 	if len(models) == 0 {
-		// Cache was empty — force-refresh once; bridge may have been cold.
+		// Empty responses are not cached; try once more in case the bridge was cold.
 		models, err = bc.getModels(ctx, true)
 		if err != nil {
 			return SendTextWithThread(bc.bot, c.Chat(), currentLine+fmt.Sprintf("\n\nLista não disponível: %v", err), threadID)

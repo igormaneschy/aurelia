@@ -874,7 +874,7 @@ func (bc *BotController) cmdListModels() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	models, err := bc.getModels(ctx, false)
+	models, err := bc.getModels(ctx, true)
 	if err != nil {
 		return currentLine + fmt.Sprintf("\n\nLista não disponível: %v", err), nil
 	}
@@ -920,7 +920,7 @@ func (bc *BotController) cmdListModels() (string, error) {
 	}
 
 	lines = append(lines, "\n\nUse /model <nome> para trocar ou /model auto para usar o PI default.")
-	lines = append(lines, "Lista em cache (5 min) — diga 'atualiza modelos' para refresh imediato.")
+	lines = append(lines, "Lista atualizada agora a partir do PI. Diga 'atualiza modelos' para forçar novo refresh.")
 	return strings.Join(lines, "\n"), nil
 }
 
@@ -1882,4 +1882,3 @@ func formatTelegramRunDetail(r *runlog.RunRecord, events []runlog.RunEvent) stri
 
 	return sb.String()
 }
-

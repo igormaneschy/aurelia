@@ -129,17 +129,7 @@ func TestEnsureBridge_RemovesStaleAuthWhenPICLIAuthAbsent(t *testing.T) {
 
 	// Intentionally do NOT create ~/.pi/agent/auth.json — PI CLI auth is absent.
 
-	// Create a minimal bridge target dir so EnsureBridge returns early
-	// (avoids running npm install).
-	targetDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(targetDir, "node_modules"), 0700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(targetDir, "bundle.js"), []byte("// bundle"), 0600); err != nil {
-		t.Fatal(err)
-	}
-
-	_, err := EnsureBridge(targetDir, nil)
+	_, err := EnsureBridge(readyBridgeTarget(t), nil)
 	if err != nil {
 		t.Fatalf("EnsureBridge failed: %v", err)
 	}
@@ -152,4 +142,78 @@ func TestEnsureBridge_RemovesStaleAuthWhenPICLIAuthAbsent(t *testing.T) {
 			t.Error("stale auth.json was NOT removed when PI CLI auth is absent")
 		}
 	}
+}
+
+func TestEnsureBridge_SymlinksModelsFromPICLI(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	piModelsPath := filepath.Join(homeDir, ".pi", "agent", "models.json")
+	if err := os.MkdirAll(filepath.Dir(piModelsPath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(piModelsPath, []byte(`{"providers":{"newpi":{"models":[]}}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	aureliaPiAgentDir := filepath.Join(homeDir, ".aurelia", "pi-agent")
+	if err := os.MkdirAll(aureliaPiAgentDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	staleModelsPath := filepath.Join(aureliaPiAgentDir, "models.json")
+	if err := os.WriteFile(staleModelsPath, []byte(`{"providers":{}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := EnsureBridge(readyBridgeTarget(t), nil)
+	if err != nil {
+		t.Fatalf("EnsureBridge failed: %v", err)
+	}
+
+	linkTarget, err := os.Readlink(staleModelsPath)
+	if err != nil {
+		t.Fatalf("models.json should be a symlink: %v", err)
+	}
+	if linkTarget != piModelsPath {
+		t.Fatalf("models.json symlink target = %q, want %q", linkTarget, piModelsPath)
+	}
+}
+
+func TestEnsureBridge_RemovesStaleModelsWhenPICLIModelsAbsent(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	aureliaPiAgentDir := filepath.Join(homeDir, ".aurelia", "pi-agent")
+	if err := os.MkdirAll(aureliaPiAgentDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	staleModelsPath := filepath.Join(aureliaPiAgentDir, "models.json")
+	if err := os.WriteFile(staleModelsPath, []byte(`{"providers":{"stale":{"models":[]}}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := EnsureBridge(readyBridgeTarget(t), nil)
+	if err != nil {
+		t.Fatalf("EnsureBridge failed: %v", err)
+	}
+
+	if _, err := os.Stat(staleModelsPath); !os.IsNotExist(err) {
+		if err != nil {
+			t.Errorf("unexpected error checking models: %v", err)
+		} else {
+			t.Error("stale models.json was NOT removed when PI CLI models are absent")
+		}
+	}
+}
+
+func readyBridgeTarget(t *testing.T) string {
+	t.Helper()
+	targetDir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(targetDir, "node_modules"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(targetDir, "bundle.js"), []byte("// bundle"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return targetDir
 }

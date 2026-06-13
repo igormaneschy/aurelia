@@ -21,7 +21,8 @@ const bridgePackageJSON = `{
     "build": "esbuild index.ts --bundle --platform=node --target=node18 --outfile=bundle.js --format=esm --banner:js=\"import { createRequire as __piCreateRequire } from 'module';const require = __piCreateRequire(import.meta.url);\""
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "0.74.0",
+    "@earendil-works/pi-ai": "0.79.2",
+    "@earendil-works/pi-coding-agent": "0.79.2",
     "esbuild": "^0.28.0"
   }
 }
@@ -99,6 +100,31 @@ func EnsureBridge(targetDir string, bundleJS []byte) (string, error) {
 					slog.Warn("failed to remove stale isolated auth.json (PI CLI auth absent)", "error", err)
 				} else if err == nil {
 					slog.Info("Removed stale isolated auth.json — PI CLI auth is absent")
+				}
+			}
+
+			// Share PI CLI models.json so Telegram /model reflects the same
+			// catalog as the interactive PI CLI. A stale isolated copy silently
+			// hides newly added providers/models even when the bridge refreshes.
+			piCliModelsPath := filepath.Join(home, ".pi", "agent", "models.json")
+			aureliaModelsPath := filepath.Join(aureliaPiAgentDir, "models.json")
+			if _, statErr := os.Stat(piCliModelsPath); statErr == nil {
+				linkTarget, linkErr := os.Readlink(aureliaModelsPath)
+				if linkErr != nil || linkTarget != piCliModelsPath {
+					if err := os.Remove(aureliaModelsPath); err != nil && !os.IsNotExist(err) {
+						slog.Warn("failed to remove stale models.json", "error", err)
+					}
+					if err := os.Symlink(piCliModelsPath, aureliaModelsPath); err != nil {
+						slog.Warn("failed to symlink models.json from PI CLI", "error", err)
+					} else {
+						slog.Info("Linked models.json from PI CLI")
+					}
+				}
+			} else {
+				if err := os.Remove(aureliaModelsPath); err != nil && !os.IsNotExist(err) {
+					slog.Warn("failed to remove stale isolated models.json (PI CLI models absent)", "error", err)
+				} else if err == nil {
+					slog.Info("Removed stale isolated models.json — PI CLI models are absent")
 				}
 			}
 
