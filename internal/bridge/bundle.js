@@ -286987,6 +286987,9 @@ async function handleRequest(line) {
         const agentDir = piAgentDir() || getAgentDir();
         const authStorage = AuthStorage.create(join31(agentDir, "auth.json"));
         const modelRegistry2 = ModelRegistry.create(authStorage, join31(agentDir, "models.json"));
+        if (req.refresh) {
+          modelRegistry2.refresh();
+        }
         const available = await modelRegistry2.getAvailable();
         const filtered = available.filter((m2) => {
           const found = resolveModel(modelRegistry2, m2.provider, m2.id);

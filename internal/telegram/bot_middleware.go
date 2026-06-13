@@ -633,9 +633,11 @@ func (bc *BotController) setModelFromCallback(c telebot.Context, data string) er
 	provider := data[:firstUnderscore]
 	modelID := data[firstUnderscore+1:]
 
+	// Validate against current PI state, not the cached menu. A model added
+	// after the menu was rendered should still be selectable.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := bc.getModels(ctx, false)
+	models, err := bc.getModels(ctx, true)
 	if err != nil {
 		return c.Edit("Não consegui validar este modelo. Tente novamente.")
 	}

@@ -6,6 +6,7 @@ type Request struct {
 	Prompt          string         `json:"prompt,omitempty"`
 	RequestID       string         `json:"request_id,omitempty"`
 	TargetRequestID string         `json:"target_request_id,omitempty"`
+	Refresh         bool           `json:"refresh,omitempty"`
 	Options         RequestOptions `json:"options,omitempty"`
 }
 

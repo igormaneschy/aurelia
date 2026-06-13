@@ -17,12 +17,14 @@ import (
 )
 
 type fakeModelLister struct {
-	calls  int
-	models [][]bridge.ModelInfo
+	calls    int
+	refreshs []bool
+	models   [][]bridge.ModelInfo
 }
 
-func (f *fakeModelLister) ListModels(context.Context) ([]bridge.ModelInfo, error) {
+func (f *fakeModelLister) ListModels(_ context.Context, refresh bool) ([]bridge.ModelInfo, error) {
 	f.calls++
+	f.refreshs = append(f.refreshs, refresh)
 	idx := f.calls - 1
 	if idx >= len(f.models) {
 		idx = len(f.models) - 1
@@ -87,6 +89,9 @@ func TestSetModelFromCallback_RejectsUnavailableModelWithoutMutation(t *testing.
 	sessions := session.NewStore()
 	sessions.SetSession(42, 99, 100, "/tmp/topic-session.jsonl")
 	bc := testModelController(sessions)
+	bc.modelLister = &fakeModelLister{models: [][]bridge.ModelInfo{
+		{{Provider: "anthropic", ID: "claude-sonnet-4-6"}},
+	}}
 	bc.modelCache = []bridge.ModelInfo{{Provider: "anthropic", ID: "claude-sonnet-4-6"}}
 	bc.modelCacheExpiry = time.Now().Add(time.Hour)
 	c := newTestTelegramContext(42, 99, 100, "")
@@ -121,6 +126,9 @@ func TestSetModelFromCallback_OwnerValidModelPersistsAndResetsCurrentScope(t *te
 	sessions.SetSession(42, 0, 100, "/tmp/general-session.jsonl")
 	sessions.SetSession(42, 99, 200, "/tmp/other-topic-session.jsonl")
 	bc := testModelController(sessions)
+	bc.modelLister = &fakeModelLister{models: [][]bridge.ModelInfo{
+		{{Provider: "openai", ID: "gpt-5.1"}},
+	}}
 	bc.modelCache = []bridge.ModelInfo{{Provider: "openai", ID: "gpt-5.1"}}
 	bc.modelCacheExpiry = time.Now().Add(time.Hour)
 	c := newTestTelegramContext(42, 99, 100, "")
@@ -202,6 +210,9 @@ func TestCmdSetModel_OwnerRefreshBypassesFreshCache(t *testing.T) {
 	}
 	if fake.calls != 1 {
 		t.Fatalf("expected one forced fetch, got %d", fake.calls)
+	}
+	if len(fake.refreshs) == 0 || !fake.refreshs[len(fake.refreshs)-1] {
+		t.Fatalf("expected refresh=true when forcing model list refresh, got %v", fake.refreshs)
 	}
 	if !modelExists(bc.modelCache, "anthropic", "claude-sonnet-4-6") {
 		t.Fatalf("expected cache refreshed from PI, got %#v", bc.modelCache)
@@ -285,6 +296,9 @@ func TestCmdSetModel_ValidationForceRefreshes(t *testing.T) {
 	if fake.calls < 1 {
 		t.Fatalf("expected at least one bridge fetch during validation, got %d", fake.calls)
 	}
+	if len(fake.refreshs) == 0 || !fake.refreshs[len(fake.refreshs)-1] {
+		t.Fatalf("expected refresh=true during forced model validation, got %v", fake.refreshs)
+	}
 
 	data, err := os.ReadFile(r.AppConfig())
 	if err != nil {
@@ -321,6 +335,9 @@ func TestSetModelFromCallback_SaveFailurePreservesModelAndSession(t *testing.T) 
 	sessions := session.NewStore()
 	sessions.SetSession(42, 99, 100, "/tmp/current-topic-session.jsonl")
 	bc := testModelController(sessions)
+	bc.modelLister = &fakeModelLister{models: [][]bridge.ModelInfo{
+		{{Provider: "newpi", ID: "new-model"}},
+	}}
 	bc.modelCache = []bridge.ModelInfo{{Provider: "newpi", ID: "new-model"}}
 	bc.modelCacheExpiry = time.Now().Add(time.Hour)
 	c := newTestTelegramContext(42, 99, 100, "")
