@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.23.6 - 2026-06-15
+
+### Changed
+- **Transport abstraction para TUI (Fase 0)** — `pipeline.Output` agora é
+  transport-agnóstico. Introduzido `transport.MessageHandle` e capacidades
+  opcionais `DeletableTransport` / `ReactableTransport`. Criado
+  `internal/pipeline/transport_output.go`, uma implementação genérica de
+  `Output` sobre qualquer `transport.Transport`. `telegramPipelineOutput`
+  foi refatorado para um thin adapter sobre `TelegramTransport`, preservando
+  comportamentos específicos (progresso, reação 🎉, deleção de mensagem de
+  reconexão, execução de planos). Todos os erros de envio de transporte são
+  redigidos antes de serem logados. Zero regressão no Telegram validada ao
+  vivo.
+
 ## v0.23.5 - 2026-06-13
 
 ### Fixed
