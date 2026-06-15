@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.24.0 - 2026-06-15
+
+### Added
+- **IPC Layer para TUI (Fase 1)** — Unix socket (`~/.aurelia/aurelia.sock`)
+  para comunicação entre o daemon `aureliad` e a futura TUI. Protocolo JSON
+  lines, streaming de respostas, auth local por permissão de socket (0600).
+  Novo pacote `internal/ipc/` com servidor, cliente e 14 testes. Servidor
+  integrado ao ciclo de vida do daemon (start no boot, shutdown graceful no
+  SIGTERM).
+
 ## v0.23.6 - 2026-06-15
 
 ### Changed
