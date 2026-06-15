@@ -158,10 +158,10 @@ type IPCEvent struct {
 ```
 
 **Tasks:**
-- [ ] `internal/ipc/server.go` — Unix socket listener no daemon (`~/.aurelia/aurelia.sock`)
-- [ ] `internal/ipc/client.go` — cliente para a TUI usar
-- [ ] Streaming de respostas (chunks SSE-like via JSON lines)
-- [ ] Auth local: verificação de `user_id` por UID do processo Unix (sem token extra)
+- [x] `internal/ipc/server.go` — Unix socket listener no daemon (`~/.aurelia/aurelia.sock`)
+- [x] `internal/ipc/client.go` — cliente para a TUI usar
+- [x] Streaming de respostas (chunks SSE-like via JSON lines)
+- [ ] Auth local: verificação de `user_id` por UID do processo Unix (sem token extra) — pendente, usa permissão 0600 como barrier inicial
 
 ---
 
