@@ -473,6 +473,77 @@ func TestWriteAllShortWrite(t *testing.T) {
 	}
 }
 
+func TestServerConcurrentStartClose(t *testing.T) {
+	// Use short temp dir to stay within macOS 104-char unix socket path limit.
+	dir, err := os.MkdirTemp("", "au-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socketPath := filepath.Join(dir, "s")
+
+	server, err := NewServer(socketPath)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	defer server.EnsureClose()
+
+	// Start and Close concurrently. Must not panic or deadlock.
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		server.Start()
+	}()
+
+	go func() {
+		defer wg.Done()
+		server.Close()
+	}()
+
+	wg.Wait()
+}
+
+func TestServerCloseBeforeStart(t *testing.T) {
+	// Use short temp dir to stay within macOS 104-char unix socket path limit.
+	dir, err := os.MkdirTemp("", "au-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socketPath := filepath.Join(dir, "s")
+
+	server, err := NewServer(socketPath)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+
+	// Close before Start should clean up cleanly.
+	if err := server.Close(); err != nil {
+		t.Fatalf("Close() before Start error: %v", err)
+	}
+
+	// Start after Close must be a no-op (not panic).
+	server.Start()
+}
+
+type zeroWriter struct{}
+
+func (zeroWriter) Write([]byte) (int, error) {
+	return 0, nil
+}
+
+func TestWriteAllZeroByte(t *testing.T) {
+	err := writeAll(zeroWriter{}, []byte("hello"))
+	if err == nil {
+		t.Fatal("expected error for zero-byte write")
+	}
+	if err.Error() != "write returned 0 bytes without error" {
+		t.Errorf("unexpected error message: got %q", err.Error())
+	}
+}
+
 // shortWriteWriter simulates a writer that returns short writes on the first call.
 type shortWriteWriter struct {
 	io.Writer

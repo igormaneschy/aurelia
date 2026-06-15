@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -38,9 +39,9 @@ type Server struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu      sync.Mutex
-	started bool
-	closed  bool
+	lifecycleMu sync.Mutex
+	started     bool
+	closed      bool
 
 	connsMu sync.Mutex
 	conns   map[net.Conn]struct{}
@@ -62,9 +63,10 @@ func NewServer(socketPath string) (*Server, error) {
 
 	// Set umask so net.Listen creates the socket with 0o600 atomically,
 	// avoiding the permission window between Listen and Chmod.
+	// Use defer to ensure umask is restored even if net.Listen panics.
 	oldMask := syscall.Umask(0o077)
+	defer syscall.Umask(oldMask)
 	listener, err := net.Listen("unix", socketPath)
-	syscall.Umask(oldMask)
 	if err != nil {
 		return nil, fmt.Errorf("listen on %s: %w", socketPath, err)
 	}
@@ -81,15 +83,15 @@ func NewServer(socketPath string) (*Server, error) {
 // Start begins accepting connections in a background goroutine.
 // It returns immediately. Safe to call multiple times. Call Close to stop.
 func (s *Server) Start() {
-	s.mu.Lock()
-	if s.started {
-		s.mu.Unlock()
+	s.lifecycleMu.Lock()
+	if s.started || s.closed {
+		s.lifecycleMu.Unlock()
 		return
 	}
 	s.started = true
-	s.mu.Unlock()
+	s.wg.Add(1) // under lock so Close cannot begin Wait() between Add and spawn
+	s.lifecycleMu.Unlock()
 
-	s.wg.Add(1)
 	go s.acceptLoop()
 }
 
@@ -115,12 +117,24 @@ func (s *Server) acceptLoop() {
 		}
 		slog.Debug("ipc: client connected", "remote", conn.RemoteAddr())
 
-		// Register before spawning goroutine to ensure Close() sees it.
+		// Register before lifecycleMu check so Close() can force-close
+		// this connection even if we decide not to spawn the handler.
 		s.connsMu.Lock()
 		s.conns[conn] = struct{}{}
 		s.connsMu.Unlock()
 
+		s.lifecycleMu.Lock()
+		if s.closed {
+			// Server is shutting down — don't spawn a handler. Close the
+			// connection immediately; Close() will force-close it too but
+			// double-close is safe for net.Conn.
+			s.lifecycleMu.Unlock()
+			conn.Close()
+			continue
+		}
 		s.wg.Add(1)
+		s.lifecycleMu.Unlock()
+
 		go s.handleConnection(conn)
 	}
 }
@@ -251,6 +265,9 @@ func writeAll(w io.Writer, data []byte) error {
 		if err != nil {
 			return err
 		}
+		if n == 0 {
+			return errors.New("write returned 0 bytes without error")
+		}
 		data = data[n:]
 	}
 	return nil
@@ -271,13 +288,13 @@ func (s *Server) writeEvent(conn net.Conn, event IPCEvent) error {
 // force-closes active connections, and waits for all handlers to finish.
 // Safe to call multiple times.
 func (s *Server) Close() error {
-	s.mu.Lock()
+	s.lifecycleMu.Lock()
 	if s.closed {
-		s.mu.Unlock()
+		s.lifecycleMu.Unlock()
 		return nil
 	}
 	s.closed = true
-	s.mu.Unlock()
+	s.lifecycleMu.Unlock()
 
 	s.cancel()
 
