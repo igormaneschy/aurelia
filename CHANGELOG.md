@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.24.2 - 2026-06-15
+
+### Fixed
+- **CI: corrige falhas no lint e sync do bridge bundle** — resolve 11 warnings
+  `errcheck` do `golangci-lint` em `internal/ipc/client.go` e
+  `internal/ipc/server.go`; retornos ignorados agora são explicitados com
+  `_ = ...` ou tratados com log. Rebuilda e sincroniza `bridge/bundle.js` e
+  `internal/bridge/bundle.js` com o TypeScript source, corrigindo o check de
+  bundle out of sync no workflow `bridge-typecheck`.
+
 ## v0.24.1 - 2026-06-15
 
 ### Fixed
