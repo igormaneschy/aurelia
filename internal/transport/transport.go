@@ -5,6 +5,18 @@ package transport
 
 import "context"
 
+// MessageHandle is an opaque, transport-specific token returned by
+// Transport.Send. It can be passed to optional interfaces
+// (DeletableTransport, ReactableTransport) for post-send operations
+// such as delete and react.
+//
+// Callers MUST NOT inspect, interpret, or type-assert the handle's
+// concrete value. The handle MUST NOT contain secrets, and MUST NOT be
+// logged — it is an implementation detail of the transport layer.
+//
+// Examples: *telebot.Message for Telegram, an internal numeric ID for a TUI.
+type MessageHandle any
+
 // ImageAttachment represents an image sent alongside a message.
 // The shape is compatible with bridge.ImageAttachment so callers can convert
 // between the two as needed.
@@ -39,8 +51,10 @@ type Transport interface {
 	// Name returns the transport identifier (e.g. "telegram", "tui").
 	Name() string
 
-	// Send sends an outgoing message. Returns error on failure.
-	Send(ctx context.Context, msg OutgoingMessage) error
+	// Send sends an outgoing message and returns an opaque handle.
+	// The handle can be used with optional interfaces (DeletableTransport,
+	// ReactableTransport) for transport-specific post-send operations.
+	Send(ctx context.Context, msg OutgoingMessage) (MessageHandle, error)
 
 	// SendError sends an error-formatted message to the chat.
 	SendError(ctx context.Context, chatID int64, threadID int, text string) error
@@ -52,4 +66,20 @@ type Transport interface {
 	// For push-based transports (Telegram), returns a closed channel.
 	// For pull-based transports (TUI), the channel delivers messages as they arrive.
 	Receive() <-chan IncomingMessage
+}
+
+// DeletableTransport is an optional interface for transports that can
+// delete previously-sent messages.
+type DeletableTransport interface {
+	// Delete removes the message identified by the handle. Safe to call
+	// with nil handle (no-op).
+	Delete(ctx context.Context, handle MessageHandle) error
+}
+
+// ReactableTransport is an optional interface for transports that can
+// add reactions (e.g. emoji) to messages.
+type ReactableTransport interface {
+	// React adds a reaction to the message identified by chatID and messageID.
+	// Safe to call with messageID == 0 (no-op).
+	React(ctx context.Context, chatID int64, messageID int) error
 }

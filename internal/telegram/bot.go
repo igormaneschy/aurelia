@@ -182,7 +182,7 @@ func NewBotController(
 		MemoryDir:    bc.memoryDir,
 		ExePath:      bc.exePath,
 		BotCwd:       bc.botCwd,
-		Output:       telegramPipelineOutput{bc: bc, tp: NewTelegramTransport(b)},
+		Output:       telegramPipelineOutput{bc: bc, tg: NewTelegramTransport(b)},
 		Bindings:     bc.bindings,
 		RunLog:       bc.runLog,
 		Continuity:   bc.continuity,

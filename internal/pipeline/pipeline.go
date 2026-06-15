@@ -221,7 +221,7 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 			log.Printf("pipeline: abort failed for chat=%d: %v", chatID, err)
 		}
 		if _, err := s.output.SendText(chatID, threadID, "🛑 Interrompendo o pedido anterior."); err != nil {
-			log.Printf("pipeline: SendText(cancel) failed for chat=%d: %v", chatID, err)
+			log.Printf("pipeline: SendText(cancel) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
 		}
 		s.output.ConfirmMessage(chatID, messageID)
 
@@ -243,7 +243,7 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 			log.Printf("pipeline: steer failed for chat=%d: %v", chatID, err)
 		}
 		if _, err := s.output.SendText(chatID, threadID, "🔁 Interrompi o pedido anterior e vou seguir com sua correção."); err != nil {
-			log.Printf("pipeline: SendText(supersede) failed for chat=%d: %v", chatID, err)
+			log.Printf("pipeline: SendText(supersede) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
 		}
 		s.output.ConfirmMessage(chatID, messageID)
 		// Start a new goroutine to process the steered session.
@@ -257,7 +257,7 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 			supersedeCancel()
 			log.Printf("pipeline: supersede raced with another run for key=%s", key)
 			if _, err := s.output.SendText(chatID, threadID, "⚠️ Outra solicitação já está em andamento. Tente novamente."); err != nil {
-				log.Printf("pipeline: SendText(supersede race) failed for chat=%d: %v", chatID, err)
+				log.Printf("pipeline: SendText(supersede race) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
 			}
 			break
 		}
@@ -282,7 +282,7 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 			log.Printf("pipeline: follow-up failed for chat=%d: %v", chatID, err)
 		}
 		if _, err := s.output.SendText(chatID, threadID, "📥 Adicionado à fila. Processo após concluir o atual."); err != nil {
-			log.Printf("pipeline: SendText(follow-up) failed for chat=%d: %v", chatID, err)
+			log.Printf("pipeline: SendText(follow-up) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
 		}
 		s.output.ConfirmMessage(chatID, messageID)
 
@@ -304,7 +304,7 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 					desc += fmt.Sprintf("\n📥 Fila: %d mensagens aguardando.", state.PendingCount)
 				}
 				if _, err := s.output.SendText(chatID, threadID, desc); err != nil {
-					log.Printf("pipeline: SendText(status) failed for chat=%d: %v", chatID, err)
+					log.Printf("pipeline: SendText(status) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
 				}
 			}
 		}
@@ -334,13 +334,13 @@ func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, rese
 			log.Printf("pipeline: unknown @profile chat=%d name=%s", input.chatID, pfErr.Name)
 			if err := s.output.SendError(input.chatID, input.threadID,
 				fmt.Sprintf("Perfil @%s não encontrado. Use /agents para ver os perfis disponíveis.", pfErr.Name)); err != nil {
-				log.Printf("pipeline: SendError(unknown profile) failed for chat=%d: %v", input.chatID, err)
+				log.Printf("pipeline: SendError(unknown profile) failed for chat=%d: %v", input.chatID, redactSecrets(err.Error()))
 			}
 		} else if deniedErr, ok := resolveErr.(*profiles.ErrProfileNotAllowed); ok {
 			log.Printf("pipeline: forbidden @profile chat=%d name=%s user=%d", input.chatID, deniedErr.Name, input.userID)
 			if err := s.output.SendError(input.chatID, input.threadID,
 				fmt.Sprintf("Perfil @%s não encontrado ou indisponível. Use /agents para ver os perfis disponíveis.", deniedErr.Name)); err != nil {
-				log.Printf("pipeline: SendError(forbidden profile) failed for chat=%d: %v", input.chatID, err)
+				log.Printf("pipeline: SendError(forbidden profile) failed for chat=%d: %v", input.chatID, redactSecrets(err.Error()))
 			}
 		} else {
 			log.Printf("pipeline: profile resolution error chat=%d: %v", input.chatID, resolveErr)
@@ -357,7 +357,7 @@ func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, rese
 	if err != nil {
 		log.Printf("Failed to build system prompt: %s", redactSecrets(err.Error()))
 		if err := s.output.SendError(input.chatID, input.threadID, "Falha ao montar o prompt de sistema."); err != nil {
-			log.Printf("pipeline: SendError(system prompt) failed for chat=%d: %v", input.chatID, err)
+			log.Printf("pipeline: SendError(system prompt) failed for chat=%d: %v", input.chatID, redactSecrets(err.Error()))
 		}
 		s.output.ConfirmMessage(input.chatID, input.messageID)
 		return
@@ -372,7 +372,7 @@ func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, rese
 		log.Printf("lifecycle: execution skipped for chat=%d: %s", input.chatID, lcResult.ErrorMessage)
 		if lcResult.ErrorMessage != "" {
 			if err := s.output.SendError(input.chatID, input.threadID, lcResult.ErrorMessage); err != nil {
-				log.Printf("pipeline: SendError(lifecycle) failed for chat=%d: %v", input.chatID, err)
+				log.Printf("pipeline: SendError(lifecycle) failed for chat=%d: %v", input.chatID, redactSecrets(err.Error()))
 			}
 		}
 		s.output.ConfirmMessage(input.chatID, input.messageID)
@@ -723,7 +723,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 					"Vou concluir o que tenho e apresentar um resumo parcial.",
 				bridgeExecutionTimeout)
 			if _, err := s.output.SendText(chatID, threadID, userMsg); err != nil {
-				log.Printf("pipeline: SendText(timeout warning) failed for chat=%d: %v", chatID, err)
+				log.Printf("pipeline: SendText(timeout warning) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
 			}
 			// Steer the model to wrap up — this injects into the active model context
 			steerDuringExecution(fmt.Sprintf(
@@ -776,7 +776,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	if s.resilient != nil {
 		res := s.resilient.Execute(ctx, req, func(msg string) {
 			if _, err := s.output.SendText(chatID, threadID, msg); err != nil {
-				log.Printf("pipeline: SendText(fallback status) failed for chat=%d: %v", chatID, err)
+				log.Printf("pipeline: SendText(fallback status) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
 			}
 		})
 		if res.Err != nil {
@@ -831,7 +831,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 			}
 			if s.resilient == nil {
 				if err := s.output.SendError(chatID, threadID, bridgeConnectErrorMessage); err != nil {
-					log.Printf("Failed to send error to chat %d: %v", chatID, err)
+					log.Printf("Failed to send error to chat %d: %v", chatID, redactSecrets(err.Error()))
 				}
 			}
 			s.output.ConfirmMessage(chatID, messageID)
@@ -878,7 +878,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 		remaining := s.bridgeFailures.cooldownRemaining()
 		log.Printf("bridge: in cooldown, skipping retry for chat=%d", chatID)
 		if err := s.output.SendError(chatID, threadID, bridgeCooldownMessage(remaining)); err != nil {
-			log.Printf("pipeline: SendError(cooldown) failed for chat=%d: %v", chatID, err)
+			log.Printf("pipeline: SendError(cooldown) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
 		}
 		s.output.ConfirmMessage(chatID, messageID)
 		return
@@ -886,7 +886,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 
 	reconnectMsg, sErr := s.output.SendText(chatID, threadID, "⚡ Reconectando...")
 	if sErr != nil {
-		log.Printf("pipeline: SendText(reconnect) failed for chat=%d: %v", chatID, sErr)
+		log.Printf("pipeline: SendText(reconnect) failed for chat=%d: %v", chatID, redactSecrets(sErr.Error()))
 	}
 
 	retryReq := req
@@ -907,7 +907,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 				observability.PhaseRetryFailed, "retry failed: process death persisted"))
 		}
 		if err := s.output.SendError(chatID, threadID, bridgeRetryFailedMessage); err != nil {
-			log.Printf("pipeline: SendError(retry failed) for chat=%d: %v", chatID, err)
+			log.Printf("pipeline: SendError(retry failed) for chat=%d: %v", chatID, redactSecrets(err.Error()))
 		}
 		s.output.ConfirmMessage(chatID, messageID)
 		return
@@ -973,7 +973,7 @@ func (s *Service) handleContextOutcome(parentCtx context.Context, ctx context.Co
 			s.sessions.MarkFailure(chatID, threadID, userID, origin)
 		}
 		if err := s.output.SendError(chatID, threadID, buildTimeoutMessage(origin)); err != nil {
-			log.Printf("pipeline: SendError(timeout) failed for chat=%d: %v", chatID, err)
+			log.Printf("pipeline: SendError(timeout) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
 		}
 		return true
 	}
@@ -998,7 +998,7 @@ func (s *Service) handleRetryOutcome(chatID int64, threadID int, messageID int, 
 		}
 		s.patchContinuitySessionCold(chatID, threadID, "bridge retry process death", userID)
 		if err := s.output.SendError(chatID, threadID, bridgeRetryFailedMessage); err != nil {
-			log.Printf("pipeline: SendError(retry outcome) failed for chat=%d: %v", chatID, err)
+			log.Printf("pipeline: SendError(retry outcome) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
 		}
 		s.output.ConfirmMessage(chatID, messageID)
 	}
@@ -1045,7 +1045,7 @@ func heartbeatMonitor(doneCh <-chan struct{}, toolUseSignal <-chan struct{}, too
 				toolCount := toolTracker.countLocked()
 				msg := buildHeartbeatMessage(elapsed, beatCount, toolCount)
 				if _, err := output.SendText(chatID, threadID, msg); err != nil {
-					log.Printf("pipeline: heartbeat SendText failed for chat=%d: %v", chatID, err)
+					log.Printf("pipeline: heartbeat SendText failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
 				}
 				beatSent = true
 			}
@@ -1288,7 +1288,7 @@ func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, e
 
 		recoveryMsg := buildEmptyResultRecoveryMessage(toolSummary)
 		if err := s.output.SendError(chatID, threadID, recoveryMsg); err != nil {
-			log.Printf("Failed to send recovery message to chat %d: %v", chatID, err)
+			log.Printf("Failed to send recovery message to chat %d: %v", chatID, redactSecrets(err.Error()))
 		}
 	} else {
 		log.Printf("bridge: empty result (no work) chat=%d thread=%d request=%s",
@@ -1299,7 +1299,7 @@ func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, e
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent(emptyNoWorkRunID,
 			observability.PhaseRunFailed, "empty result"))
 		if err := s.output.SendError(chatID, threadID, bridgeEmptyResultMessage); err != nil {
-			log.Printf("Failed to send empty-result error to chat %d: %v", chatID, err)
+			log.Printf("Failed to send empty-result error to chat %d: %v", chatID, redactSecrets(err.Error()))
 		}
 	}
 
@@ -1329,7 +1329,7 @@ func (s *Service) handlePlanExecution(chatID int64, threadID int, messageID int,
 func (s *Service) handleNormalReply(chatID int64, threadID int, messageID int, safeFinalText string, successRunID string, userText string, userID int64, isPrivateChat bool) Outcome {
 	outboundMsgID, err := s.output.SendReply(chatID, threadID, safeFinalText)
 	if err != nil {
-		log.Printf("Failed to send reply to chat %d: %v", chatID, err)
+		log.Printf("Failed to send reply to chat %d: %v", chatID, redactSecrets(err.Error()))
 	}
 	if outboundMsgID != 0 && successRunID != "" {
 		s.updateRunLogOutboundMessage(successRunID, outboundMsgID)
@@ -1358,7 +1358,7 @@ func (s *Service) tryExecutePlan(chatID int64, threadID int, messageID int, fina
 		if orchestrator.ContainsPlanMarker(finalText) {
 			log.Printf("Execution plan marker detected but plan was invalid: %v", err)
 			if err := s.output.SendError(chatID, threadID, "Plano de execução gerado, mas não consegui interpretar o JSON. Não vou enviar os prompts internos no chat."); err != nil {
-				log.Printf("pipeline: SendError(plan json parse) failed for chat=%d: %v", chatID, err)
+				log.Printf("pipeline: SendError(plan json parse) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
 			}
 			return true, OutcomeSuccess
 		}
@@ -1368,7 +1368,7 @@ func (s *Service) tryExecutePlan(chatID int64, threadID int, messageID int, fina
 		if orchestrator.ContainsPlanMarker(finalText) {
 			log.Printf("Execution plan marker detected but plan block was incomplete")
 			if err := s.output.SendError(chatID, threadID, "Plano de execução gerado, mas o bloco veio incompleto. Não vou enviar os prompts internos no chat."); err != nil {
-				log.Printf("pipeline: SendError(plan block) failed for chat=%d: %v", chatID, err)
+				log.Printf("pipeline: SendError(plan block) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
 			}
 			return true, OutcomeSuccess
 		}
@@ -1377,7 +1377,7 @@ func (s *Service) tryExecutePlan(chatID int64, threadID int, messageID int, fina
 	log.Printf("Execution plan detected with %d tasks", len(plan.Tasks))
 	if displayText := orchestrator.StripPlanBlock(finalText); displayText != "" {
 		if _, err := s.output.SendReply(chatID, threadID, displayText); err != nil {
-			log.Printf("pipeline: SendReply(plan display) failed for chat=%d: %v", chatID, err)
+			log.Printf("pipeline: SendReply(plan display) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
 		}
 	}
 
@@ -1386,7 +1386,7 @@ func (s *Service) tryExecutePlan(chatID int64, threadID int, messageID int, fina
 	if cwd == "" {
 		log.Printf("orchestration: refusing plan execution for chat=%d thread=%d: no cwd bound", chatID, threadID)
 		if err := s.output.SendError(chatID, threadID, "Não encontrei um diretório de trabalho (cwd) para executar o plano. Use /cwd para fixar um projeto e tente novamente."); err != nil {
-			log.Printf("pipeline: SendError(no cwd) failed for chat=%d: %v", chatID, err)
+			log.Printf("pipeline: SendError(no cwd) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
 		}
 		return true, OutcomeSuccess
 	}

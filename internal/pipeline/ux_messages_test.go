@@ -7,6 +7,7 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/runlog"
+	"github.com/igormaneschy/aurelia/internal/transport"
 )
 
 // captureOutput implements Output and captures the last SendText text for assertions.
@@ -19,11 +20,11 @@ func (c *captureOutput) StartTyping(_ int64, _ int) func() { return func() {} }
 func (c *captureOutput) NewProgress(_ int64, _ int) ProgressReporter { return &fakeProgress{} }
 func (c *captureOutput) SendError(_ int64, _ int, text string) error { return nil }
 func (c *captureOutput) SendReply(_ int64, _ int, text string) (int64, error) { return 0, nil }
-func (c *captureOutput) SendText(_ int64, _ int, text string) (any, error) {
+func (c *captureOutput) SendText(_ int64, _ int, text string) (transport.MessageHandle, error) {
 	c.lastText = text
 	return nil, nil
 }
-func (c *captureOutput) DeleteMessage(_ any)                              {}
+func (c *captureOutput) DeleteMessage(_ transport.MessageHandle)          {}
 func (c *captureOutput) ConfirmMessage(_ int64, _ int)                    { c.confirmCalled = true }
 func (c *captureOutput) ExecuteApprovedPlan(_ int64, _ int, _ int, _ string, _ int64, _ *orchestrator.Plan) {}
 
