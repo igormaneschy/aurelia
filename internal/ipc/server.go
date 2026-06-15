@@ -129,7 +129,7 @@ func (s *Server) acceptLoop() {
 			// connection immediately; Close() will force-close it too but
 			// double-close is safe for net.Conn.
 			s.lifecycleMu.Unlock()
-			conn.Close()
+			_ = conn.Close()
 			continue
 		}
 		s.wg.Add(1)
@@ -142,7 +142,7 @@ func (s *Server) acceptLoop() {
 // handleConnection reads messages from a single client connection.
 func (s *Server) handleConnection(conn net.Conn) {
 	defer s.wg.Done()
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	defer func() {
 		if r := recover(); r != nil {
 			slog.Error("ipc: panic in handleConnection", "error", r, "stack", string(debug.Stack()))
@@ -157,14 +157,14 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}()
 
 	// Set read deadline to prevent slow-client DoS.
-	conn.SetReadDeadline(time.Now().Add(readTimeout))
+	_ = conn.SetReadDeadline(time.Now().Add(readTimeout))
 
 	scanner := bufio.NewScanner(conn)
 	scanner.Buffer(make([]byte, maxLineSize), maxLineSize)
 
 	for scanner.Scan() {
 		// Extend read deadline on each successful read.
-		conn.SetReadDeadline(time.Now().Add(readTimeout))
+		_ = conn.SetReadDeadline(time.Now().Add(readTimeout))
 
 		line := scanner.Text()
 		if line == "" {
@@ -174,29 +174,35 @@ func (s *Server) handleConnection(conn net.Conn) {
 		var msg IPCMessage
 		if err := json.Unmarshal([]byte(line), &msg); err != nil {
 			slog.Warn("ipc: invalid message", "error", err)
-			s.writeEvent(conn, IPCEvent{
+			if err := s.writeEvent(conn, IPCEvent{
 				Type:  EventTypeError,
 				Error: fmt.Sprintf("invalid message: %v", err),
-			})
+			}); err != nil {
+				slog.Warn("ipc: write error", "error", err)
+			}
 			continue
 		}
 
 		if err := validateMessage(msg); err != nil {
 			slog.Warn("ipc: invalid message", "error", err)
-			s.writeEvent(conn, IPCEvent{
+			if err := s.writeEvent(conn, IPCEvent{
 				Type:  EventTypeError,
 				Error: fmt.Sprintf("invalid message: %v", err),
-			})
+			}); err != nil {
+				slog.Warn("ipc: write error", "error", err)
+			}
 			continue
 		}
 
 		events, err := s.dispatch(s.ctx, msg)
 		if err != nil {
 			slog.Warn("ipc: handler error", "error", err)
-			s.writeEvent(conn, IPCEvent{
+			if err := s.writeEvent(conn, IPCEvent{
 				Type:  EventTypeError,
 				Error: err.Error(),
-			})
+			}); err != nil {
+				slog.Warn("ipc: write error", "error", err)
+			}
 			continue
 		}
 
@@ -210,10 +216,12 @@ func (s *Server) handleConnection(conn net.Conn) {
 
 	if err := scanner.Err(); err != nil {
 		if err == bufio.ErrTooLong {
-			s.writeEvent(conn, IPCEvent{
+			if err := s.writeEvent(conn, IPCEvent{
 				Type:  EventTypeError,
 				Error: "line too long (max 64KB)",
-			})
+			}); err != nil {
+				slog.Warn("ipc: write error", "error", err)
+			}
 		}
 		slog.Debug("ipc: client read error", "error", err)
 	}
@@ -275,7 +283,7 @@ func writeAll(w io.Writer, data []byte) error {
 
 // writeEvent marshals and writes a single IPCEvent as a JSON line.
 func (s *Server) writeEvent(conn net.Conn, event IPCEvent) error {
-	conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+	_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshal event: %w", err)
@@ -300,13 +308,13 @@ func (s *Server) Close() error {
 
 	// Stop accepting new connections.
 	if s.listener != nil {
-		s.listener.Close()
+		_ = s.listener.Close()
 	}
 
 	// Force-close active connections to unblock Wait immediately.
 	s.connsMu.Lock()
 	for conn := range s.conns {
-		conn.Close()
+		_ = conn.Close()
 	}
 	s.connsMu.Unlock()
 
