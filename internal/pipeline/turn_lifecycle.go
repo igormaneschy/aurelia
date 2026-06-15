@@ -421,7 +421,7 @@ func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev
 	}
 
 	if err := s.output.SendError(chatID, threadID, redacted); err != nil {
-		log.Printf("Failed to send error to chat %d: %v", chatID, err)
+		log.Printf("Failed to send error to chat %d: %v", chatID, redactSecrets(err.Error()))
 	}
 	s.output.ConfirmMessage(chatID, messageID)
 	return OutcomeLLMError

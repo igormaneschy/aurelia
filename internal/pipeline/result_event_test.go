@@ -7,6 +7,7 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
+	"github.com/igormaneschy/aurelia/internal/transport"
 )
 
 // fakeOutput is a test double for the Output interface.
@@ -40,11 +41,11 @@ func (f *fakeOutput) SendReply(_ int64, _ int, text string) (int64, error) {
 	return 0, nil
 }
 
-func (f *fakeOutput) SendText(_ int64, _ int, _ string) (any, error) {
+func (f *fakeOutput) SendText(_ int64, _ int, _ string) (transport.MessageHandle, error) {
 	return nil, nil
 }
 
-func (f *fakeOutput) DeleteMessage(_ any) {}
+func (f *fakeOutput) DeleteMessage(_ transport.MessageHandle) {}
 
 func (f *fakeOutput) ConfirmMessage(_ int64, _ int) {
 	f.confirmCalled = true

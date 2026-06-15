@@ -6,13 +6,16 @@ import (
 )
 
 // MockTransport implements Transport for testing pipeline components
-// without a real chat surface.
+// without a real chat surface. It also implements DeletableTransport and
+// ReactableTransport when the corresponding function fields are set.
 type MockTransport struct {
 	NameFn        func() string
-	SendFn        func(ctx context.Context, msg OutgoingMessage) error
+	SendFn        func(ctx context.Context, msg OutgoingMessage) (MessageHandle, error)
 	SendErrorFn   func(ctx context.Context, chatID int64, threadID int, text string) error
 	StartTypingFn func(chatID int64, threadID int) func()
 	ReceiveFn     func() <-chan IncomingMessage
+	DeleteFn      func(ctx context.Context, handle MessageHandle) error
+	ReactFn       func(ctx context.Context, chatID int64, messageID int) error
 }
 
 func (m *MockTransport) Name() string {
@@ -22,11 +25,11 @@ func (m *MockTransport) Name() string {
 	return "mock"
 }
 
-func (m *MockTransport) Send(ctx context.Context, msg OutgoingMessage) error {
+func (m *MockTransport) Send(ctx context.Context, msg OutgoingMessage) (MessageHandle, error) {
 	if m.SendFn != nil {
 		return m.SendFn(ctx, msg)
 	}
-	return nil
+	return nil, nil
 }
 
 func (m *MockTransport) SendError(ctx context.Context, chatID int64, threadID int, text string) error {
@@ -52,8 +55,26 @@ func (m *MockTransport) Receive() <-chan IncomingMessage {
 	return ch
 }
 
-// compile-time check that MockTransport satisfies Transport.
-var _ Transport = (*MockTransport)(nil)
+func (m *MockTransport) Delete(ctx context.Context, handle MessageHandle) error {
+	if m.DeleteFn != nil {
+		return m.DeleteFn(ctx, handle)
+	}
+	return nil
+}
+
+func (m *MockTransport) React(ctx context.Context, chatID int64, messageID int) error {
+	if m.ReactFn != nil {
+		return m.ReactFn(ctx, chatID, messageID)
+	}
+	return nil
+}
+
+// compile-time checks that MockTransport satisfies Transport and optional interfaces.
+var (
+	_ Transport           = (*MockTransport)(nil)
+	_ DeletableTransport  = (*MockTransport)(nil)
+	_ ReactableTransport  = (*MockTransport)(nil)
+)
 
 func TestMockTransport_ImplementsTransport(t *testing.T) {
 	// Guarantee the mock type can be used wherever Transport is required.

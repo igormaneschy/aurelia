@@ -10,6 +10,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/session"
+	"github.com/igormaneschy/aurelia/internal/transport"
 )
 
 // testOutputRecorder records output calls for testing preflight behavior.
@@ -24,13 +25,13 @@ func (r *testOutputRecorder) NewProgress(int64, int) ProgressReporter { return n
 func (r *testOutputRecorder) SendError(int64, int, string) error { return nil }
 func (r *testOutputRecorder) SendReply(int64, int, string) (int64, error) { return 0, nil }
 
-func (r *testOutputRecorder) SendText(_ int64, _ int, text string) (any, error) {
+func (r *testOutputRecorder) SendText(_ int64, _ int, text string) (transport.MessageHandle, error) {
 	r.messageSent = true
 	r.sentMessages = append(r.sentMessages, text)
 	return nil, nil
 }
 
-func (r *testOutputRecorder) DeleteMessage(any)                                        {}
+func (r *testOutputRecorder) DeleteMessage(transport.MessageHandle)                   {}
 func (r *testOutputRecorder) ConfirmMessage(int64, int)                               { r.confirmCalled = true }
 func (r *testOutputRecorder) ExecuteApprovedPlan(int64, int, int, string, int64, *orchestrator.Plan) {}
 

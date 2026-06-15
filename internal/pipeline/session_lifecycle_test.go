@@ -10,6 +10,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/session"
+	"github.com/igormaneschy/aurelia/internal/transport"
 )
 
 // lifecycleTestHelper creates a minimal Service with a real session store
@@ -388,12 +389,12 @@ func (r *recordingOutput) StartTyping(_ int64, _ int) func()           { return 
 func (r *recordingOutput) NewProgress(_ int64, _ int) ProgressReporter { return &fakeProgress{} }
 func (r *recordingOutput) SendError(_ int64, _ int, text string) error { return nil }
 func (r *recordingOutput) SendReply(_ int64, _ int, text string) (int64, error) { return 0, nil }
-func (r *recordingOutput) SendText(_ int64, _ int, text string) (any, error) {
+func (r *recordingOutput) SendText(_ int64, _ int, text string) (transport.MessageHandle, error) {
 	r.texts = append(r.texts, text)
 	return nil, nil
 }
-func (r *recordingOutput) DeleteMessage(_ any)           {}
-func (r *recordingOutput) ConfirmMessage(_ int64, _ int) {}
+func (r *recordingOutput) DeleteMessage(_ transport.MessageHandle) {}
+func (r *recordingOutput) ConfirmMessage(_ int64, _ int)           {}
 func (r *recordingOutput) ExecuteApprovedPlan(_ int64, _ int, _ int, _ string, _ int64, _ *orchestrator.Plan) {
 }
 

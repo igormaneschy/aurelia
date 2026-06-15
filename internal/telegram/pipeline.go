@@ -127,7 +127,7 @@ func (bc *BotController) ensurePipeline() *pipelinepkg.Service {
 		MemoryDir:    bc.memoryDir,
 		ExePath:      bc.exePath,
 		BotCwd:       bc.botCwd,
-		Output:       telegramPipelineOutput{bc: bc, tp: NewTelegramTransport(bc.bot)},
+		Output:       telegramPipelineOutput{bc: bc, tg: NewTelegramTransport(bc.bot)},
 		Orchestrator: bc.orchestrator,
 		Dreamer:      bc.dreamer,
 		ProjectIndex: bc.projectIndex,
@@ -141,16 +141,19 @@ func (bc *BotController) ensurePipeline() *pipelinepkg.Service {
 	return bc.pipeline
 }
 
+// telegramPipelineOutput is a thin adapter that implements pipeline.Output for
+// Telegram. Generic send/delete/react operations delegate to TelegramTransport;
+// only Telegram-specific behavior (progress reporter, plan execution) lives here.
 type telegramPipelineOutput struct {
 	bc *BotController
-	tp transport.Transport
+	tg *TelegramTransport
 }
 
 func (o telegramPipelineOutput) StartTyping(chatID int64, threadID int) func() {
-	if o.tp == nil {
+	if o.tg == nil {
 		return func() {}
 	}
-	return o.tp.StartTyping(chatID, threadID)
+	return o.tg.StartTyping(chatID, threadID)
 }
 
 func (o telegramPipelineOutput) NewProgress(chatID int64, threadID int) pipelinepkg.ProgressReporter {
@@ -161,53 +164,70 @@ func (o telegramPipelineOutput) NewProgress(chatID int64, threadID int) pipeline
 }
 
 func (o telegramPipelineOutput) SendError(chatID int64, threadID int, text string) error {
-	if o.tp == nil {
+	if o.tg == nil {
 		return nil
 	}
-	return o.tp.SendError(context.Background(), chatID, threadID, text)
+	return o.tg.SendError(context.Background(), chatID, threadID, text)
 }
 
+// SendReply sends a markdown reply via TelegramTransport and extracts the
+// Telegram message ID for run-log tracking.
 func (o telegramPipelineOutput) SendReply(chatID int64, threadID int, text string) (int64, error) {
-	if o.bc == nil || o.bc.bot == nil {
+	if o.tg == nil {
 		return 0, nil
 	}
-	return sendTextWithSender(o.bc.bot, &telebot.Chat{ID: chatID}, text, telegramMessageLimit, threadID)
+	handle, err := o.tg.Send(context.Background(), transport.OutgoingMessage{
+		ChatID:   chatID,
+		ThreadID: threadID,
+		Text:     text,
+		Markdown: true,
+	})
+	if err != nil {
+		return 0, err
+	}
+	if msg, ok := handle.(*telebot.Message); ok && msg != nil {
+		return int64(msg.ID), nil
+	}
+	return 0, nil
 }
 
-func (o telegramPipelineOutput) SendText(chatID int64, threadID int, text string) (any, error) {
-	if o.tp == nil {
+// SendText sends a plain-text message via TelegramTransport and returns the
+// opaque handle needed by DeleteMessage for the reconnect flow.
+func (o telegramPipelineOutput) SendText(chatID int64, threadID int, text string) (transport.MessageHandle, error) {
+	if o.tg == nil {
 		return nil, nil
 	}
-	// Use TelegramTransport's SendText if available — it returns a message ref
-	// needed by DeleteMessage for the reconnect flow.
-	if tg, ok := o.tp.(*TelegramTransport); ok {
-		return tg.SendText(chatID, threadID, text)
-	}
-	// Generic fallback: send via the transport, return no ref (deletion no-op).
-	err := o.tp.Send(context.Background(), transport.OutgoingMessage{
+	return o.tg.Send(context.Background(), transport.OutgoingMessage{
 		ChatID:   chatID,
 		ThreadID: threadID,
 		Text:     text,
 		Markdown: false,
 	})
-	return nil, err
 }
 
-func (o telegramPipelineOutput) DeleteMessage(message any) {
-	msg, ok := message.(*telebot.Message)
-	if !ok || msg == nil || o.bc == nil || o.bc.bot == nil {
+// DeleteMessage delegates to TelegramTransport.Delete. Safe no-op for nil
+// handle or non-telebot.Message types.
+func (o telegramPipelineOutput) DeleteMessage(message transport.MessageHandle) {
+	if o.tg == nil || message == nil {
 		return
 	}
-	_ = o.bc.bot.Delete(msg)
+	if err := o.tg.Delete(context.Background(), message); err != nil {
+		log.Printf("telegramPipelineOutput: DeleteMessage error: %v", err)
+	}
 }
 
+// ConfirmMessage delegates to TelegramTransport.React for the 🎉 reaction.
 func (o telegramPipelineOutput) ConfirmMessage(chatID int64, messageID int) {
-	if o.bc == nil || o.bc.bot == nil || messageID == 0 {
+	if o.tg == nil {
 		return
 	}
-	ReactToMessage(o.bc.bot, &telebot.Chat{ID: chatID}, messageID, "🎉")
+	if err := o.tg.React(context.Background(), chatID, messageID); err != nil {
+		log.Printf("telegramPipelineOutput: ConfirmMessage error: %v", err)
+	}
 }
 
+// ExecuteApprovedPlan triggers the orchestrator plan execution via BotController.
+// This is Telegram-specific behavior not available in the generic transport output.
 func (o telegramPipelineOutput) ExecuteApprovedPlan(chatID int64, threadID int, messageID int, cwd string, userID int64, plan *orchestrator.Plan) {
 	if o.bc == nil {
 		return

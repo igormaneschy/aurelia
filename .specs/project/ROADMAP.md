@@ -340,22 +340,43 @@ boundary established in Sprint 0 (Delegate to PI SDK).
 
 ---
 
-## 11. TUI (Terminal User Interface)
+## 11. TUI — Transport Abstraction (Fase 0)
 
-**Spec:** `docs/aurelia-tui-roadmap.md`
+**Spec:** `.specs/features/tui-transport-abstraction/`
+**Status:** ✅ Validated
+**Implementado em:** `feature/tui-transport-abstraction`
+**Depende de:** Session/Profile Operability (Sprint G, ✅)
+
+**Problem:** o `pipeline.Output` e sua única implementação (`telegramPipelineOutput`) misturavam comportamento genérico de envio de mensagens com comportamento específico do Telegram (reações com emoji, deleção de mensagens, progresso baseado em edição, execução de planos via `BotController`). Construir a TUI diretamente sobre esse código forçaria no-ops forçados ou vazamento de tipos `telebot`.
+
+**Scope:**
+
+- tornar `pipeline.Output` transport-agnóstico;
+- estender `transport.Transport` com `MessageHandle` e capacidades opcionais (`DeletableTransport`, `ReactableTransport`);
+- criar `transportOutput` — implementação genérica de `Output` sobre qualquer `transport.Transport`;
+- refatorar `telegramPipelineOutput` para thin adapter sobre `TelegramTransport`;
+- atualizar todos os fakes de teste de `Output` e `Transport`;
+- zero regressão no Telegram.
+
+**Decisão:** `MessageHandle` opaco (`any`); capabilities via type assertion; `transportOutput` genérico em `internal/pipeline/transport_output.go`.
+
+---
+
+## 12. TUI (Terminal User Interface)
+
+**Spec:** `docs/aurelia-tui-roadmap.md` + `.specs/features/tui-transport-abstraction/`
 **Status:** 🔴 Proposta
-**Depende de:** Context-Scoped Memory (Sprint E) + Memory Boundary Realignment (Sprint F, ✅) + Session/Profile Operability (Sprint G)
+**Depende de:** TUI — Transport Abstraction (Fase 0, ✅) + Context-Scoped Memory (Sprint E, ✅) + Memory Boundary Realignment (Sprint F, ✅) + Session/Profile Operability (Sprint G, ✅)
 
 **Problem:** o Telegram é hoje o único ponto de entrada conversacional da Aurelia. Isso cria fricção no contexto de terminal, sessões não retomáveis cross-surface e dependência de conectividade externa.
 
 **Scope:**
 
-- abstração de transport (`Transport` interface) - Fase 0, pode ser feita antes;
-- IPC layer via Unix socket para comunicação com daemon;
-- TUI MVP com Bubble Tea: sidebar, viewport, input, streaming;
-- multi-sessão local + retomada de sessões Telegram;
-- painel de estado do projeto (cwd, artefatos, checkpoints);
-- polish: temas, mouse, resize, flags `--session`/`--attach`.
+- IPC layer via Unix socket para comunicação com daemon (Fase 1);
+- TUI MVP com Bubble Tea: sidebar, viewport, input, streaming (Fase 2);
+- multi-sessão local + retomada de sessões Telegram (Fase 3);
+- painel de estado do projeto (cwd, artefatos, checkpoints) (Fase 4);
+- polish: temas, mouse, resize, flags `--session`/`--attach` (Fase 5).
 
 **Decisão:** Unix socket + JSON lines no MVP; gRPC em P2. Bubble Tea v2 + Lipgloss + Bubbles + Glamour. Binary separado `aurelia-tui`.
 
@@ -396,7 +417,10 @@ D0. Memory Contract & Spec Hygiene ✅
  8. Learning Nudge ✅
       │
       ▼
- 11. TUI (Terminal User Interface)
+  11. TUI — Transport Abstraction (Fase 0) ✅
+       │
+       ▼
+  12. TUI (Terminal User Interface) 🔴
 ```
 
 ## Mapa de implementação por sprint
@@ -496,7 +520,7 @@ Sprint H: Learning Nudge ✅ (v0.9.0–v0.21.1)
   └─ ✅ sugestões/updates escopados; Wiki transversal só via PI + ai-memory quando configurado
 
 Sprint K: TUI
-  ├─ Fase 0: Transport Abstraction (2d) - pode antecipar
+  ├─ ✅ Fase 0: Transport Abstraction (~2d) — implementado em `feature/tui-transport-abstraction`
   ├─ Fase 1: IPC Layer (3d)
   ├─ Fase 2: TUI MVP (5d)
   ├─ Fase 3: Multi-sessão (4d)

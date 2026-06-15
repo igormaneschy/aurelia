@@ -23,6 +23,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/security"
 	"github.com/igormaneschy/aurelia/internal/session"
+	"github.com/igormaneschy/aurelia/internal/transport"
 	"github.com/igormaneschy/aurelia/internal/users"
 )
 
@@ -40,8 +41,8 @@ type Output interface {
 	NewProgress(chatID int64, threadID int) ProgressReporter
 	SendError(chatID int64, threadID int, text string) error
 	SendReply(chatID int64, threadID int, text string) (int64, error)
-	SendText(chatID int64, threadID int, text string) (any, error)
-	DeleteMessage(message any)
+	SendText(chatID int64, threadID int, text string) (transport.MessageHandle, error)
+	DeleteMessage(message transport.MessageHandle)
 	ConfirmMessage(chatID int64, messageID int)
 	ExecuteApprovedPlan(chatID int64, threadID int, messageID int, cwd string, userID int64, plan *orchestrator.Plan)
 }
