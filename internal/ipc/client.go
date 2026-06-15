@@ -38,13 +38,13 @@ func (c *Client) Send(ctx context.Context, msg IPCMessage) (*ResponseReader, err
 
 	data, err := json.Marshal(msg)
 	if err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("marshal message: %w", err)
 	}
 	data = append(data, '\n')
 
 	if err := writeAll(conn, data); err != nil {
-		conn.Close()
+		_ = conn.Close()
 		return nil, fmt.Errorf("write message: %w", err)
 	}
 
@@ -60,7 +60,7 @@ func (c *Client) SendAndWait(ctx context.Context, msg IPCMessage) ([]IPCEvent, e
 	if err != nil {
 		return nil, err
 	}
-	defer reader.Close()
+	defer func() { _ = reader.Close() }()
 
 	var events []IPCEvent
 	for {
@@ -89,7 +89,7 @@ func (c *Client) Ping(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("daemon not reachable: %w", err)
 	}
-	conn.Close()
+	_ = conn.Close()
 	return nil
 }
 

@@ -70285,14 +70285,14 @@ var init_node = __esm({
       /**
            Establishes a connection to the specified model and returns a
            LiveMusicSession object representing that connection.
-
+      
            @experimental
-
+      
            @remarks
-
+      
            @param params - The parameters for establishing a connection to the model.
            @return A live session.
-
+      
            @example
            ```ts
            let model = 'models/lyria-realtime-exp';
@@ -70361,12 +70361,12 @@ var init_node = __esm({
       /**
           Sets inputs to steer music generation. Updates the session's current
           weighted prompts.
-
+      
           @param params - Contains one property, `weightedPrompts`.
-
+      
             - `weightedPrompts` to send to the model; weights are normalized to
               sum to 1.0.
-
+      
           @experimental
          */
       async setWeightedPrompts(params) {
@@ -70379,12 +70379,12 @@ var init_node = __esm({
       /**
           Sets a configuration to the model. Updates the session's current
           music generation config.
-
+      
           @param params - Contains one property, `musicGenerationConfig`.
-
+      
             - `musicGenerationConfig` to set in the model. Passing an empty or
           undefined config to the model will reset the config to defaults.
-
+      
           @experimental
          */
       async setMusicGenerationConfig(params) {
@@ -70435,7 +70435,7 @@ var init_node = __esm({
       }
       /**
            Terminates the WebSocket connection.
-
+      
            @experimental
          */
       close() {
@@ -70453,15 +70453,15 @@ var init_node = __esm({
       /**
            Establishes a connection to the specified model with the given
            configuration and returns a Session object representing that connection.
-
+      
            @experimental Built-in MCP support is an experimental feature, may change in
            future versions.
-
+      
            @remarks
-
+      
            @param params - The parameters for establishing a connection to the model.
            @return A live session.
-
+      
            @example
            ```ts
            let model: string;
@@ -70661,36 +70661,36 @@ var init_node = __esm({
       }
       /**
           Send a message over the established connection.
-
+      
           @param params - Contains two **optional** properties, `turns` and
               `turnComplete`.
-
+      
             - `turns` will be converted to a `Content[]`
             - `turnComplete: true` [default] indicates that you are done sending
               content and expect a response. If `turnComplete: false`, the server
               will wait for additional messages before starting generation.
-
+      
           @experimental
-
+      
           @remarks
           There are two ways to send messages to the live API:
           `sendClientContent` and `sendRealtimeInput`.
-
+      
           `sendClientContent` messages are added to the model context **in order**.
           Having a conversation using `sendClientContent` messages is roughly
           equivalent to using the `Chat.sendMessageStream`, except that the state of
           the `chat` history is stored on the API server instead of locally.
-
+      
           Because of `sendClientContent`'s order guarantee, the model cannot respons
           as quickly to `sendClientContent` messages as to `sendRealtimeInput`
           messages. This makes the biggest difference when sending objects that have
           significant preprocessing time (typically images).
-
+      
           The `sendClientContent` message sends a `Content[]`
           which has more options than the `Blob` sent by `sendRealtimeInput`.
-
+      
           So the main use-cases for `sendClientContent` over `sendRealtimeInput` are:
-
+      
           - Sending anything that can't be represented as a `Blob` (text,
           `sendClientContent({turns="Hello?"}`)).
           - Managing turns when not using audio input and voice activity detection.
@@ -70715,23 +70715,23 @@ var init_node = __esm({
       }
       /**
           Send a realtime message over the established connection.
-
+      
           @param params - Contains one property, `media`.
-
+      
             - `media` will be converted to a `Blob`
-
+      
           @experimental
-
+      
           @remarks
           Use `sendRealtimeInput` for realtime audio chunks and video frames (images).
-
+      
           With `sendRealtimeInput` the api will respond to audio automatically
           based on voice activity detection (VAD).
-
+      
           `sendRealtimeInput` is optimized for responsivness at the expense of
           deterministic ordering guarantees. Audio and video tokens are to the
           context when they become available.
-
+      
           Note: The Call signature expects a `Blob` object, but only a subset
           of audio and image mimetypes are allowed.
          */
@@ -70750,16 +70750,16 @@ var init_node = __esm({
       }
       /**
           Send a function response message over the established connection.
-
+      
           @param params - Contains property `functionResponses`.
-
+      
             - `functionResponses` will be converted to a `functionResponses[]`
-
+      
           @remarks
           Use `sendFunctionResponse` to reply to `LiveServerToolCall` from the server.
-
+      
           Use {@link types.LiveConnectConfig#tools} to configure the callable functions.
-
+      
           @experimental
          */
       sendToolResponse(params) {
@@ -70771,9 +70771,9 @@ var init_node = __esm({
       }
       /**
            Terminates the WebSocket connection.
-
+      
            @experimental
-
+      
            @example
            ```ts
            let model: string;
@@ -70788,7 +70788,7 @@ var init_node = __esm({
                responseModalities: [Modality.AUDIO],
              }
            });
-
+      
            session.close();
            ```
          */
@@ -73584,7 +73584,7 @@ ${underline}`);
       }
       /**
          * Used as a callback for mutating the given `FinalRequestOptions` object.
-
+      
          */
       async prepareOptions(options2) {
         if (this.clientAdapter && this.clientAdapter.isVertexAI() && !options2.path.startsWith(`/${this.apiVersion}/projects/`)) {
@@ -164221,7 +164221,7 @@ var require_vim = __commonJS({
                 A double quote can start either a string or a line comment. Strings are
                 ended before the end of a line by another double quote and can contain
                 escaped double-quotes and post-escaped line breaks.
-
+          
                 Also, any double quote at the beginning of a line is a comment but we
                 don't handle that properly at the moment: any double quote inside will
                 turn them into a string. Handling it properly will require a smarter
@@ -176511,7 +176511,7 @@ Default "index" lookups for the main are deprecated for ES modules.`, "Deprecati
           }
           function next() {
             if (N3.exports && N3.exports.__JITI_ERROR__) {
-              const { filename: e4, line: i4, column: n9, code: a3, message: c3 } = N3.exports.__JITI_ERROR__, l3 = new Error(`${a3}: ${c3}
+              const { filename: e4, line: i4, column: n9, code: a3, message: c3 } = N3.exports.__JITI_ERROR__, l3 = new Error(`${a3}: ${c3} 
  ${`${e4}:${i4}:${n9}`}`);
               Error.captureStackTrace(l3, jitiRequire), t4.onError(l3);
             }
