@@ -43,19 +43,18 @@ func (c *Client) Send(ctx context.Context, msg IPCMessage) (*ResponseReader, err
 	}
 	data = append(data, '\n')
 
-	if _, err := conn.Write(data); err != nil {
+	if err := writeAll(conn, data); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("write message: %w", err)
 	}
 
-	return &ResponseReader{
-		conn:    conn,
-		scanner: bufio.NewScanner(conn),
-	}, nil
+	return newResponseReader(conn), nil
 }
 
 // SendAndWait sends a message and reads all response events until a terminal
 // event (EventTypeStreamEnd or EventTypeError). Returns all events.
+// When a EventTypeError is received, the returned error contains the server's
+// error message.
 func (c *Client) SendAndWait(ctx context.Context, msg IPCMessage) ([]IPCEvent, error) {
 	reader, err := c.Send(ctx, msg)
 	if err != nil {
@@ -70,8 +69,15 @@ func (c *Client) SendAndWait(ctx context.Context, msg IPCMessage) ([]IPCEvent, e
 			return events, fmt.Errorf("read event: %w", err)
 		}
 		events = append(events, event)
-		if event.Type == EventTypeStreamEnd || event.Type == EventTypeError {
+		if event.Type == EventTypeStreamEnd {
 			break
+		}
+		if event.Type == EventTypeError {
+			errMsg := event.Error
+			if errMsg == "" {
+				errMsg = "server returned error"
+			}
+			return events, fmt.Errorf("server error: %s", errMsg)
 		}
 	}
 	return events, nil
@@ -98,6 +104,14 @@ func (c *Client) dial(ctx context.Context) (net.Conn, error) {
 type ResponseReader struct {
 	conn    net.Conn
 	scanner *bufio.Scanner
+}
+
+// newResponseReader creates a ResponseReader with a properly sized scanner
+// buffer (64KB, matching the server's maximum line size).
+func newResponseReader(conn net.Conn) *ResponseReader {
+	scanner := bufio.NewScanner(conn)
+	scanner.Buffer(make([]byte, maxLineSize), maxLineSize)
+	return &ResponseReader{conn: conn, scanner: scanner}
 }
 
 // Read reads the next event from the stream. Returns io.EOF when the

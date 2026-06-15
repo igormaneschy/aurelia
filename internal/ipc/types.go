@@ -12,6 +12,12 @@ import (
 // DefaultSocketName is the default basename for the Unix socket file.
 const DefaultSocketName = "aurelia.sock"
 
+// MaxMessageTextLength is the maximum allowed length for IPCMessage.Text.
+const MaxMessageTextLength = 4000
+
+// MaxRequestIDLength is the maximum allowed length for IPCMessage.RequestID.
+const MaxRequestIDLength = 64
+
 // DefaultSocketPath returns the default socket path under the Aurelia data
 // directory (~/.aurelia).
 func DefaultSocketPath() (string, error) {
