@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/continuity"
+	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/internal/cron"
 	"github.com/igormaneschy/aurelia/internal/deps"
 	"github.com/igormaneschy/aurelia/internal/dream"
@@ -43,6 +45,7 @@ type app struct {
 	scheduler  *cron.Scheduler
 	cronCtx    context.Context
 	cronCancel context.CancelFunc
+	ipcServer  *ipc.Server
 
 	onboardingStore *users.OnboardingStore
 }
@@ -360,6 +363,18 @@ func bootstrapApp() (*app, error) {
 
 	cronCtx, cronCancel := context.WithCancel(context.Background())
 
+	// Create IPC server for TUI communication.
+	var ipcServer *ipc.Server
+	socketPath, sockErr := ipc.DefaultSocketPath()
+	if sockErr == nil {
+		ipcServer, sockErr = ipc.NewServer(socketPath)
+	}
+	if sockErr != nil {
+		log.Printf("Warning: failed to create IPC server: %v (TUI will not be available)", sockErr)
+	} else {
+		slog.Info("ipc: listening", "socket", socketPath)
+	}
+
 	return &app{
 		config:          cfg,
 		resolver:        resolver,
@@ -374,6 +389,7 @@ func bootstrapApp() (*app, error) {
 		scheduler:       scheduler,
 		cronCtx:         cronCtx,
 		cronCancel:      cronCancel,
+		ipcServer:       ipcServer,
 		onboardingStore: onboardingStore,
 	}, nil
 }
@@ -490,6 +506,9 @@ func (a *app) start() {
 		})
 	}
 	a.startSessionGC()
+	if a.ipcServer != nil {
+		goSafe("ipc server", func() { a.ipcServer.Start() })
+	}
 	goSafe("bot", func() { a.bot.Start() })
 	go func() {
 		defer func() {
@@ -566,6 +585,16 @@ func (a *app) startSessionGC() {
 }
 
 func (a *app) shutdown(ctx context.Context) {
+	if a.ipcServer != nil {
+		// IPC server is shut down last — TUI clients should still see
+		// shutdown messages while other services drain.
+		defer func() {
+			if err := a.ipcServer.Close(); err != nil {
+				log.Printf("Warning: IPC server close error: %v", err)
+			}
+		}()
+	}
+
 	if a.cronCancel != nil {
 		a.cronCancel()
 	}
