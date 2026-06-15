@@ -3,10 +3,13 @@ package pipeline
 import (
 	"context"
 	"log"
+	"time"
 
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/transport"
 )
+
+const transportTimeout = 30 * time.Second
 
 // transportOutput is a generic pipeline.Output implementation that works
 // over any transport.Transport. It does not import Telegram-specific types
@@ -40,7 +43,9 @@ func (o *transportOutput) SendError(chatID int64, threadID int, text string) err
 	if o.tp == nil {
 		return nil
 	}
-	return o.tp.SendError(context.Background(), chatID, threadID, text)
+	ctx, cancel := context.WithTimeout(context.Background(), transportTimeout)
+	defer cancel()
+	return o.tp.SendError(ctx, chatID, threadID, text)
 }
 
 // SendReply sends a markdown reply via the transport. Returns 0 for the
@@ -49,7 +54,9 @@ func (o *transportOutput) SendReply(chatID int64, threadID int, text string) (in
 	if o.tp == nil {
 		return 0, nil
 	}
-	_, err := o.tp.Send(context.Background(), transport.OutgoingMessage{
+	ctx, cancel := context.WithTimeout(context.Background(), transportTimeout)
+	defer cancel()
+	_, err := o.tp.Send(ctx, transport.OutgoingMessage{
 		ChatID:   chatID,
 		ThreadID: threadID,
 		Text:     text,
@@ -64,7 +71,9 @@ func (o *transportOutput) SendText(chatID int64, threadID int, text string) (tra
 	if o.tp == nil {
 		return nil, nil
 	}
-	return o.tp.Send(context.Background(), transport.OutgoingMessage{
+	ctx, cancel := context.WithTimeout(context.Background(), transportTimeout)
+	defer cancel()
+	return o.tp.Send(ctx, transport.OutgoingMessage{
 		ChatID:   chatID,
 		ThreadID: threadID,
 		Text:     text,
@@ -85,8 +94,10 @@ func (o *transportOutput) DeleteMessage(message transport.MessageHandle) {
 	if !ok {
 		return
 	}
-	if err := dt.Delete(context.Background(), message); err != nil {
-		log.Printf("transport_output: DeleteMessage error: %v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := dt.Delete(ctx, message); err != nil {
+		log.Printf("transport_output: DeleteMessage error: %s", redactSecrets(err.Error()))
 	}
 }
 
@@ -103,8 +114,10 @@ func (o *transportOutput) ConfirmMessage(chatID int64, messageID int) {
 	if !ok {
 		return
 	}
-	if err := rt.React(context.Background(), chatID, messageID); err != nil {
-		log.Printf("transport_output: ConfirmMessage error: %v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := rt.React(ctx, chatID, messageID); err != nil {
+		log.Printf("transport_output: ConfirmMessage error: %s", redactSecrets(err.Error()))
 	}
 }
 

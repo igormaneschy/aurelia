@@ -196,3 +196,35 @@ func BenchmarkClientSend(b *testing.B) {
 		}
 	}
 }
+
+func TestClientSendAndWaitError(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "se.sock")
+	server, err := NewServer(socketPath)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	defer server.EnsureClose()
+
+	server.Handler = func(ctx context.Context, msg IPCMessage) ([]IPCEvent, error) {
+		return []IPCEvent{{Type: EventTypeError, Error: "something went wrong"}}, nil
+	}
+	server.Start()
+
+	client := NewClient(socketPath)
+	events, err := client.SendAndWait(context.Background(), IPCMessage{
+		Type: MsgTypeSend,
+		Text: "hello",
+	})
+	if err == nil {
+		t.Fatal("expected error for EventTypeError")
+	}
+	if !strings.Contains(err.Error(), "something went wrong") {
+		t.Errorf("expected error to contain server message, got: %v", err)
+	}
+	if len(events) != 1 {
+		t.Errorf("expected 1 event, got %d", len(events))
+	}
+	if events[0].Type != EventTypeError {
+		t.Errorf("expected EventTypeError, got %q", events[0].Type)
+	}
+}
