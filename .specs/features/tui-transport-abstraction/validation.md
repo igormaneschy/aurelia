@@ -48,10 +48,10 @@
 
 ### Live Validation
 
-- [ ] `make deploy` executa com sucesso.
-- [ ] Enviar mensagem no Telegram → resposta chega.
-- [ ] Enviar `/stop` durante execução → mensagem de interrupção e reação chegam.
-- [ ] Simular process death do bridge → mensagem de reconexão aparece e é removida.
+- [x] `make deploy` executa com sucesso.
+- [x] Enviar mensagem no Telegram → resposta chega.
+- [x] Enviar `/stop` durante execução → mensagem de interrupção e reação chegam.
+- [x] Simular process death do bridge → mensagem de reconexão aparece e é removida.
 
 ### Out-of-Scope Guard
 

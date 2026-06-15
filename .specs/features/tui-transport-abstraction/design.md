@@ -1,7 +1,7 @@
 # TUI — Transport Abstraction (Fase 0) — Design
 
 **Spec**: `.specs/features/tui-transport-abstraction/spec.md`
-**Status**: Approved
+**Status**: Validated
 
 ---
 

@@ -92,8 +92,8 @@ Se a TUI for construída sobre o código atual, seria forçada a:
 
 ## Success Criteria
 
-- [ ] `pipeline.Output` não referencia `telebot` nem outros tipos Telegram-only.
-- [ ] `go build ./...`, `go vet ./...` e `go test ./... -short` passam.
-- [ ] `telegramPipelineOutput` continua usando `TelegramTransport` para todos os envios.
-- [ ] Existe ao menos um teste unitário para `transportOutput` usando `MockTransport`.
-- [ ] Teste ao vivo no Telegram confirma zero regressão.
+- [x] `pipeline.Output` não referencia `telebot` nem outros tipos Telegram-only.
+- [x] `go build ./...`, `go vet ./...` e `go test ./... -short` passam.
+- [x] `telegramPipelineOutput` continua usando `TelegramTransport` para todos os envios.
+- [x] Existe ao menos um teste unitário para `transportOutput` usando `MockTransport`.
+- [x] Teste ao vivo no Telegram confirma zero regressão.
