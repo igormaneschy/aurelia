@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.24.1 - 2026-06-15
+
+### Fixed
+- **IPC: hardening do servidor Unix socket** — adicionado `defer recover()`
+  nas goroutines `acceptLoop` e `handleConnection` para evitar que um panic
+  derrube o daemon; `Start`/`Close` agora são thread-safe e idempotentes;
+  conexões ativas são fechadas à força no shutdown para evitar hang;
+  leituras/escritas possuem deadlines para mitigar slow-client DoS.
+
+- **IPC: validação de mensagens e permissões seguras** — `IPCMessage` agora
+  é validado antes do dispatch (tipo allow-list, limite de texto/IDs,
+  tamanho do request ID); diretório do socket criado como `0o700` e socket
+  criado atomicamente com `0o600` via umask; removido `ensureSingleInstance`
+  morto.
+
+- **IPC: protocolo robusto** — short writes agora são tratados corretamente
+  em `writeEvent`/`writeBatch`/`Client.Send`; scanner do cliente alinhado
+  com o servidor (64 KB); `Client.SendAndWait` retorna erro quando recebe
+  `EventTypeError`.
+
+- **Transport: timeouts e redação** — `transportOutput` usa
+  `context.WithTimeout` em todas as chamadas de transporte e redig erros
+  com `redactSecrets` antes de logar.
+
 ## v0.24.0 - 2026-06-15
 
 ### Added
