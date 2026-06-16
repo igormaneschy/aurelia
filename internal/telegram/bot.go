@@ -401,3 +401,28 @@ func (bc *BotController) reactToUserMessage(msg *telebot.Message, emoji string) 
 		log.Printf("telegram reaction %q error: %v", emoji, err)
 	}
 }
+
+// ProfileResolver returns the profile resolver for shared use (e.g. TUI).
+func (bc *BotController) ProfileResolver() *profiles.Resolver {
+	return bc.profiles
+}
+
+// PersonaService returns the identity service for shared use (e.g. TUI).
+func (bc *BotController) PersonaService() *persona.CanonicalIdentityService {
+	return bc.persona
+}
+
+// UserStore returns the user store for shared use (e.g. TUI).
+func (bc *BotController) UserStore() *users.Store {
+	return bc.userStore
+}
+
+// UserResolver returns the user resolver for shared use (e.g. TUI).
+func (bc *BotController) UserResolver() *users.Resolver {
+	return bc.userResolver
+}
+
+// Pipeline returns the pipeline service for shared use (e.g. TUI).
+func (bc *BotController) Pipeline() *pipelinepkg.Service {
+	return bc.pipeline
+}

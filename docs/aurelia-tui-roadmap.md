@@ -55,12 +55,18 @@ Esta refactorização é **Fase 0** — pequena, localizada, sem risco de regres
 
 | Componente | Biblioteca | Razão |
 |---|---|---|
-| **Framework TUI** | `charmbracelet/bubbletea` v2 | Go nativo, mesmo stack do Aurelia, arquitectura Elm (Model/Update/View), produção comprovada |
-| **Styling & Layout** | `charmbracelet/lipgloss` | CSS-like para terminal — borders, cores, padding, flex layout |
-| **Componentes** | `charmbracelet/bubbles` | Lista, viewport, textarea, spinner, progress bar — não reinventar |
-| **Markdown rendering** | `charmbracelet/glamour` | Render de markdown no terminal com temas — respostas da Aurelia ficam formatadas |
-| **IPC com daemon** | Unix socket ou gRPC local | Comunicação com o processo `aureliad` já em execução |
+| **Framework TUI** | `charmbracelet/bubbletea` v1 (v1.3.10) | Go nativo, mesmo stack do Aurelia, arquitectura Elm (Model/Update/View), produção comprovada. V2 usa module path `charm.land/bubbletea/v2` — migração adiada para Fase 5 (Polish) para evitar risco de regressão cross-package |
+| **Styling & Layout** | `charmbracelet/lipgloss` v1 | CSS-like para terminal — borders, cores, padding, flex layout |
+| **Componentes** | `charmbracelet/bubbles` v0.20 | Lista, viewport, textarea, spinner, progress bar — não reinventar |
+| **Markdown rendering** | `charmbracelet/glamour` v0.8 | Render de markdown no terminal com temas — respostas da Aurelia ficam formatadas |
+| **IPC com daemon** | Unix socket | Comunicação com o processo `aureliad` já em execução |
 | **Config** | Ficheiro existente do Aurelia | Reutiliza `~/.aurelia/config.yaml` |
+
+> **Nota sobre Bubble Tea v1 vs v2 (2026-06-15):** O roadmap original previa Bubble Tea v2. Na data da implementação, as bibliotecas Charm v2 usam module paths diferentes (`charm.land/bubbletea/v2`, `github.com/charmbracelet/{bubbles,lipgloss,glamour}/v2`). A migração exige alterar todos os imports e verificar compatibilidade cross-package. Para minimizar risco no MVP, mantivemos as versões estáveis v1; a migração para v2 está agendada para a Fase 5 (Polish).
+
+> **Nota sobre multiline (2026-06-15):** O `/cwd` no input usa `enter` para submeter (consistente com o roadmap). `alt+enter` insere nova linha; `ctrl+j` é fallback portável para terminais que não distinguem `shift+enter`. O status bar exibe a tecla activa: `alt+enter:newline`.
+
+> **Nota UX hardening (2026-06-16):** A Fase 2 inclui uma sub-etapa 2.1 para reduzir fricção dos primeiros testes: a UI sobe sem pré-checar o socket no `main`, o ping inicial tem timeout curto, o header/status/sidebar exibem estado de daemon e projecto, e a sidebar esconde-se automaticamente em terminais estreitos. Multi-sessão continua reservado para a Fase 3.
 
 ---
 

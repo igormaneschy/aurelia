@@ -31,9 +31,18 @@ var writeTimeout = 10 * time.Second
 // Server handles incoming IPC connections from TUI clients over a Unix socket.
 type Server struct {
 	listener net.Listener
-	// Handler is called for every incoming IPC message.
+
+	// Handler is called for every incoming IPC message and returns events
+	// to be written to the connection synchronously.
 	// If nil, the server acknowledges messages but does nothing.
+	// Deprecated: prefer StreamHandler for streaming responses.
 	Handler func(ctx context.Context, msg IPCMessage) ([]IPCEvent, error)
+
+	// StreamHandler is the preferred handler for streaming IPC responses.
+	// It receives an emit function that can be called multiple times to
+	// stream events back to the client. The handler returns when the
+	// stream is complete. If set, StreamHandler takes precedence over Handler.
+	StreamHandler func(ctx context.Context, msg IPCMessage, emit func(IPCEvent) error) error
 
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -184,32 +193,59 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 
 		if err := validateMessage(msg); err != nil {
-			slog.Warn("ipc: invalid message", "error", err)
+			slog.Warn("ipc: invalid message", "error", err, "request_id", msg.RequestID)
 			if err := s.writeEvent(conn, IPCEvent{
-				Type:  EventTypeError,
-				Error: fmt.Sprintf("invalid message: %v", err),
+				Type:      EventTypeError,
+				Error:     fmt.Sprintf("invalid message: %v", err),
+				RequestID: msg.RequestID,
 			}); err != nil {
 				slog.Warn("ipc: write error", "error", err)
 			}
 			continue
 		}
 
-		events, err := s.dispatch(s.ctx, msg)
-		if err != nil {
-			slog.Warn("ipc: handler error", "error", err)
-			if err := s.writeEvent(conn, IPCEvent{
-				Type:  EventTypeError,
-				Error: err.Error(),
-			}); err != nil {
-				slog.Warn("ipc: write error", "error", err)
+		if s.StreamHandler != nil {
+			// Streaming dispatch: handler uses emit() to send events.
+			emit := func(event IPCEvent) error {
+				// Propagate request_id from message if not already set.
+				if event.RequestID == "" && msg.RequestID != "" {
+					event.RequestID = msg.RequestID
+				}
+				return s.writeEvent(conn, event)
 			}
-			continue
-		}
+			if err := s.StreamHandler(s.ctx, msg, emit); err != nil {
+				slog.Warn("ipc: stream handler error", "error", err, "request_id", msg.RequestID)
+				if e := s.writeEvent(conn, IPCEvent{
+					Type:      EventTypeError,
+					Error:     err.Error(),
+					RequestID: msg.RequestID,
+				}); e != nil {
+					slog.Warn("ipc: write error", "error", e)
+				}
+			}
+		} else {
+			events, err := s.dispatch(s.ctx, msg)
+			if err != nil {
+				slog.Warn("ipc: handler error", "error", err, "request_id", msg.RequestID)
+				if err := s.writeEvent(conn, IPCEvent{
+					Type:      EventTypeError,
+					Error:     err.Error(),
+					RequestID: msg.RequestID,
+				}); err != nil {
+					slog.Warn("ipc: write error", "error", err)
+				}
+				continue
+			}
 
-		for _, event := range events {
-			if err := s.writeEvent(conn, event); err != nil {
-				slog.Warn("ipc: write error", "error", err)
-				return // Connection is broken, stop reading.
+			for _, event := range events {
+				// Propagate request_id from message if not already set.
+				if event.RequestID == "" && msg.RequestID != "" {
+					event.RequestID = msg.RequestID
+				}
+				if err := s.writeEvent(conn, event); err != nil {
+					slog.Warn("ipc: write error", "error", err)
+					return // Connection is broken, stop reading.
+				}
 			}
 		}
 	}
@@ -238,7 +274,7 @@ func validateMessage(msg IPCMessage) error {
 	if len(msg.Text) > MaxMessageTextLength {
 		return fmt.Errorf("text too long (%d bytes, max %d)", len(msg.Text), MaxMessageTextLength)
 	}
-	if msg.ChatID < 0 {
+	if msg.ChatID < 0 && !IsReservedTUIID(msg.ChatID) {
 		return fmt.Errorf("negative chat_id: %d", msg.ChatID)
 	}
 	if msg.ThreadID < 0 {

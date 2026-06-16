@@ -18,6 +18,15 @@ const MaxMessageTextLength = 4000
 // MaxRequestIDLength is the maximum allowed length for IPCMessage.RequestID.
 const MaxRequestIDLength = 64
 
+// ReservedTUIChatID is the reserved chat ID for TUI local DM conversations.
+// This negative ID is in a namespace separate from Telegram's positive chat IDs.
+const ReservedTUIChatID int64 = -9000001
+
+// IsReservedTUIID returns true if the chat ID is a reserved TUI local ID.
+func IsReservedTUIID(chatID int64) bool {
+	return chatID == ReservedTUIChatID
+}
+
 // DefaultSocketPath returns the default socket path under the Aurelia data
 // directory (~/.aurelia).
 func DefaultSocketPath() (string, error) {
