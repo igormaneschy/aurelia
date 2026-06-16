@@ -2,7 +2,7 @@
 
 ## Vision
 
-Aurelia OS is a personality, context, and product layer accessible via Telegram. The goal is not to reimplement what PI or future SDK harnesses already do — it's to **wrap and orchestrate them**, adding identity, Prompt Profiles, persistence, scheduling, multi-project support, and a natural Telegram interface on top.
+Aurelia OS is a personality, context, and product layer accessible via Telegram and local terminal surfaces. The goal is not to reimplement what PI or future SDK harnesses already do — it's to **wrap and orchestrate them**, adding identity, Prompt Profiles, persistence, scheduling, multi-project support, and natural conversational interfaces on top.
 
 One persistent Go daemon, many projects, many prompt profiles.
 
@@ -11,7 +11,7 @@ One persistent Go daemon, many projects, many prompt profiles.
 Aurelia is a product/operating layer over the PI SDK engine:
 
 ```text
-Telegram / CLI / Cron / future interfaces
+Telegram / TUI / CLI / Cron / future interfaces
         ↓
 Aurelia Product Layer
 - identity and persona
@@ -38,7 +38,7 @@ The strategic differentiator is the persistent Telegram product layer: identity,
 
 ## Goals
 
-- **Natural interface** — Talk to an AI assistant via Telegram with text, photos, voice, documents. No CLI required for daily use.
+- **Natural interface** — Talk to an AI assistant via Telegram with text, photos, voice, documents, or locally via TUI when working in the terminal. No raw CLI required for daily use.
 - **Prompt Profile orchestration** — Package each request with the right personality/context profile, schedule autonomous execution, and deliver results back to Telegram.
 - **Local-first** — Single binary, SQLite, no cloud dependencies beyond LLM providers. Runs on your machine, owns your data.
 - **Stay light** — Don't rebuild what the PI SDK already provides. Wrap it, orchestrate it, extend it.
@@ -47,7 +47,7 @@ The strategic differentiator is the persistent Telegram product layer: identity,
 ## Constraints
 
 - **Single user** — Personal assistant, not a multi-tenant platform
-- **Telegram-only interface** — No web UI, no other chat platforms (for now)
+- **Primary Telegram UX + local TUI** — Telegram remains the main personal assistant surface; `aurelia-tui` is the local terminal surface for project work. No web UI or external chat platforms yet.
 - **Bridge dependency** — LLM reasoning requires Node.js runtime for the PI SDK bridge
 - **Cross-platform** — CI and development target macOS, Windows, and Linux
 - **No Docker** — Single binary deployment, no container orchestration
@@ -64,6 +64,7 @@ The strategic differentiator is the persistent Telegram product layer: identity,
 - Onboarding CLI: interactive setup for providers, tokens, and configuration
 - Vision model fallback + Groq STT + bridge image format (PI SDK compatible)
 - Tool monitoring: `toolCallTracker` + `loopDetector` + heartbeat monitor prevent silent explosions and loop cycles
+- Local TUI MVP: `aurelia-tui` talks to the daemon over Unix socket IPC with streaming replies, `/cwd`/`/status`, sidebar/status chrome, markdown rendering and hardened terminal input handling.
 
 ### Recently completed (v0.11.0–v0.16.0)
 - **User Isolation MVP + runtime hardening**: user profiles, owner gate, per-user persona/memory loading, user-scoped sessions/active runs/Bridge commands, cron ownership, `/users`, `/forgetme`, migration CLI.
@@ -78,6 +79,9 @@ The strategic differentiator is the persistent Telegram product layer: identity,
 - **Session Lifecycle Manager v0.15.0**: Health states (healthy/large/suspect/dangerous/cold), auto-decisions (continue/compact/rotate/cold_resume), bridge commands (`get-session-stats`, `compact-session`, `rotate-session`), failure metadata persistence.
 - **Close Orchestration Cycle v0.16.0**: `ExecutionContext` with cwd/threadID, git preflight, artifact collection, fail-closed validation with retry, serial merge, dependency skip, commit + optional PR, `ExecutionManifest`.
 - **Tool Monitoring hardening (Jun 2026)**: `loopDetector.ResetForNewTurn()`, elapsed time in steer messages, `detectToolSpiral` prefix-match, `AddToolEvent` nudge integration.
+
+### Recently completed (v0.23.6–Unreleased)
+- **TUI foundations**: transport abstraction (Fase 0), Unix socket IPC layer (Fase 1), and local TUI MVP (Fase 2) are implemented on `feature/tui-mvp` with live terminal validation.
 
 ### In progress
 - Closing the conceptual boundary: SDK harnesses own model/session/context/tool execution; Aurelia owns Telegram UX, identity/persona, Prompt Profile injection, persistence, scheduling, memory, project binding, policy/audit and orchestration.

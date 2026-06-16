@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Unreleased
+
+### Added
+- **TUI MVP local (`aurelia-tui`)** — novo binário Bubble Tea para conversar
+  com o daemon Aurelia por Unix socket, com streaming de respostas, comandos
+  `/cwd` e `/status`, renderização markdown, input multi-linha via
+  `alt+enter`, sidebar mínima de sessão/projeto/daemon e status bar compacta.
+
+### Fixed
+- **TUI: atalhos não poluem o input** — `tab`/`ctrl+i` alternam sidebar sem
+  inserir caracteres; atalhos `alt+<rune>` desconhecidos não vazam para o
+  textarea; respostas OSC de cor do terminal (`1;rgb:...`) são ignoradas e o
+  renderer usa tema fixo para evitar queries automáticas de background.
+
+### Changed
+- **IPC: handler TUI no daemon** — mensagens locais usam `ReservedTUIChatID`,
+  suportam eventos streaming e comandos, mantendo o daemon Telegram existente
+  como processo de produto principal.
+
 ## v0.24.2 - 2026-06-15
 
 ### Fixed
