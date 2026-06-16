@@ -19,10 +19,11 @@ Contabiliza tool calls cumulativos por turn. Em dois limiares envia:
 1. Uma mensagem Telegram para o utilizador (human-language, sem contagens técnicas)
 2. Um `steer` para o modelo pedindo que consolide
 
-| Constante | Valor | Acção |
+| Fonte | Valor | Acção |
 |---|---|---|
-| `toolCallWarningThreshold` | 20 | Aviso + steer de consolidação |
-| `toolCallCriticalThreshold` | 50 | Aviso crítico + steer urgente |
+| Default `toolCallWarningThreshold` | 20 | Aviso + steer de consolidação |
+| Default `toolCallCriticalThreshold` | 50 | Aviso crítico + steer urgente |
+| Prompt Profile / legacy agent `tool_budget` | warning = budget; critical = budget × 2.5 | Override por perfil/agent para workloads que precisam de mais ou menos ferramentas |
 
 **Steer format:** inclui contagem, nome da última tool, e elapsed time desde `startedAt`.
 
@@ -60,7 +61,10 @@ garante que um segundo loop numa sessão longa também emite aviso.
 
 **Em caso de detecção:**
 1. Telegram: `"🔁 Vou consolidar o que já encontrei para evitar repetição."`
-2. Steer: menciona o nome da tool em loop e pede ao modelo para parar e resumir
+2. Steer: menciona o nome da tool em loop, inclui até 3 tools recentes distintas
+   como contexto, e pede ao modelo para parar e resumir
+3. Observabilidade: grava evento warn `loop_detected` com o tipo do padrão
+   (`consecutive_repeat`, `ping_pong` ou `tool_spiral`)
 
 ---
 
@@ -109,7 +113,7 @@ acontece antes de `AfterTurnNudge` para que o nudge engine já veja os dados.
 ```
 case "tool_use":
     toolTracker.increment(toolName)       // explosão
-    loopDetect.record(toolName, ev.Input) // loops
+    loopDetect.record(toolName, ev.Input) // loops + loop_detected event
     toolUseSignal <- struct{}{}            // heartbeat reset
     recordPipelineEvent(...)              // observability
 
@@ -120,8 +124,9 @@ case "result":
 
 ## Thresholds e tuning
 
-Todos os limiares são constantes em `pipeline.go` e `tool_monitoring.go`.
-Para ajustar sem tocar na lógica:
+Os defaults vivem em `pipeline.go` e `tool_monitoring.go`. Para ajustar sem tocar
+na lógica global, use `tool_budget` no Prompt Profile/agent; o warning ocorre no
+valor do budget e o critical em `budget * 2.5`.
 
 ```go
 // pipeline.go
@@ -138,6 +143,18 @@ loopPingPongLength  = 4
 loopOnlyReadLength  = 8
 ```
 
+## Estado ao vivo em `/status`
+
+Durante um run ativo, o pipeline mantém um snapshot user-scoped por
+`chatID:threadID:userID` com:
+
+- total de tool calls do run atual;
+- se loop já foi detectado neste turno;
+- até 5 tools recentes distintas.
+
+O comando `/status` mostra esse bloco apenas quando há um run ativo com tools.
+O snapshot é limpo no fim de `executeAsync`, e é intencionalmente não persistido.
+
 ## Decisões de design relevantes
 
 ### Por que steer e não cancel?
@@ -146,12 +163,13 @@ loopOnlyReadLength  = 8
 Cancelar seria destrutivo — o modelo pode estar genuinamente perto de concluir.
 O steer é a forma menos invasiva de reorientar o comportamento.
 
-### Por que não configurar os thresholds via `app.json`?
+### Por que `tool_budget` no perfil e não `app.json`?
 
-Os valores actuais (20/50 tool calls, 15s heartbeat) são conservadores e
-cobrem 99% dos casos. Configurabilidade adicionaria superfície de configuração
-sem benefício claro. Pode ser revisitado se houver agentes com padrões
-radicalmente diferentes (ex: agentes de análise de grandes codebases).
+Os valores globais (20/50 tool calls, 15s heartbeat) continuam conservadores e
+cobrem o caso comum. Quando um perfil realmente precisa de comportamento
+diferente (ex: análise grande de codebase vs. respostas rápidas), o override
+fica junto do perfil que muda o comportamento, sem adicionar mais superfície de
+configuração global.
 
 ### Por que ring buffer e não slice crescente?
 
