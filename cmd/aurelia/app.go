@@ -46,6 +46,7 @@ type app struct {
 	cronCtx    context.Context
 	cronCancel context.CancelFunc
 	ipcServer  *ipc.Server
+	tuiRunGuard *tuiRunGuard
 
 	onboardingStore *users.OnboardingStore
 }
@@ -375,6 +376,9 @@ func bootstrapApp() (*app, error) {
 		slog.Info("ipc: listening", "socket", socketPath)
 	}
 
+	// TUI concurrency guard — one pipeline run at a time.
+	tuiGuard := &tuiRunGuard{}
+
 	return &app{
 		config:          cfg,
 		resolver:        resolver,
@@ -390,6 +394,7 @@ func bootstrapApp() (*app, error) {
 		cronCtx:         cronCtx,
 		cronCancel:      cronCancel,
 		ipcServer:       ipcServer,
+		tuiRunGuard:     tuiGuard,
 		onboardingStore: onboardingStore,
 	}, nil
 }
@@ -507,6 +512,8 @@ func (a *app) start() {
 	}
 	a.startSessionGC()
 	if a.ipcServer != nil {
+		// Wire TUI handler before starting.
+		a.ipcServer.StreamHandler = makeTUIHandler(a)
 		goSafe("ipc server", func() { a.ipcServer.Start() })
 	}
 	goSafe("bot", func() { a.bot.Start() })

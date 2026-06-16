@@ -1,0 +1,204 @@
+// Package tui implements the terminal UI for the Aurelia TUI client using
+// Bubble Tea. It provides a chat-like interface for interacting with the
+// Aurelia daemon over a Unix socket IPC connection.
+package tui
+
+import (
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/igormaneschy/aurelia/internal/ipc"
+)
+
+// TUI states.
+type tuiState int
+
+const (
+	stateLoading tuiState = iota
+	stateChat
+	stateError
+)
+
+// chatMessage represents a single message in the chat viewport.
+type chatMessage struct {
+	Sender    string // "Igor" or "Aurelia"
+	Text      string
+	Timestamp time.Time
+}
+
+// Model is the main Bubble Tea model for the TUI.
+type Model struct {
+	// State machine
+	state tuiState
+
+	// IPC connection
+	socketPath string
+	ipcClient  *ipc.Client
+
+	// Chat history
+	messages []chatMessage
+
+	// Viewport for scrolling chat
+	viewport    viewport.Model
+	viewportSet bool
+
+	// Spinner for loading state
+	spinner spinner.Model
+
+	// Textarea for multiline input
+	textarea textarea.Model
+
+	// Pending request tracking
+	requestID string
+	waiting   bool
+
+	// Current stream reader (held between events during streaming)
+	reader *ipc.ResponseReader
+
+	// Accumulated streaming text
+	streamBuf string
+
+	// UI state
+	width          int
+	height         int
+	showSidebar    bool
+	err            error
+	ready          bool
+	daemonLabel    string
+	cwdPath        string
+	connectLatency time.Duration
+
+	// Cached glamour renderer (recreated when width changes)
+	glamourRenderer *glamour.TermRenderer
+	rendererWidth   int
+}
+
+// NewModel creates a new TUI model with the given socket path.
+func NewModel(socketPath string) Model {
+	s := spinner.New()
+	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+
+	ta := textarea.New()
+	ta.Placeholder = "Type a message…"
+	ta.Focus()
+	ta.CharLimit = 4000
+	ta.ShowLineNumbers = false
+	ta.KeyMap.InsertNewline.SetEnabled(false) // Enter will be intercepted for submit
+
+	ta.SetHeight(2)
+
+	return Model{
+		state:       stateLoading,
+		socketPath:  socketPath,
+		ipcClient:   ipc.NewClient(socketPath),
+		spinner:     s,
+		textarea:    ta,
+		showSidebar: true,
+		daemonLabel: "connecting",
+		cwdPath:     "not set",
+		messages:    make([]chatMessage, 0),
+	}
+}
+
+// Init implements tea.Model.
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(
+		m.spinner.Tick,
+		checkDaemon(m.ipcClient),
+	)
+}
+
+// checkDaemon returns a command that pings the daemon.
+func checkDaemon(client *ipc.Client) tea.Cmd {
+	return func() tea.Msg {
+		started := time.Now()
+		ctx, cancel := contextWithTimeout(1200 * time.Millisecond)
+		defer cancel()
+		if err := client.Ping(ctx); err != nil {
+			return daemonUnreachableMsg{err: err}
+		}
+		return daemonReachableMsg{latency: time.Since(started)}
+	}
+}
+
+// fetchTUIStatus returns a command that asks the daemon for lightweight
+// session status used by the chrome/sidebar. It intentionally does not write
+// into the chat history.
+func fetchTUIStatus(client *ipc.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := contextWithTimeout(1500 * time.Millisecond)
+		defer cancel()
+		events, err := client.SendAndWait(ctx, ipc.IPCMessage{
+			Type:      ipc.MsgTypeCommand,
+			ChatID:    ipc.ReservedTUIChatID,
+			ThreadID:  0,
+			UserID:    int64(os.Getuid()),
+			Text:      "/status",
+			RequestID: fmt.Sprintf("tui-status-%d", time.Now().UnixNano()),
+		})
+		if err != nil {
+			return tuiStatusMsg{err: err}
+		}
+		return tuiStatusMsg{cwd: cwdFromEvents(events)}
+	}
+}
+
+// submitMessage sends a message to the daemon and returns a command.
+func (m Model) submitMessage(text string) tea.Cmd {
+	m.requestID = fmt.Sprintf("tui-%d", time.Now().UnixNano())
+	m.waiting = true
+
+	userID := int64(os.Getuid())
+	msg := ipc.IPCMessage{
+		Type:      ipc.MsgTypeSend,
+		ChatID:    ipc.ReservedTUIChatID,
+		ThreadID:  0,
+		UserID:    userID,
+		Text:      text,
+		RequestID: m.requestID,
+	}
+
+	return func() tea.Msg {
+		ctx, cancel := contextWithTimeout(30 * time.Minute)
+		defer cancel()
+		reader, err := m.ipcClient.Send(ctx, msg)
+		if err != nil {
+			return daemonErrorMsg{err: err}
+		}
+		return &streamReaderMsg{reader: reader}
+	}
+}
+
+// sendCommand sends a command to the daemon.
+func (m Model) sendCommand(text string) tea.Cmd {
+	m.requestID = fmt.Sprintf("tui-%d", time.Now().UnixNano())
+	m.waiting = true
+
+	userID := int64(os.Getuid())
+	msg := ipc.IPCMessage{
+		Type:      ipc.MsgTypeCommand,
+		ChatID:    ipc.ReservedTUIChatID,
+		ThreadID:  0,
+		UserID:    userID,
+		Text:      text,
+		RequestID: m.requestID,
+	}
+
+	return func() tea.Msg {
+		ctx, cancel := contextWithTimeout(30 * time.Second)
+		defer cancel()
+		reader, err := m.ipcClient.Send(ctx, msg)
+		if err != nil {
+			return daemonErrorMsg{err: err}
+		}
+		return &streamReaderMsg{reader: reader}
+	}
+}

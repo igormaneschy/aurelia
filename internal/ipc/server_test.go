@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -541,6 +542,176 @@ func TestWriteAllZeroByte(t *testing.T) {
 	}
 	if err.Error() != "write returned 0 bytes without error" {
 		t.Errorf("unexpected error message: got %q", err.Error())
+	}
+}
+
+func TestStreamHandlerEmitsMultipleEvents(t *testing.T) {
+	dir, err := os.MkdirTemp("", "au-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socketPath := filepath.Join(dir, "s")
+
+	server, err := NewServer(socketPath)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	defer server.EnsureClose()
+
+	var receivedEvents []IPCEvent
+	server.StreamHandler = func(ctx context.Context, msg IPCMessage, emit func(IPCEvent) error) error {
+		if err := emit(IPCEvent{Type: EventTypeAck, Body: "received"}); err != nil {
+			return err
+		}
+		if err := emit(IPCEvent{Type: EventTypeStreamChunk, Body: "chunk1"}); err != nil {
+			return err
+		}
+		if err := emit(IPCEvent{Type: EventTypeStreamChunk, Body: "chunk2"}); err != nil {
+			return err
+		}
+		if err := emit(IPCEvent{Type: EventTypeMessage, Body: "done"}); err != nil {
+			return err
+		}
+		return emit(IPCEvent{Type: EventTypeStreamEnd, Done: true})
+	}
+	server.Start()
+
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("Dial() error: %v", err)
+	}
+	defer conn.Close()
+
+	msg := IPCMessage{Type: MsgTypeSend, Text: "hello", RequestID: "req-123"}
+	data, _ := json.Marshal(msg)
+	data = append(data, '\n')
+	conn.Write(data)
+
+	scanner := bufio.NewScanner(conn)
+	for scanner.Scan() {
+		var ev IPCEvent
+		if err := json.Unmarshal([]byte(scanner.Text()), &ev); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		receivedEvents = append(receivedEvents, ev)
+		if ev.Type == EventTypeStreamEnd {
+			break
+		}
+	}
+
+	if len(receivedEvents) != 5 {
+		t.Fatalf("expected 5 events, got %d", len(receivedEvents))
+	}
+	if receivedEvents[0].Type != EventTypeAck {
+		t.Errorf("event[0] type = %q, want %q", receivedEvents[0].Type, EventTypeAck)
+	}
+	if receivedEvents[1].Body != "chunk1" {
+		t.Errorf("event[1].Body = %q, want %q", receivedEvents[1].Body, "chunk1")
+	}
+	if receivedEvents[2].Body != "chunk2" {
+		t.Errorf("event[2].Body = %q, want %q", receivedEvents[2].Body, "chunk2")
+	}
+	if receivedEvents[4].Type != EventTypeStreamEnd {
+		t.Errorf("event[4].type = %q, want %q", receivedEvents[4].Type, EventTypeStreamEnd)
+	}
+}
+
+func TestStreamHandlerRequestIDPropagation(t *testing.T) {
+	dir, err := os.MkdirTemp("", "au-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socketPath := filepath.Join(dir, "r")
+
+	server, err := NewServer(socketPath)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	defer server.EnsureClose()
+
+	server.StreamHandler = func(ctx context.Context, msg IPCMessage, emit func(IPCEvent) error) error {
+		// emit an event without setting RequestID — server should propagate it
+		return emit(IPCEvent{Type: EventTypeMessage, Body: "ok"})
+	}
+	server.Start()
+
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("Dial() error: %v", err)
+	}
+	defer conn.Close()
+
+	msg := IPCMessage{Type: MsgTypeSend, Text: "hi", RequestID: "my-request"}
+	data, _ := json.Marshal(msg)
+	data = append(data, '\n')
+	conn.Write(data)
+
+	scanner := bufio.NewScanner(conn)
+	if !scanner.Scan() {
+		t.Fatal("expected response")
+	}
+	var ev IPCEvent
+	json.Unmarshal([]byte(scanner.Text()), &ev)
+	if ev.RequestID != "my-request" {
+		t.Errorf("expected RequestID %q, got %q", "my-request", ev.RequestID)
+	}
+}
+
+func TestStreamHandlerError(t *testing.T) {
+	dir, err := os.MkdirTemp("", "au-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socketPath := filepath.Join(dir, "e")
+
+	server, err := NewServer(socketPath)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	defer server.EnsureClose()
+
+	server.StreamHandler = func(ctx context.Context, msg IPCMessage, emit func(IPCEvent) error) error {
+		emit(IPCEvent{Type: EventTypeAck, Body: "starting"})
+		return fmt.Errorf("something bad")
+	}
+	server.Start()
+
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("Dial() error: %v", err)
+	}
+	defer conn.Close()
+
+	msg := IPCMessage{Type: MsgTypeCommand, Text: "/fail"}
+	data, _ := json.Marshal(msg)
+	data = append(data, '\n')
+	conn.Write(data)
+
+	scanner := bufio.NewScanner(conn)
+
+	// First event should be ack
+	if !scanner.Scan() {
+		t.Fatal("expected ack")
+	}
+	var ev IPCEvent
+	json.Unmarshal([]byte(scanner.Text()), &ev)
+	if ev.Type != EventTypeAck {
+		t.Errorf("expected ack, got %q", ev.Type)
+	}
+
+	// Second event should be error from the stream handler returning error
+	if !scanner.Scan() {
+		t.Fatal("expected error event")
+	}
+	json.Unmarshal([]byte(scanner.Text()), &ev)
+	if ev.Type != EventTypeError {
+		t.Errorf("expected EventTypeError, got %q", ev.Type)
+	}
+	if !strings.Contains(ev.Error, "something bad") {
+		t.Errorf("expected error to contain 'something bad', got %q", ev.Error)
 	}
 }
 

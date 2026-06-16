@@ -1,0 +1,399 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"os"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/igormaneschy/aurelia/internal/ipc"
+	"github.com/igormaneschy/aurelia/internal/orchestrator"
+	"github.com/igormaneschy/aurelia/internal/pipeline"
+	"github.com/igormaneschy/aurelia/internal/projectbinding"
+	"github.com/igormaneschy/aurelia/internal/runtime"
+	"github.com/igormaneschy/aurelia/internal/transport"
+)
+
+// tuiOutput implements pipeline.Output by writing IPC events through an emit
+// function. It signals completion when a terminal output method is called.
+// All emit calls are serialized with a mutex since the pipeline may invoke
+// output methods from multiple goroutines.
+type tuiOutput struct {
+	mu       sync.Mutex
+	emit     func(ipc.IPCEvent) error
+	done     chan struct{}
+	doneOnce sync.Once
+	errored  bool // true if a terminal error was emitted
+}
+
+func newTUIOutput(emit func(ipc.IPCEvent) error) *tuiOutput {
+	return &tuiOutput{
+		emit: emit,
+		done: make(chan struct{}),
+	}
+}
+
+// markDone closes the done channel exactly once.
+func (o *tuiOutput) markDone() {
+	o.doneOnce.Do(func() {
+		close(o.done)
+	})
+}
+
+// send serializes an emit call under the mutex and returns the error.
+func (o *tuiOutput) send(ev ipc.IPCEvent) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.emit(ev)
+}
+
+func (o *tuiOutput) StartTyping(_ int64, _ int) func() {
+	return func() {}
+}
+
+func (o *tuiOutput) NewProgress(_ int64, _ int) pipeline.ProgressReporter {
+	return &tuiProgress{out: o}
+}
+
+func (o *tuiOutput) SendError(_ int64, _ int, text string) error {
+	o.mu.Lock()
+	o.errored = true
+	o.mu.Unlock()
+	err := o.send(ipc.IPCEvent{Type: ipc.EventTypeError, Error: text})
+	o.markDone()
+	return err
+}
+
+func (o *tuiOutput) SendReply(_ int64, _ int, text string) (int64, error) {
+	err := o.send(ipc.IPCEvent{Type: ipc.EventTypeMessage, Body: text})
+	o.markDone()
+	return 0, err
+}
+
+func (o *tuiOutput) SendText(_ int64, _ int, text string) (transport.MessageHandle, error) {
+	err := o.send(ipc.IPCEvent{Type: ipc.EventTypeStreamChunk, Body: text})
+	return nil, err
+}
+
+func (o *tuiOutput) DeleteMessage(_ transport.MessageHandle) {}
+
+// ConfirmMessage marks done for local-handled paths (project preflight, etc.)
+// that call SendText then ConfirmMessage without SendReply/SendError.
+func (o *tuiOutput) ConfirmMessage(_ int64, _ int) {
+	o.markDone()
+}
+
+func (o *tuiOutput) ExecuteApprovedPlan(_ int64, _ int, _ int, _ string, _ int64, _ *orchestrator.Plan) {}
+
+// tuiProgress streams assistant progress to the TUI via stream_chunk events.
+// It tracks the last reported text to emit only deltas, avoiding duplication.
+type tuiProgress struct {
+	out      *tuiOutput
+	lastText string
+}
+
+func (p *tuiProgress) ReportText(text string) {
+	if text == "" || text == p.lastText {
+		return
+	}
+	if len(text) > len(p.lastText) && text[:len(p.lastText)] == p.lastText {
+		delta := text[len(p.lastText):]
+		_ = p.out.send(ipc.IPCEvent{Type: ipc.EventTypeStreamChunk, Body: delta})
+	} else {
+		_ = p.out.send(ipc.IPCEvent{
+			Type: ipc.EventTypeStreamChunk,
+			Body: "\n" + text + "\n",
+		})
+	}
+	p.lastText = text
+}
+
+func (p *tuiProgress) ReportTool(toolName string) {
+	_ = p.out.send(ipc.IPCEvent{
+		Type: ipc.EventTypeStreamChunk,
+		Body: fmt.Sprintf("\n🔧 %s...\n", toolName),
+	})
+}
+
+func (p *tuiProgress) ReportToolResult(_ string) {
+	// No-op: do not leak raw tool result data.
+}
+
+func (p *tuiProgress) Delete() {}
+
+// tuiRunGuard limits TUI pipeline runs to one at a time.
+// Initialized in bootstrapApp and passed to makeTUIHandler.
+type tuiRunGuard struct {
+	mu     sync.Mutex
+	active bool
+}
+
+// tryAcquire returns true if the run slot was acquired.
+func (g *tuiRunGuard) tryAcquire() bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.active {
+		return false
+	}
+	g.active = true
+	return true
+}
+
+// release frees the run slot.
+func (g *tuiRunGuard) release() {
+	g.mu.Lock()
+	g.active = false
+	g.mu.Unlock()
+}
+
+// makeTUIHandler creates the IPC stream handler for TUI clients.
+// All TUI requests are forced to the local TUI namespace:
+// ChatID=ReservedTUIChatID, ThreadID=0, UserID=os.Getuid().
+func makeTUIHandler(a *app) func(context.Context, ipc.IPCMessage, func(ipc.IPCEvent) error) error {
+	return func(ctx context.Context, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
+		// Emit ack for all messages.
+		if err := emit(ipc.IPCEvent{Type: ipc.EventTypeAck, RequestID: msg.RequestID}); err != nil {
+			return err
+		}
+
+		switch msg.Type {
+		case ipc.MsgTypeCommand:
+			// Force local TUI IDs (security: ignore client-supplied IDs).
+			msg.ChatID = ipc.ReservedTUIChatID
+			msg.ThreadID = 0
+			msg.UserID = int64(os.Getuid())
+			return handleTUICommand(ctx, a, msg, emit)
+		case ipc.MsgTypeSend:
+			msg.ChatID = ipc.ReservedTUIChatID
+			msg.ThreadID = 0
+			msg.UserID = int64(os.Getuid())
+			return handleTUISend(ctx, a, msg, emit)
+		case ipc.MsgTypeSubscribe:
+			// Terminal error: subscribe not supported.
+			return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "subscribe not supported", RequestID: msg.RequestID})
+		default:
+			return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: fmt.Sprintf("unknown message type: %s", msg.Type), RequestID: msg.RequestID})
+		}
+	}
+}
+
+// tuiIDs returns the forced local TUI identity.
+func tuiIDs() (chatID int64, threadID int, userID int64) {
+	return ipc.ReservedTUIChatID, 0, int64(os.Getuid())
+}
+
+// handleTUICommand processes a TUI command (/cwd, /status, etc.).
+func handleTUICommand(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
+	text := strings.TrimSpace(msg.Text)
+	chatID, threadID, userID := msg.ChatID, int(msg.ThreadID), msg.UserID
+
+	// Safety: these should already be forced by makeTUIHandler, but guard here too.
+	if chatID != ipc.ReservedTUIChatID {
+		chatID = ipc.ReservedTUIChatID
+	}
+	if threadID != 0 {
+		threadID = 0
+	}
+
+	var response string
+
+	switch {
+	case strings.HasPrefix(text, "/cwd"):
+		response = handleTUICwd(ctx, a, chatID, threadID, userID, text)
+	case strings.HasPrefix(text, "/status"):
+		response = handleTUIStatus(ctx, a, chatID, threadID, userID)
+	default:
+		response = fmt.Sprintf("Unknown command: %s", text)
+	}
+
+	if err := emit(ipc.IPCEvent{Type: ipc.EventTypeMessage, Body: response, RequestID: msg.RequestID}); err != nil {
+		return err
+	}
+	return emit(ipc.IPCEvent{Type: ipc.EventTypeStreamEnd, Done: true, RequestID: msg.RequestID})
+}
+
+// handleTUISend processes a TUI send message through the pipeline.
+func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
+	chatID, threadID, userID := msg.ChatID, int(msg.ThreadID), msg.UserID
+
+	text := strings.TrimSpace(msg.Text)
+	if text == "" {
+		if err := emit(ipc.IPCEvent{Type: ipc.EventTypeMessage, Body: "Empty message", RequestID: msg.RequestID}); err != nil {
+			return err
+		}
+		return emit(ipc.IPCEvent{Type: ipc.EventTypeStreamEnd, Done: true, RequestID: msg.RequestID})
+	}
+
+	// Concurrency guard: only one TUI pipeline run at a time.
+	if a.tuiRunGuard != nil && !a.tuiRunGuard.tryAcquire() {
+		return emit(ipc.IPCEvent{
+			Type:      ipc.EventTypeError,
+			Error:     "TUI request already in progress",
+			RequestID: msg.RequestID,
+		})
+	}
+	if a.tuiRunGuard != nil {
+		defer a.tuiRunGuard.release()
+	}
+
+	// Create TUI output for pipeline events.
+	output := newTUIOutput(emit)
+
+	// Build pipeline config sharing the daemon's services.
+	pipeCfg := pipeline.Config{
+		AppConfig:    a.config,
+		Bridge:       a.bridge,
+		Agents:       a.agents,
+		Profiles:     a.bot.ProfileResolver(),
+		Persona:      a.bot.PersonaService(),
+		Sessions:     a.sessions,
+		Resolver:     a.resolver,
+		MemoryDir:    a.resolver.Memory(),
+		ExePath:      a.resolver.Root(),
+		BotCwd:       a.resolver.Root(),
+		Output:       output,
+		Bindings:     a.bindings,
+		RunLog:       a.runLog,
+		Continuity:   a.continuity,
+		UsersStore:   a.bot.UserStore(),
+		UserResolver: a.bot.UserResolver(),
+	}
+	pipeSvc := pipeline.NewService(pipeCfg)
+
+	// Launch pipeline processing (async).
+	pipeErr := pipeSvc.Process(chatID, threadID, 0, text, nil, userID, true)
+	if pipeErr != nil {
+		log.Printf("tui: pipeline process error: %s", pipeline.RedactSecrets(pipeErr.Error()))
+		output.SendError(chatID, threadID, pipeErr.Error())
+	}
+
+	// Wait for pipeline completion or context cancellation.
+	select {
+	case <-output.done:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	// Skip stream_end if a terminal error was already emitted (SendError).
+	output.mu.Lock()
+	errored := output.errored
+	output.mu.Unlock()
+	if errored {
+		return nil
+	}
+
+	return emit(ipc.IPCEvent{Type: ipc.EventTypeStreamEnd, Done: true, RequestID: msg.RequestID})
+}
+
+// handleTUICwd processes /cwd commands from the TUI.
+// All writes are forced to ReservedTUIChatID/0 regardless of client-supplied IDs.
+func handleTUICwd(ctx context.Context, a *app, chatID int64, threadID int, userID int64, text string) string {
+	args := strings.TrimSpace(strings.TrimPrefix(text, "/cwd"))
+
+	if args == "" {
+		return buildTUICwdStatus(ctx, a, chatID, threadID)
+	}
+
+	if args == "clear" {
+		key := projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID}
+		if err := a.bindings.Delete(ctx, key); err != nil {
+			return fmt.Sprintf("❌ Error clearing cwd: %s", err)
+		}
+		if a.sessions != nil {
+			a.sessions.ClearCwd(chatID, threadID)
+		}
+		return "✅ Project binding removed."
+	}
+
+	// Validate and resolve path.
+	cwd, err := runtime.ResolveProjectCwd(args)
+	if err != nil {
+		return fmt.Sprintf("❌ Invalid path: %s", err)
+	}
+
+	// Set binding — always under ReservedTUIChatID.
+	binding := projectbinding.ProjectBinding{
+		Key:         projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID},
+		CWD:         cwd,
+		ProjectSlug: runtime.ProjectSlug(cwd),
+		Source:      projectbinding.BindingManual,
+		CreatedBy:   userID,
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+	if err := a.bindings.Set(ctx, binding); err != nil {
+		return fmt.Sprintf("❌ Error setting cwd: %s", err)
+	}
+	if a.sessions != nil {
+		a.sessions.SetCwd(chatID, threadID, cwd)
+	}
+	return fmt.Sprintf("✅ Project set to: `%s`", cwd)
+}
+
+// buildTUICwdStatus returns a formatted cwd status string.
+func buildTUICwdStatus(ctx context.Context, a *app, chatID int64, threadID int) string {
+	resolved, err := a.bindings.Resolve(ctx, projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID})
+	if err != nil {
+		return fmt.Sprintf("Error reading cwd: %s", err)
+	}
+
+	var b strings.Builder
+	b.WriteString("**Current Working Directory**\n")
+	if resolved != nil && resolved.Binding != nil {
+		b.WriteString(fmt.Sprintf("📂 Path: `%s`\n", resolved.Binding.CWD))
+		if resolved.Inherited {
+			b.WriteString("   (inherited from group)\n")
+		}
+	} else {
+		b.WriteString("📂 No project set.\n")
+		b.WriteString("   Use `/cwd <path>` to set one.\n")
+	}
+
+	if a.sessions != nil {
+		if cwd := a.sessions.GetCwd(chatID, threadID); cwd != "" {
+			b.WriteString(fmt.Sprintf("📁 Session CWD: `%s`\n", cwd))
+		}
+	}
+
+	return b.String()
+}
+
+// handleTUIStatus returns a formatted status response for the TUI.
+func handleTUIStatus(ctx context.Context, a *app, chatID int64, threadID int, userID int64) string {
+	var b strings.Builder
+	b.WriteString("**Aurelia Status**\n")
+
+	bridgeStatus := "offline"
+	if a.bridge != nil {
+		pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		if err := a.bridge.Ping(pingCtx); err == nil {
+			bridgeStatus = "online"
+		}
+	}
+	b.WriteString(fmt.Sprintf("🧠 Bridge: **%s**\n", bridgeStatus))
+
+	if a.config != nil {
+		b.WriteString(fmt.Sprintf("⚙️ Model: **%s**\n", a.config.ModelDisplayName()))
+	}
+
+	if a.bindings != nil {
+		resolved, err := a.bindings.Resolve(ctx, projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID})
+		if err == nil && resolved != nil && resolved.Binding != nil {
+			b.WriteString(fmt.Sprintf("📂 CWD: `%s`\n", resolved.Binding.CWD))
+		}
+	}
+
+	if a.sessions != nil {
+		if _, active := a.sessions.GetSessionWithState(chatID, threadID, userID); active {
+			b.WriteString("💬 Session: active\n")
+		} else {
+			b.WriteString("💬 Session: none\n")
+		}
+	}
+
+	return b.String()
+}

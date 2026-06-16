@@ -1,7 +1,7 @@
 # Aurelia TUI — Plano de Implementação
 
 **Sprint:** J (pós Auto-Skills)
-**Status:** 🔴 Proposta — aguarda aprovação para roadmap
+**Status:** 🟢 Fase 2 MVP implementada — branch `feature/tui-mvp`
 **Depende de:** Sprint E (Project Memory), Sprint F (Wiki Memory Gateway)
 **Desbloqueia:** Interface alternativa ao Telegram, onboarding sem bot, uso em contexto de terminal/IDE
 
@@ -55,12 +55,20 @@ Esta refactorização é **Fase 0** — pequena, localizada, sem risco de regres
 
 | Componente | Biblioteca | Razão |
 |---|---|---|
-| **Framework TUI** | `charmbracelet/bubbletea` v2 | Go nativo, mesmo stack do Aurelia, arquitectura Elm (Model/Update/View), produção comprovada |
-| **Styling & Layout** | `charmbracelet/lipgloss` | CSS-like para terminal — borders, cores, padding, flex layout |
-| **Componentes** | `charmbracelet/bubbles` | Lista, viewport, textarea, spinner, progress bar — não reinventar |
-| **Markdown rendering** | `charmbracelet/glamour` | Render de markdown no terminal com temas — respostas da Aurelia ficam formatadas |
-| **IPC com daemon** | Unix socket ou gRPC local | Comunicação com o processo `aureliad` já em execução |
+| **Framework TUI** | `charmbracelet/bubbletea` v1 (v1.3.10) | Go nativo, mesmo stack do Aurelia, arquitectura Elm (Model/Update/View), produção comprovada. V2 usa module path `charm.land/bubbletea/v2` — migração adiada para Fase 5 (Polish) para evitar risco de regressão cross-package |
+| **Styling & Layout** | `charmbracelet/lipgloss` v1 | CSS-like para terminal — borders, cores, padding, flex layout |
+| **Componentes** | `charmbracelet/bubbles` v0.20 | Lista, viewport, textarea, spinner, progress bar — não reinventar |
+| **Markdown rendering** | `charmbracelet/glamour` v0.8 | Render de markdown no terminal com temas — respostas da Aurelia ficam formatadas |
+| **IPC com daemon** | Unix socket | Comunicação com o processo `aureliad` já em execução |
 | **Config** | Ficheiro existente do Aurelia | Reutiliza `~/.aurelia/config.yaml` |
+
+> **Nota sobre Bubble Tea v1 vs v2 (2026-06-15):** O roadmap original previa Bubble Tea v2. Na data da implementação, as bibliotecas Charm v2 usam module paths diferentes (`charm.land/bubbletea/v2`, `github.com/charmbracelet/{bubbles,lipgloss,glamour}/v2`). A migração exige alterar todos os imports e verificar compatibilidade cross-package. Para minimizar risco no MVP, mantivemos as versões estáveis v1; a migração para v2 está agendada para a Fase 5 (Polish).
+
+> **Nota sobre multiline (2026-06-15):** O `/cwd` no input usa `enter` para submeter (consistente com o roadmap). `alt+enter` insere nova linha; `ctrl+j` é fallback portável para terminais que não distinguem `shift+enter`. O status bar exibe a tecla activa: `alt+enter:newline`.
+
+> **Nota UX hardening (2026-06-16):** A Fase 2 inclui uma sub-etapa 2.1 para reduzir fricção dos primeiros testes: a UI sobe sem pré-checar o socket no `main`, o ping inicial tem timeout curto, status/sidebar exibem estado de daemon e projecto, e a sidebar esconde-se automaticamente em terminais estreitos/baixos. Multi-sessão continua reservado para a Fase 3.
+
+> **Nota Fase 2.2 polish (2026-06-16):** O MVP foi fechado com correções de input (`tab`/`ctrl+i`, `alt+<rune>` desconhecido e resíduos OSC `rgb:`), markdown com tema fixo para evitar queries de cor do terminal, uma linha limpa de respiro no topo, status bar compacta e sidebar mínima menos técnica. O polish visual avançado fica para Fase 5.
 
 ---
 
@@ -68,7 +76,7 @@ Esta refactorização é **Fase 0** — pequena, localizada, sem risco de regres
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ ● aurelia  [project: aurelia @ main]                    │  ← Header bar
+│                                                        │  ← top margin
 ├──────────────┬──────────────────────────────────────────┤
 │              │                                          │
 │  CHATS       │  #aurelia-dev / General                  │  ← Thread title
@@ -92,7 +100,7 @@ Esta refactorização é **Fase 0** — pequena, localizada, sem risco de regres
 - **Sidebar esquerda** — lista de "chats" mapeados para `ConversationKey` (DM = chat directo, grupos = chat com lista de tópicos)
 - **Painel principal** — histórico da conversa com markdown rendering, streaming de respostas em tempo real
 - **Input bar** — textarea com suporte a multi-linha (`shift+enter`)
-- **Header bar** — projecto activo (`/cwd`), agent activo
+- **Top margin** — respiro visual; estado detalhado fica na sidebar/status
 - **Status bar** — keybindings contextuais
 
 ---
@@ -165,21 +173,24 @@ type IPCEvent struct {
 
 ---
 
-### Fase 2 — TUI MVP (1 semana)
+### Fase 2 — TUI MVP (1 semana) ✅
 *Interface mínima funcional: uma conversa, comandos, streaming.*
 
 **Tasks:**
-- [ ] `cmd/aurelia-tui/main.go` — binary separado `aurelia-tui`
-- [ ] `TUITransport` implementando a interface de transport
-- [ ] Model principal com 3 estados: `loading | chat | error`
-- [ ] Viewport com glamour para rendering de markdown
-- [ ] Textarea com `shift+enter` para multi-linha
-- [ ] Streaming de respostas em tempo real (chunks aparecem à medida que chegam)
-- [ ] Keybindings: `ctrl+c` sair, `ctrl+l` limpar, `tab` alternar sidebar
-- [ ] Status bar com `cwd` activo e agent activo
-- [ ] Graceful degradation: se daemon não estiver a correr, mensagem clara
+- [x] `cmd/aurelia-tui/main.go` — binary separado `aurelia-tui`
+- [x] Cliente IPC local para conversar com o daemon via Unix socket
+- [x] Handler TUI no daemon com `ReservedTUIChatID`
+- [x] Model principal com 3 estados: `loading | chat | error`
+- [x] Viewport com glamour para rendering de markdown
+- [x] Textarea com `alt+enter` para multi-linha (`ctrl+j` fallback)
+- [x] Streaming de respostas em tempo real (chunks aparecem à medida que chegam)
+- [x] Keybindings: `ctrl+c` sair, `ctrl+l` limpar, `tab` alternar sidebar
+- [x] Status bar compacta com estado e keybindings
+- [x] Sidebar mínima com sessão, projecto (`/cwd`) e estado do daemon
+- [x] Graceful degradation: se daemon não estiver a correr, mensagem clara
+- [x] UX hardening: filtros para atalhos/resíduos de terminal não poluírem input
 
-**Critério de saída:** consegues ter uma conversa completa com a Aurelia pela TUI, incluindo `/cwd` e respostas em markdown
+**Critério de saída:** ✅ consegues ter uma conversa completa com a Aurelia pela TUI, incluindo `/cwd`, `/status`, streaming e respostas em markdown.
 
 ---
 
