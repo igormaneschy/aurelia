@@ -9,9 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
+	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/session"
 )
 
@@ -90,6 +92,130 @@ func TestTUIHandler_StatusReturnsMessageAndStreamEnd(t *testing.T) {
 	}
 }
 
+func TestTUIHandler_HelpReturnsTUICommandsAndKeyboardShortcuts(t *testing.T) {
+	a, ctx, cleanup := testApp(t)
+	defer cleanup()
+
+	handler := makeTUIHandler(a)
+	te := &testEmit{}
+
+	err := handler(ctx, ipc.IPCMessage{
+		Type:      "command",
+		Text:      "/help",
+		RequestID: "help-test",
+	}, te.emit)
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	if te.count() != 3 {
+		t.Fatalf("expected 3 events (ack, message, stream_end), got %d", te.count())
+	}
+	body := te.events[1].Body
+	for _, want := range []string{"Aurelia TUI Help", "/status", "/model <name>", "/cwd <path>", "Esc", "Ctrl+L"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected help body to contain %q, got %q", want, body)
+		}
+	}
+	if te.events[2].Type != ipc.EventTypeStreamEnd {
+		t.Errorf("event[2] type = %q, want %q", te.events[2].Type, ipc.EventTypeStreamEnd)
+	}
+}
+
+func TestTUIHandler_ModelNoBridgeReturnsCurrentModelAndHint(t *testing.T) {
+	a, ctx, cleanup := testApp(t)
+	defer cleanup()
+	a.config.DefaultProvider = "anthropic"
+	a.config.DefaultModel = "claude-sonnet-4-6"
+
+	handler := makeTUIHandler(a)
+	te := &testEmit{}
+
+	err := handler(ctx, ipc.IPCMessage{
+		Type: "command",
+		Text: "/model",
+	}, te.emit)
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	if te.count() != 3 {
+		t.Fatalf("expected 3 events (ack, message, stream_end), got %d", te.count())
+	}
+	body := te.events[1].Body
+	for _, want := range []string{"Current model", "claude-sonnet-4-6", "Bridge unavailable"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected /model body to contain %q, got %q", want, body)
+		}
+	}
+}
+
+func TestFormatTUIModelListGroupsAndLimitsModels(t *testing.T) {
+	models := []bridge.ModelInfo{
+		{Provider: "openai", ID: "gpt-5.1"},
+		{Provider: "anthropic", ID: "claude-sonnet-4-6", SupportsImages: true},
+	}
+
+	body := formatTUIModelList("Current model: **PI default**", models)
+
+	for _, want := range []string{"Available models", "anthropic:", "`claude-sonnet-4-6` 📷", "openai:", "`gpt-5.1`", "/model auto"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("expected formatted model list to contain %q, got %q", want, body)
+		}
+	}
+}
+
+func TestFindTUIModelMatchesBareOrProviderQualifiedName(t *testing.T) {
+	models := []bridge.ModelInfo{{Provider: "openai", ID: "gpt-5.1"}}
+
+	if got := findTUIModel(models, "GPT-5.1"); got == nil || got.Provider != "openai" {
+		t.Fatalf("expected bare case-insensitive match, got %#v", got)
+	}
+	if got := findTUIModel(models, "openai/gpt-5.1"); got == nil || got.ID != "gpt-5.1" {
+		t.Fatalf("expected provider-qualified match, got %#v", got)
+	}
+	if got := findTUIModel(models, "missing"); got != nil {
+		t.Fatalf("expected nil for missing model, got %#v", got)
+	}
+}
+
+func TestSaveTUIDefaultModelUpdatesConfigFileAndMemory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("AURELIA_HOME", home)
+	configDir := filepath.Join(home, "config")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	configPath := filepath.Join(configDir, "app.json")
+	initial := `{"default_provider":"old","default_model":"old-model","providers":{"openai":{"api_key":"keep"}}}`
+	if err := os.WriteFile(configPath, []byte(initial), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	resolver, err := runtime.New()
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+	a := &app{config: &config.AppConfig{}, resolver: resolver}
+
+	if err := saveTUIDefaultModel(a, "openai", "gpt-5.1"); err != nil {
+		t.Fatalf("saveTUIDefaultModel: %v", err)
+	}
+	reloaded, err := config.Load(resolver)
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+
+	if reloaded.DefaultProvider != "openai" || reloaded.DefaultModel != "gpt-5.1" {
+		t.Fatalf("unexpected saved model provider=%q model=%q", reloaded.DefaultProvider, reloaded.DefaultModel)
+	}
+	if reloaded.ProviderAPIKey("openai") != "keep" {
+		t.Fatalf("expected existing provider config to be preserved")
+	}
+	if a.config.DefaultProvider != "openai" || a.config.DefaultModel != "gpt-5.1" {
+		t.Fatalf("expected in-memory config updated, got provider=%q model=%q", a.config.DefaultProvider, a.config.DefaultModel)
+	}
+}
+
 func TestTUIHandler_CwdNoBinding(t *testing.T) {
 	a, ctx, cleanup := testApp(t)
 	defer cleanup()
@@ -138,8 +264,8 @@ func TestTUIHandler_CwdValidPath(t *testing.T) {
 	te := &testEmit{}
 
 	err = handler(ctx, ipc.IPCMessage{
-		Type: "command",
-		Text: "/cwd " + validDir,
+		Type:     "command",
+		Text:     "/cwd " + validDir,
 		ChatID:   0,
 		ThreadID: 0,
 		UserID:   0,

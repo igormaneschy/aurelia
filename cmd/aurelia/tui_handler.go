@@ -86,7 +86,8 @@ func (o *tuiOutput) ConfirmMessage(_ int64, _ int) {
 	o.markDone()
 }
 
-func (o *tuiOutput) ExecuteApprovedPlan(_ int64, _ int, _ int, _ string, _ int64, _ *orchestrator.Plan) {}
+func (o *tuiOutput) ExecuteApprovedPlan(_ int64, _ int, _ int, _ string, _ int64, _ *orchestrator.Plan) {
+}
 
 // tuiProgress streams assistant progress to the TUI via stream_chunk events.
 // It tracks the last reported text to emit only deltas, avoiding duplication.
@@ -201,6 +202,10 @@ func handleTUICommand(ctx context.Context, a *app, msg ipc.IPCMessage, emit func
 	var response string
 
 	switch {
+	case text == "/help" || text == "help":
+		response = buildTUIHelp()
+	case text == "/model" || strings.HasPrefix(text, "/model "):
+		response = handleTUIModel(ctx, a, chatID, threadID, userID, text)
 	case strings.HasPrefix(text, "/cwd"):
 		response = handleTUICwd(ctx, a, chatID, threadID, userID, text)
 	case strings.HasPrefix(text, "/status"):
@@ -213,6 +218,29 @@ func handleTUICommand(ctx context.Context, a *app, msg ipc.IPCMessage, emit func
 		return err
 	}
 	return emit(ipc.IPCEvent{Type: ipc.EventTypeStreamEnd, Done: true, RequestID: msg.RequestID})
+}
+
+func buildTUIHelp() string {
+	return strings.TrimSpace(`**Aurelia TUI Help**
+
+Type a message and press Enter to chat.
+
+Commands:
+- /help — show this help
+- /status — show daemon, model, cwd, and session status
+- /model — list available models
+- /model <name> — switch model
+- /model auto — use PI automatic model selection
+- /model refresh — refresh the model list
+- /cwd — show current project binding
+- /cwd <path> — set the project working directory
+- /cwd clear — remove the project binding
+
+Keyboard:
+- Esc — cancel the current response
+- Ctrl+L — clear the screen
+- Ctrl+C — quit
+- Alt+Enter or Ctrl+J — insert a newline`)
 }
 
 // handleTUISend processes a TUI send message through the pipeline.
