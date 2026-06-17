@@ -18,12 +18,26 @@ const MaxMessageTextLength = 4000
 // MaxRequestIDLength is the maximum allowed length for IPCMessage.RequestID.
 const MaxRequestIDLength = 64
 
-// ReservedTUIChatID is the reserved chat ID for TUI local DM conversations.
-// This negative ID is in a namespace separate from Telegram's positive chat IDs.
+// ReservedTUIChatID is the reserved chat ID for the default TUI local DM
+// conversation. This negative ID is in a namespace separate from Telegram's
+// positive chat IDs.
 const ReservedTUIChatID int64 = -9000001
 
-// IsReservedTUIID returns true if the chat ID is a reserved TUI local ID.
+// ReservedTUIChatIDFloor is the most negative chat ID reserved for TUI local
+// sessions. Together with ReservedTUIChatID, this defines the TUI local
+// namespace: [-9000009, -9000001] — 9 slots for named local sessions.
+// ReservedTUIChatID (-9000001) is the default DM; -9000002..-9000009 are
+// available for user-named sessions (e.g. "tui:work", "tui:research").
+const ReservedTUIChatIDFloor int64 = -9000009
+
+// IsReservedTUIID returns true if the chat ID is in the reserved TUI local
+// namespace [ReservedTUIChatIDFloor, ReservedTUIChatID].
 func IsReservedTUIID(chatID int64) bool {
+	return chatID <= ReservedTUIChatID && chatID >= ReservedTUIChatIDFloor
+}
+
+// IsDefaultTUISession returns true if the chat ID is the default TUI DM.
+func IsDefaultTUISession(chatID int64) bool {
 	return chatID == ReservedTUIChatID
 }
 
@@ -47,6 +61,16 @@ const (
 	MsgTypeCommand = "command"
 	// MsgTypeHistory requests recent UI-safe transcript messages for the TUI.
 	MsgTypeHistory = "history"
+	// MsgTypeSessions requests the list of TUI local sessions.
+	MsgTypeSessions = "sessions"
+	// MsgTypeSessionCreate creates a new TUI local session with a name.
+	// The daemon assigns a ChatID from the reserved range.
+	MsgTypeSessionCreate = "session_create"
+	// MsgTypeSessionOpen opens/switches to an existing TUI local session.
+	// The ChatID field selects the session to activate.
+	MsgTypeSessionOpen = "session_open"
+	// MsgTypeSessionDelete removes a TUI local session.
+	MsgTypeSessionDelete = "session_delete"
 )
 
 // IPC event types sent from server to client.
@@ -63,6 +87,14 @@ const (
 	EventTypeAck = "ack"
 	// EventTypeHistory returns JSON-encoded history messages in Body.
 	EventTypeHistory = "history"
+	// EventTypeSessions returns JSON-encoded session list in Body.
+	EventTypeSessions = "sessions"
+	// EventTypeSessionCreated returns JSON-encoded created session in Body.
+	EventTypeSessionCreated = "session_created"
+	// EventTypeSessionOpened returns JSON-encoded opened session in Body.
+	EventTypeSessionOpened = "session_opened"
+	// EventTypeSessionDeleted confirms a session was deleted.
+	EventTypeSessionDeleted = "session_deleted"
 )
 
 // IPCMessage is sent from the TUI client to the daemon.

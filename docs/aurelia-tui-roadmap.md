@@ -1,7 +1,7 @@
 # Aurelia TUI — Plano de Implementação
 
 **Sprint:** J (pós Auto-Skills)
-**Status:** 🟢 Fase 2 MVP implementada — branch `feature/tui-mvp`
+**Status:** 🟢 Fase 3 implementada — branch `feature/tui-multi-session`
 **Depende de:** Sprint E (Project Memory), Sprint F (Wiki Memory Gateway)
 **Desbloqueia:** Interface alternativa ao Telegram, onboarding sem bot, uso em contexto de terminal/IDE
 
@@ -12,8 +12,12 @@
 O Telegram é hoje o único ponto de entrada conversacional da Aurelia. Isso cria três fricções reais:
 
 1. **Contexto de terminal** — trabalhar num projecto no terminal e ter de trocar para o telemóvel (ou Telegram Desktop) para falar com a Aurelia quebra o fluxo de trabalho
-2. **Sessões não retomáveis cross-surface** — iniciar uma sessão de trabalho no Telegram e querer retomá-la num terminal (ou vice-versa) não é possível hoje
+2. **Sessões isoladas** — no Telegram, os tópicos foram uma workaround para ter contextos separados (cada tópico com /cwd próprio). A TUI resolve isto nativamente com sessões locais nomeadas, sem precisar de importar nada do Telegram
 3. **Dependência de conectividade** — o Telegram requer ligação à internet e autenticação externa; uma TUI local comunica directamente com o daemon
+
+> **Decisão 2026-06-17:** Telegram e TUI são superfícies independentes
+> por design. O `--attach` (continuar no terminal uma conversa iniciada
+> no Telegram) foi removido do roadmap. Ver detalhes na Fase 5.
 
 ---
 
@@ -107,15 +111,20 @@ Esta refactorização é **Fase 0** — pequena, localizada, sem risco de regres
 
 ## Mapeamento Telegram → TUI
 
+Telegram e TUI são **superfícies independentes** por design (decisão
+2026-06-17). Não há importação de sessões entre as duas. O mapeamento
+abaixo mostra como conceitos equivalentes se traduzem, não que são
+partilhados.
+
 | Conceito Telegram | Conceito TUI | Implementação |
 |---|---|---|
-| Chat directo com o bot | Sessão DM | `ConversationKey{chat_id: localDM, thread_id: 0}` |
-| Grupo com tópicos | Chat com sidebar de tópicos | `ConversationKey{chat_id: groupID, thread_id: topicID}` |
+| Chat directo com o bot | Sessão DM local | `ConversationKey{chat_id: ReservedTUIChatID, thread_id: 0}` |
+| Grupo com tópicos | Sessões locais nomeadas | Cada sessão = um `ChatID` no range reservado, com /cwd próprio |
 | Mensagem de texto | Input da TUI | `IncomingMessage` via `TUITransport` |
 | Resposta do bot | Viewport renderizado | Stream de `OutgoingMessage` com glamour |
 | `/cwd`, `/status`, etc. | Comandos idênticos no input | Parser de comandos reutilizado do pipeline |
 | Projecto activo | Indicador no header | Lê cwd do daemon |
-| Sessão persistente | Retoma por `ConversationKey` | Mesmas chaves, mesmo SQLite |
+| Sessão persistente | Retoma por `ConversationKey` | Mesmas chaves, mesmo SQLite — mas namespaces separados |
 
 ---
 
@@ -199,23 +208,29 @@ type IPCEvent struct {
 
 ---
 
-### Fase 3 — Multi-sessão e Sidebar (3-4 dias)
-*Reflectir a estrutura de chats do Telegram.*
+### Fase 3 — Multi-sessão e Sidebar (3-4 dias) ✅
+*Sessões locais isoladas, cada uma com /cwd e session file PI próprios.*
 
 **Conceito de sessões locais:**
 
-A TUI cria `ConversationKey` locais que coexistem com as do Telegram. Um `chat_id` local (e.g. `-9000001`) é reservado para sessions TUI. Um utilizador pode ter:
-- `tui:dm` — conversa directa local (equivale ao DM do Telegram)
+A TUI cria `ConversationKey` locais no namespace reservado [-9000009,
+-9000001]. Cada sessão é um compartimento estanque com /cwd, session
+file PI, e histórico independentes. Um utilizador pode ter:
+- `tui:dm` — conversa directa local (sessão default, ChatID=-9000001)
 - `tui:work` — sessão de trabalho com nome personalizado
-- `telegram:grupo-x/topico-dev` — sessão importada do Telegram (read + write)
+- `tui:research` — outra sessão nomeada para um contexto diferente
+
+> **Nota 2026-06-17:** Sessões importadas do Telegram (`telegram:...`)
+> foram removidas do roadmap. Ver decisão na Fase 5. Telegram e TUI são
+> superfícies independentes por design.
 
 **Tasks:**
-- [ ] Sidebar com lista de sessões (locais + Telegram se autenticado)
-- [ ] Navegação: `↑↓` na sidebar, `enter` para abrir sessão
-- [ ] Criar nova sessão local: `n` na sidebar
-- [ ] Persistência de sessões TUI no SQLite do daemon
-- [ ] Header com nome da sessão, `cwd`, projecto activo
-- [ ] Histórico de mensagens por sessão (carregado do daemon ao abrir)
+- [x] Sidebar com lista de sessões (locais + Telegram se autenticado)
+- [x] Navegação: `↑↓` na sidebar, `enter` para abrir sessão
+- [x] Criar nova sessão local: `n` na sidebar
+- [x] Persistência de sessões TUI no SQLite do daemon
+- [x] Header com nome da sessão, `cwd`, projecto activo
+- [x] Histórico de mensagens por sessão (carregado do daemon ao abrir)
 
 ---
 
@@ -255,6 +270,42 @@ ao chat, útil para ver contexto rápido sem sair da conversa.
 
 ---
 
+### Fase 4.5 — Image Input / Vision (3-4 dias)
+
+*Enviar imagens ao modelo vision directamente do terminal — screenshots,
+diagramas, fotos — sem trocar para o Telegram.*
+
+**Spec:** `.specs/features/tui-image-input/spec.md`
+**Design:** `.specs/features/tui-image-input/design.md`
+**Tasks:** `.specs/features/tui-image-input/tasks.md`
+
+Toda a infraestrutura backend já existe (bridge protocol, pipeline,
+`applyVisionFallback`). Esta fase adiciona apenas a camada TUI.
+
+**Métodos de input:**
+
+| Método | UX | Prioridade |
+|--------|-----|------------|
+| `/img <path>` | Escreves `/img ~/screenshots/erro.png` + pergunta | P1 |
+| `ctrl+v` (clipboard) | Screenshot → ctrl+v na TUI → pergunta | P2 |
+| Drag-and-drop | Arrastas ficheiro para o terminal | P3 |
+
+**Tasks:**
+- [ ] Extrair `encodeImageAttachment` para `pkg/images/` (partilhado Telegram + TUI)
+- [ ] Adicionar `IPCImage` ao protocolo IPC + validação
+- [ ] Handler do daemon: converter IPCImage → ImageAttachment, passar ao pipeline
+- [ ] TUI: comando `/img <path>` com badges `[📎 nome.png]`
+- [ ] TUI: `ctrl+v` clipboard (osascript macOS, xclip/wl-paste Linux)
+- [ ] TUI: drag-and-drop — detectar path de imagem em paste de texto
+- [ ] `ctrl+x` limpa imagens pendentes
+- [ ] Testes + validação ao vivo com modelo vision
+
+**Critério de saída:** consegues enviar um screenshot à Aurelia pela TUI
+e receber uma análise do modelo vision, com `applyVisionFallback`
+trocando automaticamente se o modelo activo não suportar imagens.
+
+---
+
 ### Fase 5 — Polish e Distribuição (2-3 dias)
 
 **Tasks:**
@@ -262,10 +313,33 @@ ao chat, útil para ver contexto rápido sem sair da conversa.
 - [x] Mouse support (`tea.WithMouseCellMotion()` + scroll no viewport)
 - [x] Resize handling básico (terminal window resize)
 - [ ] `--session` flag para abrir directamente numa sessão: `aurelia-tui --session tui:work`
-- [ ] `--attach` flag para retomar sessão Telegram: `aurelia-tui --attach telegram:chat_id/thread_id`
 - [ ] Build targets: `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`
 - [ ] Instalação via `go install`: `go install github.com/igormaneschy/aurelia/cmd/aurelia-tui@latest`
 - [ ] Makefile target: `make tui`
+
+> **Decisão 2026-06-17 — `--attach` removido do roadmap.**
+> O `--attach telegram:chat_id/thread_id` foi originalmente planeado para
+> permitir retomar no terminal uma conversa iniciada no Telegram. Com a
+> Fase 3 (multi-sessão local), cada sessão TUI tem o seu próprio /cwd,
+> session file PI, e histórico — o isolamento é nativo e não precisa de
+> importar nada do Telegram.
+>
+> Análise de trade-offs:
+> - **A favor de remover**: complexidade de segurança (permitir ChatID
+>   positivo no IPC quebra o namespace local), races cross-surface (TUI
+>   e Telegram a enviar turnos concorrentes no mesmo session file),
+>   modelo mental confuso ("esta sessão é local ou espelho?"), caso de
+>   uso raro (se estás no computador, usas a TUI; se não estás, usas o
+>   Telegram — a sobreposição é marginal).
+> - **O contexto real é o /cwd**, não a conversa. O PI lê os ficheiros
+>   do projecto independentemente de onde a conversa aconteceu.
+> - **A infraestrutura para `--attach` já existe** (session.Store indexa
+>   por ChatID) — se a necessidade surgir no futuro, é uma camada fina
+>   por cima. A decisão não é irreversível.
+>
+> As sessões Telegram e TUI são agora **compartimentos estanques** por
+> design. Telegram = comunicação assíncrona fora do computador. TUI =
+> trabalho focado no terminal.
 
 ---
 
@@ -284,8 +358,9 @@ Sprint J: TUI ← AQUI                        🔴 proposta
   ├─ Fase 2: TUI MVP (5d)
   ├─ Fase 3: Multi-sessão (4d)
   ├─ Fase 4: Painel de Estado do Projeto (3d)
+  ├─ Fase 4.5: Image Input / Vision (3-4d)
   └─ Fase 5: Polish + Distribuição (3d)
-     Total estimado: ~2.5 semanas
+     Total estimado: ~3 semanas
 ```
 
 **Nota:** A Fase 0 (Transport Abstraction) pode e deve ser feita **antes** do Sprint J — idealmente junto com o Sprint D0 ou E, porque não tem risco de regressão e a refactorização vai ser necessária de qualquer forma.
@@ -298,8 +373,7 @@ Sprint J: TUI ← AQUI                        🔴 proposta
 |---|---|---|
 | Bubble Tea ELM architecture difícil de manter em apps grandes | Médio | Dividir em sub-modelos por componente (sidebar model, chat model, project state model) com `tea.Cmd` para comunicação |
 | IPC unix socket não disponível em Windows | Baixo | Aurelia corre em macOS/Linux; named pipe como fallback futuro |
-| Divergência de estado entre TUI e Telegram | Médio | Toda a escrita passa pelo daemon — TUI nunca escreve directamente no SQLite |
-| Sessões TUI com `chat_id` local conflituarem com IDs Telegram | Baixo | Namespace separado: IDs locais negativos < -9000000, Telegram usa range diferente |
+| Sessões TUI com `chat_id` local conflituarem com IDs Telegram | Baixo | Namespace separado: IDs locais negativos [-9000009,-9000001], Telegram usa range positivo. Daemon força IDs no range (`forceTUIIDs`) |
 | Streaming lento no terminal com mensagens longas | Baixo | Glamour renderiza por chunks; viewport só renderiza o visível (`content-visibility` equivalente) |
 
 ---
@@ -308,9 +382,9 @@ Sprint J: TUI ← AQUI                        🔴 proposta
 
 - [ ] `aurelia-tui` corre como binary independente sem configuração extra
 - [ ] Conversa completa com streaming funciona pela TUI
-- [ ] Sidebar mostra sessões locais e sessões Telegram (se autenticado)
-- [ ] Retomar sessão iniciada no Telegram funciona com `--attach`
+- [x] Sidebar mostra sessões locais com navegação e gestão (criar/abrir/apagar)
 - [ ] Painel de estado mostra cwd, binding source, resumo de memória
-- [ ] Nenhuma regressão no Telegram transport
-- [ ] `go build ./... && go vet ./... && go test ./...` limpo
+- [ ] Envio de imagens funciona (`/img`, `ctrl+v` clipboard, drag-drop) com modelo vision
+- [x] Nenhuma regressão no Telegram transport
+- [x] `go build ./... && go vet ./... && go test ./...` limpo
 - [ ] Funciona em macOS (darwin/arm64) e Linux (amd64/arm64)

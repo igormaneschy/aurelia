@@ -151,8 +151,10 @@ func (g *tuiRunGuard) release() {
 }
 
 // makeTUIHandler creates the IPC stream handler for TUI clients.
-// All TUI requests are forced to the local TUI namespace:
-// ChatID=ReservedTUIChatID, ThreadID=0, UserID=os.Getuid().
+// All TUI requests are forced into the local TUI namespace:
+// ChatID must be in [ReservedTUIChatIDFloor, ReservedTUIChatID]; any other
+// value (including Telegram IDs) is forced to the default DM.
+// ThreadID is always 0; UserID is always os.Getuid().
 func makeTUIHandler(a *app) func(context.Context, ipc.IPCMessage, func(ipc.IPCEvent) error) error {
 	return func(ctx context.Context, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
 		// Emit ack for all messages.
@@ -162,21 +164,22 @@ func makeTUIHandler(a *app) func(context.Context, ipc.IPCMessage, func(ipc.IPCEv
 
 		switch msg.Type {
 		case ipc.MsgTypeCommand:
-			// Force local TUI IDs (security: ignore client-supplied IDs).
-			msg.ChatID = ipc.ReservedTUIChatID
-			msg.ThreadID = 0
-			msg.UserID = int64(os.Getuid())
+			forceTUIIDs(&msg)
 			return handleTUICommand(ctx, a, msg, emit)
 		case ipc.MsgTypeHistory:
-			msg.ChatID = ipc.ReservedTUIChatID
-			msg.ThreadID = 0
-			msg.UserID = int64(os.Getuid())
+			forceTUIIDs(&msg)
 			return handleTUIHistory(ctx, a, msg, emit)
 		case ipc.MsgTypeSend:
-			msg.ChatID = ipc.ReservedTUIChatID
-			msg.ThreadID = 0
-			msg.UserID = int64(os.Getuid())
+			forceTUIIDs(&msg)
 			return handleTUISend(ctx, a, msg, emit)
+		case ipc.MsgTypeSessions:
+			return handleTUISessions(ctx, a, msg, emit)
+		case ipc.MsgTypeSessionCreate:
+			return handleTUISessionCreate(ctx, a, msg, emit)
+		case ipc.MsgTypeSessionOpen:
+			return handleTUISessionOpen(ctx, a, msg, emit)
+		case ipc.MsgTypeSessionDelete:
+			return handleTUISessionDelete(ctx, a, msg, emit)
 		case ipc.MsgTypeSubscribe:
 			// Terminal error: subscribe not supported.
 			return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "subscribe not supported", RequestID: msg.RequestID})
@@ -186,7 +189,19 @@ func makeTUIHandler(a *app) func(context.Context, ipc.IPCMessage, func(ipc.IPCEv
 	}
 }
 
-// tuiIDs returns the forced local TUI identity.
+// forceTUIIDs clamps client-supplied IDs into the local TUI namespace.
+// A ChatID already in the reserved range is preserved (the client is
+// selecting a named session); anything else is forced to the default DM.
+// ThreadID is always 0; UserID is always the local OS user.
+func forceTUIIDs(msg *ipc.IPCMessage) {
+	if !ipc.IsReservedTUIID(msg.ChatID) {
+		msg.ChatID = ipc.ReservedTUIChatID
+	}
+	msg.ThreadID = 0
+	msg.UserID = int64(os.Getuid())
+}
+
+// tuiIDs returns the forced local TUI identity for the default DM session.
 func tuiIDs() (chatID int64, threadID int, userID int64) {
 	return ipc.ReservedTUIChatID, 0, int64(os.Getuid())
 }
@@ -197,7 +212,7 @@ func handleTUICommand(ctx context.Context, a *app, msg ipc.IPCMessage, emit func
 	chatID, threadID, userID := msg.ChatID, int(msg.ThreadID), msg.UserID
 
 	// Safety: these should already be forced by makeTUIHandler, but guard here too.
-	if chatID != ipc.ReservedTUIChatID {
+	if !ipc.IsReservedTUIID(chatID) {
 		chatID = ipc.ReservedTUIChatID
 	}
 	if threadID != 0 {
@@ -242,6 +257,8 @@ Commands:
 - /cwd clear — remove the project binding
 
 Keyboard:
+- Ctrl+S or F2 — focus sidebar to navigate sessions
+- In sidebar: ↑↓ navigate, enter open, n new, d delete, esc exit
 - Esc — cancel the current response
 - Ctrl+L — clear the screen
 - Ctrl+C — quit
@@ -303,10 +320,13 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 		output.SendError(chatID, threadID, pipeErr.Error())
 	}
 
-	// Wait for pipeline completion or context cancellation.
+	// Wait for pipeline completion or context cancellation (client
+	// disconnected). On cancellation, abort the pipeline so it stops
+	// consuming tokens and running tools.
 	select {
 	case <-output.done:
 	case <-ctx.Done():
+		pipeSvc.Cancel(chatID, threadID, userID)
 		return ctx.Err()
 	}
 
@@ -322,7 +342,8 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 }
 
 // handleTUICwd processes /cwd commands from the TUI.
-// All writes are forced to ReservedTUIChatID/0 regardless of client-supplied IDs.
+// All writes are forced into the reserved TUI namespace regardless of
+// client-supplied IDs.
 func handleTUICwd(ctx context.Context, a *app, chatID int64, threadID int, userID int64, text string) string {
 	args := strings.TrimSpace(strings.TrimPrefix(text, "/cwd"))
 
@@ -347,7 +368,7 @@ func handleTUICwd(ctx context.Context, a *app, chatID int64, threadID int, userI
 		return fmt.Sprintf("❌ Invalid path: %s", err)
 	}
 
-	// Set binding — always under ReservedTUIChatID.
+	// Set binding — under the active TUI session's ChatID.
 	binding := projectbinding.ProjectBinding{
 		Key:         projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID},
 		CWD:         cwd,
@@ -417,6 +438,8 @@ func handleTUIStatus(ctx context.Context, a *app, chatID int64, threadID int, us
 		resolved, err := a.bindings.Resolve(ctx, projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID})
 		if err == nil && resolved != nil && resolved.Binding != nil {
 			b.WriteString(fmt.Sprintf("📂 CWD: `%s`\n", resolved.Binding.CWD))
+		} else {
+			b.WriteString("📂 No project set.\n")
 		}
 	}
 

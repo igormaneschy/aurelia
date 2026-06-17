@@ -65,7 +65,7 @@ func (m Model) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Timestamp: time.Now(),
 		})
 		m.ensureViewport()
-		return m, tea.Batch(fetchTUIStatus(m.ipcClient), fetchTUIHistory(m.ipcClient))
+		return m, tea.Batch(fetchTUIStatus(m.ipcClient, m.activeSession), fetchTUIHistory(m.ipcClient, m.activeSession), fetchTUISessions(m.ipcClient))
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -130,16 +130,24 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tuiStatusMsg:
-		if msg.err == nil && msg.cwd != "" {
-			m.cwdPath = msg.cwd
+		if msg.err == nil {
+			if msg.cwd != "" {
+				m.cwdPath = msg.cwd
+			} else {
+				// No cwd marker in status response — session has no project.
+				m.cwdPath = "not set"
+			}
 		}
 		return m, nil
 
 	case tuiHistoryMsg:
-		if msg.err == nil && len(msg.messages) > 0 && m.canApplyStartupHistory() {
-			m.messages = msg.messages
-			m.updateViewport()
+		if msg.err == nil && len(msg.messages) > 0 {
+			if m.switchingSession || m.canApplyStartupHistory() {
+				m.messages = msg.messages
+				m.updateViewport()
+			}
 		}
+		m.switchingSession = false
 		return m, nil
 
 	case daemonErrorMsg:
@@ -201,6 +209,89 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 		m.updateViewport()
 		return m, nil
+
+	case tuiSessionsMsg:
+		if msg.err == nil {
+			m.sessions = msg.sessions
+			// Ensure the active session is in the list (the default DM
+			// always exists implicitly even if not in the store).
+			m.ensureDefaultSessionInList()
+			// Clamp sidebar cursor to valid range.
+			if m.sidebarCursor >= len(m.sessions) {
+				m.sidebarCursor = maxInt(0, len(m.sessions)-1)
+			}
+		}
+		return m, nil
+
+	case tuiSessionCreatedMsg:
+		if msg.err != nil {
+			m.messages = append(m.messages, chatMessage{
+				Sender:    "⚠️",
+				Text:      fmt.Sprintf("Failed to create session: %s", msg.err),
+				Timestamp: time.Now(),
+			})
+			m.updateViewport()
+			return m, nil
+		}
+		// Switch to the newly created session.
+		m.activeSession = msg.session.ChatID
+		m.messages = []chatMessage{}
+		m.viewportSet = false
+		m.switchingSession = true
+		m.updateViewport()
+		// Reload sessions list + history for the new session.
+		return m, tea.Batch(
+			fetchTUISessions(m.ipcClient),
+			fetchTUIHistory(m.ipcClient, m.activeSession),
+			fetchTUIStatus(m.ipcClient, m.activeSession),
+		)
+
+	case tuiSessionOpenedMsg:
+		if msg.err != nil {
+			m.messages = append(m.messages, chatMessage{
+				Sender:    "⚠️",
+				Text:      fmt.Sprintf("Failed to open session: %s", msg.err),
+				Timestamp: time.Now(),
+			})
+			m.updateViewport()
+			return m, nil
+		}
+		// Switch to the opened session.
+		m.activeSession = msg.session.ChatID
+		m.messages = []chatMessage{}
+		m.viewportSet = false
+		m.switchingSession = true
+		m.updateViewport()
+		m.sidebarFocused = false
+		// Reload history + status for the new session.
+		return m, tea.Batch(
+			fetchTUIHistory(m.ipcClient, m.activeSession),
+			fetchTUIStatus(m.ipcClient, m.activeSession),
+		)
+
+	case tuiSessionDeletedMsg:
+		if msg.err != nil {
+			m.messages = append(m.messages, chatMessage{
+				Sender:    "⚠️",
+				Text:      fmt.Sprintf("Failed to delete session: %s", msg.err),
+				Timestamp: time.Now(),
+			})
+			m.updateViewport()
+			return m, nil
+		}
+		// If the active session was deleted, fall back to the default DM.
+		if m.activeSession == msg.chatID {
+			m.activeSession = ipc.ReservedTUIChatID
+			m.messages = []chatMessage{}
+			m.viewportSet = false
+			m.updateViewport()
+			return m, tea.Batch(
+				fetchTUISessions(m.ipcClient),
+				fetchTUIHistory(m.ipcClient, m.activeSession),
+				fetchTUIStatus(m.ipcClient, m.activeSession),
+			)
+		}
+		return m, fetchTUISessions(m.ipcClient)
 	}
 
 	return m, nil
@@ -231,10 +322,30 @@ func (m Model) updateError(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// ensureDefaultSessionInList adds the default DM session to the list if
+// it's not already present. The DM always exists implicitly.
+func (m *Model) ensureDefaultSessionInList() {
+	for _, s := range m.sessions {
+		if s.ChatID == ipc.ReservedTUIChatID {
+			return
+		}
+	}
+	// Prepend the default DM so it's always first.
+	m.sessions = append([]tuiSessionInfo{
+		{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
+	}, m.sessions...)
+}
+
 // handleKeyMsg processes keyboard input.
 // enter submits when not waiting. alt+enter inserts a newline in the textarea.
 // ctrl+j is also accepted as a portable newline fallback.
+// When the sidebar is focused, ↑↓ navigate sessions, enter opens, n creates.
 func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Sidebar-focused mode: intercept navigation keys.
+	if m.sidebarFocused && m.state == stateChat {
+		return m.handleSidebarKey(msg)
+	}
+
 	switch {
 	case msg.String() == "ctrl+c":
 		return m, tea.Quit
@@ -247,6 +358,19 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case isSidebarToggleKey(msg):
 		m.showSidebar = !m.showSidebar
 		m.updateViewport()
+		return m, nil
+
+	case isSidebarFocusKey(msg):
+		if m.showSidebar && len(m.sessions) > 0 {
+			m.sidebarFocused = true
+			// Set cursor to the active session if found.
+			for i, s := range m.sessions {
+				if s.ChatID == m.activeSession {
+					m.sidebarCursor = i
+					break
+				}
+			}
+		}
 		return m, nil
 
 	case isViewportScrollKey(msg):
@@ -306,6 +430,74 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	default:
 		return m.delegateKeyToTextarea(msg)
+	}
+}
+
+// handleSidebarKey processes keys when the sidebar is focused.
+func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+
+	case "esc", "tab", "ctrl+i", "\t":
+		// Exit sidebar focus — return to input.
+		m.sidebarFocused = false
+		if msg.String() == "tab" || msg.String() == "ctrl+i" || msg.String() == "\t" {
+			// Tab also toggles sidebar visibility.
+			m.showSidebar = !m.showSidebar
+			m.updateViewport()
+		}
+		return m, nil
+
+	case "up", "k":
+		if m.sidebarCursor > 0 {
+			m.sidebarCursor--
+		}
+		return m, nil
+
+	case "down", "j":
+		if m.sidebarCursor < len(m.sessions)-1 {
+			m.sidebarCursor++
+		}
+		return m, nil
+
+	case "enter":
+		if m.sidebarCursor < 0 || m.sidebarCursor >= len(m.sessions) {
+			return m, nil
+		}
+		target := m.sessions[m.sidebarCursor]
+		if target.ChatID == m.activeSession {
+			// Already on this session — just unfocus.
+			m.sidebarFocused = false
+			return m, nil
+		}
+		return m, openTUISession(m.ipcClient, target.ChatID)
+
+	case "n":
+		// Create a new session — use a default name based on count.
+		name := fmt.Sprintf("session-%d", len(m.sessions))
+		return m, createTUISession(m.ipcClient, name)
+
+	case "d":
+		// Delete the selected session (not the default DM).
+		if m.sidebarCursor < 0 || m.sidebarCursor >= len(m.sessions) {
+			return m, nil
+		}
+		target := m.sessions[m.sidebarCursor]
+		if target.ChatID == ipc.ReservedTUIChatID {
+			// Can't delete the default DM — show a message.
+			m.messages = append(m.messages, chatMessage{
+				Sender:    "⚠️",
+				Text:      "Cannot delete the default DM session.",
+				Timestamp: time.Now(),
+			})
+			m.updateViewport()
+			return m, nil
+		}
+		return m, deleteTUISession(m.ipcClient, target.ChatID)
+
+	default:
+		return m, nil
 	}
 }
 
@@ -402,6 +594,8 @@ func (m Model) handleViewportMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // cancelStreaming aborts the current streaming response, closing the reader
 // and returning the model to the ready state. Triggered by Esc during waiting.
+// Closing the reader closes the IPC connection, which cancels the daemon-side
+// handler context, which aborts the pipeline.
 func (m Model) cancelStreaming() (tea.Model, tea.Cmd) {
 	m.waiting = false
 	if m.reader != nil {
@@ -411,7 +605,7 @@ func (m Model) cancelStreaming() (tea.Model, tea.Cmd) {
 	m.streamBuf = ""
 	m.messages = append(m.messages, chatMessage{
 		Sender:    "⚠️",
-		Text:      "(cancelled)",
+		Text:      "(cancelled — pipeline aborting)",
 		Timestamp: time.Now(),
 	})
 	m.updateViewport()
@@ -452,6 +646,14 @@ func isSidebarToggleKey(msg tea.KeyMsg) bool {
 	}
 	s := msg.String()
 	return s == "tab" || s == "ctrl+i" || s == "\t"
+}
+
+// isSidebarFocusKey returns true for ctrl+s or f2, which focus the
+// sidebar for session navigation. ctrl+s is the primary; f2 is the
+// fallback for terminals that intercept ctrl+s as XOFF flow control.
+func isSidebarFocusKey(msg tea.KeyMsg) bool {
+	s := msg.String()
+	return s == "ctrl+s" || s == "f2"
 }
 
 // handleStreamEvent processes a single IPC event.

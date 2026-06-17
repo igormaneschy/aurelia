@@ -7,6 +7,8 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/igormaneschy/aurelia/internal/ipc"
 )
 
 const (
@@ -70,7 +72,11 @@ var (
 				Foreground(lipgloss.Color("244"))
 
 	sidebarActiveStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("39")).
+			Foreground(lipgloss.Color("39")).
+			Bold(true)
+
+	sidebarCursorStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("226")).
 				Bold(true)
 
 	headerTitleStyle = lipgloss.NewStyle().
@@ -89,6 +95,11 @@ var (
 	statusReadyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	statusBusyStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 	statusErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+
+	// chatModeStyle highlights that file system tools are disabled.
+	chatModeStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("214")). // amber
+			Italic(true)
 )
 
 // View implements tea.Model.
@@ -251,8 +262,9 @@ func (m Model) renderStatusBar() string {
 		{label: "pg scroll", min: 64},
 		{label: "esc cancel", min: 82},
 		{label: "⌃L clear", min: 96},
-		{label: "tab sidebar", min: 114},
-		{label: "⌃C quit", min: 128},
+		{label: "⌃S/f2 sessions", min: 108},
+		{label: "tab sidebar", min: 124},
+		{label: "⌃C quit", min: 138},
 	}
 
 	parts := []string{}
@@ -271,15 +283,33 @@ type statusBarItem struct {
 }
 
 func (m Model) renderChatHeader() string {
-	project := truncateMiddle(projectName(m.cwdPath), maxInt(12, m.contentWidth()/3))
 	stateLabel := m.chromeState()
 	if m.waiting {
 		stateLabel = m.spinner.View() + " thinking"
 	}
-	meta := fmt.Sprintf("project %s   ·   daemon %s   ·   %s", project, m.daemonLabel, stateLabel)
+
+	// Session name in the header.
+	sessionName := "DM"
+	for _, s := range m.sessions {
+		if s.ChatID == m.activeSession {
+			if s.ChatID != ipc.ReservedTUIChatID {
+				sessionName = s.Name
+			}
+			break
+		}
+	}
+
+	var projectPart string
+	if m.isChatMode() {
+		projectPart = chatModeStyle.Render("chat mode")
+	} else {
+		projectName := truncateMiddle(projectName(m.cwdPath), maxInt(12, m.contentWidth()/3))
+		projectPart = headerMetaStyle.Render("project " + projectName)
+	}
+	meta := fmt.Sprintf("%s   ·   daemon %s   ·   %s", projectPart, m.daemonLabel, stateLabel)
 	header := lipgloss.JoinVertical(
 		lipgloss.Left,
-		headerTitleStyle.Render("Aurelia / DM")+"  "+headerMetaStyle.Render(meta),
+		headerTitleStyle.Render("Aurelia / "+sessionName)+"  "+headerMetaStyle.Render(meta),
 		headerRuleStyle.Render(strings.Repeat("─", maxInt(20, m.contentWidth()-2))),
 	)
 	return lipgloss.NewStyle().Width(m.contentWidth()).Render(header)
@@ -303,17 +333,64 @@ func (m Model) renderSidebar() string {
 		sidebarTitleStyle.Render("Aurelia"),
 		sidebarMutedStyle.Render("local terminal"),
 		"",
-		sidebarTitleStyle.Render("Session"),
-		sidebarActiveStyle.Render("● DM"),
-		sidebarMutedStyle.Render("  direct chat"),
-		"",
-		sidebarTitleStyle.Render("Project"),
-		truncateMiddle(projectName(m.cwdPath), sidebarWidth-4),
-		sidebarMutedStyle.Render(truncateMiddle(m.cwdPath, sidebarWidth-4)),
-		"",
-		sidebarTitleStyle.Render("Daemon"),
-		m.daemonLabel,
+		sidebarTitleStyle.Render("Sessions"),
 	}
+
+	if len(m.sessions) == 0 {
+		lines = append(lines, sidebarMutedStyle.Render("  (no sessions)"))
+	} else {
+		for i, s := range m.sessions {
+			label := s.Name
+			if s.ChatID == ipc.ReservedTUIChatID {
+				label = "DM"
+			}
+
+			// Determine display style.
+			isActive := s.ChatID == m.activeSession
+			isCursor := m.sidebarFocused && i == m.sidebarCursor
+
+			var prefix string
+			switch {
+			case isActive && isCursor:
+				prefix = "▶ ●"
+				lines = append(lines, sidebarActiveStyle.Render(prefix+" "+label))
+			case isActive:
+				prefix = "●"
+				lines = append(lines, sidebarActiveStyle.Render(prefix+" "+label))
+			case isCursor:
+				prefix = "▶"
+				lines = append(lines, sidebarCursorStyle.Render(prefix+" "+label))
+			default:
+				prefix = "○"
+				lines = append(lines, sidebarMutedStyle.Render(prefix+" "+label))
+			}
+		}
+	}
+
+	// Sidebar navigation hints when focused.
+	if m.sidebarFocused {
+		lines = append(lines, "",
+			sidebarMutedStyle.Render("↑↓ navigate"),
+			sidebarMutedStyle.Render("enter open"),
+			sidebarMutedStyle.Render("n new"),
+			sidebarMutedStyle.Render("d delete"),
+			sidebarMutedStyle.Render("esc exit"),
+		)
+	} else {
+		lines = append(lines, "",
+			sidebarTitleStyle.Render("Project"),
+			truncateMiddle(projectName(m.cwdPath), sidebarWidth-4),
+			sidebarMutedStyle.Render(truncateMiddle(m.cwdPath, sidebarWidth-4)),
+		)
+		if m.isChatMode() {
+			lines = append(lines, chatModeStyle.Render("(chat mode)"))
+		}
+		lines = append(lines, "",
+			sidebarTitleStyle.Render("Daemon"),
+			m.daemonLabel,
+		)
+	}
+
 	return strings.Join(lines, "\n")
 }
 

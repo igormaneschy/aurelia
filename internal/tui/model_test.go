@@ -283,7 +283,7 @@ func TestModel_EscCancelsStreaming(t *testing.T) {
 		t.Fatalf("expected 2 messages (original + cancel), got %d", len(m2.messages))
 	}
 	last := m2.messages[len(m2.messages)-1]
-	if last.Sender != "⚠️" || last.Text != "(cancelled)" {
+	if last.Sender != "⚠️" || last.Text != "(cancelled — pipeline aborting)" {
 		t.Errorf("expected cancel message, got sender=%q text=%q", last.Sender, last.Text)
 	}
 }
@@ -1329,6 +1329,61 @@ func TestModel_ChatViewDoesNotExceedShortTerminalHeight(t *testing.T) {
 
 	if lineCount > m.height {
 		t.Fatalf("expected view height <= %d lines, got %d", m.height, lineCount)
+	}
+}
+
+func TestModel_ChatHeaderShowsChatModeWhenNoCWD(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.width = 100
+	m.height = 40
+	m.daemonLabel = "ready"
+	// cwdPath is "not set" by default
+
+	header := stripANSIForTest(m.renderChatHeader())
+
+	if !strings.Contains(header, "chat mode") {
+		t.Errorf("expected header to show 'chat mode' when no cwd, got: %q", header)
+	}
+	if strings.Contains(header, "project") {
+		t.Errorf("expected header to NOT mention 'project' when in chat mode, got: %q", header)
+	}
+}
+
+func TestModel_SidebarShowsChatModeWhenNoCWD(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.daemonLabel = "ready"
+	m.sessions = []tuiSessionInfo{
+		{ChatID: -9000001, Name: "dm"},
+	}
+	// cwdPath is "not set" by default
+
+	sidebar := m.renderSidebar()
+	plain := stripANSIForTest(sidebar)
+
+	if !strings.Contains(plain, "chat mode") {
+		t.Errorf("expected sidebar to show '(chat mode)' when no cwd, got: %q", plain)
+	}
+}
+
+func TestModel_SidebarHidesChatModeWhenCWDSet(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.cwdPath = "/Users/igor/dev/aurelia"
+	m.daemonLabel = "ready"
+	m.sessions = []tuiSessionInfo{
+		{ChatID: -9000001, Name: "dm"},
+	}
+
+	sidebar := m.renderSidebar()
+	plain := stripANSIForTest(sidebar)
+
+	if strings.Contains(plain, "chat mode") {
+		t.Errorf("expected no 'chat mode' when cwd is set, got: %q", plain)
+	}
+	if !strings.Contains(plain, "aurelia") {
+		t.Errorf("expected sidebar project to show 'aurelia', got: %q", plain)
 	}
 }
 

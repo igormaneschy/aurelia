@@ -66,6 +66,36 @@ type healthCheckResultMsg struct {
 	latency time.Duration
 }
 
+// tuiSessionsMsg carries the list of TUI local sessions from the daemon.
+type tuiSessionsMsg struct {
+	sessions []tuiSessionInfo
+	err      error
+}
+
+// tuiSessionCreatedMsg carries a newly created session.
+type tuiSessionCreatedMsg struct {
+	session tuiSessionInfo
+	err     error
+}
+
+// tuiSessionOpenedMsg carries the session that was opened/switched to.
+type tuiSessionOpenedMsg struct {
+	session tuiSessionInfo
+	err     error
+}
+
+// tuiSessionDeletedMsg confirms a session was deleted.
+type tuiSessionDeletedMsg struct {
+	chatID int64
+	err    error
+}
+
+// tuiSessionInfo is the TUI-side representation of a session.
+type tuiSessionInfo struct {
+	ChatID int64
+	Name   string
+}
+
 // contextWithTimeout is a test-accessible timeout helper.
 var contextWithTimeout = func(d time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), d)
