@@ -52,7 +52,16 @@ type Model struct {
 	socketPath string
 	ipcClient  *ipc.Client
 
-	// Chat history
+	// Active session — ChatID of the currently open TUI local session.
+	// Default is ReservedTUIChatID (the DM).
+	activeSession int64
+
+	// Session list for sidebar
+	sessions       []tuiSessionInfo
+	sidebarCursor  int // index into sessions, 0-based
+	sidebarFocused bool
+
+	// Chat history (active session only — reloaded on session switch)
 	messages []chatMessage
 
 	// Viewport for scrolling chat
@@ -120,6 +129,7 @@ func NewModel(socketPath string) Model {
 		cwdPath:           "not set",
 		messages:          make([]chatMessage, 0),
 		inputHistoryIndex: 0,
+		activeSession:     ipc.ReservedTUIChatID,
 	}
 }
 
@@ -172,13 +182,13 @@ func runHealthCheck(client *ipc.Client) tea.Cmd {
 // fetchTUIStatus returns a command that asks the daemon for lightweight
 // session status used by the chrome/sidebar. It intentionally does not write
 // into the chat history.
-func fetchTUIStatus(client *ipc.Client) tea.Cmd {
+func fetchTUIStatus(client *ipc.Client, chatID int64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := contextWithTimeout(1500 * time.Millisecond)
 		defer cancel()
 		events, err := client.SendAndWait(ctx, ipc.IPCMessage{
 			Type:      ipc.MsgTypeCommand,
-			ChatID:    ipc.ReservedTUIChatID,
+			ChatID:    chatID,
 			ThreadID:  0,
 			UserID:    int64(os.Getuid()),
 			Text:      "/status",
@@ -198,13 +208,13 @@ type tuiHistoryPayload struct {
 
 // fetchTUIHistory asks the daemon for recent PI session transcript messages.
 // Failure is intentionally non-fatal so startup never blocks on history.
-func fetchTUIHistory(client *ipc.Client) tea.Cmd {
+func fetchTUIHistory(client *ipc.Client, chatID int64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := contextWithTimeout(3 * time.Second)
 		defer cancel()
 		events, err := client.SendAndWait(ctx, ipc.IPCMessage{
 			Type:      ipc.MsgTypeHistory,
-			ChatID:    ipc.ReservedTUIChatID,
+			ChatID:    chatID,
 			ThreadID:  0,
 			UserID:    int64(os.Getuid()),
 			RequestID: fmt.Sprintf("tui-history-%d", time.Now().UnixNano()),
@@ -249,7 +259,7 @@ func (m Model) submitMessage(text string) tea.Cmd {
 	userID := int64(os.Getuid())
 	msg := ipc.IPCMessage{
 		Type:      ipc.MsgTypeSend,
-		ChatID:    ipc.ReservedTUIChatID,
+		ChatID:    m.activeSession,
 		ThreadID:  0,
 		UserID:    userID,
 		Text:      text,
@@ -275,7 +285,7 @@ func (m Model) sendCommand(text string) tea.Cmd {
 	userID := int64(os.Getuid())
 	msg := ipc.IPCMessage{
 		Type:      ipc.MsgTypeCommand,
-		ChatID:    ipc.ReservedTUIChatID,
+		ChatID:    m.activeSession,
 		ThreadID:  0,
 		UserID:    userID,
 		Text:      text,
@@ -291,4 +301,132 @@ func (m Model) sendCommand(text string) tea.Cmd {
 		}
 		return &streamReaderMsg{reader: reader}
 	}
+}
+
+// fetchTUISessions asks the daemon for the list of TUI local sessions.
+func fetchTUISessions(client *ipc.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := contextWithTimeout(3 * time.Second)
+		defer cancel()
+		events, err := client.SendAndWait(ctx, ipc.IPCMessage{
+			Type:      ipc.MsgTypeSessions,
+			RequestID: fmt.Sprintf("tui-sessions-%d", time.Now().UnixNano()),
+		})
+		if err != nil {
+			return tuiSessionsMsg{err: err}
+		}
+		return sessionsFromEvents(events)
+	}
+}
+
+// createTUISession asks the daemon to create a new named session.
+func createTUISession(client *ipc.Client, name string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := contextWithTimeout(3 * time.Second)
+		defer cancel()
+		events, err := client.SendAndWait(ctx, ipc.IPCMessage{
+			Type:      ipc.MsgTypeSessionCreate,
+			Text:      name,
+			RequestID: fmt.Sprintf("tui-session-create-%d", time.Now().UnixNano()),
+		})
+		if err != nil {
+			return tuiSessionCreatedMsg{err: err}
+		}
+		return sessionCreatedFromEvents(events)
+	}
+}
+
+// openTUISession asks the daemon to open/switch to an existing session.
+func openTUISession(client *ipc.Client, chatID int64) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := contextWithTimeout(3 * time.Second)
+		defer cancel()
+		events, err := client.SendAndWait(ctx, ipc.IPCMessage{
+			Type:      ipc.MsgTypeSessionOpen,
+			ChatID:    chatID,
+			RequestID: fmt.Sprintf("tui-session-open-%d", time.Now().UnixNano()),
+		})
+		if err != nil {
+			return tuiSessionOpenedMsg{err: err}
+		}
+		return sessionOpenedFromEvents(events)
+	}
+}
+
+// deleteTUISession asks the daemon to delete a session.
+func deleteTUISession(client *ipc.Client, chatID int64) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := contextWithTimeout(3 * time.Second)
+		defer cancel()
+		_, err := client.SendAndWait(ctx, ipc.IPCMessage{
+			Type:      ipc.MsgTypeSessionDelete,
+			ChatID:    chatID,
+			RequestID: fmt.Sprintf("tui-session-delete-%d", time.Now().UnixNano()),
+		})
+		if err != nil {
+			return tuiSessionDeletedMsg{chatID: chatID, err: err}
+		}
+		return tuiSessionDeletedMsg{chatID: chatID}
+	}
+}
+
+// sessionsFromEvents parses the sessions list from IPC events.
+func sessionsFromEvents(events []ipc.IPCEvent) tuiSessionsMsg {
+	type sessionPayload struct {
+		ChatID int64  `json:"chat_id"`
+		Name   string `json:"name"`
+	}
+	for _, ev := range events {
+		if ev.Type != ipc.EventTypeSessions || ev.Body == "" {
+			continue
+		}
+		var payload []sessionPayload
+		if err := json.Unmarshal([]byte(ev.Body), &payload); err != nil {
+			return tuiSessionsMsg{err: fmt.Errorf("parse sessions: %w", err)}
+		}
+		sessions := make([]tuiSessionInfo, 0, len(payload))
+		for _, s := range payload {
+			sessions = append(sessions, tuiSessionInfo{ChatID: s.ChatID, Name: s.Name})
+		}
+		return tuiSessionsMsg{sessions: sessions}
+	}
+	return tuiSessionsMsg{}
+}
+
+// sessionCreatedFromEvents parses a created session from IPC events.
+func sessionCreatedFromEvents(events []ipc.IPCEvent) tuiSessionCreatedMsg {
+	type sessionPayload struct {
+		ChatID int64  `json:"chat_id"`
+		Name   string `json:"name"`
+	}
+	for _, ev := range events {
+		if ev.Type != ipc.EventTypeSessionCreated || ev.Body == "" {
+			continue
+		}
+		var s sessionPayload
+		if err := json.Unmarshal([]byte(ev.Body), &s); err != nil {
+			return tuiSessionCreatedMsg{err: fmt.Errorf("parse created session: %w", err)}
+		}
+		return tuiSessionCreatedMsg{session: tuiSessionInfo{ChatID: s.ChatID, Name: s.Name}}
+	}
+	return tuiSessionCreatedMsg{}
+}
+
+// sessionOpenedFromEvents parses an opened session from IPC events.
+func sessionOpenedFromEvents(events []ipc.IPCEvent) tuiSessionOpenedMsg {
+	type sessionPayload struct {
+		ChatID int64  `json:"chat_id"`
+		Name   string `json:"name"`
+	}
+	for _, ev := range events {
+		if ev.Type != ipc.EventTypeSessionOpened || ev.Body == "" {
+			continue
+		}
+		var s sessionPayload
+		if err := json.Unmarshal([]byte(ev.Body), &s); err != nil {
+			return tuiSessionOpenedMsg{err: fmt.Errorf("parse opened session: %w", err)}
+		}
+		return tuiSessionOpenedMsg{session: tuiSessionInfo{ChatID: s.ChatID, Name: s.Name}}
+	}
+	return tuiSessionOpenedMsg{}
 }
