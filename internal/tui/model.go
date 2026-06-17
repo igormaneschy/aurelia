@@ -4,6 +4,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"time"
@@ -183,6 +184,56 @@ func fetchTUIStatus(client *ipc.Client) tea.Cmd {
 		}
 		return tuiStatusMsg{cwd: cwdFromEvents(events)}
 	}
+}
+
+type tuiHistoryPayload struct {
+	Sender string `json:"sender"`
+	Text   string `json:"text"`
+}
+
+// fetchTUIHistory asks the daemon for recent PI session transcript messages.
+// Failure is intentionally non-fatal so startup never blocks on history.
+func fetchTUIHistory(client *ipc.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := contextWithTimeout(3 * time.Second)
+		defer cancel()
+		events, err := client.SendAndWait(ctx, ipc.IPCMessage{
+			Type:      ipc.MsgTypeHistory,
+			ChatID:    ipc.ReservedTUIChatID,
+			ThreadID:  0,
+			UserID:    int64(os.Getuid()),
+			RequestID: fmt.Sprintf("tui-history-%d", time.Now().UnixNano()),
+		})
+		if err != nil {
+			return tuiHistoryMsg{err: err}
+		}
+		return historyFromEvents(events)
+	}
+}
+
+func historyFromEvents(events []ipc.IPCEvent) tuiHistoryMsg {
+	for _, ev := range events {
+		if ev.Type != ipc.EventTypeHistory {
+			continue
+		}
+		var payload []tuiHistoryPayload
+		if err := json.Unmarshal([]byte(ev.Body), &payload); err != nil {
+			return tuiHistoryMsg{err: fmt.Errorf("parse history: %w", err)}
+		}
+		messages := make([]chatMessage, 0, len(payload))
+		for _, item := range payload {
+			if item.Text == "" || item.Sender == "" {
+				continue
+			}
+			messages = append(messages, chatMessage{
+				Sender:    item.Sender,
+				Text:      item.Text,
+				Timestamp: time.Now(),
+			})
+		}
+		return tuiHistoryMsg{messages: messages}
+	}
+	return tuiHistoryMsg{}
 }
 
 // submitMessage sends a message to the daemon and returns a command.

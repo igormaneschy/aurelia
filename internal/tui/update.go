@@ -65,7 +65,7 @@ func (m Model) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Timestamp: time.Now(),
 		})
 		m.ensureViewport()
-		return m, fetchTUIStatus(m.ipcClient)
+		return m, tea.Batch(fetchTUIStatus(m.ipcClient), fetchTUIHistory(m.ipcClient))
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -132,6 +132,13 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tuiStatusMsg:
 		if msg.err == nil && msg.cwd != "" {
 			m.cwdPath = msg.cwd
+		}
+		return m, nil
+
+	case tuiHistoryMsg:
+		if msg.err == nil && len(msg.messages) > 0 && m.canApplyStartupHistory() {
+			m.messages = msg.messages
+			m.updateViewport()
 		}
 		return m, nil
 
@@ -296,6 +303,13 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.textarea, cmd = m.textarea.Update(msg)
 		return m, cmd
 	}
+}
+
+func (m Model) canApplyStartupHistory() bool {
+	if m.waiting || m.reader != nil || len(m.messages) != 1 {
+		return false
+	}
+	return m.messages[0].Sender == "Aurelia" && strings.HasPrefix(m.messages[0].Text, "Connected to Aurelia daemon")
 }
 
 func (m Model) handleViewportMsg(msg tea.Msg) (tea.Model, tea.Cmd) {

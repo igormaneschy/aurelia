@@ -150,6 +150,35 @@ func TestTUIHandler_ModelNoBridgeReturnsCurrentModelAndHint(t *testing.T) {
 	}
 }
 
+func TestTUIHandler_HistoryWithoutSessionReturnsEmptyList(t *testing.T) {
+	a, ctx, cleanup := testApp(t)
+	defer cleanup()
+
+	handler := makeTUIHandler(a)
+	te := &testEmit{}
+
+	err := handler(ctx, ipc.IPCMessage{
+		Type:      ipc.MsgTypeHistory,
+		RequestID: "history-test",
+	}, te.emit)
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	if te.count() != 3 {
+		t.Fatalf("expected 3 events (ack, history, stream_end), got %d", te.count())
+	}
+	if te.events[1].Type != ipc.EventTypeHistory {
+		t.Fatalf("event[1] type = %q, want %q", te.events[1].Type, ipc.EventTypeHistory)
+	}
+	if te.events[1].Body != "[]" {
+		t.Fatalf("expected empty history body, got %q", te.events[1].Body)
+	}
+	if te.events[2].Type != ipc.EventTypeStreamEnd {
+		t.Fatalf("event[2] type = %q, want %q", te.events[2].Type, ipc.EventTypeStreamEnd)
+	}
+}
+
 func TestFormatTUIModelListGroupsAndLimitsModels(t *testing.T) {
 	models := []bridge.ModelInfo{
 		{Provider: "openai", ID: "gpt-5.1"},

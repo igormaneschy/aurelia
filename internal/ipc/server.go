@@ -266,7 +266,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 // validateMessage checks that an IPCMessage has valid fields before dispatch.
 func validateMessage(msg IPCMessage) error {
 	switch msg.Type {
-	case MsgTypeSend, MsgTypeSubscribe, MsgTypeCommand:
+	case MsgTypeSend, MsgTypeSubscribe, MsgTypeCommand, MsgTypeHistory:
 		// valid
 	default:
 		return fmt.Errorf("unknown message type %q", msg.Type)

@@ -30,6 +30,13 @@ type tuiStatusMsg struct {
 	err error
 }
 
+// tuiHistoryMsg carries recent user/assistant transcript messages loaded from
+// the daemon's PI session history. Errors are non-fatal at startup.
+type tuiHistoryMsg struct {
+	messages []chatMessage
+	err      error
+}
+
 // streamReaderMsg wraps an IPC response reader for the update loop.
 type streamReaderMsg struct {
 	reader *ipc.ResponseReader

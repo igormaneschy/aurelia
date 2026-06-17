@@ -45,6 +45,8 @@ const (
 	MsgTypeSubscribe = "subscribe"
 	// MsgTypeCommand sends a command (e.g. "/cwd", "/status") to the daemon.
 	MsgTypeCommand = "command"
+	// MsgTypeHistory requests recent UI-safe transcript messages for the TUI.
+	MsgTypeHistory = "history"
 )
 
 // IPC event types sent from server to client.
@@ -59,6 +61,8 @@ const (
 	EventTypeError = "error"
 	// EventTypeAck is an acknowledgement that a message was received.
 	EventTypeAck = "ack"
+	// EventTypeHistory returns JSON-encoded history messages in Body.
+	EventTypeHistory = "history"
 )
 
 // IPCMessage is sent from the TUI client to the daemon.

@@ -680,6 +680,30 @@ func (b *Bridge) GetSessionStats(ctx context.Context, opts RequestOptions) (*Ses
 	return &stats, nil
 }
 
+// GetSessionHistory returns UI-safe user/assistant messages from a PI session.
+// If opts.Resume is empty the bridge returns an empty history without creating
+// a new session.
+func (b *Bridge) GetSessionHistory(ctx context.Context, opts RequestOptions) ([]SessionHistoryMessage, error) {
+	ev, err := b.ExecuteSync(ctx, Request{
+		Command: "get-session-history",
+		Options: opts,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("bridge: get-session-history: %w", err)
+	}
+	if ev.Type == "error" {
+		return nil, fmt.Errorf("bridge: get-session-history error: %s", ev.Message)
+	}
+	if ev.Content == "" {
+		return nil, nil
+	}
+	var messages []SessionHistoryMessage
+	if err := json.Unmarshal([]byte(ev.Content), &messages); err != nil {
+		return nil, fmt.Errorf("bridge: get-session-history parse: %w", err)
+	}
+	return messages, nil
+}
+
 // ModelInfo describes a model available through the bridge.
 type ModelInfo struct {
 	Provider       string `json:"provider"`

@@ -99,6 +99,11 @@ interface ChatSessionState {
   createdAt: number;
 }
 
+interface SessionHistoryMessage {
+  sender: "Igor" | "Aurelia";
+  text: string;
+}
+
 const activeRequests = new Map<string, ActiveRequest>();
 const chatSessions = new Map<string, ChatSessionState>();
 
@@ -901,6 +906,35 @@ function textFromContent(content: unknown): string {
     .join("");
 }
 
+function textFromMessageContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) return textFromContent(content);
+  if (typeof content !== "object" || content === null) return "";
+
+  const obj = content as Record<string, unknown>;
+  if (typeof obj.text === "string") return obj.text;
+  if (obj.content !== undefined) return textFromMessageContent(obj.content);
+  return "";
+}
+
+function sessionHistoryFromMessages(messages: unknown[], limit = 100): SessionHistoryMessage[] {
+  const history: SessionHistoryMessage[] = [];
+  for (const raw of messages) {
+    if (typeof raw !== "object" || raw === null) continue;
+
+    const msg = raw as Record<string, unknown>;
+    const role = typeof msg.role === "string" ? msg.role : "";
+    const sender = role === "user" ? "Igor" : role === "assistant" ? "Aurelia" : "";
+    if (!sender) continue;
+
+    const text = textFromMessageContent(msg.content).trim();
+    if (!text) continue;
+    history.push({ sender, text });
+  }
+  if (history.length <= limit) return history;
+  return history.slice(history.length - limit);
+}
+
 function resolveModel(
   registry: ModelRegistry,
   provider: string | undefined,
@@ -1631,6 +1665,41 @@ async function handleGetSessionStats(req: Request): Promise<void> {
   }
 }
 
+// ── Handle get-session-history command ─────────────────────────────────────
+
+async function handleGetSessionHistory(req: Request): Promise<void> {
+  const reqId = req.request_id || "";
+  const emitReq = (obj: OutEvent) => emit({ ...obj, request_id: reqId });
+  const opts = req.options;
+
+  if (!opts?.resume) {
+    emitReq({ event: "result", content: "[]" });
+    return;
+  }
+  if (!existsSync(opts.resume)) {
+    redactedLog(`get-session-history skipped missing resume=${redactSDKError(opts.resume)}`);
+    emitReq({ event: "result", content: "[]" });
+    return;
+  }
+
+  let session: Awaited<ReturnType<typeof createPiSession>>["session"] | undefined;
+  try {
+    const piSession = await createPiSession({ ...opts, continue: false });
+    session = piSession.session;
+    const messages = session.state.messages ?? [];
+    const history = sessionHistoryFromMessages(messages, 100);
+    emitReq({ event: "result", content: JSON.stringify(history) });
+  } catch (err: unknown) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    redactedLog(`get-session-history error: rid=${reqId} ${errMsg}`);
+    emitReq({ event: "error", message: `get-session-history failed: ${redactSDKError(errMsg)}` });
+  } finally {
+    if (session) {
+      try { session.dispose(); } catch {}
+    }
+  }
+}
+
 // ── Handle compact-session command ────────────────────────────────────────
 
 async function handleCompactSession(req: Request): Promise<void> {
@@ -1898,6 +1967,11 @@ async function handleRequest(line: string): Promise<void> {
 
     case "get-session-stats": {
       await handleGetSessionStats(req);
+      break;
+    }
+
+    case "get-session-history": {
+      await handleGetSessionHistory(req);
       break;
     }
 

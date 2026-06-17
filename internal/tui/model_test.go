@@ -353,6 +353,67 @@ func TestModel_HealthCheckTickTriggersPing(t *testing.T) {
 	}
 }
 
+func TestHistoryFromEventsParsesHistoryPayload(t *testing.T) {
+	msg := historyFromEvents([]ipc.IPCEvent{{
+		Type: ipc.EventTypeHistory,
+		Body: `[{"sender":"Igor","text":"hello"},{"sender":"Aurelia","text":"hi"}]`,
+	}})
+
+	if msg.err != nil {
+		t.Fatalf("unexpected history parse error: %v", msg.err)
+	}
+	if len(msg.messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(msg.messages))
+	}
+	if msg.messages[0].Sender != "Igor" || msg.messages[0].Text != "hello" {
+		t.Fatalf("unexpected first history message: %#v", msg.messages[0])
+	}
+}
+
+func TestModel_HistoryMsgReplacesStartupMessage(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.width = 80
+	m.height = 24
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+	m.messages = []chatMessage{{Sender: "Aurelia", Text: "Connected to Aurelia daemon. Type a message or /help.", Timestamp: time.Now()}}
+
+	updated, cmd := m.Update(tuiHistoryMsg{messages: []chatMessage{{Sender: "Igor", Text: "previous prompt", Timestamp: time.Now()}}})
+	m2 := updated.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected nil command for history message")
+	}
+	if len(m2.messages) != 1 || m2.messages[0].Text != "previous prompt" {
+		t.Fatalf("expected history to replace startup message, got %#v", m2.messages)
+	}
+}
+
+func TestModel_LateHistoryDoesNotReplaceUserInteraction(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.width = 80
+	m.height = 24
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+	m.messages = []chatMessage{
+		{Sender: "Aurelia", Text: "Connected to Aurelia daemon. Type a message or /help.", Timestamp: time.Now()},
+		{Sender: "Igor", Text: "new prompt", Timestamp: time.Now()},
+	}
+	m.waiting = true
+
+	updated, _ := m.Update(tuiHistoryMsg{messages: []chatMessage{{Sender: "Igor", Text: "old prompt", Timestamp: time.Now()}}})
+	m2 := updated.(Model)
+
+	if len(m2.messages) != 2 {
+		t.Fatalf("expected late history to be ignored, got %#v", m2.messages)
+	}
+	if m2.messages[1].Text != "new prompt" {
+		t.Fatalf("expected current user prompt preserved, got %#v", m2.messages)
+	}
+}
+
 func TestModel_PageUpScrollsViewport(t *testing.T) {
 	m := NewModel("/tmp/test.sock")
 	m.state = stateChat
