@@ -245,6 +245,52 @@ func TestTUIHandler_SessionOpenNotFound(t *testing.T) {
 	}
 }
 
+func TestTUIHandler_SessionOpenDefaultDM(t *testing.T) {
+	a, ctx, cleanup := testApp(t)
+	defer cleanup()
+
+	handler := makeTUIHandler(a)
+	te := &testEmit{}
+
+	// The default DM (-9000001) exists implicitly — it's never created
+	// via session_create, so it has no row in the store. Opening it
+	// should succeed without "session not found".
+	if err := handler(ctx, ipc.IPCMessage{
+		Type:   ipc.MsgTypeSessionOpen,
+		ChatID: ipc.ReservedTUIChatID,
+	}, te.emit); err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	foundOpened := false
+	for _, ev := range te.events {
+		if ev.Type == ipc.EventTypeSessionOpened {
+			foundOpened = true
+			var s sessionJSON
+			if err := json.Unmarshal([]byte(ev.Body), &s); err != nil {
+				t.Fatalf("unmarshal opened session: %v", err)
+			}
+			if s.ChatID != ipc.ReservedTUIChatID {
+				t.Errorf("opened.ChatID = %d, want ReservedTUIChatID", s.ChatID)
+			}
+			if s.Name != "dm" {
+				t.Errorf("opened.Name = %q, want %q", s.Name, "dm")
+			}
+			break
+		}
+	}
+	if !foundOpened {
+		t.Error("expected session_opened event for default DM")
+	}
+
+	// Verify no error was emitted.
+	for _, ev := range te.events {
+		if ev.Type == ipc.EventTypeError {
+			t.Errorf("unexpected error for default DM: %s", ev.Error)
+		}
+	}
+}
+
 func TestTUIHandler_SessionDelete(t *testing.T) {
 	a, ctx, cleanup := testApp(t)
 	defer cleanup()

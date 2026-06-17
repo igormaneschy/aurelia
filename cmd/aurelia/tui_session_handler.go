@@ -75,6 +75,8 @@ func handleTUISessionCreate(ctx context.Context, a *app, msg ipc.IPCMessage, emi
 
 // handleTUISessionOpen opens/switches to an existing TUI local session.
 // The ChatID in the message selects which session to activate.
+// The default DM (ReservedTUIChatID) always exists implicitly — it is
+// never created via session_create and may not have a row in the store.
 func handleTUISessionOpen(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
 	if a.tuiSessions == nil {
 		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "tui sessions store not available", RequestID: msg.RequestID})
@@ -83,6 +85,18 @@ func handleTUISessionOpen(ctx context.Context, a *app, msg ipc.IPCMessage, emit 
 	chatID := msg.ChatID
 	if !ipc.IsReservedTUIID(chatID) {
 		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "invalid session chat_id", RequestID: msg.RequestID})
+	}
+
+	// The default DM exists implicitly — don't require a store row.
+	if ipc.IsDefaultTUISession(chatID) {
+		if err := emit(ipc.IPCEvent{
+			Type:      ipc.EventTypeSessionOpened,
+			Body:      fmt.Sprintf(`{"chat_id":%d,"name":"dm"}`, chatID),
+			RequestID: msg.RequestID,
+		}); err != nil {
+			return err
+		}
+		return emit(ipc.IPCEvent{Type: ipc.EventTypeStreamEnd, Done: true, RequestID: msg.RequestID})
 	}
 
 	sess, err := a.tuiSessions.Get(ctx, chatID)
