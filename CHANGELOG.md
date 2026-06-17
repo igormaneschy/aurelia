@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.25.1 - 2026-06-17
+
+### Added
+- **TUI: comandos locais `/help` e `/model`** — `/help` lista comandos e
+  atalhos; `/model` lista modelos disponíveis, suporta refresh, seleção
+  automática do PI e troca validada por nome.
+
+### Changed
+- **TUI: polimento visual e operacional** — adiciona blocos visuais para
+  mensagens, estado vazio amigável, status bar responsiva, spinner durante
+  respostas, scroll por teclado/mouse, cancelamento com `Esc` e health check
+  periódico do daemon.
+
 ## v0.25.0 - 2026-06-16
 
 ### Added
