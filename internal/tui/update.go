@@ -136,10 +136,13 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tuiHistoryMsg:
-		if msg.err == nil && len(msg.messages) > 0 && m.canApplyStartupHistory() {
-			m.messages = msg.messages
-			m.updateViewport()
+		if msg.err == nil && len(msg.messages) > 0 {
+			if m.switchingSession || m.canApplyStartupHistory() {
+				m.messages = msg.messages
+				m.updateViewport()
+			}
 		}
+		m.switchingSession = false
 		return m, nil
 
 	case daemonErrorMsg:
@@ -229,6 +232,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activeSession = msg.session.ChatID
 		m.messages = []chatMessage{}
 		m.viewportSet = false
+		m.switchingSession = true
 		m.updateViewport()
 		// Reload sessions list + history for the new session.
 		return m, tea.Batch(
@@ -251,6 +255,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.activeSession = msg.session.ChatID
 		m.messages = []chatMessage{}
 		m.viewportSet = false
+		m.switchingSession = true
 		m.updateViewport()
 		m.sidebarFocused = false
 		// Reload history + status for the new session.

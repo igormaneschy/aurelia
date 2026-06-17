@@ -82,6 +82,11 @@ type Model struct {
 	requestID string
 	waiting   bool
 
+	// switchingSession is true while waiting for history after a session
+	// switch. It tells tuiHistoryMsg to replace messages even when the
+	// "Connected to Aurelia daemon" startup message is not present.
+	switchingSession bool
+
 	// Current stream reader (held between events during streaming)
 	reader *ipc.ResponseReader
 

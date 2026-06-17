@@ -146,6 +146,55 @@ func TestTUISessionOpenedMsg_SwitchesActiveSession(t *testing.T) {
 	if m2.sidebarFocused {
 		t.Error("expected sidebarFocused=false after opening session")
 	}
+	if !m2.switchingSession {
+		t.Error("expected switchingSession=true after opening session")
+	}
+}
+
+func TestTUIHistoryMsg_AppliedOnSessionSwitch(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.activeSession = -9000002
+	m.messages = []chatMessage{} // empty after session switch
+	m.switchingSession = true
+
+	history := []chatMessage{
+		{Sender: "Igor", Text: "previous question"},
+		{Sender: "Aurelia", Text: "previous answer"},
+	}
+
+	updated, _ := m.Update(tuiHistoryMsg{messages: history})
+	m2 := updated.(Model)
+
+	if len(m2.messages) != 2 {
+		t.Fatalf("expected 2 history messages, got %d", len(m2.messages))
+	}
+	if m2.messages[0].Text != "previous question" {
+		t.Errorf("messages[0].Text = %q, want %q", m2.messages[0].Text, "previous question")
+	}
+	if m2.switchingSession {
+		t.Error("expected switchingSession=false after history applied")
+	}
+}
+
+func TestTUIHistoryMsg_NotAppliedWhenNotSwitchingAndNoStartupMessage(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.messages = []chatMessage{{Sender: "Igor", Text: "my message"}}
+	m.switchingSession = false
+
+	history := []chatMessage{
+		{Sender: "Igor", Text: "old question"},
+	}
+
+	updated, _ := m.Update(tuiHistoryMsg{messages: history})
+	m2 := updated.(Model)
+
+	// Should NOT replace — we're not switching sessions and the startup
+	// condition (1 "Connected" message) is not met.
+	if len(m2.messages) != 1 || m2.messages[0].Text != "my message" {
+		t.Errorf("expected original message preserved, got %v", m2.messages)
+	}
 }
 
 func TestTUISessionCreatedMsg_SwitchesToNewSession(t *testing.T) {

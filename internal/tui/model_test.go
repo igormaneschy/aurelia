@@ -283,7 +283,7 @@ func TestModel_EscCancelsStreaming(t *testing.T) {
 		t.Fatalf("expected 2 messages (original + cancel), got %d", len(m2.messages))
 	}
 	last := m2.messages[len(m2.messages)-1]
-	if last.Sender != "⚠️" || last.Text != "(cancelled)" {
+	if last.Sender != "⚠️" || last.Text != "(cancelled — pipeline aborting)" {
 		t.Errorf("expected cancel message, got sender=%q text=%q", last.Sender, last.Text)
 	}
 }
