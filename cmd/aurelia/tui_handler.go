@@ -320,10 +320,13 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 		output.SendError(chatID, threadID, pipeErr.Error())
 	}
 
-	// Wait for pipeline completion or context cancellation.
+	// Wait for pipeline completion or context cancellation (client
+	// disconnected). On cancellation, abort the pipeline so it stops
+	// consuming tokens and running tools.
 	select {
 	case <-output.done:
 	case <-ctx.Done():
+		pipeSvc.Cancel(chatID, threadID, userID)
 		return ctx.Err()
 	}
 

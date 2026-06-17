@@ -205,6 +205,13 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 
 		if s.StreamHandler != nil {
+			// Create a per-connection context so that when the client
+			// disconnects (closes the socket), the handler's context is
+			// cancelled and long-running operations stop waiting.
+			connCtx, connCancel := context.WithCancel(s.ctx)
+			// Cancel when handleConnection returns (connection closed).
+			defer connCancel()
+
 			// Streaming dispatch: handler uses emit() to send events.
 			emit := func(event IPCEvent) error {
 				// Propagate request_id from message if not already set.
@@ -213,7 +220,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 				}
 				return s.writeEvent(conn, event)
 			}
-			if err := s.StreamHandler(s.ctx, msg, emit); err != nil {
+			if err := s.StreamHandler(connCtx, msg, emit); err != nil {
 				slog.Warn("ipc: stream handler error", "error", err, "request_id", msg.RequestID)
 				if e := s.writeEvent(conn, IPCEvent{
 					Type:      EventTypeError,

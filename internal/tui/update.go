@@ -584,6 +584,8 @@ func (m Model) handleViewportMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // cancelStreaming aborts the current streaming response, closing the reader
 // and returning the model to the ready state. Triggered by Esc during waiting.
+// Closing the reader closes the IPC connection, which cancels the daemon-side
+// handler context, which aborts the pipeline.
 func (m Model) cancelStreaming() (tea.Model, tea.Cmd) {
 	m.waiting = false
 	if m.reader != nil {
@@ -593,7 +595,7 @@ func (m Model) cancelStreaming() (tea.Model, tea.Cmd) {
 	m.streamBuf = ""
 	m.messages = append(m.messages, chatMessage{
 		Sender:    "⚠️",
-		Text:      "(cancelled)",
+		Text:      "(cancelled — pipeline aborting)",
 		Timestamp: time.Now(),
 	})
 	m.updateViewport()
