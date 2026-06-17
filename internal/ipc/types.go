@@ -18,12 +18,26 @@ const MaxMessageTextLength = 4000
 // MaxRequestIDLength is the maximum allowed length for IPCMessage.RequestID.
 const MaxRequestIDLength = 64
 
-// ReservedTUIChatID is the reserved chat ID for TUI local DM conversations.
-// This negative ID is in a namespace separate from Telegram's positive chat IDs.
+// ReservedTUIChatID is the reserved chat ID for the default TUI local DM
+// conversation. This negative ID is in a namespace separate from Telegram's
+// positive chat IDs.
 const ReservedTUIChatID int64 = -9000001
 
-// IsReservedTUIID returns true if the chat ID is a reserved TUI local ID.
+// ReservedTUIChatIDFloor is the most negative chat ID reserved for TUI local
+// sessions. Together with ReservedTUIChatID, this defines the TUI local
+// namespace: [-9000009, -9000001] — 9 slots for named local sessions.
+// ReservedTUIChatID (-9000001) is the default DM; -9000002..-9000009 are
+// available for user-named sessions (e.g. "tui:work", "tui:research").
+const ReservedTUIChatIDFloor int64 = -9000009
+
+// IsReservedTUIID returns true if the chat ID is in the reserved TUI local
+// namespace [ReservedTUIChatIDFloor, ReservedTUIChatID].
 func IsReservedTUIID(chatID int64) bool {
+	return chatID <= ReservedTUIChatID && chatID >= ReservedTUIChatIDFloor
+}
+
+// IsDefaultTUISession returns true if the chat ID is the default TUI DM.
+func IsDefaultTUISession(chatID int64) bool {
 	return chatID == ReservedTUIChatID
 }
 

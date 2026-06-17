@@ -29,6 +29,45 @@ func TestReservedTUIChatID_NegativeOneRejected(t *testing.T) {
 	}
 }
 
+func TestReservedTUIRange_AllSlotsValid(t *testing.T) {
+	for chatID := ReservedTUIChatID; chatID >= ReservedTUIChatIDFloor; chatID-- {
+		if err := validateMessage(IPCMessage{
+			Type:   MsgTypeSend,
+			ChatID: chatID,
+			Text:   "hello",
+		}); err != nil {
+			t.Errorf("ChatID %d should be valid in TUI range, got: %v", chatID, err)
+		}
+		if !IsReservedTUIID(chatID) {
+			t.Errorf("IsReservedTUIID(%d) = false, want true", chatID)
+		}
+	}
+}
+
+func TestReservedTUIRange_OutsideRejected(t *testing.T) {
+	outside := []int64{
+		ReservedTUIChatIDFloor - 1, // too negative
+		ReservedTUIChatID + 1,      // just above the DM (e.g. -9000000)
+		-1,
+		0,
+		1,
+	}
+	for _, chatID := range outside {
+		if IsReservedTUIID(chatID) {
+			t.Errorf("IsReservedTUIID(%d) = true, want false", chatID)
+		}
+	}
+}
+
+func TestIsDefaultTUISession(t *testing.T) {
+	if !IsDefaultTUISession(ReservedTUIChatID) {
+		t.Errorf("IsDefaultTUISession(ReservedTUIChatID) = false, want true")
+	}
+	if IsDefaultTUISession(ReservedTUIChatID - 1) {
+		t.Errorf("IsDefaultTUISession(non-DM) = true, want false")
+	}
+}
+
 func TestDefaultSocketPath(t *testing.T) {
 	path, err := DefaultSocketPath()
 	if err != nil {
