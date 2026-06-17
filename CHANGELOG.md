@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.26.0 - 2026-06-17
+
+### Added
+- **TUI: histórico visual de sessão** — ao reabrir a TUI com uma sessão
+  existente, o histórico de mensagens carrega automaticamente via PI
+  `session_file`, permitindo continuar a conversa de onde parou.
+- **TUI: navegação de input history** — as teclas `↑`/`↓` no modo de input
+  permitem recuperar e editar prompts anteriores, com proteção contra
+  sobrescrita durante a navegação.
+
 ## v0.25.1 - 2026-06-17
 
 ### Added
