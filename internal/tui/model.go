@@ -18,6 +18,14 @@ import (
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
 
+// spinnerTickCmd returns a command that fires a spinner.TickMsg, used to
+// keep the spinner animating during streaming responses.
+func spinnerTickCmd() tea.Cmd {
+	return func() tea.Msg {
+		return spinner.TickMsg{}
+	}
+}
+
 // TUI states.
 type tuiState int
 
@@ -87,6 +95,7 @@ func NewModel(socketPath string) Model {
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
 	ta := textarea.New()
+	ta.Prompt = ""
 	ta.Placeholder = "Type a message…"
 	ta.Focus()
 	ta.CharLimit = 4000
@@ -126,6 +135,31 @@ func checkDaemon(client *ipc.Client) tea.Cmd {
 			return daemonUnreachableMsg{err: err}
 		}
 		return daemonReachableMsg{latency: time.Since(started)}
+	}
+}
+
+// healthCheckInterval is the delay between periodic daemon health checks.
+const healthCheckInterval = 30 * time.Second
+
+// scheduleHealthCheck returns a command that fires a healthCheckTickMsg
+// after the configured interval.
+func scheduleHealthCheck() tea.Cmd {
+	return tea.Tick(healthCheckInterval, func(time.Time) tea.Msg {
+		return healthCheckTickMsg{}
+	})
+}
+
+// runHealthCheck pings the daemon and returns a healthCheckResultMsg.
+// Unlike checkDaemon, a failure here does not transition to stateError.
+func runHealthCheck(client *ipc.Client) tea.Cmd {
+	return func() tea.Msg {
+		started := time.Now()
+		ctx, cancel := contextWithTimeout(1500 * time.Millisecond)
+		defer cancel()
+		if err := client.Ping(ctx); err != nil {
+			return healthCheckResultMsg{err: err}
+		}
+		return healthCheckResultMsg{latency: time.Since(started)}
 	}
 }
 

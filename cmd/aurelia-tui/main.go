@@ -26,7 +26,7 @@ func main() {
 	// Create and start the Bubble Tea program. The UI itself owns daemon
 	// reachability so startup stays visual even when the socket is missing.
 	m := tui.NewModel(socketPath)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	if _, err := p.Run(); err != nil {
 		log.Fatalf("Error running TUI: %v", err)

@@ -39,7 +39,7 @@ func (m Model) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.textarea.SetWidth(maxInt(20, msg.Width-4))
+		m.textarea.SetWidth(inputTextareaWidth(msg.Width))
 		return m, nil
 
 	case tea.KeyMsg:
@@ -81,7 +81,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.textarea.SetWidth(maxInt(20, msg.Width-4)) // account for prompt/border
+		m.textarea.SetWidth(inputTextareaWidth(msg.Width))
 		contentWidth := m.contentWidth()
 		if !m.viewportSet {
 			m.viewport = viewportForSize(contentWidth, msg.Height)
@@ -90,10 +90,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.GotoBottom()
 		} else {
 			m.viewport.Width = contentWidth
-			m.viewport.Height = msg.Height - viewBottomHeight(msg.Height)
-			if m.viewport.Height < minViewportHeight {
-				m.viewport.Height = minViewportHeight
-			}
+			m.viewport.Height = viewportHeightForTerminal(msg.Height)
 			m.updateViewport()
 		}
 		return m, nil
@@ -101,10 +98,30 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKeyMsg(msg)
 
+	case tea.MouseMsg:
+		return m.handleViewportMsg(msg)
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		return m, cmd
+
 	case daemonReachableMsg:
 		m.daemonLabel = "ready"
 		m.connectLatency = msg.latency
-		return m, nil
+		return m, scheduleHealthCheck()
+
+	case healthCheckTickMsg:
+		return m, runHealthCheck(m.ipcClient)
+
+	case healthCheckResultMsg:
+		if msg.err != nil {
+			m.daemonLabel = "offline"
+		} else {
+			m.daemonLabel = "ready"
+			m.connectLatency = msg.latency
+		}
+		return m, scheduleHealthCheck()
 
 	case daemonUnreachableMsg:
 		m.daemonLabel = "offline"
@@ -137,7 +154,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case *streamReaderMsg:
 		m.reader = msg.reader
-		return m, m.readNextStreamEvent()
+		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
 
 	case streamEventMsg:
 		return m.handleStreamEvent(msg.event)
@@ -217,14 +234,21 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case msg.String() == "ctrl+l":
 		m.messages = nil
-		if m.viewportSet {
-			m.viewport.SetContent("")
-		}
+		m.updateViewport()
 		return m, nil
 
 	case isSidebarToggleKey(msg):
 		m.showSidebar = !m.showSidebar
 		m.updateViewport()
+		return m, nil
+
+	case isViewportScrollKey(msg):
+		return m.handleViewportMsg(msg)
+
+	case msg.String() == "esc":
+		if m.waiting {
+			return m.cancelStreaming()
+		}
 		return m, nil
 
 	case msg.String() == "enter":
@@ -246,9 +270,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.updateViewport()
 
 		if strings.HasPrefix(text, "/") {
-			return m, m.sendCommand(text)
+			return m, tea.Batch(m.sendCommand(text), spinnerTickCmd())
 		}
-		return m, m.submitMessage(text)
+		return m, tea.Batch(m.submitMessage(text), spinnerTickCmd())
 
 	case msg.String() == "alt+enter":
 		// alt+enter: insert newline.
@@ -272,6 +296,41 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.textarea, cmd = m.textarea.Update(msg)
 		return m, cmd
 	}
+}
+
+func (m Model) handleViewportMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if !m.viewportSet {
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.viewport, cmd = m.viewport.Update(msg)
+	return m, cmd
+}
+
+// cancelStreaming aborts the current streaming response, closing the reader
+// and returning the model to the ready state. Triggered by Esc during waiting.
+func (m Model) cancelStreaming() (tea.Model, tea.Cmd) {
+	m.waiting = false
+	if m.reader != nil {
+		m.reader.Close()
+		m.reader = nil
+	}
+	m.streamBuf = ""
+	m.messages = append(m.messages, chatMessage{
+		Sender:    "⚠️",
+		Text:      "(cancelled)",
+		Timestamp: time.Now(),
+	})
+	m.updateViewport()
+	return m, nil
+}
+
+func isViewportScrollKey(msg tea.KeyMsg) bool {
+	switch msg.String() {
+	case "pgup", "pgdown":
+		return true
+	}
+	return false
 }
 
 func isTerminalColorReportResidue(msg tea.KeyMsg) bool {
@@ -309,13 +368,13 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 	switch event.Type {
 	case "ack":
 		// No content to display; continue reading.
-		return m, m.readNextStreamEvent()
+		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
 
 	case "stream_chunk":
 		m.streamBuf += event.Body
 		m.appendOrUpdateAureliaMessage(m.streamBuf)
 		m.updateViewport()
-		return m, m.readNextStreamEvent()
+		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
 
 	case "message":
 		// Replace accumulated text with the final message to avoid duplication.
@@ -325,7 +384,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 		}
 		m.appendOrUpdateAureliaMessage(m.streamBuf)
 		m.updateViewport()
-		return m, m.readNextStreamEvent()
+		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
 
 	case "stream_end":
 		// Terminal event — stream complete.
@@ -360,7 +419,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 	}
 
 	// Unknown event type — keep reading.
-	return m, m.readNextStreamEvent()
+	return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
 }
 
 // readNextStreamEvent returns a command that reads the next event from the

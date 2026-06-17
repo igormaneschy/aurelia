@@ -18,6 +18,8 @@ const (
 	statusBarHeight = 1
 	// topMarginHeight keeps the TUI from feeling glued to the terminal chrome.
 	topMarginHeight = 1
+	// chatHeaderHeight is reserved for the active session/project header.
+	chatHeaderHeight = 2
 	// sidebarWidth is the width of the sidebar panel when visible.
 	sidebarWidth = 24
 	// minSidebarScreenWidth avoids crushing chat content on narrow terminals.
@@ -46,6 +48,9 @@ var (
 			BorderForeground(lipgloss.Color("238")).
 			Padding(0, 1)
 
+	inputWaitingStyle = inputBoxStyle.Copy().
+				BorderForeground(lipgloss.Color("205"))
+
 	statusBarStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("244")).
 			Background(lipgloss.Color("235")).
@@ -67,6 +72,23 @@ var (
 	sidebarActiveStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("39")).
 				Bold(true)
+
+	headerTitleStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("205"))
+
+	headerMetaStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244"))
+
+	headerRuleStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("238"))
+
+	messageSeparatorStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("238"))
+
+	statusReadyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
+	statusBusyStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
+	statusErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
 )
 
 // View implements tea.Model.
@@ -106,8 +128,6 @@ func (m Model) chatView() string {
 		return "Loading..."
 	}
 
-	mainContent := m.renderMainContent()
-
 	inputBar := m.renderInput()
 
 	statusBar := m.renderStatusBar()
@@ -117,8 +137,8 @@ func (m Model) chatView() string {
 	statusH := statusBarHeight
 	contentH := viewHeight - topMarginHeight - inputH - statusH
 
-	if contentH < minViewportHeight {
-		contentH = minViewportHeight
+	if contentH < 1 {
+		contentH = 1
 	}
 
 	mainContentHeight := contentH
@@ -126,14 +146,14 @@ func (m Model) chatView() string {
 	var body string
 	if m.shouldShowSidebar() {
 		sidebar := m.renderSidebar()
-		viewContent := lipgloss.NewStyle().Height(mainContentHeight).Width(m.contentWidth()).Render(mainContent)
+		viewContent := m.renderMainPane(mainContentHeight, m.contentWidth())
 		body = lipgloss.JoinHorizontal(
 			lipgloss.Top,
 			sidebarStyle.Render(sidebar),
 			viewContent,
 		)
 	} else {
-		body = lipgloss.NewStyle().Height(mainContentHeight).Width(m.width).Render(mainContent)
+		body = m.renderMainPane(mainContentHeight, m.width)
 	}
 
 	return lipgloss.JoinVertical(
@@ -162,6 +182,15 @@ func (m Model) errorView() string {
 	)
 }
 
+func (m Model) renderMainPane(height, width int) string {
+	content := lipgloss.JoinVertical(
+		lipgloss.Left,
+		m.renderChatHeader(),
+		m.renderMainContent(),
+	)
+	return lipgloss.NewStyle().Height(height).Width(width).Render(content)
+}
+
 func (m Model) renderMainContent() string {
 	if !m.viewportSet || m.viewport.Height <= 0 {
 		return "Initializing..."
@@ -175,38 +204,108 @@ func (m Model) renderInput() string {
 		promptText = "… "
 	}
 	prompt := inputPromptStyle.Render(promptText)
+	input := renderPromptedTextarea(prompt, promptText, m.textarea.View())
 	// Lipgloss width is applied before border/padding, so leave enough room
 	// to avoid terminal wrapping artifacts when toggling the sidebar.
-	boxWidth := maxInt(20, m.width-6)
-	return inputBoxStyle.Width(boxWidth).Render(prompt + m.textarea.View())
+	boxWidth := inputBoxContentWidth(m.width)
+	style := inputBoxStyle
+	if m.waiting {
+		style = inputWaitingStyle
+	}
+	return style.Width(boxWidth).Render(input)
+}
+
+func renderPromptedTextarea(prompt, rawPrompt, text string) string {
+	lines := strings.Split(text, "\n")
+	if len(lines) == 0 {
+		return prompt
+	}
+	indent := strings.Repeat(" ", len(rawPrompt))
+	lines[0] = prompt + lines[0]
+	for i := 1; i < len(lines); i++ {
+		lines[i] = indent + lines[i]
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) renderStatusBar() string {
-	state := "ready"
-	if m.state == stateLoading {
-		state = "connecting"
-	} else if m.waiting {
-		state = "waiting"
+	chromeState := m.chromeState()
+	state := statusReadyStyle.Render("● ready")
+	if chromeState == "connecting" {
+		state = statusBusyStyle.Render("● connecting")
+	} else if chromeState == "waiting" {
+		state = statusBusyStyle.Render("● waiting")
+	} else if chromeState == "error" {
+		state = statusErrorStyle.Render("● error")
 	}
-	parts := []string{
-		"● " + state,
-		"↵ send",
-		fmt.Sprintf("%s newline", newlineFallbackKey),
-		"⌃L clear",
-		"tab sidebar",
-		"⌃C quit",
+
+	// Items ordered by priority — less critical ones are dropped on narrow
+	// terminals so the status bar never wraps to a second line.
+	// Thresholds account for: content width = m.width - 4 (Width - 2, Padding - 2).
+	// Cumulative visible widths: state(7) +sep(7)+ send(6) +sep(7)+ newline(17)
+	// +sep(7)+ scroll(9) +sep(7)+ esc(10) +sep(7)+ clear(8) +sep(7)+ tab(11) +sep(7)+ quit(7).
+	allParts := []statusBarItem{
+		{label: state, min: 0},
+		{label: "↵ send", min: 24},
+		{label: fmt.Sprintf("%s newline", newlineFallbackKey), min: 48},
+		{label: "pg scroll", min: 64},
+		{label: "esc cancel", min: 82},
+		{label: "⌃L clear", min: 96},
+		{label: "tab sidebar", min: 114},
+		{label: "⌃C quit", min: 128},
 	}
+
+	parts := []string{}
+	for _, item := range allParts {
+		if m.width >= item.min {
+			parts = append(parts, item.label)
+		}
+	}
+
 	return statusBarStyle.Width(maxInt(20, m.width-2)).Render(strings.Join(parts, "   ·   "))
+}
+
+type statusBarItem struct {
+	label string
+	min   int
+}
+
+func (m Model) renderChatHeader() string {
+	project := truncateMiddle(projectName(m.cwdPath), maxInt(12, m.contentWidth()/3))
+	stateLabel := m.chromeState()
+	if m.waiting {
+		stateLabel = m.spinner.View() + " thinking"
+	}
+	meta := fmt.Sprintf("project %s   ·   daemon %s   ·   %s", project, m.daemonLabel, stateLabel)
+	header := lipgloss.JoinVertical(
+		lipgloss.Left,
+		headerTitleStyle.Render("Aurelia / DM")+"  "+headerMetaStyle.Render(meta),
+		headerRuleStyle.Render(strings.Repeat("─", maxInt(20, m.contentWidth()-2))),
+	)
+	return lipgloss.NewStyle().Width(m.contentWidth()).Render(header)
+}
+
+func (m Model) chromeState() string {
+	if m.waiting {
+		return "waiting"
+	}
+	if m.state == stateLoading {
+		return "connecting"
+	}
+	if m.state == stateError {
+		return "error"
+	}
+	return "ready"
 }
 
 func (m Model) renderSidebar() string {
 	lines := []string{
 		sidebarTitleStyle.Render("Aurelia"),
-		sidebarMutedStyle.Render("local TUI"),
+		sidebarMutedStyle.Render("local terminal"),
 		"",
 		sidebarTitleStyle.Render("Session"),
 		sidebarActiveStyle.Render("● DM"),
-		sidebarMutedStyle.Render("  direct channel"),
+		sidebarMutedStyle.Render("  direct chat"),
 		"",
 		sidebarTitleStyle.Render("Project"),
 		truncateMiddle(projectName(m.cwdPath), sidebarWidth-4),
@@ -250,7 +349,7 @@ func (m *Model) getOrCreateRenderer(width int) (*glamour.TermRenderer, error) {
 // Uses a cached renderer to avoid expensive re-creation on every call.
 func (m *Model) renderMessages(messages []chatMessage, width int) string {
 	if len(messages) == 0 {
-		return ""
+		return renderEmptyState(width)
 	}
 
 	var b strings.Builder
@@ -267,27 +366,29 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 		}
 
 		timestamp := msg.Timestamp.Format("15:04")
-		header := fmt.Sprintf("%s [%s]", msg.Sender, timestamp)
 
 		switch msg.Sender {
 		case "Igor":
+			header := fmt.Sprintf("▶ Igor · %s", timestamp)
 			b.WriteString(userStyle.Render(header))
+			b.WriteString("\n")
+			b.WriteString(messageSeparatorStyle.Render(strings.Repeat("─", maxInt(20, width-4))))
+			b.WriteString("\n")
+			b.WriteString(msg.Text)
 		case "Aurelia":
+			header := fmt.Sprintf("▶ Aurelia · %s", timestamp)
 			b.WriteString(assistantStyle.Render(header))
-		default:
-			b.WriteString(errorStyle.Render(header))
-		}
-
-		b.WriteString("\n")
-
-		if msg.Sender == "Aurelia" {
+			b.WriteString("\n")
 			rendered, err := renderer.Render(msg.Text)
 			if err != nil || rendered == "" {
 				b.WriteString(msg.Text)
 			} else {
 				b.WriteString(strings.TrimSpace(rendered))
 			}
-		} else {
+		default:
+			header := fmt.Sprintf("▶ %s · %s", msg.Sender, timestamp)
+			b.WriteString(errorStyle.Render(header))
+			b.WriteString("\n")
 			b.WriteString(msg.Text)
 		}
 	}
@@ -303,6 +404,29 @@ func (m *Model) renderMessagesPlain(b *strings.Builder, messages []chatMessage) 
 		}
 		b.WriteString(fmt.Sprintf("%s:\n%s", msg.Sender, msg.Text))
 	}
+}
+
+// renderEmptyState returns a friendly welcome panel shown when the chat
+// history is empty (initial connect or after Ctrl+L clear).
+func renderEmptyState(width int) string {
+	contentWidth := width - 8
+	if contentWidth < 30 {
+		contentWidth = 30
+	}
+
+	title := headerTitleStyle.Render("Aurelia TUI")
+	hint := sidebarMutedStyle.Render(
+		"Type a message or /help to start.\n" +
+			"/cwd to set a project directory.",
+	)
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("238")).
+		Padding(1, 2).
+		Width(contentWidth).
+		Render(title + "\n\n" + hint)
+
+	return lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Render(box)
 }
 
 // shouldShowSidebar returns true when sidebar is enabled and the terminal is
@@ -321,14 +445,32 @@ func (m Model) contentWidth() int {
 
 // viewportForSize creates a viewport with the given dimensions.
 func viewportForSize(width, height int) viewport.Model {
-	vp := viewport.New(width, maxInt(minViewportHeight, height-viewBottomHeight(height)))
+	vp := viewport.New(width, viewportHeightForTerminal(height))
 	vp.YPosition = topMarginHeight
+	vp.MouseWheelEnabled = true
+	vp.MouseWheelDelta = 3
 	return vp
+}
+
+func inputBoxContentWidth(terminalWidth int) int {
+	return maxInt(20, terminalWidth-6)
+}
+
+func inputTextareaWidth(terminalWidth int) int {
+	return maxInt(10, inputBoxContentWidth(terminalWidth)-3)
+}
+
+func viewportHeightForTerminal(height int) int {
+	available := height - viewBottomHeight(height)
+	if available < minViewportHeight {
+		return maxInt(1, available)
+	}
+	return available
 }
 
 // viewBottomHeight returns the height of non-viewport UI elements.
 func viewBottomHeight(totalHeight int) int {
-	return inputHeight + statusBarHeight + topMarginHeight
+	return inputHeight + statusBarHeight + topMarginHeight + chatHeaderHeight
 }
 
 func maxInt(a, b int) int {
