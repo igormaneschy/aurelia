@@ -27,6 +27,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/session"
 	"github.com/igormaneschy/aurelia/internal/telegram"
+	"github.com/igormaneschy/aurelia/internal/tuisessions"
 	"github.com/igormaneschy/aurelia/internal/users"
 	"github.com/igormaneschy/aurelia/pkg/stt"
 )
@@ -45,8 +46,9 @@ type app struct {
 	scheduler  *cron.Scheduler
 	cronCtx    context.Context
 	cronCancel context.CancelFunc
-	ipcServer  *ipc.Server
+	ipcServer   *ipc.Server
 	tuiRunGuard *tuiRunGuard
+	tuiSessions tuisessions.Store
 
 	onboardingStore *users.OnboardingStore
 }
@@ -174,6 +176,26 @@ func bootstrapApp() (*app, error) {
 			log.Printf("Warning: failed to close cron store: %v", closeErr)
 		}
 		return nil, fmt.Errorf("initialize onboarding store: %w", err)
+	}
+
+	tuiSessionsStore, err := tuisessions.NewSQLiteStore(resolver.DBPath("tui_sessions.db"))
+	if err != nil {
+		if closeErr := onboardingStore.Close(); closeErr != nil {
+			log.Printf("Warning: failed to close onboarding store: %v", closeErr)
+		}
+		if closeErr := continuityStore.Close(); closeErr != nil {
+			log.Printf("Warning: failed to close continuity store: %v", closeErr)
+		}
+		if closeErr := runLogStore.Close(); closeErr != nil {
+			log.Printf("Warning: failed to close runlog store: %v", closeErr)
+		}
+		if closeErr := bindings.Close(); closeErr != nil {
+			log.Printf("Warning: failed to close project binding store: %v", closeErr)
+		}
+		if closeErr := cronStore.Close(); closeErr != nil {
+			log.Printf("Warning: failed to close cron store: %v", closeErr)
+		}
+		return nil, fmt.Errorf("initialize tui sessions store: %w", err)
 	}
 
 	transcriber, err := buildTranscriber(cfg)
@@ -395,6 +417,7 @@ func bootstrapApp() (*app, error) {
 		cronCancel:      cronCancel,
 		ipcServer:       ipcServer,
 		tuiRunGuard:     tuiGuard,
+		tuiSessions:     tuiSessionsStore,
 		onboardingStore: onboardingStore,
 	}, nil
 }
@@ -646,6 +669,11 @@ func (a *app) close() {
 	if a.onboardingStore != nil {
 		if err := a.onboardingStore.Close(); err != nil {
 			log.Printf("Warning: failed to close onboarding store: %v", err)
+		}
+	}
+	if a.tuiSessions != nil {
+		if err := a.tuiSessions.Close(); err != nil {
+			log.Printf("Warning: failed to close tui sessions store: %v", err)
 		}
 	}
 }
