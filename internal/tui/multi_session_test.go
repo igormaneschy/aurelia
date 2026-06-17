@@ -369,6 +369,7 @@ func TestCtrlS_FocusesSidebar(t *testing.T) {
 	}
 	m.activeSession = -9000001
 
+	// ctrl+s
 	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyCtrlS})
 	m2 := updated.(Model)
 
@@ -377,6 +378,14 @@ func TestCtrlS_FocusesSidebar(t *testing.T) {
 	}
 	if m2.sidebarCursor != 0 {
 		t.Errorf("sidebarCursor = %d, want 0 (active session)", m2.sidebarCursor)
+	}
+
+	// f2 (fallback for terminals that intercept ctrl+s)
+	updated2, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyF2})
+	m3 := updated2.(Model)
+
+	if !m3.sidebarFocused {
+		t.Error("expected sidebarFocused=true after f2")
 	}
 }
 

@@ -257,7 +257,7 @@ func (m Model) renderStatusBar() string {
 		{label: "pg scroll", min: 64},
 		{label: "esc cancel", min: 82},
 		{label: "⌃L clear", min: 96},
-		{label: "⌃S sessions", min: 108},
+		{label: "⌃S/f2 sessions", min: 108},
 		{label: "tab sidebar", min: 124},
 		{label: "⌃C quit", min: 138},
 	}

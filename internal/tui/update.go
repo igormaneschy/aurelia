@@ -636,10 +636,12 @@ func isSidebarToggleKey(msg tea.KeyMsg) bool {
 	return s == "tab" || s == "ctrl+i" || s == "\t"
 }
 
-// isSidebarFocusKey returns true for ctrl+s, which focuses the sidebar
-// for session navigation.
+// isSidebarFocusKey returns true for ctrl+s or f2, which focus the
+// sidebar for session navigation. ctrl+s is the primary; f2 is the
+// fallback for terminals that intercept ctrl+s as XOFF flow control.
 func isSidebarFocusKey(msg tea.KeyMsg) bool {
-	return msg.String() == "ctrl+s"
+	s := msg.String()
+	return s == "ctrl+s" || s == "f2"
 }
 
 // handleStreamEvent processes a single IPC event.
