@@ -15,6 +15,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/session"
+	"github.com/igormaneschy/aurelia/internal/tuisessions"
 )
 
 // testEmit collects emitted events for verification.
@@ -47,6 +48,11 @@ func testApp(t *testing.T) (*app, context.Context, func()) {
 		t.Fatalf("NewSQLiteStore: %v", err)
 	}
 
+	tuiSessions, err := tuisessions.NewSQLiteStore(filepath.Join(dir, "tui_sessions.db"))
+	if err != nil {
+		t.Fatalf("tuisessions.NewSQLiteStore: %v", err)
+	}
+
 	sessions := session.NewStore()
 	cfg := &config.AppConfig{}
 	ctx := context.Background()
@@ -56,7 +62,11 @@ func testApp(t *testing.T) (*app, context.Context, func()) {
 		sessions:    sessions,
 		config:      cfg,
 		tuiRunGuard: &tuiRunGuard{},
-	}, ctx, func() { bindings.Close() }
+		tuiSessions: tuiSessions,
+	}, ctx, func() {
+		bindings.Close()
+		tuiSessions.Close()
+	}
 }
 
 func TestTUIHandler_StatusReturnsMessageAndStreamEnd(t *testing.T) {

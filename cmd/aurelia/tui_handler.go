@@ -172,6 +172,14 @@ func makeTUIHandler(a *app) func(context.Context, ipc.IPCMessage, func(ipc.IPCEv
 		case ipc.MsgTypeSend:
 			forceTUIIDs(&msg)
 			return handleTUISend(ctx, a, msg, emit)
+		case ipc.MsgTypeSessions:
+			return handleTUISessions(ctx, a, msg, emit)
+		case ipc.MsgTypeSessionCreate:
+			return handleTUISessionCreate(ctx, a, msg, emit)
+		case ipc.MsgTypeSessionOpen:
+			return handleTUISessionOpen(ctx, a, msg, emit)
+		case ipc.MsgTypeSessionDelete:
+			return handleTUISessionDelete(ctx, a, msg, emit)
 		case ipc.MsgTypeSubscribe:
 			// Terminal error: subscribe not supported.
 			return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "subscribe not supported", RequestID: msg.RequestID})
