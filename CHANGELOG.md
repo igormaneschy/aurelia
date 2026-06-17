@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.27.0 - 2026-06-17
+
+### Added
+- **TUI: multi-sessão com sidebar** — cria, lista, navega e troca entre sessões
+  isoladas (`ctrl+s`/`f2` foco, `↑↓`/`jk` navega, `enter` abre, `n` nova, `d`
+  apaga). Cada sessão tem o seu próprio ChatID, histórico e project binding.
+- **TUI: indicador visual de chat mode** — quando uma sessão não tem `/cwd`,
+  o header mostra `chat mode` em âmbar e a sidebar mostra `(chat mode)`,
+  indicando que ferramentas de ficheiro estão desactivadas.
+
+### Fixed
+- **TUI: pipeline não quebra ao cancelar com Esc** — usa per-connection context
+  para abortar o pipeline correctamente sem "broken pipe".
+- **TUI: histórico carrega ao trocar de sessão** — flag `switchingSession`
+  garante que as mensagens correctas aparecem após navegar entre sessões.
+- **TUI: DM default abre sem erro** — `ReservedTUIChatID` é tratado como
+  implícito, sem necessidade de row na store.
+- **Daemon: `/status` sem projecto** — `handleTUIStatus` agora emite
+  "No project set" quando não há binding, permitindo à TUI detectar chat mode.
+
 ## v0.26.0 - 2026-06-17
 
 ### Added
