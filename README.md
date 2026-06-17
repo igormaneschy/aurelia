@@ -299,6 +299,38 @@ The model sees relevant operational memory layers in its system prompt. Layers a
 | `/debug run <id>` | Show full metadata and timeline for a specific run — owner only |
 | `/debug errors` | Show recent failed/timed-out runs — owner only |
 
+## Terminal TUI
+
+`aurelia-tui` is a local terminal client for the running Aurelia daemon. It
+talks to the daemon over the Unix socket at `~/.aurelia/aurelia.sock`, so the
+daemon must be installed/running first (`make deploy` or the launchd service).
+
+```bash
+# Build and run the local TUI from the repository
+go build -o ./aurelia-tui ./cmd/aurelia-tui
+./aurelia-tui
+```
+
+The TUI supports streaming replies, markdown rendering, mouse/keyboard scroll,
+periodic daemon health checks, and a compact status/sidebar layout.
+
+| Command / shortcut | Description |
+|--------------------|-------------|
+| `/help` | Show TUI commands and keyboard shortcuts |
+| `/status` | Show daemon, model, cwd, and session status |
+| `/cwd` | Show the current TUI project binding |
+| `/cwd <path>` | Set the TUI working directory/project binding |
+| `/cwd clear` | Remove the TUI project binding |
+| `/model` | List models from the current PI model catalog |
+| `/model <name>` | Switch model after validating against the PI catalog |
+| `/model auto` | Let PI choose the model automatically |
+| `/model refresh` | Refresh the PI model catalog and report model count |
+| `Esc` | Cancel the current streaming response |
+| `Ctrl+L` | Clear the visible chat history |
+| `Alt+Enter` / `Ctrl+J` | Insert a newline in the input |
+| `Tab` | Toggle the sidebar |
+| `PgUp` / `PgDown` / mouse wheel | Scroll chat history |
+
 ## CLI
 
 ```bash
@@ -422,7 +454,8 @@ Aurelia supports local models via [Ollama](https://ollama.com/) or any OpenAI-co
 2. **Configure PI models** by editing `~/.pi/agent/models.json`:
 
    Aurelia keeps `~/.aurelia/pi-agent/models.json` as a symlink to this PI CLI
-   file, so Telegram `/model` and `pi --list-models` read the same catalog.
+   file, so Telegram `/model`, TUI `/model`, and `pi --list-models` read the
+   same catalog.
    ```json
    {
      "providers": {

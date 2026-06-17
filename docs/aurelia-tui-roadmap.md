@@ -189,8 +189,13 @@ type IPCEvent struct {
 - [x] Sidebar mínima com sessão, projecto (`/cwd`) e estado do daemon
 - [x] Graceful degradation: se daemon não estiver a correr, mensagem clara
 - [x] UX hardening: filtros para atalhos/resíduos de terminal não poluírem input
+- [x] `/help` local com comandos e atalhos do TUI
+- [x] `/model` local para listar, refresh, auto e troca validada de modelo
+- [x] Polish visual: blocos de mensagem, estado vazio, header/status responsivos
+- [x] Cancelamento com `Esc`, spinner durante streaming e health check periódico
+- [x] Scroll por teclado (`pgup`/`pgdown`) e mouse wheel
 
-**Critério de saída:** ✅ consegues ter uma conversa completa com a Aurelia pela TUI, incluindo `/cwd`, `/status`, streaming e respostas em markdown.
+**Critério de saída:** ✅ consegues ter uma conversa completa com a Aurelia pela TUI, incluindo `/help`, `/cwd`, `/status`, `/model`, streaming e respostas em markdown.
 
 ---
 
@@ -254,8 +259,8 @@ ao chat, útil para ver contexto rápido sem sair da conversa.
 
 **Tasks:**
 - [ ] Tema claro/escuro (detecta `$TERM_PROGRAM` e `$COLORTERM`)
-- [ ] Mouse support (`tea.WithMouseCellMotion()`)
-- [ ] Resize handling (terminal window resize)
+- [x] Mouse support (`tea.WithMouseCellMotion()` + scroll no viewport)
+- [x] Resize handling básico (terminal window resize)
 - [ ] `--session` flag para abrir directamente numa sessão: `aurelia-tui --session tui:work`
 - [ ] `--attach` flag para retomar sessão Telegram: `aurelia-tui --attach telegram:chat_id/thread_id`
 - [ ] Build targets: `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`
