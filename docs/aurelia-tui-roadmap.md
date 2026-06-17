@@ -1,7 +1,7 @@
 # Aurelia TUI — Plano de Implementação
 
 **Sprint:** J (pós Auto-Skills)
-**Status:** 🟢 Fase 2 MVP implementada — branch `feature/tui-mvp`
+**Status:** 🟢 Fase 3 implementada — branch `feature/tui-multi-session`
 **Depende de:** Sprint E (Project Memory), Sprint F (Wiki Memory Gateway)
 **Desbloqueia:** Interface alternativa ao Telegram, onboarding sem bot, uso em contexto de terminal/IDE
 
@@ -199,7 +199,7 @@ type IPCEvent struct {
 
 ---
 
-### Fase 3 — Multi-sessão e Sidebar (3-4 dias)
+### Fase 3 — Multi-sessão e Sidebar (3-4 dias) ✅
 *Reflectir a estrutura de chats do Telegram.*
 
 **Conceito de sessões locais:**
@@ -207,15 +207,15 @@ type IPCEvent struct {
 A TUI cria `ConversationKey` locais que coexistem com as do Telegram. Um `chat_id` local (e.g. `-9000001`) é reservado para sessions TUI. Um utilizador pode ter:
 - `tui:dm` — conversa directa local (equivale ao DM do Telegram)
 - `tui:work` — sessão de trabalho com nome personalizado
-- `telegram:grupo-x/topico-dev` — sessão importada do Telegram (read + write)
+- `telegram:grupo-x/topico-dev` — sessão importada do Telegram (read + write) — reservado para Fase 5
 
 **Tasks:**
-- [ ] Sidebar com lista de sessões (locais + Telegram se autenticado)
-- [ ] Navegação: `↑↓` na sidebar, `enter` para abrir sessão
-- [ ] Criar nova sessão local: `n` na sidebar
-- [ ] Persistência de sessões TUI no SQLite do daemon
-- [ ] Header com nome da sessão, `cwd`, projecto activo
-- [ ] Histórico de mensagens por sessão (carregado do daemon ao abrir)
+- [x] Sidebar com lista de sessões (locais + Telegram se autenticado)
+- [x] Navegação: `↑↓` na sidebar, `enter` para abrir sessão
+- [x] Criar nova sessão local: `n` na sidebar
+- [x] Persistência de sessões TUI no SQLite do daemon
+- [x] Header com nome da sessão, `cwd`, projecto activo
+- [x] Histórico de mensagens por sessão (carregado do daemon ao abrir)
 
 ---
 
