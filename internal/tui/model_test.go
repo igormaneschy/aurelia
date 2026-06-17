@@ -474,6 +474,98 @@ func TestModel_CtrlUDelegatesToTextarea(t *testing.T) {
 	}
 }
 
+func TestModel_InputHistoryNavigatesUpAndDown(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.inputHistory = []string{"first prompt", "second prompt"}
+	m.inputHistoryIndex = len(m.inputHistory)
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m2 := updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected nil command for history up")
+	}
+	if m2.textarea.Value() != "second prompt" {
+		t.Fatalf("expected latest history entry, got %q", m2.textarea.Value())
+	}
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m3 := updated.(Model)
+	if m3.textarea.Value() != "first prompt" {
+		t.Fatalf("expected previous history entry, got %q", m3.textarea.Value())
+	}
+
+	updated, _ = m3.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m4 := updated.(Model)
+	if m4.textarea.Value() != "second prompt" {
+		t.Fatalf("expected next history entry, got %q", m4.textarea.Value())
+	}
+
+	updated, _ = m4.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m5 := updated.(Model)
+	if m5.textarea.Value() != "" {
+		t.Fatalf("expected down past latest to clear input, got %q", m5.textarea.Value())
+	}
+}
+
+func TestModel_InputHistoryDoesNotReplaceNonEmptyDraft(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.inputHistory = []string{"old prompt"}
+	m.inputHistoryIndex = len(m.inputHistory)
+	m.textarea.SetValue("draft")
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m2 := updated.(Model)
+
+	if m2.textarea.Value() != "draft" {
+		t.Fatalf("expected draft preserved, got %q", m2.textarea.Value())
+	}
+	if m2.inputHistoryIndex != len(m.inputHistory) {
+		t.Fatalf("expected history index unchanged, got %d", m2.inputHistoryIndex)
+	}
+}
+
+func TestModel_InputHistoryDoesNotReplaceEditedHistoryDraft(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.inputHistory = []string{"old prompt", "second prompt"}
+	m.inputHistoryIndex = len(m.inputHistory)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m2 := updated.(Model)
+	m2.textarea.SetValue("second prompt edited")
+
+	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyUp})
+	m3 := updated.(Model)
+	if m3.textarea.Value() != "second prompt edited" {
+		t.Fatalf("expected edited history draft preserved on up, got %q", m3.textarea.Value())
+	}
+
+	updated, _ = m3.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m4 := updated.(Model)
+	if m4.textarea.Value() != "second prompt edited" {
+		t.Fatalf("expected edited history draft preserved on down, got %q", m4.textarea.Value())
+	}
+}
+
+func TestModel_RememberInputDedupesConsecutiveEntries(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.rememberInput("hello")
+	m.rememberInput("hello")
+	m.rememberInput("world")
+
+	if len(m.inputHistory) != 2 {
+		t.Fatalf("expected 2 deduped history entries, got %d", len(m.inputHistory))
+	}
+	if m.inputHistory[0] != "hello" || m.inputHistory[1] != "world" {
+		t.Fatalf("unexpected input history: %#v", m.inputHistory)
+	}
+	if m.inputHistoryIndex != len(m.inputHistory) {
+		t.Fatalf("expected index at end, got %d", m.inputHistoryIndex)
+	}
+}
+
 func TestModel_TabTogglesSidebar(t *testing.T) {
 	m := Model{
 		state:       stateChat,

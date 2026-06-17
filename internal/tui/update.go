@@ -252,6 +252,18 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case isViewportScrollKey(msg):
 		return m.handleViewportMsg(msg)
 
+	case msg.String() == "up":
+		if m.canNavigateInputHistory(-1) {
+			return m.navigateInputHistory(-1), nil
+		}
+		return m.delegateKeyToTextarea(msg)
+
+	case msg.String() == "down":
+		if m.canNavigateInputHistory(1) {
+			return m.navigateInputHistory(1), nil
+		}
+		return m.delegateKeyToTextarea(msg)
+
 	case msg.String() == "esc":
 		if m.waiting {
 			return m.cancelStreaming()
@@ -267,6 +279,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if text == "" {
 			return m, nil
 		}
+		m.rememberInput(text)
 		m.textarea.Reset()
 		m.messages = append(m.messages, chatMessage{
 			Sender:    "Igor",
@@ -292,17 +305,83 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	default:
-		if isTerminalColorReportResidue(msg) {
-			return m, nil
-		}
-		if !shouldDelegateKeyToTextarea(msg, m.textarea.KeyMap) {
-			return m, nil
-		}
-		// Delegate all other keys to the textarea.
-		var cmd tea.Cmd
-		m.textarea, cmd = m.textarea.Update(msg)
-		return m, cmd
+		return m.delegateKeyToTextarea(msg)
 	}
+}
+
+func (m Model) delegateKeyToTextarea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if isTerminalColorReportResidue(msg) {
+		return m, nil
+	}
+	if !shouldDelegateKeyToTextarea(msg, m.textarea.KeyMap) {
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.textarea, cmd = m.textarea.Update(msg)
+	return m, cmd
+}
+
+const maxInputHistory = 100
+
+func (m *Model) rememberInput(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return
+	}
+	last := len(m.inputHistory) - 1
+	if last < 0 || m.inputHistory[last] != text {
+		m.inputHistory = append(m.inputHistory, text)
+		if len(m.inputHistory) > maxInputHistory {
+			m.inputHistory = m.inputHistory[len(m.inputHistory)-maxInputHistory:]
+		}
+	}
+	m.inputHistoryIndex = len(m.inputHistory)
+}
+
+func (m Model) canNavigateInputHistory(direction int) bool {
+	if m.waiting || len(m.inputHistory) == 0 {
+		return false
+	}
+	if m.isViewingInputHistory() {
+		return true
+	}
+	if direction < 0 {
+		return strings.TrimSpace(m.textarea.Value()) == ""
+	}
+	return false
+}
+
+func (m Model) isViewingInputHistory() bool {
+	if m.inputHistoryIndex < 0 || m.inputHistoryIndex >= len(m.inputHistory) {
+		return false
+	}
+	return m.textarea.Value() == m.inputHistory[m.inputHistoryIndex]
+}
+
+func (m Model) navigateInputHistory(direction int) Model {
+	if len(m.inputHistory) == 0 {
+		return m
+	}
+	if m.inputHistoryIndex < 0 || m.inputHistoryIndex > len(m.inputHistory) {
+		m.inputHistoryIndex = len(m.inputHistory)
+	}
+
+	if direction < 0 && m.inputHistoryIndex > 0 {
+		m.inputHistoryIndex--
+		m.textarea.SetValue(m.inputHistory[m.inputHistoryIndex])
+		m.textarea.CursorEnd()
+		return m
+	}
+	if direction > 0 && m.inputHistoryIndex < len(m.inputHistory) {
+		m.inputHistoryIndex++
+		if m.inputHistoryIndex == len(m.inputHistory) {
+			m.textarea.Reset()
+			return m
+		}
+		m.textarea.SetValue(m.inputHistory[m.inputHistoryIndex])
+		m.textarea.CursorEnd()
+	}
+	return m
 }
 
 func (m Model) canApplyStartupHistory() bool {

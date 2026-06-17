@@ -65,6 +65,10 @@ type Model struct {
 	// Textarea for multiline input
 	textarea textarea.Model
 
+	// In-memory prompt/command history for ↑/↓ navigation.
+	inputHistory      []string
+	inputHistoryIndex int
+
 	// Pending request tracking
 	requestID string
 	waiting   bool
@@ -106,15 +110,16 @@ func NewModel(socketPath string) Model {
 	ta.SetHeight(2)
 
 	return Model{
-		state:       stateLoading,
-		socketPath:  socketPath,
-		ipcClient:   ipc.NewClient(socketPath),
-		spinner:     s,
-		textarea:    ta,
-		showSidebar: true,
-		daemonLabel: "connecting",
-		cwdPath:     "not set",
-		messages:    make([]chatMessage, 0),
+		state:             stateLoading,
+		socketPath:        socketPath,
+		ipcClient:         ipc.NewClient(socketPath),
+		spinner:           s,
+		textarea:          ta,
+		showSidebar:       true,
+		daemonLabel:       "connecting",
+		cwdPath:           "not set",
+		messages:          make([]chatMessage, 0),
+		inputHistoryIndex: 0,
 	}
 }
 
