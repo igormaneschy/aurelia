@@ -270,6 +270,42 @@ ao chat, útil para ver contexto rápido sem sair da conversa.
 
 ---
 
+### Fase 4.5 — Image Input / Vision (3-4 dias)
+
+*Enviar imagens ao modelo vision directamente do terminal — screenshots,
+diagramas, fotos — sem trocar para o Telegram.*
+
+**Spec:** `.specs/features/tui-image-input/spec.md`
+**Design:** `.specs/features/tui-image-input/design.md`
+**Tasks:** `.specs/features/tui-image-input/tasks.md`
+
+Toda a infraestrutura backend já existe (bridge protocol, pipeline,
+`applyVisionFallback`). Esta fase adiciona apenas a camada TUI.
+
+**Métodos de input:**
+
+| Método | UX | Prioridade |
+|--------|-----|------------|
+| `/img <path>` | Escreves `/img ~/screenshots/erro.png` + pergunta | P1 |
+| `ctrl+v` (clipboard) | Screenshot → ctrl+v na TUI → pergunta | P2 |
+| Drag-and-drop | Arrastas ficheiro para o terminal | P3 |
+
+**Tasks:**
+- [ ] Extrair `encodeImageAttachment` para `pkg/images/` (partilhado Telegram + TUI)
+- [ ] Adicionar `IPCImage` ao protocolo IPC + validação
+- [ ] Handler do daemon: converter IPCImage → ImageAttachment, passar ao pipeline
+- [ ] TUI: comando `/img <path>` com badges `[📎 nome.png]`
+- [ ] TUI: `ctrl+v` clipboard (osascript macOS, xclip/wl-paste Linux)
+- [ ] TUI: drag-and-drop — detectar path de imagem em paste de texto
+- [ ] `ctrl+x` limpa imagens pendentes
+- [ ] Testes + validação ao vivo com modelo vision
+
+**Critério de saída:** consegues enviar um screenshot à Aurelia pela TUI
+e receber uma análise do modelo vision, com `applyVisionFallback`
+trocando automaticamente se o modelo activo não suportar imagens.
+
+---
+
 ### Fase 5 — Polish e Distribuição (2-3 dias)
 
 **Tasks:**
@@ -322,8 +358,9 @@ Sprint J: TUI ← AQUI                        🔴 proposta
   ├─ Fase 2: TUI MVP (5d)
   ├─ Fase 3: Multi-sessão (4d)
   ├─ Fase 4: Painel de Estado do Projeto (3d)
+  ├─ Fase 4.5: Image Input / Vision (3-4d)
   └─ Fase 5: Polish + Distribuição (3d)
-     Total estimado: ~2.5 semanas
+     Total estimado: ~3 semanas
 ```
 
 **Nota:** A Fase 0 (Transport Abstraction) pode e deve ser feita **antes** do Sprint J — idealmente junto com o Sprint D0 ou E, porque não tem risco de regressão e a refactorização vai ser necessária de qualquer forma.
@@ -347,6 +384,7 @@ Sprint J: TUI ← AQUI                        🔴 proposta
 - [ ] Conversa completa com streaming funciona pela TUI
 - [x] Sidebar mostra sessões locais com navegação e gestão (criar/abrir/apagar)
 - [ ] Painel de estado mostra cwd, binding source, resumo de memória
+- [ ] Envio de imagens funciona (`/img`, `ctrl+v` clipboard, drag-drop) com modelo vision
 - [x] Nenhuma regressão no Telegram transport
 - [x] `go build ./... && go vet ./... && go test ./...` limpo
 - [ ] Funciona em macOS (darwin/arm64) e Linux (amd64/arm64)
