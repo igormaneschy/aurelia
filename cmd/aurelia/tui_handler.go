@@ -257,6 +257,8 @@ Commands:
 - /cwd clear — remove the project binding
 
 Keyboard:
+- Ctrl+S — focus sidebar to navigate sessions
+- In sidebar: ↑↓ navigate, enter open, n new, d delete, esc exit
 - Esc — cancel the current response
 - Ctrl+L — clear the screen
 - Ctrl+C — quit
