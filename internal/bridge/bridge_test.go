@@ -782,6 +782,15 @@ rl.on('line', (line) => {
                 context_usage_pct: 45.5,
             }),
         }) + "\n");
+    } else if (req.command === "get-session-history") {
+        process.stdout.write(JSON.stringify({
+            event: "result",
+            request_id: rid,
+            content: JSON.stringify([
+                { sender: "Igor", text: "hello" },
+                { sender: "Aurelia", text: "hi there" },
+            ]),
+        }) + "\n");
     } else if (req.command === "ping") {
         process.stdout.write(JSON.stringify({event:"pong",request_id:rid}) + "\n");
     } else {
@@ -834,6 +843,30 @@ func TestBridge_GetSessionStats(t *testing.T) {
 	}
 	if stats.ContextUsagePct != 45.5 {
 		t.Fatalf("ContextUsagePct = %f, want 45.5", stats.ContextUsagePct)
+	}
+}
+
+func TestBridge_GetSessionHistory(t *testing.T) {
+	dir := t.TempDir()
+	b := newMockBridge(t, dir, sessionStatsMockJS)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	messages, err := b.GetSessionHistory(ctx, RequestOptions{
+		Resume: "/tmp/sessions/test.jsonl",
+	})
+	if err != nil {
+		t.Fatalf("GetSessionHistory() error: %v", err)
+	}
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 history messages, got %d", len(messages))
+	}
+	if messages[0].Sender != "Igor" || messages[0].Text != "hello" {
+		t.Fatalf("unexpected first message: %#v", messages[0])
+	}
+	if messages[1].Sender != "Aurelia" || messages[1].Text != "hi there" {
+		t.Fatalf("unexpected second message: %#v", messages[1])
 	}
 }
 

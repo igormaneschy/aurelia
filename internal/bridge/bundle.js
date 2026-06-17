@@ -303175,6 +303175,30 @@ function textFromContent(content) {
     return typeof block2.text === "string" ? block2.text : "";
   }).join("");
 }
+function textFromMessageContent(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) return textFromContent(content);
+  if (typeof content !== "object" || content === null) return "";
+  const obj = content;
+  if (typeof obj.text === "string") return obj.text;
+  if (obj.content !== void 0) return textFromMessageContent(obj.content);
+  return "";
+}
+function sessionHistoryFromMessages(messages, limit2 = 100) {
+  const history = [];
+  for (const raw of messages) {
+    if (typeof raw !== "object" || raw === null) continue;
+    const msg = raw;
+    const role = typeof msg.role === "string" ? msg.role : "";
+    const sender = role === "user" ? "Igor" : role === "assistant" ? "Aurelia" : "";
+    if (!sender) continue;
+    const text = textFromMessageContent(msg.content).trim();
+    if (!text) continue;
+    history.push({ sender, text });
+  }
+  if (history.length <= limit2) return history;
+  return history.slice(history.length - limit2);
+}
 function resolveModel(registry2, provider, modelID) {
   if (!modelID) return void 0;
   const mappedProvider = mapProvider(provider);
@@ -303748,6 +303772,39 @@ async function handleGetSessionStats(req) {
     emitReq({ event: "error", message: redactSDKError(errMsg) });
   }
 }
+async function handleGetSessionHistory(req) {
+  const reqId = req.request_id || "";
+  const emitReq = (obj) => emit({ ...obj, request_id: reqId });
+  const opts = req.options;
+  if (!opts?.resume) {
+    emitReq({ event: "result", content: "[]" });
+    return;
+  }
+  if (!existsSync27(opts.resume)) {
+    redactedLog(`get-session-history skipped missing resume=${redactSDKError(opts.resume)}`);
+    emitReq({ event: "result", content: "[]" });
+    return;
+  }
+  let session;
+  try {
+    const piSession = await createPiSession({ ...opts, continue: false });
+    session = piSession.session;
+    const messages = session.state.messages ?? [];
+    const history = sessionHistoryFromMessages(messages, 100);
+    emitReq({ event: "result", content: JSON.stringify(history) });
+  } catch (err2) {
+    const errMsg = err2 instanceof Error ? err2.message : String(err2);
+    redactedLog(`get-session-history error: rid=${reqId} ${errMsg}`);
+    emitReq({ event: "error", message: `get-session-history failed: ${redactSDKError(errMsg)}` });
+  } finally {
+    if (session) {
+      try {
+        session.dispose();
+      } catch {
+      }
+    }
+  }
+}
 async function handleCompactSession(req) {
   const reqId = req.request_id || "";
   const emitReq = (obj) => emit({ ...obj, request_id: reqId });
@@ -303947,6 +304004,10 @@ async function handleRequest(line) {
     }
     case "get-session-stats": {
       await handleGetSessionStats(req);
+      break;
+    }
+    case "get-session-history": {
+      await handleGetSessionHistory(req);
       break;
     }
     case "compact-session": {

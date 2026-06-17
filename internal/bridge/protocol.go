@@ -66,6 +66,13 @@ type SessionStats struct {
 	ContextUsagePct   float64 `json:"context_usage_pct,omitempty"`
 }
 
+// SessionHistoryMessage is a UI-safe transcript message derived from the PI
+// session file. Tool/system/internal messages are filtered out by the bridge.
+type SessionHistoryMessage struct {
+	Sender string `json:"sender"`
+	Text   string `json:"text"`
+}
+
 // SecurityContext carries capability profile and policy configuration to the
 // Bridge so the PI tool_call hook can evaluate and govern individual tool
 // calls before they execute.

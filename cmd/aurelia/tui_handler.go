@@ -167,6 +167,11 @@ func makeTUIHandler(a *app) func(context.Context, ipc.IPCMessage, func(ipc.IPCEv
 			msg.ThreadID = 0
 			msg.UserID = int64(os.Getuid())
 			return handleTUICommand(ctx, a, msg, emit)
+		case ipc.MsgTypeHistory:
+			msg.ChatID = ipc.ReservedTUIChatID
+			msg.ThreadID = 0
+			msg.UserID = int64(os.Getuid())
+			return handleTUIHistory(ctx, a, msg, emit)
 		case ipc.MsgTypeSend:
 			msg.ChatID = ipc.ReservedTUIChatID
 			msg.ThreadID = 0
