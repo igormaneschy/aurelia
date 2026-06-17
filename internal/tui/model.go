@@ -146,6 +146,13 @@ func (m Model) Init() tea.Cmd {
 	)
 }
 
+// isChatMode returns true when no project cwd is set, meaning file system
+// tools (Read, Write, Edit, Bash, Glob, Grep, LS, List) are disabled.
+// The session works as a conversational assistant only.
+func (m Model) isChatMode() bool {
+	return m.cwdPath == "" || m.cwdPath == "not set"
+}
+
 // checkDaemon returns a command that pings the daemon.
 func checkDaemon(client *ipc.Client) tea.Cmd {
 	return func() tea.Msg {

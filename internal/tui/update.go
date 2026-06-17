@@ -130,8 +130,13 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tuiStatusMsg:
-		if msg.err == nil && msg.cwd != "" {
-			m.cwdPath = msg.cwd
+		if msg.err == nil {
+			if msg.cwd != "" {
+				m.cwdPath = msg.cwd
+			} else {
+				// No cwd marker in status response — session has no project.
+				m.cwdPath = "not set"
+			}
 		}
 		return m, nil
 

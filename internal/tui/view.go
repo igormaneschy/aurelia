@@ -95,6 +95,11 @@ var (
 	statusReadyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
 	statusBusyStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 	statusErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
+
+	// chatModeStyle highlights that file system tools are disabled.
+	chatModeStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("214")). // amber
+			Italic(true)
 )
 
 // View implements tea.Model.
@@ -278,7 +283,6 @@ type statusBarItem struct {
 }
 
 func (m Model) renderChatHeader() string {
-	project := truncateMiddle(projectName(m.cwdPath), maxInt(12, m.contentWidth()/3))
 	stateLabel := m.chromeState()
 	if m.waiting {
 		stateLabel = m.spinner.View() + " thinking"
@@ -295,7 +299,14 @@ func (m Model) renderChatHeader() string {
 		}
 	}
 
-	meta := fmt.Sprintf("project %s   ·   daemon %s   ·   %s", project, m.daemonLabel, stateLabel)
+	var projectPart string
+	if m.isChatMode() {
+		projectPart = chatModeStyle.Render("chat mode")
+	} else {
+		projectName := truncateMiddle(projectName(m.cwdPath), maxInt(12, m.contentWidth()/3))
+		projectPart = headerMetaStyle.Render("project " + projectName)
+	}
+	meta := fmt.Sprintf("%s   ·   daemon %s   ·   %s", projectPart, m.daemonLabel, stateLabel)
 	header := lipgloss.JoinVertical(
 		lipgloss.Left,
 		headerTitleStyle.Render("Aurelia / "+sessionName)+"  "+headerMetaStyle.Render(meta),
@@ -370,7 +381,11 @@ func (m Model) renderSidebar() string {
 			sidebarTitleStyle.Render("Project"),
 			truncateMiddle(projectName(m.cwdPath), sidebarWidth-4),
 			sidebarMutedStyle.Render(truncateMiddle(m.cwdPath, sidebarWidth-4)),
-			"",
+		)
+		if m.isChatMode() {
+			lines = append(lines, chatModeStyle.Render("(chat mode)"))
+		}
+		lines = append(lines, "",
 			sidebarTitleStyle.Render("Daemon"),
 			m.daemonLabel,
 		)

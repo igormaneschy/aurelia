@@ -438,6 +438,8 @@ func handleTUIStatus(ctx context.Context, a *app, chatID int64, threadID int, us
 		resolved, err := a.bindings.Resolve(ctx, projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID})
 		if err == nil && resolved != nil && resolved.Binding != nil {
 			b.WriteString(fmt.Sprintf("📂 CWD: `%s`\n", resolved.Binding.CWD))
+		} else {
+			b.WriteString("📂 No project set.\n")
 		}
 	}
 

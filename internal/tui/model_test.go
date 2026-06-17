@@ -1332,6 +1332,61 @@ func TestModel_ChatViewDoesNotExceedShortTerminalHeight(t *testing.T) {
 	}
 }
 
+func TestModel_ChatHeaderShowsChatModeWhenNoCWD(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.width = 100
+	m.height = 40
+	m.daemonLabel = "ready"
+	// cwdPath is "not set" by default
+
+	header := stripANSIForTest(m.renderChatHeader())
+
+	if !strings.Contains(header, "chat mode") {
+		t.Errorf("expected header to show 'chat mode' when no cwd, got: %q", header)
+	}
+	if strings.Contains(header, "project") {
+		t.Errorf("expected header to NOT mention 'project' when in chat mode, got: %q", header)
+	}
+}
+
+func TestModel_SidebarShowsChatModeWhenNoCWD(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.daemonLabel = "ready"
+	m.sessions = []tuiSessionInfo{
+		{ChatID: -9000001, Name: "dm"},
+	}
+	// cwdPath is "not set" by default
+
+	sidebar := m.renderSidebar()
+	plain := stripANSIForTest(sidebar)
+
+	if !strings.Contains(plain, "chat mode") {
+		t.Errorf("expected sidebar to show '(chat mode)' when no cwd, got: %q", plain)
+	}
+}
+
+func TestModel_SidebarHidesChatModeWhenCWDSet(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.cwdPath = "/Users/igor/dev/aurelia"
+	m.daemonLabel = "ready"
+	m.sessions = []tuiSessionInfo{
+		{ChatID: -9000001, Name: "dm"},
+	}
+
+	sidebar := m.renderSidebar()
+	plain := stripANSIForTest(sidebar)
+
+	if strings.Contains(plain, "chat mode") {
+		t.Errorf("expected no 'chat mode' when cwd is set, got: %q", plain)
+	}
+	if !strings.Contains(plain, "aurelia") {
+		t.Errorf("expected sidebar project to show 'aurelia', got: %q", plain)
+	}
+}
+
 func TestModel_ChatViewDoesNotExceedVeryShortTerminalHeight(t *testing.T) {
 	for _, height := range []int{12, 13} {
 		m := NewModel("/tmp/test.sock")
