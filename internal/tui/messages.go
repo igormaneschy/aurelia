@@ -48,6 +48,17 @@ type streamErrMsg struct {
 	err error
 }
 
+// healthCheckTickMsg triggers a periodic daemon reachability check.
+type healthCheckTickMsg struct{}
+
+// healthCheckResultMsg carries the result of a periodic health check.
+// Unlike daemonReachableMsg/daemonUnreachableMsg, this never transitions
+// to stateError — it only updates the daemon label for non-fatal checks.
+type healthCheckResultMsg struct {
+	err     error
+	latency time.Duration
+}
+
 // contextWithTimeout is a test-accessible timeout helper.
 var contextWithTimeout = func(d time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), d)

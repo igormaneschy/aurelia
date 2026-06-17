@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
@@ -221,6 +222,28 @@ func TestModel_CtrlLClearsMessages(t *testing.T) {
 	}
 }
 
+func TestModel_CtrlLShowsEmptyStateWhenViewportReady(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.width = 80
+	m.height = 24
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+	m.messages = []chatMessage{{Sender: "Igor", Text: "hello"}}
+	m.updateViewport()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	m2 := updated.(Model)
+
+	if len(m2.messages) != 0 {
+		t.Fatalf("expected empty messages, got %d", len(m2.messages))
+	}
+	content := stripANSIForTest(m2.viewport.View())
+	if !strings.Contains(content, "Aurelia TUI") {
+		t.Errorf("expected empty state after ctrl+l, got:\n%s", content)
+	}
+}
+
 func TestModel_CtrlCQuits(t *testing.T) {
 	m := Model{
 		state: stateChat,
@@ -230,6 +253,163 @@ func TestModel_CtrlCQuits(t *testing.T) {
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
 	if cmd == nil {
 		t.Fatal("expected quit command for ctrl+c")
+	}
+}
+
+func TestModel_EscCancelsStreaming(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.ready = true
+	m.waiting = true
+	m.streamBuf = "partial response"
+	m.messages = []chatMessage{{Sender: "Igor", Text: "hello"}}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m2 := updated.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected nil command after esc cancel")
+	}
+	if m2.waiting {
+		t.Error("expected waiting=false after esc cancel")
+	}
+	if m2.streamBuf != "" {
+		t.Error("expected streamBuf cleared after esc cancel")
+	}
+	if m2.reader != nil {
+		t.Error("expected reader nil after esc cancel")
+	}
+	if len(m2.messages) != 2 {
+		t.Fatalf("expected 2 messages (original + cancel), got %d", len(m2.messages))
+	}
+	last := m2.messages[len(m2.messages)-1]
+	if last.Sender != "⚠️" || last.Text != "(cancelled)" {
+		t.Errorf("expected cancel message, got sender=%q text=%q", last.Sender, last.Text)
+	}
+}
+
+func TestModel_EscDoesNothingWhenNotWaiting(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.ready = true
+	m.waiting = false
+	m.textarea.SetValue("hello")
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m2 := updated.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected nil command for esc when not waiting")
+	}
+	if m2.textarea.Value() != "hello" {
+		t.Errorf("expected textarea unchanged, got %q", m2.textarea.Value())
+	}
+}
+
+func TestModel_HealthCheckResultUpdatesDaemonLabel(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.daemonLabel = "ready"
+
+	// Successful health check updates latency.
+	updated, cmd := m.Update(healthCheckResultMsg{latency: 42 * time.Millisecond})
+	m2 := updated.(Model)
+
+	if m2.daemonLabel != "ready" {
+		t.Errorf("expected daemonLabel=ready, got %q", m2.daemonLabel)
+	}
+	if m2.connectLatency != 42*time.Millisecond {
+		t.Errorf("expected latency=42ms, got %v", m2.connectLatency)
+	}
+	if cmd == nil {
+		t.Error("expected next health check to be scheduled")
+	}
+
+	// Failed health check marks daemon offline without going to error state.
+	updated, _ = m.Update(healthCheckResultMsg{err: errors.New("timeout")})
+	m3 := updated.(Model)
+
+	if m3.daemonLabel != "offline" {
+		t.Errorf("expected daemonLabel=offline, got %q", m3.daemonLabel)
+	}
+	if m3.state != stateChat {
+		t.Errorf("expected state=chat (not error), got %v", m3.state)
+	}
+}
+
+func TestModel_HealthCheckTickTriggersPing(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+
+	updated, cmd := m.Update(healthCheckTickMsg{})
+	m2 := updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected non-nil command (health check ping)")
+	}
+	// Model should not change state from the tick itself.
+	if m2.state != stateChat {
+		t.Errorf("expected state=chat, got %v", m2.state)
+	}
+}
+
+func TestModel_PageUpScrollsViewport(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.width = 100
+	m.height = 12
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+	m.viewport.SetContent(strings.Repeat("line\n", 40))
+	m.viewport.GotoBottom()
+	bottomOffset := m.viewport.YOffset
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	m2 := updated.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected nil command for viewport scroll")
+	}
+	if m2.viewport.YOffset >= bottomOffset {
+		t.Fatalf("expected page up to reduce viewport offset from %d, got %d", bottomOffset, m2.viewport.YOffset)
+	}
+}
+
+func TestModel_MouseWheelScrollsViewport(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.width = 100
+	m.height = 12
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+	m.viewport.SetContent(strings.Repeat("line\n", 40))
+	m.viewport.GotoBottom()
+	bottomOffset := m.viewport.YOffset
+
+	updated, _ := m.Update(tea.MouseMsg{
+		Type:   tea.MouseWheelUp,
+		Button: tea.MouseButtonWheelUp,
+		Action: tea.MouseActionPress,
+	})
+	m2 := updated.(Model)
+
+	if m2.viewport.YOffset >= bottomOffset {
+		t.Fatalf("expected mouse wheel up to reduce viewport offset from %d, got %d", bottomOffset, m2.viewport.YOffset)
+	}
+}
+
+func TestModel_CtrlUDelegatesToTextarea(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.ready = true
+	m.textarea.SetValue("hello world")
+	m.textarea.CursorEnd()
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	m2 := updated.(Model)
+
+	if m2.textarea.Value() == "hello world" {
+		t.Fatal("expected ctrl+u to edit textarea, but value was unchanged")
 	}
 }
 
@@ -379,6 +559,28 @@ func TestModel_CtrlJInsertsNewline(t *testing.T) {
 	}
 	if m2.textarea.Value() != "\n" {
 		t.Errorf("expected newline in textarea, got %q", m2.textarea.Value())
+	}
+}
+
+func TestInputTextareaWidthLeavesRoomForPrompt(t *testing.T) {
+	terminalWidth := 80
+	got := inputTextareaWidth(terminalWidth)
+	boxWidth := inputBoxContentWidth(terminalWidth)
+
+	if got >= boxWidth {
+		t.Fatalf("expected textarea width %d to be less than box width %d", got, boxWidth)
+	}
+	if got >= terminalWidth-4 {
+		t.Fatalf("expected textarea width %d to be narrower than old terminal-based width", got)
+	}
+}
+
+func TestRenderPromptedTextareaIndentsContinuationLines(t *testing.T) {
+	got := stripANSIForTest(renderPromptedTextarea("> ", "> ", "first\nsecond"))
+	want := "> first\n  second"
+
+	if got != want {
+		t.Fatalf("expected prompted textarea %q, got %q", want, got)
 	}
 }
 
@@ -729,6 +931,14 @@ func TestModel_DefaultChromeState(t *testing.T) {
 	}
 }
 
+func TestModel_TextareaPromptDisabledForCustomInputChrome(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+
+	if m.textarea.Prompt != "" {
+		t.Fatalf("expected textarea internal prompt disabled, got %q", m.textarea.Prompt)
+	}
+}
+
 func TestModel_ChatViewStartsWithTopMargin(t *testing.T) {
 	m := NewModel("/tmp/test.sock")
 	m.state = stateChat
@@ -751,13 +961,157 @@ func TestModel_ChatViewStartsWithTopMargin(t *testing.T) {
 func TestModel_StatusBarUsesCompactShortcuts(t *testing.T) {
 	m := NewModel("/tmp/test.sock")
 	m.state = stateChat
-	m.width = 100
+	m.width = 150
 
 	status := m.renderStatusBar()
 
-	for _, want := range []string{"↵ send", "alt+enter newline", "⌃L clear", "tab sidebar", "⌃C quit"} {
+	for _, want := range []string{"↵ send", "alt+enter newline", "esc cancel", "⌃L clear", "tab sidebar", "⌃C quit"} {
 		if !strings.Contains(status, want) {
 			t.Errorf("expected status bar to contain %q, got %q", want, status)
+		}
+	}
+}
+
+func TestModel_StatusBarDropsItemsOnNarrowTerminal(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.width = 50
+
+	status := stripANSIForTest(m.renderStatusBar())
+
+	// On a narrow terminal, low-priority items should be dropped.
+	if strings.Contains(status, "⌃C quit") {
+		t.Errorf("expected '⌃C quit' to be dropped on width=50, got %q", status)
+	}
+	if strings.Contains(status, "tab sidebar") {
+		t.Errorf("expected 'tab sidebar' to be dropped on width=50, got %q", status)
+	}
+	// High-priority items should remain.
+	if !strings.Contains(status, "↵ send") {
+		t.Errorf("expected '↵ send' to remain on width=50, got %q", status)
+	}
+}
+
+func TestModel_StatusBarNeverWraps(t *testing.T) {
+	for _, width := range []int{40, 60, 80, 100, 120, 150} {
+		m := NewModel("/tmp/test.sock")
+		m.state = stateChat
+		m.width = width
+
+		status := stripANSIForTest(m.renderStatusBar())
+		lineCount := strings.Count(status, "\n") + 1
+
+		if lineCount > 1 {
+			t.Fatalf("width %d: expected status bar to be 1 line, got %d: %q", width, lineCount, status)
+		}
+	}
+}
+
+func TestModel_ChatHeaderShowsProjectAndDaemon(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.width = 100
+	m.height = 40
+	m.cwdPath = "/Users/igor/dev/aurelia"
+	m.daemonLabel = "ready"
+
+	header := stripANSIForTest(m.renderChatHeader())
+
+	for _, want := range []string{"Aurelia / DM", "project aurelia", "daemon ready"} {
+		if !strings.Contains(header, want) {
+			t.Errorf("expected header to contain %q, got %q", want, header)
+		}
+	}
+}
+
+func TestModel_ChatHeaderShowsThinkingWhenWaiting(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.width = 100
+	m.height = 40
+	m.waiting = true
+
+	header := stripANSIForTest(m.renderChatHeader())
+
+	if !strings.Contains(header, "thinking") {
+		t.Errorf("expected header to show 'thinking' when waiting, got %q", header)
+	}
+}
+
+func TestModel_EmptyStateShowsWelcome(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.width = 80
+	m.height = 24
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+	m.messages = nil
+	m.updateViewport()
+
+	content := stripANSIForTest(m.viewport.View())
+
+	for _, want := range []string{"Aurelia TUI", "/help", "/cwd"} {
+		if !strings.Contains(content, want) {
+			t.Errorf("expected empty state to contain %q, got:\n%s", want, content)
+		}
+	}
+}
+
+func TestModel_MessageRenderingUsesBlockFormat(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.width = 80
+	m.height = 40
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+	m.messages = []chatMessage{
+		{Sender: "Igor", Text: "hello world", Timestamp: time.Now()},
+		{Sender: "Aurelia", Text: "hi there", Timestamp: time.Now()},
+	}
+	m.updateViewport()
+
+	content := stripANSIForTest(m.viewport.View())
+
+	// User messages get a ▶ marker and separator line.
+	if !strings.Contains(content, "▶ Igor") {
+		t.Errorf("expected '▶ Igor' marker in rendered messages, got:\n%s", content)
+	}
+	if !strings.Contains(content, "hello world") {
+		t.Errorf("expected user text in rendered messages, got:\n%s", content)
+	}
+	// Aurelia messages get a ▶ marker.
+	if !strings.Contains(content, "▶ Aurelia") {
+		t.Errorf("expected '▶ Aurelia' marker in rendered messages, got:\n%s", content)
+	}
+	if !strings.Contains(content, "hi there") {
+		t.Errorf("expected assistant text in rendered messages, got:\n%s", content)
+	}
+}
+
+func TestModel_ViewportHeightAccountsForChatHeader(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.width = 100
+	m.height = 40
+
+	vp := viewportForSize(m.contentWidth(), m.height)
+	want := m.height - inputHeight - statusBarHeight - topMarginHeight - chatHeaderHeight
+
+	if vp.Height != want {
+		t.Fatalf("expected viewport height %d, got %d", want, vp.Height)
+	}
+}
+
+func TestModel_ViewportShrinksBelowMinimumOnVeryShortTerminal(t *testing.T) {
+	for _, height := range []int{12, 13} {
+		m := NewModel("/tmp/test.sock")
+		m.width = minSidebarScreenWidth
+		m.height = height
+
+		vp := viewportForSize(m.contentWidth(), m.height)
+		want := height - inputHeight - statusBarHeight - topMarginHeight - chatHeaderHeight
+
+		if vp.Height != want {
+			t.Fatalf("height %d: expected viewport height %d, got %d", height, want, vp.Height)
 		}
 	}
 }
@@ -822,5 +1176,23 @@ func TestModel_ChatViewDoesNotExceedShortTerminalHeight(t *testing.T) {
 
 	if lineCount > m.height {
 		t.Fatalf("expected view height <= %d lines, got %d", m.height, lineCount)
+	}
+}
+
+func TestModel_ChatViewDoesNotExceedVeryShortTerminalHeight(t *testing.T) {
+	for _, height := range []int{12, 13} {
+		m := NewModel("/tmp/test.sock")
+		m.state = stateChat
+		m.width = minSidebarScreenWidth
+		m.height = height
+		m.viewport = viewportForSize(m.contentWidth(), m.height)
+		m.viewportSet = true
+
+		view := m.View()
+		lineCount := strings.Count(view, "\n") + 1
+
+		if lineCount > m.height {
+			t.Fatalf("height %d: expected view height <= %d lines, got %d", height, height, lineCount)
+		}
 	}
 }
