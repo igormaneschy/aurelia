@@ -57,10 +57,16 @@ func testApp(t *testing.T) (*app, context.Context, func()) {
 	cfg := &config.AppConfig{}
 	ctx := context.Background()
 
+	resolver, err := runtime.New()
+	if err != nil {
+		t.Fatalf("runtime.New: %v", err)
+	}
+
 	return &app{
 		bindings:    bindings,
 		sessions:    sessions,
 		config:      cfg,
+		resolver:    resolver,
 		tuiRunGuard: &tuiRunGuard{},
 		tuiSessions: tuiSessions,
 	}, ctx, func() {
@@ -633,6 +639,57 @@ func TestTUIHandler_RequestIDInErrorOnInvalidMessage(t *testing.T) {
 		if ev.RequestID != "my-req-42" {
 			t.Errorf("event[%d] RequestID = %q, want %q", i, ev.RequestID, "my-req-42")
 		}
+	}
+}
+
+func TestTUIHandler_ImageOnlySendBypassesEmptyMessage(t *testing.T) {
+	a, ctx, cleanup := testApp(t)
+	defer cleanup()
+
+	dir := t.TempDir()
+	imgPath := filepath.Join(dir, "test.png")
+	// Write a minimal valid PNG.
+	imgData := []byte{
+		0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+		0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+		0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41,
+		0x54, 0x78, 0x9c, 0x62, 0x00, 0x00, 0x00, 0x02,
+		0x00, 0x01, 0xe5, 0x27, 0xde, 0xfc, 0x00, 0x00,
+		0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42,
+		0x60, 0x82,
+	}
+	if err := os.WriteFile(imgPath, imgData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := makeTUIHandler(a)
+	te := &testEmit{}
+
+	// Send: empty text + valid image path.
+	err := handler(ctx, ipc.IPCMessage{
+		Type: "send",
+		Text: "",
+		Images: []ipc.IPCImage{
+			{Path: imgPath, MediaType: "image/png"},
+		},
+	}, te.emit)
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	// The "Empty message" response would be a message event with body
+	// "Empty message" before stream_end. Since we bypassed that guard,
+	// we should NOT see "Empty message" as a message body.
+	for _, ev := range te.events {
+		if ev.Type == "message" && strings.Contains(ev.Body, "Empty message") {
+			t.Fatal("image-only send should NOT return 'Empty message'")
+		}
+	}
+	// We expect at least an ack event.
+	if te.count() == 0 {
+		t.Fatal("expected at least an ack event")
 	}
 }
 

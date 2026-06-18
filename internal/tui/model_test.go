@@ -2,6 +2,8 @@ package tui
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -737,6 +739,188 @@ func TestRenderPromptedTextareaIndentsContinuationLines(t *testing.T) {
 	}
 }
 
+func TestModel_SubmitWithPendingImagesClearsThem(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.png")
+	if err := os.WriteFile(path, testPNG(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ta := textarea.New()
+	ta.SetValue("hello")
+	m := Model{
+		state:      stateChat,
+		ready:      true,
+		textarea:   ta,
+		waiting:    false,
+		socketPath: "/tmp/test.sock",
+	}
+	// Attach image.
+	_ = m.attachImageFromPath(path)
+	if len(m.pendingImages) != 1 {
+		t.Fatalf("expected 1 pending image before submit, got %d", len(m.pendingImages))
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected non-nil command after submit with images")
+	}
+	// Pending images should be cleared after submit.
+	if len(m2.pendingImages) != 0 {
+		t.Errorf("expected 0 pending images after submit, got %d", len(m2.pendingImages))
+	}
+}
+
+func TestModel_SubmitImageOnlyWithoutText(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "photo.png")
+	if err := os.WriteFile(path, testPNG(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ta := textarea.New()
+	// Empty textarea.
+	m := Model{
+		state:      stateChat,
+		ready:      true,
+		textarea:   ta,
+		waiting:    false,
+		socketPath: "/tmp/test.sock",
+	}
+	// Attach image.
+	_ = m.attachImageFromPath(path)
+	if len(m.pendingImages) != 1 {
+		t.Fatalf("expected 1 pending image, got %d", len(m.pendingImages))
+	}
+	if m.textarea.Value() != "" {
+		t.Fatalf("expected empty textarea, got %q", m.textarea.Value())
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected non-nil command for image-only submit")
+	}
+	if len(m2.pendingImages) != 0 {
+		t.Errorf("expected 0 pending images after submit, got %d", len(m2.pendingImages))
+	}
+}
+
+func TestModel_SubmitTempImageDefersCleanupUntilStreamEnd(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "clip.png")
+	if err := os.WriteFile(path, testPNG(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ta := textarea.New()
+	ta.SetValue("describe")
+	m := Model{
+		state:      stateChat,
+		ready:      true,
+		textarea:   ta,
+		waiting:    false,
+		socketPath: "/tmp/test.sock",
+	}
+	if errMsg := m.attachTempImage(path); errMsg != "" {
+		t.Fatalf("unexpected attach error: %s", errMsg)
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected non-nil command for temp image submit")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("expected temp image to remain until daemon consumes it: %v", err)
+	}
+	if len(m2.submittedTempImagePaths) != 1 {
+		t.Fatalf("expected submitted temp path tracked, got %d", len(m2.submittedTempImagePaths))
+	}
+
+	updated, _ = m2.handleStreamEvent(ipc.IPCEvent{Type: ipc.EventTypeStreamEnd})
+	m3 := updated.(Model)
+
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected temp image removed on stream end, stat: %v", err)
+	}
+	if len(m3.submittedTempImagePaths) != 0 {
+		t.Fatalf("expected submitted temp paths cleared, got %d", len(m3.submittedTempImagePaths))
+	}
+}
+
+func TestModel_SidebarQuitCleansSubmittedTempImages(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "submitted.png")
+	if err := os.WriteFile(path, testPNG(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	m := Model{
+		state:                   stateChat,
+		ready:                   true,
+		sidebarFocused:          true,
+		submittedTempImagePaths: []string{path},
+	}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	if cmd == nil {
+		t.Fatal("expected quit command")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected submitted temp image removed on sidebar quit, stat: %v", err)
+	}
+}
+
+func TestModel_SubmitAutoAttachesImagePathFromText(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "GravaçãoTela")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "Captura de Tela 2026-06-17 às 19.04.36.png")
+	if err := os.WriteFile(path, testPNG(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	escaped := filepath.Join(dir, "Captura\\ de\\ Tela\\ 2026-06-17\\ às\\ 19.04.36.png")
+
+	ta := textarea.New()
+	ta.SetValue("descreva essa imagem " + escaped)
+	m := Model{
+		state:      stateChat,
+		ready:      true,
+		textarea:   ta,
+		waiting:    false,
+		socketPath: "/tmp/test.sock",
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected non-nil command after submit")
+	}
+	if len(m2.pendingImages) != 0 {
+		t.Errorf("expected pending images cleared after submit, got %d", len(m2.pendingImages))
+	}
+	if len(m2.messages) != 1 {
+		t.Fatalf("expected 1 displayed message, got %d", len(m2.messages))
+	}
+	if !strings.Contains(m2.messages[0].Text, "📎 Captura de Tela 2026-06-17 às 19.04.36.png") {
+		t.Errorf("message missing image badge: %q", m2.messages[0].Text)
+	}
+	if !strings.Contains(m2.messages[0].Text, "descreva essa imagem") {
+		t.Errorf("message missing cleaned prompt: %q", m2.messages[0].Text)
+	}
+	if strings.Contains(m2.messages[0].Text, escaped) || strings.Contains(m2.messages[0].Text, path) {
+		t.Errorf("message should not display raw image path: %q", m2.messages[0].Text)
+	}
+}
+
 func TestModel_SendCommandForSlashText(t *testing.T) {
 	ta := textarea.New()
 	ta.SetValue("/status")
@@ -756,6 +940,37 @@ func TestModel_SendCommandForSlashText(t *testing.T) {
 	}
 	if m2.waiting != true {
 		t.Error("expected waiting=true after command submit")
+	}
+}
+
+func TestModel_SlashCommandDoesNotAutoAttachImageArgument(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "status.png")
+	if err := os.WriteFile(path, testPNG(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	ta := textarea.New()
+	ta.SetValue("/status " + path)
+	m := Model{
+		state:      stateChat,
+		ready:      true,
+		textarea:   ta,
+		waiting:    false,
+		socketPath: "/tmp/test.sock",
+	}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected command for /status")
+	}
+	if len(m2.pendingImages) != 0 {
+		t.Fatalf("expected no auto-attached images for slash command, got %d", len(m2.pendingImages))
+	}
+	if len(m2.messages) != 1 || m2.messages[0].Text != "/status "+path {
+		t.Fatalf("displayed command = %#v, want raw command text", m2.messages)
 	}
 }
 

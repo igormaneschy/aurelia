@@ -166,6 +166,19 @@ func TestValidateMessage_ImageUnsupportedMediaType(t *testing.T) {
 	}
 }
 
+func TestValidateMessage_EmptyTextWithImagesValid(t *testing.T) {
+	msg := IPCMessage{
+		Type: MsgTypeSend,
+		Text: "",
+		Images: []IPCImage{
+			{Path: "/tmp/test.png", MediaType: "image/png"},
+		},
+	}
+	if err := validateMessage(msg); err != nil {
+		t.Errorf("image-only message should pass IPC validation, got: %v", err)
+	}
+}
+
 func TestValidateMessage_ImageDataTooLarge(t *testing.T) {
 	// Create a message with base64 data that exceeds the limit.
 	largeData := strings.Repeat("A", MaxTotalImageBytes+1)

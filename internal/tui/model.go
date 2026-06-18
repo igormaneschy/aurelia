@@ -108,7 +108,8 @@ type Model struct {
 	rendererWidth   int
 
 	// Pending image attachments (cleared after send)
-	pendingImages []pendingImage
+	pendingImages           []pendingImage
+	submittedTempImagePaths []string
 }
 
 // NewModel creates a new TUI model with the given socket path.

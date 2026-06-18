@@ -1,14 +1,26 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// clipboardTimeout is the maximum time to wait for a clipboard subprocess.
+var clipboardTimeout = 10 * time.Second
+
+// clipboardNewContext returns a cancellable context for clipboard operations.
+// Exposed as a variable so tests can inject a pre-cancelled context.
+var clipboardNewContext = func() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), clipboardTimeout)
+}
 
 // clipboardPasteMsg is sent when clipboard paste completes.
 type clipboardPasteMsg struct {
@@ -30,16 +42,21 @@ func pasteFromClipboardCmd() tea.Cmd {
 func pasteFromClipboard() (string, error) {
 	switch runtime.GOOS {
 	case "darwin":
-		return pasteFromClipboardMacOS()
+		ctx, cancel := clipboardNewContext()
+		defer cancel()
+		return pasteFromClipboardMacOS(ctx)
 	case "linux":
-		return pasteFromClipboardLinux()
+		ctx, cancel := clipboardNewContext()
+		defer cancel()
+		return pasteFromClipboardLinux(ctx)
 	default:
 		return "", fmt.Errorf("clipboard image paste not supported on %s", runtime.GOOS)
 	}
 }
 
 // pasteFromClipboardMacOS uses osascript to read the clipboard as PNG.
-func pasteFromClipboardMacOS() (string, error) {
+// Uses exec.CommandContext with ctx to prevent hangs.
+func pasteFromClipboardMacOS(ctx context.Context) (string, error) {
 	// Check if osascript is available.
 	if _, err := exec.LookPath("osascript"); err != nil {
 		return "", fmt.Errorf("osascript not available: %w", err)
@@ -68,10 +85,13 @@ on error errMsg number errNum
 	error errMsg number errNum
 end try`
 
-	cmd := exec.Command("osascript", "-e", script)
+	cmd := exec.CommandContext(ctx, "osascript", "-e", script)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		os.Remove(tempPath)
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("clipboard timed out after %v", clipboardTimeout)
+		}
 		// Check if the error is "clipboard doesn't contain image data".
 		if len(output) > 0 {
 			return "", fmt.Errorf("clipboard error: %s", string(output))
@@ -93,14 +113,14 @@ end try`
 }
 
 // pasteFromClipboardLinux tries xclip and wl-paste to read clipboard image.
-func pasteFromClipboardLinux() (string, error) {
+func pasteFromClipboardLinux(ctx context.Context) (string, error) {
 	// Try xclip first.
-	if path, err := pasteFromXClip(); err == nil {
+	if path, err := pasteFromXClip(ctx); err == nil {
 		return path, nil
 	}
 
 	// Try wl-paste (Wayland).
-	if path, err := pasteFromWlPaste(); err == nil {
+	if path, err := pasteFromWlPaste(ctx); err == nil {
 		return path, nil
 	}
 
@@ -108,7 +128,7 @@ func pasteFromClipboardLinux() (string, error) {
 }
 
 // pasteFromXClip uses xclip to read clipboard image.
-func pasteFromXClip() (string, error) {
+func pasteFromXClip(ctx context.Context) (string, error) {
 	if _, err := exec.LookPath("xclip"); err != nil {
 		return "", fmt.Errorf("xclip not available: %w", err)
 	}
@@ -120,10 +140,13 @@ func pasteFromXClip() (string, error) {
 	tempPath := f.Name()
 	f.Close()
 
-	cmd := exec.Command("xclip", "-selection", "clipboard", "-t", "image/png", "-o")
+	cmd := exec.CommandContext(ctx, "xclip", "-selection", "clipboard", "-t", "image/png", "-o")
 	output, err := cmd.Output()
 	if err != nil {
 		os.Remove(tempPath)
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("clipboard timed out after %v", clipboardTimeout)
+		}
 		return "", fmt.Errorf("xclip failed: %w", err)
 	}
 
@@ -141,7 +164,7 @@ func pasteFromXClip() (string, error) {
 }
 
 // pasteFromWlPaste uses wl-paste to read clipboard image.
-func pasteFromWlPaste() (string, error) {
+func pasteFromWlPaste(ctx context.Context) (string, error) {
 	if _, err := exec.LookPath("wl-paste"); err != nil {
 		return "", fmt.Errorf("wl-paste not available: %w", err)
 	}
@@ -153,10 +176,13 @@ func pasteFromWlPaste() (string, error) {
 	tempPath := f.Name()
 	f.Close()
 
-	cmd := exec.Command("wl-paste", "-t", "image/png")
+	cmd := exec.CommandContext(ctx, "wl-paste", "-t", "image/png")
 	output, err := cmd.Output()
 	if err != nil {
 		os.Remove(tempPath)
+		if ctx.Err() != nil {
+			return "", fmt.Errorf("clipboard timed out after %v", clipboardTimeout)
+		}
 		return "", fmt.Errorf("wl-paste failed: %w", err)
 	}
 
@@ -174,8 +200,11 @@ func pasteFromWlPaste() (string, error) {
 }
 
 // isImagePath checks if a string looks like an image file path.
+// Handles uppercase extensions, quoted paths, file:// URLs, and
+// backslash-escaped spaces (common in drag-and-drop on macOS/Linux).
 func isImagePath(s string) bool {
-	ext := filepath.Ext(s)
+	s = normalizeImagePath(s)
+	ext := strings.ToLower(filepath.Ext(s))
 	switch ext {
 	case ".png", ".jpg", ".jpeg", ".gif", ".webp":
 		return true
