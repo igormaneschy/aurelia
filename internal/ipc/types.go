@@ -97,6 +97,24 @@ const (
 	EventTypeSessionDeleted = "session_deleted"
 )
 
+// MaxImageCount is the maximum number of images per message.
+const MaxImageCount = 10
+
+// MaxTotalImageBytes is the maximum total size of all images (15 MB).
+const MaxTotalImageBytes = 15 * 1024 * 1024
+
+// IPCImage represents an image sent from the TUI to the daemon.
+// The TUI sends file paths (not base64) because the daemon reads files
+// from the local filesystem and base64-encodes them for the bridge.
+type IPCImage struct {
+	// Path is the filesystem path to the image file (preferred for local IPC).
+	Path string `json:"path,omitempty"`
+	// Data is base64-encoded image data (fallback; not used in MVP).
+	Data string `json:"data,omitempty"`
+	// MediaType is the MIME type (e.g. "image/png", "image/jpeg").
+	MediaType string `json:"media_type"`
+}
+
 // IPCMessage is sent from the TUI client to the daemon.
 type IPCMessage struct {
 	Type     string `json:"type"`
@@ -104,6 +122,8 @@ type IPCMessage struct {
 	ThreadID int64  `json:"thread_id,omitempty"`
 	UserID   int64  `json:"user_id,omitempty"`
 	Text     string `json:"text,omitempty"`
+	// Images are optional image attachments for the message.
+	Images []IPCImage `json:"images,omitempty"`
 	// RequestID is an optional correlation ID for matching responses.
 	RequestID string `json:"request_id,omitempty"`
 }
