@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/pipeline"
@@ -313,8 +314,23 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 	}
 	pipeSvc := pipeline.NewService(pipeCfg)
 
+	// Convert images if present.
+	var images []bridge.ImageAttachment
+	if len(msg.Images) > 0 {
+		var err error
+		images, err = convertIPCImages(msg.Images, 0) // 0 = use default max
+		if err != nil {
+			log.Printf("tui: image conversion error: %v", err)
+			return emit(ipc.IPCEvent{
+				Type:      ipc.EventTypeError,
+				Error:     fmt.Sprintf("Failed to process images: %v", err),
+				RequestID: msg.RequestID,
+			})
+		}
+	}
+
 	// Launch pipeline processing (async).
-	pipeErr := pipeSvc.Process(chatID, threadID, 0, text, nil, userID, true)
+	pipeErr := pipeSvc.Process(chatID, threadID, 0, text, images, userID, true)
 	if pipeErr != nil {
 		log.Printf("tui: pipeline process error: %s", pipeline.RedactSecrets(pipeErr.Error()))
 		output.SendError(chatID, threadID, pipeErr.Error())
