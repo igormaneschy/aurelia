@@ -256,14 +256,23 @@ Commands:
 - /cwd — show current project binding
 - /cwd <path> — set the project working directory
 - /cwd clear — remove the project binding
+- /img <path> — attach an image (png, jpg, gif, webp)
 
 Keyboard:
 - Ctrl+S or F2 — focus sidebar to navigate sessions
 - In sidebar: ↑↓ navigate, enter open, n new, d delete, esc exit
 - Esc — cancel the current response
 - Ctrl+L — clear the screen
+- Ctrl+X — clear pending images
+- Ctrl+V — paste image from clipboard
 - Ctrl+C — quit
-- Alt+Enter or Ctrl+J — insert a newline`)
+- Alt+Enter or Ctrl+J — insert a newline
+
+Images:
+- Use /img <path> to attach images by file path
+- Use Ctrl+V to paste images from clipboard (macOS/Linux)
+- Drag-and-drop image files into the terminal
+- Multiple images can be attached before sending`)
 }
 
 // handleTUISend processes a TUI send message through the pipeline.
