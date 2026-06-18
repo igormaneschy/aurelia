@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -592,6 +593,31 @@ func (m Model) delegateKeyToTextarea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if !shouldDelegateKeyToTextarea(msg, m.textarea.KeyMap) {
 		return m, nil
 	}
+
+	// Check if this is a paste event with an image path (drag-and-drop).
+	if msg.Paste && msg.Type == tea.KeyRunes {
+		text := string(msg.Runes)
+		text = strings.TrimSpace(text)
+		if isImagePath(text) {
+			// Treat as image attachment, not text input.
+			errMsg := m.attachImageFromPath(text)
+			if errMsg != "" {
+				m.messages = append(m.messages, chatMessage{
+					Sender: "⚠️",
+					Text:   errMsg,
+				})
+				m.updateViewport()
+			} else {
+				m.messages = append(m.messages, chatMessage{
+					Sender: "📎",
+					Text:   fmt.Sprintf("Image attached: %s", filepath.Base(text)),
+				})
+				m.updateViewport()
+			}
+			return m, nil
+		}
+	}
+
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
 	return m, cmd
