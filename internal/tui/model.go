@@ -106,6 +106,9 @@ type Model struct {
 	// Cached glamour renderer (recreated when width changes)
 	glamourRenderer *glamour.TermRenderer
 	rendererWidth   int
+
+	// Pending image attachments (cleared after send)
+	pendingImages []pendingImage
 }
 
 // NewModel creates a new TUI model with the given socket path.
@@ -275,8 +278,12 @@ func (m Model) submitMessage(text string) tea.Cmd {
 		ThreadID:  0,
 		UserID:    userID,
 		Text:      text,
+		Images:    m.toIPCImages(),
 		RequestID: m.requestID,
 	}
+
+	// Clear pending images after capturing them.
+	m.pendingImages = nil
 
 	return func() tea.Msg {
 		ctx, cancel := contextWithTimeout(30 * time.Minute)

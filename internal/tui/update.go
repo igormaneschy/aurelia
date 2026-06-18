@@ -355,6 +355,18 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.updateViewport()
 		return m, nil
 
+	case msg.String() == "ctrl+x":
+		// Clear pending images.
+		if len(m.pendingImages) > 0 {
+			m.clearPendingImages()
+			m.messages = append(m.messages, chatMessage{
+				Sender: "📎",
+				Text:   "Cleared pending images",
+			})
+			m.updateViewport()
+		}
+		return m, nil
+
 	case isSidebarToggleKey(msg):
 		m.showSidebar = !m.showSidebar
 		m.updateViewport()
@@ -400,14 +412,52 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		text := strings.TrimSpace(m.textarea.Value())
-		if text == "" {
+		if text == "" && len(m.pendingImages) == 0 {
 			return m, nil
 		}
+
+		// Handle /img command — attach image, don't send message.
+		if strings.HasPrefix(text, "/img ") {
+			path := strings.TrimPrefix(text, "/img ")
+			errMsg := m.attachImageFromPath(path)
+			m.textarea.Reset()
+			if errMsg != "" {
+				m.messages = append(m.messages, chatMessage{
+					Sender: "⚠️",
+					Text:   errMsg,
+				})
+				m.updateViewport()
+			}
+			return m, nil
+		}
+
+		// Handle bare /img (no path).
+		if text == "/img" {
+			m.textarea.Reset()
+			m.messages = append(m.messages, chatMessage{
+				Sender: "⚠️",
+				Text:   "Usage: /img <path-to-image>",
+			})
+			m.updateViewport()
+			return m, nil
+		}
+
 		m.rememberInput(text)
 		m.textarea.Reset()
+
+		// Build display text with image badges.
+		displayText := text
+		if badges := m.pendingImageBadges(); badges != "" {
+			if displayText != "" {
+				displayText = badges + "\n" + displayText
+			} else {
+				displayText = badges
+			}
+		}
+
 		m.messages = append(m.messages, chatMessage{
 			Sender:    "Igor",
-			Text:      text,
+			Text:      displayText,
 			Timestamp: time.Now(),
 		})
 		m.waiting = true
