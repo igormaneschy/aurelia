@@ -292,6 +292,36 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			)
 		}
 		return m, fetchTUISessions(m.ipcClient)
+
+	case clipboardPasteMsg:
+		if msg.err != nil {
+			errText := msg.err.Error()
+			if errText == "" {
+				errText = "unknown error"
+			}
+			m.messages = append(m.messages, chatMessage{
+				Sender: "⚠️",
+				Text:   fmt.Sprintf("Clipboard paste failed: %s. Use /img <path> instead.", errText),
+			})
+			m.updateViewport()
+			return m, nil
+		}
+		// Add the clipboard image to pending images.
+		errMsg := m.attachImageFromPath(msg.path)
+		if errMsg != "" {
+			m.messages = append(m.messages, chatMessage{
+				Sender: "⚠️",
+				Text:   errMsg,
+			})
+			m.updateViewport()
+			return m, nil
+		}
+		m.messages = append(m.messages, chatMessage{
+			Sender: "📎",
+			Text:   "Image attached from clipboard",
+		})
+		m.updateViewport()
+		return m, nil
 	}
 
 	return m, nil
@@ -366,6 +396,10 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.updateViewport()
 		}
 		return m, nil
+
+	case msg.String() == "ctrl+v":
+		// Paste image from clipboard.
+		return m, pasteFromClipboardCmd()
 
 	case isSidebarToggleKey(msg):
 		m.showSidebar = !m.showSidebar

@@ -6,7 +6,23 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
+
+// clipboardPasteMsg is sent when clipboard paste completes.
+type clipboardPasteMsg struct {
+	path string // path to temp file with image data
+	err  error  // error if paste failed
+}
+
+// pasteFromClipboardCmd returns a tea.Cmd that reads an image from clipboard.
+func pasteFromClipboardCmd() tea.Cmd {
+	return func() tea.Msg {
+		path, err := pasteFromClipboard()
+		return clipboardPasteMsg{path: path, err: err}
+	}
+}
 
 // pasteFromClipboard reads an image from the system clipboard and returns
 // the path to a temporary file containing the image data.
