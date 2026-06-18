@@ -370,6 +370,32 @@ func TestHistoryFromEventsParsesHistoryPayload(t *testing.T) {
 	}
 }
 
+func TestModel_HistoryMsgErrorShowsWarning(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.messages = nil
+	m.switchingSession = true
+
+	updated, _ := m.Update(tuiHistoryMsg{err: errors.New("connection timeout")})
+	m2 := updated.(Model)
+
+	if m2.switchingSession {
+		t.Error("expected switchingSession=false after history error")
+	}
+	if len(m2.messages) != 1 {
+		t.Fatalf("expected 1 warning message, got %d", len(m2.messages))
+	}
+	if m2.messages[0].Sender != "⚠️" {
+		t.Errorf("expected ⚠️ sender, got %q", m2.messages[0].Sender)
+	}
+	if !strings.Contains(m2.messages[0].Text, "failed to load chat history") {
+		t.Errorf("expected warning about chat history failure, got %q", m2.messages[0].Text)
+	}
+	if !strings.Contains(m2.messages[0].Text, "connection timeout") {
+		t.Errorf("expected error detail in warning, got %q", m2.messages[0].Text)
+	}
+}
+
 func TestModel_HistoryMsgReplacesStartupMessage(t *testing.T) {
 	m := NewModel("/tmp/test.sock")
 	m.state = stateChat
@@ -448,7 +474,7 @@ func TestModel_MouseWheelScrollsViewport(t *testing.T) {
 	bottomOffset := m.viewport.YOffset
 
 	updated, _ := m.Update(tea.MouseMsg{
-		Type:   tea.MouseWheelUp,
+		Type:   tea.MouseWheelUp, //nolint:staticcheck // SA1019: deprecated but still functional
 		Button: tea.MouseButtonWheelUp,
 		Action: tea.MouseActionPress,
 	})
@@ -823,7 +849,7 @@ func TestModel_ErrorStateKeys(t *testing.T) {
 	}
 
 	// Enter in error state retries (goes to loading).
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m2 := updated.(Model)
 	if m2.state != stateLoading {
 		t.Errorf("expected stateLoading after enter in error, got %v", m2.state)

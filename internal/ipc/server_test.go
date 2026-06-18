@@ -715,6 +715,314 @@ func TestStreamHandlerError(t *testing.T) {
 	}
 }
 
+func TestStreamHandlerContextCancelledOnDisconnect(t *testing.T) {
+	dir, err := os.MkdirTemp("", "au-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socketPath := filepath.Join(dir, "d")
+
+	server, err := NewServer(socketPath)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	defer server.EnsureClose()
+
+	// StreamHandler that blocks until ctx is cancelled.
+	handlerStarted := make(chan struct{})
+	handlerCancelled := make(chan struct{})
+	server.StreamHandler = func(ctx context.Context, msg IPCMessage, emit func(IPCEvent) error) error {
+		close(handlerStarted)
+		<-ctx.Done()
+		close(handlerCancelled)
+		return ctx.Err()
+	}
+	server.Start()
+
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("Dial() error: %v", err)
+	}
+
+	// Send a message that triggers the blocking handler.
+	msg := IPCMessage{Type: MsgTypeSend, Text: "hello"}
+	data, _ := json.Marshal(msg)
+	data = append(data, '\n')
+	if _, err := conn.Write(data); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	// Wait for the handler to start blocking on ctx.Done().
+	select {
+	case <-handlerStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler did not start within 3s")
+	}
+
+	// Disconnect the client by closing the connection.
+	if err := conn.Close(); err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+
+	// Verify the handler's context is cancelled within a reasonable time.
+	select {
+	case <-handlerCancelled:
+		// OK — the context was cancelled when the client disconnected.
+	case <-time.After(5 * time.Second):
+		t.Fatal("handler context was not cancelled within 5s of client disconnect")
+	}
+}
+
+func TestStreamHandlerContextCancelledWithQueuedData(t *testing.T) {
+	// Regression test: client sends A, then queues valid B, then closes
+	// while A's handler blocks. The reader goroutine reads both A and B
+	// from the socket into the internal channel before detecting EOF. A's
+	// context must cancel promptly. B remains queued in the channel —
+	// it must not be silently consumed from the socket by a drain monitor.
+	dir, err := os.MkdirTemp("", "au-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socketPath := filepath.Join(dir, "q")
+
+	server, err := NewServer(socketPath)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	defer server.EnsureClose()
+
+	var handleAOnce sync.Once
+	var cancelledOnce sync.Once
+	handleAStarted := make(chan struct{})
+	handlerCancelled := make(chan struct{})
+	server.StreamHandler = func(ctx context.Context, msg IPCMessage, emit func(IPCEvent) error) error {
+		handleAOnce.Do(func() { close(handleAStarted) })
+		<-ctx.Done()
+		cancelledOnce.Do(func() { close(handlerCancelled) })
+		return ctx.Err()
+	}
+	server.Start()
+
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("Dial() error: %v", err)
+	}
+
+	// Send A (triggers the blocking handler).
+	msgA, _ := json.Marshal(IPCMessage{Type: MsgTypeSend, Text: "hello"})
+	msgA = append(msgA, '\n')
+	if _, err := conn.Write(msgA); err != nil {
+		t.Fatalf("write A error: %v", err)
+	}
+
+	// Wait for A's handler to start blocking.
+	select {
+	case <-handleAStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler A did not start within 3s")
+	}
+
+	// Queue B while A blocks. The reader goroutine reads B into the channel.
+	msgB, _ := json.Marshal(IPCMessage{Type: MsgTypeSend, Text: "queued"})
+	msgB = append(msgB, '\n')
+	if _, err := conn.Write(msgB); err != nil {
+		t.Fatalf("write B error: %v", err)
+	}
+
+	// Close the client connection.
+	if err := conn.Close(); err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+
+	// A's context must cancel promptly despite B being queued in the
+	// channel (reader already consumed both A and B from the socket).
+	select {
+	case <-handlerCancelled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("A handler context not cancelled within 5s with queued data")
+	}
+}
+
+func TestStreamHandlerQueuedMessagePreserved(t *testing.T) {
+	// Client sends A whose handler blocks, then sends B and stays
+	// connected. After A's handler completes (via external signal), B
+	// must be processed and produce a response — proving queued messages
+	// are preserved in the channel and not silently dropped.
+	dir, err := os.MkdirTemp("", "au-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socketPath := filepath.Join(dir, "p")
+
+	server, err := NewServer(socketPath)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	defer server.EnsureClose()
+
+	// A blocks until unblockA is closed. B returns immediately.
+	handlerAStarted := make(chan struct{})
+	unblockA := make(chan struct{})
+	processedB := make(chan struct{})
+	server.StreamHandler = func(ctx context.Context, msg IPCMessage, emit func(IPCEvent) error) error {
+		if msg.Text == "a" {
+			close(handlerAStarted)
+			select {
+			case <-unblockA:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			return emit(IPCEvent{Type: EventTypeMessage, Body: "A-done"})
+		}
+		if msg.Text == "b" {
+			close(processedB)
+			return emit(IPCEvent{Type: EventTypeMessage, Body: "B-done"})
+		}
+		return nil
+	}
+	server.Start()
+
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("Dial() error: %v", err)
+	}
+	defer conn.Close()
+
+	writeMsg := func(text string) {
+		data, _ := json.Marshal(IPCMessage{Type: MsgTypeSend, Text: text})
+		data = append(data, '\n')
+		if _, err := conn.Write(data); err != nil {
+			t.Fatalf("Write(%s) error: %v", text, err)
+		}
+	}
+
+	// Send A (triggers blocking handler).
+	writeMsg("a")
+
+	// Wait for A's handler to be actively running before sending B.
+	select {
+	case <-handlerAStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler A did not start within 3s")
+	}
+
+	// Send B while A blocks. Reader reads B into the channel.
+	writeMsg("b")
+
+	// Let A complete — unblock the handler.
+	close(unblockA)
+
+	// Read responses with a bounded deadline so the test fails locally
+	// if B is lost rather than hanging the test suite.
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	scanner := bufio.NewScanner(conn)
+	var events []IPCEvent
+	for scanner.Scan() {
+		var ev IPCEvent
+		if err := json.Unmarshal([]byte(scanner.Text()), &ev); err != nil {
+			t.Fatalf("unmarshal event: %v", err)
+		}
+		events = append(events, ev)
+		if ev.Type == EventTypeMessage && ev.Body == "B-done" {
+			break
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("reading responses timed out or failed: %v — B was likely lost", err)
+	}
+
+	// Verify B was actually processed (handler invoked).
+	select {
+	case <-processedB:
+	default:
+		t.Fatal("B was never processed — handler was not invoked for B")
+	}
+
+	foundB := false
+	for _, ev := range events {
+		if ev.Type == EventTypeMessage && ev.Body == "B-done" {
+			foundB = true
+			break
+		}
+	}
+	if !foundB {
+		t.Fatal("B-done response not received — queued B message was lost")
+	}
+}
+
+func TestStreamHandlerContextCancelledWhenMessageQueueFull(t *testing.T) {
+	// Regression: handler A blocks, client fills the message queue,
+	// then closes. The reader must fail-fast on queue full, cancel
+	// connCtx so A aborts, and not deadlock waiting to enqueue.
+	dir, err := os.MkdirTemp("", "au-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	socketPath := filepath.Join(dir, "qfull")
+
+	server, err := NewServer(socketPath)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	defer server.EnsureClose()
+
+	var handlerAStarted sync.Once
+	aStarted := make(chan struct{})
+	handlerCancelled := make(chan struct{})
+	var cancelledOnce sync.Once
+	server.StreamHandler = func(ctx context.Context, msg IPCMessage, emit func(IPCEvent) error) error {
+		handlerAStarted.Do(func() { close(aStarted) })
+		<-ctx.Done()
+		cancelledOnce.Do(func() { close(handlerCancelled) })
+		return ctx.Err()
+	}
+	server.Start()
+
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("Dial() error: %v", err)
+	}
+
+	// Send A (blocks handler).
+	dataA, _ := json.Marshal(IPCMessage{Type: MsgTypeSend, Text: "hello"})
+	dataA = append(dataA, '\n')
+	if _, err := conn.Write(dataA); err != nil {
+		t.Fatalf("write A error: %v", err)
+	}
+
+	select {
+	case <-aStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("handler A did not start within 3s")
+	}
+
+	// Send messageQueueSize+1 additional valid messages to fill the
+	// queue past capacity. The reader should fail on the last one.
+	payload, _ := json.Marshal(IPCMessage{Type: MsgTypeSend, Text: "filler"})
+	payload = append(payload, '\n')
+	for i := 0; i < messageQueueSize+1; i++ {
+		if _, err := conn.Write(payload); err != nil {
+			t.Fatalf("write filler %d error: %v", i, err)
+		}
+	}
+
+	// Close the client connection.
+	if err := conn.Close(); err != nil {
+		t.Fatalf("Close() error: %v", err)
+	}
+
+	// A's handler context must cancel promptly.
+	select {
+	case <-handlerCancelled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("A handler context not cancelled within 5s — queue saturation caused deadlock")
+	}
+}
+
 // shortWriteWriter simulates a writer that returns short writes on the first call.
 type shortWriteWriter struct {
 	io.Writer

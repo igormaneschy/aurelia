@@ -141,7 +141,16 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tuiHistoryMsg:
-		if msg.err == nil && len(msg.messages) > 0 {
+		if msg.err != nil {
+			m.messages = append(m.messages, chatMessage{
+				Sender: "⚠️",
+				Text:   fmt.Sprintf("Warning: failed to load chat history: %s", safeSessionLabel(msg.err.Error())),
+			})
+			m.updateViewport()
+			m.switchingSession = false
+			return m, nil
+		}
+		if len(msg.messages) > 0 {
 			if m.switchingSession || m.canApplyStartupHistory() {
 				m.messages = msg.messages
 				m.updateViewport()
@@ -155,7 +164,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.waiting = false
 		m.streamBuf = ""
 		if m.reader != nil {
-			m.reader.Close()
+			_ = m.reader.Close()
 			m.reader = nil
 		}
 		m.err = msg.err
@@ -178,7 +187,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Stream ended (EOF) without explicit terminal event.
 		m.waiting = false
 		if m.reader != nil {
-			m.reader.Close()
+			_ = m.reader.Close()
 			m.reader = nil
 		}
 		m.streamBuf = ""
@@ -194,7 +203,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Stream error.
 		m.waiting = false
 		if m.reader != nil {
-			m.reader.Close()
+			_ = m.reader.Close()
 			m.reader = nil
 		}
 		m.streamBuf = ""
@@ -599,7 +608,7 @@ func (m Model) handleViewportMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) cancelStreaming() (tea.Model, tea.Cmd) {
 	m.waiting = false
 	if m.reader != nil {
-		m.reader.Close()
+		_ = m.reader.Close()
 		m.reader = nil
 	}
 	m.streamBuf = ""
@@ -685,7 +694,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 		// Terminal event — stream complete.
 		m.waiting = false
 		if m.reader != nil {
-			m.reader.Close()
+			_ = m.reader.Close()
 			m.reader = nil
 		}
 		m.streamBuf = ""
@@ -696,7 +705,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 		// Terminal event — error.
 		m.waiting = false
 		if m.reader != nil {
-			m.reader.Close()
+			_ = m.reader.Close()
 			m.reader = nil
 		}
 		errText := event.Error
@@ -726,11 +735,11 @@ func (m Model) readNextStreamEvent() tea.Cmd {
 	return func() tea.Msg {
 		event, err := m.reader.Read()
 		if err == io.EOF {
-			m.reader.Close()
+			_ = m.reader.Close()
 			return streamDoneMsg{}
 		}
 		if err != nil {
-			m.reader.Close()
+			_ = m.reader.Close()
 			return streamErrMsg{err: err}
 		}
 		return streamEventMsg{event: event}

@@ -11,6 +11,99 @@ import (
 	"github.com/igormaneschy/aurelia/internal/tuisessions"
 )
 
+// maxSessionNameLength is the maximum length of a sanitized session name.
+const maxSessionNameLength = 64
+
+// sanitizeSessionName removes terminal-control characters and limits length.
+// Strips ANSI escape sequences (ESC), OSC sequences, and all C0 control
+// characters (NUL..US, DEL). The result is trimmed and truncated to
+// maxSessionNameLength runes so it renders safely in the sidebar.
+func sanitizeSessionName(name string) string {
+	// Remove ANSI escape sequences: ESC [ ... <letter>
+	// Remove OSC sequences: ESC ] ... ST (BEL or ESC \)
+	cleaned := name
+	for {
+		before := cleaned
+		cleaned = stripAnsiOrOsc(cleaned)
+		if cleaned == before {
+			break
+		}
+	}
+	// Remove C0 (0x00-0x1F), DEL (0x7F), C1 (U+0080-U+009F), and
+	// any U+FFFD replacement characters (invalid UTF-8 bytes become
+	// replacement chars when converted to runes in Go).
+	var b strings.Builder
+	for _, r := range cleaned {
+		if r < 0x20 || r == 0x7F || r == 0xFFFD || (r >= 0x80 && r <= 0x9F) {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	cleaned = strings.TrimSpace(b.String())
+	// Limit to maxSessionNameLength runes.
+	runes := []rune(cleaned)
+	if len(runes) > maxSessionNameLength {
+		runes = runes[:maxSessionNameLength]
+		// Re-trim to avoid ending on a partial character or space.
+		cleaned = strings.TrimSpace(string(runes))
+	}
+	return cleaned
+}
+
+// stripAnsiOrOsc removes a single ANSI escape or OSC sequence from the start
+// of a string, or returns the string unchanged if no sequence is found.
+// ANSI: ESC [ (parameter bytes) (intermediate bytes) (final byte)
+// OSC: ESC ] (payload) (ST = ESC \ or BEL)
+func stripAnsiOrOsc(s string) string {
+	idx := strings.IndexRune(s, '\x1b')
+	if idx < 0 {
+		return s
+	}
+	if idx > 0 {
+		return s[:idx] + stripAnsiOrOsc(s[idx:])
+	}
+	// s starts with ESC
+	if len(s) < 2 {
+		return s
+	}
+	switch s[1] {
+	case '[':
+		// ANSI CSI sequence: ESC [ parameters... intermediate... final
+		i := 2
+		// Parameter bytes: 0x30-0x3F
+		for i < len(s) && s[i] >= 0x30 && s[i] <= 0x3F {
+			i++
+		}
+		// Intermediate bytes: 0x20-0x2F
+		for i < len(s) && s[i] >= 0x20 && s[i] <= 0x2F {
+			i++
+		}
+		// Final byte: 0x40-0x7E
+		if i < len(s) && s[i] >= 0x40 && s[i] <= 0x7E {
+			i++
+		}
+		if i >= len(s) {
+			return ""
+		}
+		return s[i:]
+	case ']':
+		// OSC sequence: ESC ] ... ST (BEL 0x07 or ESC \)
+		for i := 2; i < len(s); i++ {
+			if s[i] == '\x07' {
+				return s[i+1:]
+			}
+			if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '\\' {
+				return s[i+2:]
+			}
+		}
+		// No terminator found — strip from ESC onward.
+		return ""
+	default:
+		// Other ESC sequences: remove this ESC and continue.
+		return s[1:]
+	}
+}
+
 // sessionJSON is the wire format for a TUI session in IPC events.
 type sessionJSON struct {
 	ChatID int64  `json:"chat_id"`
@@ -46,31 +139,45 @@ func handleTUISessions(ctx context.Context, a *app, msg ipc.IPCMessage, emit fun
 
 // handleTUISessionCreate creates a new TUI local session with the given name.
 // The daemon assigns the next available ChatID from the reserved range.
+// Allocation is race-safe: each candidate ChatID is tried atomically via
+// Create (SQL UNIQUE constraint). No separate list-then-create window exists.
 func handleTUISessionCreate(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
 	if a.tuiSessions == nil {
 		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "tui sessions store not available", RequestID: msg.RequestID})
 	}
 
-	name := strings.TrimSpace(msg.Text)
-	if name == "" {
+	rawName := strings.TrimSpace(msg.Text)
+	if rawName == "" {
 		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "session name is required", RequestID: msg.RequestID})
 	}
 
-	chatID, err := allocateTUISessionChatID(ctx, a)
-	if err != nil {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: err.Error(), RequestID: msg.RequestID})
+	// Sanitize the name before persistence — strip control characters
+	// and limit length. After sanitization, the name may become empty.
+	name := sanitizeSessionName(rawName)
+	if name == "" {
+		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "session name is empty after sanitization", RequestID: msg.RequestID})
 	}
 
-	sess, err := a.tuiSessions.Create(ctx, chatID, name)
-	if err != nil {
+	// Iterate each candidate ChatID in the reserved range atomically.
+	// Each Create is a single SQL INSERT whose UNIQUE constraint prevents
+	// double-allocation. If the slot is taken we move to the next — no race
+	// window like the old list-then-allocate approach.
+	for chatID := ipc.ReservedTUIChatID - 1; chatID >= ipc.ReservedTUIChatIDFloor; chatID-- {
+		sess, err := a.tuiSessions.Create(ctx, chatID, name)
+		if err == nil {
+			body, _ := json.Marshal(sessionJSON{ChatID: sess.ChatID, Name: sess.Name})
+			if emitErr := emit(ipc.IPCEvent{Type: ipc.EventTypeSessionCreated, Body: string(body), RequestID: msg.RequestID}); emitErr != nil {
+				return emitErr
+			}
+			return emit(ipc.IPCEvent{Type: ipc.EventTypeStreamEnd, Done: true, RequestID: msg.RequestID})
+		}
+		if err == tuisessions.ErrSessionExists {
+			continue
+		}
 		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: fmt.Sprintf("create session: %s", err), RequestID: msg.RequestID})
 	}
 
-	body, _ := json.Marshal(sessionJSON{ChatID: sess.ChatID, Name: sess.Name})
-	if err := emit(ipc.IPCEvent{Type: ipc.EventTypeSessionCreated, Body: string(body), RequestID: msg.RequestID}); err != nil {
-		return err
-	}
-	return emit(ipc.IPCEvent{Type: ipc.EventTypeStreamEnd, Done: true, RequestID: msg.RequestID})
+	return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "no free TUI session slots", RequestID: msg.RequestID})
 }
 
 // handleTUISessionOpen opens/switches to an existing TUI local session.
@@ -150,26 +257,4 @@ func handleTUISessionDelete(ctx context.Context, a *app, msg ipc.IPCMessage, emi
 		return err
 	}
 	return emit(ipc.IPCEvent{Type: ipc.EventTypeStreamEnd, Done: true, RequestID: msg.RequestID})
-}
-
-// allocateTUISessionChatID finds the next available ChatID in the reserved
-// TUI range [-9000009, -9000002]. The default DM (-9000001) is skipped — it
-// always exists implicitly. Returns an error if all slots are taken.
-func allocateTUISessionChatID(ctx context.Context, a *app) (int64, error) {
-	existing, err := a.tuiSessions.List(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("list sessions for allocation: %w", err)
-	}
-	taken := make(map[int64]bool, len(existing))
-	for _, s := range existing {
-		taken[s.ChatID] = true
-	}
-
-	// Scan -9000002 down to -9000009 for the first free slot.
-	for chatID := ipc.ReservedTUIChatID - 1; chatID >= ipc.ReservedTUIChatIDFloor; chatID-- {
-		if !taken[chatID] {
-			return chatID, nil
-		}
-	}
-	return 0, fmt.Errorf("no free TUI session slots (all %d slots in use)", int(ipc.ReservedTUIChatID-ipc.ReservedTUIChatIDFloor))
 }
