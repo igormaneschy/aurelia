@@ -530,6 +530,91 @@ func TestRenderChatHeader_DefaultDM(t *testing.T) {
 	}
 }
 
+func TestSafeSessionLabel_StripsControlCharacters(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{input: "normal", expected: "normal"},
+		{input: "line\nbreak", expected: "linebreak"},
+		{input: "tab\there", expected: "tabhere"},
+		{input: "carriage\rreturn", expected: "carriagereturn"},
+		{input: "na\x00me", expected: "name"},
+		{input: "\x1b[31mred\x1b[0m", expected: "red"},
+		{input: "\x1b]0;title\x07name\x07", expected: "name"},
+		{input: "na\x7fme", expected: "name"},
+		{input: "mixed\n\t\rESC:\x1b[1mok", expected: "mixedESC:ok"},
+		{input: "c1\x80test\x9f", expected: "c1test"},
+		{input: "CSI:\x9b1m", expected: "CSI:1m"},
+	}
+	for _, tt := range tests {
+		got := safeSessionLabel(tt.input)
+		if got != tt.expected {
+			t.Errorf("safeSessionLabel(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
+func TestRenderSidebar_SanitizesLegacySessionNames(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.messages = append(m.messages, chatMessage{
+		Sender: "Aurelia",
+		Text:   "Connected.",
+	})
+	m.viewportSet = true
+	m.width = 120
+	m.height = 30
+	// Legacy session name with ANSI escape, newline, and tab.
+	m.sessions = []tuiSessionInfo{
+		{ChatID: -9000001, Name: "dm"},
+		{ChatID: -9000002, Name: "normal"},
+		{ChatID: -9000003, Name: "mal\x1b[31micious\x1b[0m"},
+		{ChatID: -9000004, Name: "bad\nname"},
+		{ChatID: -9000005, Name: "tab\tname"},
+	}
+	m.activeSession = -9000003
+
+	sidebar := m.renderSidebar()
+	plain := stripANSIForTest(sidebar)
+
+	// The sanitized versions should appear in the sidebar, not the raw strings.
+	if !containsStr(plain, "normal") {
+		t.Error("sidebar should show 'normal' session")
+	}
+	if !containsStr(plain, "malicious") {
+		t.Error("sidebar should show sanitized 'malicious' (ESC stripped)")
+	}
+	// Newline from "bad\nname" should be stripped — "badname" should appear.
+	if !containsStr(plain, "badname") {
+		t.Errorf("sidebar should show sanitized 'badname' (newline stripped), got: %q", plain)
+	}
+	// Tab from "tab\tname" should be stripped — "tabname" should appear.
+	if !containsStr(plain, "tabname") {
+		t.Errorf("sidebar should show sanitized 'tabname' (tab stripped), got: %q", plain)
+	}
+}
+
+func TestRenderChatHeader_SanitizesLegacySessionNames(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+	m.state = stateChat
+	m.width = 120
+	m.height = 30
+	m.sessions = []tuiSessionInfo{
+		{ChatID: -9000001, Name: "dm"},
+		{ChatID: -9000002, Name: "normal"},
+		{ChatID: -9000003, Name: "hack\x1b[31med\x1b[0m"},
+	}
+	m.activeSession = -9000003
+
+	header := m.renderChatHeader()
+	plain := stripANSIForTest(header)
+
+	if !containsStr(plain, "Aurelia / hacked") {
+		t.Errorf("expected header to contain 'Aurelia / hacked' (ESC stripped), got: %s", plain)
+	}
+}
+
 func containsStr(s, substr string) bool {
 	return len(s) >= len(substr) && indexOfStr(s, substr) >= 0
 }
