@@ -190,6 +190,70 @@ func EnsureBridge(targetDir string, bundleJS []byte) (string, error) {
 					}
 				}
 			}
+
+			// Share settings.json so PI SDK uses same provider, model,
+			// thinking level, compaction, and skill configuration.
+			piSettingsPath := filepath.Join(home, ".pi", "agent", "settings.json")
+			aureliaSettingsPath := filepath.Join(aureliaPiAgentDir, "settings.json")
+			if _, statErr := os.Stat(piSettingsPath); statErr == nil {
+				linkTarget, linkErr := os.Readlink(aureliaSettingsPath)
+				if linkErr != nil || linkTarget != piSettingsPath {
+					_ = os.Remove(aureliaSettingsPath)
+					if err := os.Symlink(piSettingsPath, aureliaSettingsPath); err != nil {
+						slog.Warn("failed to symlink settings.json from PI CLI", "error", err)
+					} else {
+						slog.Info("Linked settings.json from PI CLI")
+					}
+				}
+			}
+
+			// Share context/ directory so model has access to anti-rationalization
+			// patterns and essential context files.
+			piContextDir := filepath.Join(home, ".pi", "agent", "context")
+			aureliaContextDir := filepath.Join(aureliaPiAgentDir, "context")
+			if _, statErr := os.Stat(piContextDir); statErr == nil {
+				linkTarget, linkErr := os.Readlink(aureliaContextDir)
+				if linkErr != nil || linkTarget != piContextDir {
+					_ = os.RemoveAll(aureliaContextDir)
+					if err := os.Symlink(piContextDir, aureliaContextDir); err != nil {
+						slog.Warn("failed to symlink context/ from PI CLI", "error", err)
+					} else {
+						slog.Info("Linked context/ from PI CLI")
+					}
+				}
+			}
+
+			// Share prompts/ directory so model has access to commit, review,
+			// and test prompt templates.
+			piPromptsDir := filepath.Join(home, ".pi", "agent", "prompts")
+			aureliaPromptsDir := filepath.Join(aureliaPiAgentDir, "prompts")
+			if _, statErr := os.Stat(piPromptsDir); statErr == nil {
+				linkTarget, linkErr := os.Readlink(aureliaPromptsDir)
+				if linkErr != nil || linkTarget != piPromptsDir {
+					_ = os.RemoveAll(aureliaPromptsDir)
+					if err := os.Symlink(piPromptsDir, aureliaPromptsDir); err != nil {
+						slog.Warn("failed to symlink prompts/ from PI CLI", "error", err)
+					} else {
+						slog.Info("Linked prompts/ from PI CLI")
+					}
+				}
+			}
+
+			// Share skills/ directory so model has access to all available skills
+			// (architect-planning, lessons-learned, self-review, etc.).
+			piSkillsDir := filepath.Join(home, ".pi", "agent", "skills")
+			aureliaSkillsDir := filepath.Join(aureliaPiAgentDir, "skills")
+			if _, statErr := os.Stat(piSkillsDir); statErr == nil {
+				linkTarget, linkErr := os.Readlink(aureliaSkillsDir)
+				if linkErr != nil || linkTarget != piSkillsDir {
+					_ = os.RemoveAll(aureliaSkillsDir)
+					if err := os.Symlink(piSkillsDir, aureliaSkillsDir); err != nil {
+						slog.Warn("failed to symlink skills/ from PI CLI", "error", err)
+					} else {
+						slog.Info("Linked skills/ from PI CLI")
+					}
+				}
+			}
 		}
 	}
 
