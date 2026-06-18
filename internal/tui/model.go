@@ -398,7 +398,7 @@ func sessionsFromEvents(events []ipc.IPCEvent) tuiSessionsMsg {
 		}
 		sessions := make([]tuiSessionInfo, 0, len(payload))
 		for _, s := range payload {
-			sessions = append(sessions, tuiSessionInfo{ChatID: s.ChatID, Name: s.Name})
+			sessions = append(sessions, tuiSessionInfo{ChatID: s.ChatID, Name: s.Name}) //nolint:staticcheck // S1016: different types, cannot convert
 		}
 		return tuiSessionsMsg{sessions: sessions}
 	}
@@ -419,7 +419,7 @@ func sessionCreatedFromEvents(events []ipc.IPCEvent) tuiSessionCreatedMsg {
 		if err := json.Unmarshal([]byte(ev.Body), &s); err != nil {
 			return tuiSessionCreatedMsg{err: fmt.Errorf("parse created session: %w", err)}
 		}
-		return tuiSessionCreatedMsg{session: tuiSessionInfo{ChatID: s.ChatID, Name: s.Name}}
+		return tuiSessionCreatedMsg{session: tuiSessionInfo{ChatID: s.ChatID, Name: s.Name}} //nolint:staticcheck // S1016: different types, cannot convert
 	}
 	return tuiSessionCreatedMsg{}
 }
@@ -438,7 +438,7 @@ func sessionOpenedFromEvents(events []ipc.IPCEvent) tuiSessionOpenedMsg {
 		if err := json.Unmarshal([]byte(ev.Body), &s); err != nil {
 			return tuiSessionOpenedMsg{err: fmt.Errorf("parse opened session: %w", err)}
 		}
-		return tuiSessionOpenedMsg{session: tuiSessionInfo{ChatID: s.ChatID, Name: s.Name}}
+		return tuiSessionOpenedMsg{session: tuiSessionInfo{ChatID: s.ChatID, Name: s.Name}} //nolint:staticcheck // S1016: different types, cannot convert
 	}
 	return tuiSessionOpenedMsg{}
 }

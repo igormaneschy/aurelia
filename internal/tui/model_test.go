@@ -474,7 +474,7 @@ func TestModel_MouseWheelScrollsViewport(t *testing.T) {
 	bottomOffset := m.viewport.YOffset
 
 	updated, _ := m.Update(tea.MouseMsg{
-		Type:   tea.MouseWheelUp,
+		Type:   tea.MouseWheelUp, //nolint:staticcheck // SA1019: deprecated but still functional
 		Button: tea.MouseButtonWheelUp,
 		Action: tea.MouseActionPress,
 	})
@@ -849,7 +849,7 @@ func TestModel_ErrorStateKeys(t *testing.T) {
 	}
 
 	// Enter in error state retries (goes to loading).
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m2 := updated.(Model)
 	if m2.state != stateLoading {
 		t.Errorf("expected stateLoading after enter in error, got %v", m2.state)

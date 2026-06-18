@@ -417,17 +417,6 @@ func writeAll(w io.Writer, data []byte) error {
 	return nil
 }
 
-// writeEvent marshals and writes a single IPCEvent as a JSON line.
-func (s *Server) writeEvent(conn net.Conn, event IPCEvent) error {
-	_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
-	data, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("marshal event: %w", err)
-	}
-	data = append(data, '\n')
-	return writeAll(conn, data)
-}
-
 // Close gracefully shuts down the server: stops accepting new connections,
 // force-closes active connections, and waits for all handlers to finish.
 // Safe to call multiple times.

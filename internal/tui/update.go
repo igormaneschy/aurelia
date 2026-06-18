@@ -164,7 +164,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.waiting = false
 		m.streamBuf = ""
 		if m.reader != nil {
-			m.reader.Close()
+			_ = m.reader.Close()
 			m.reader = nil
 		}
 		m.err = msg.err
@@ -187,7 +187,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Stream ended (EOF) without explicit terminal event.
 		m.waiting = false
 		if m.reader != nil {
-			m.reader.Close()
+			_ = m.reader.Close()
 			m.reader = nil
 		}
 		m.streamBuf = ""
@@ -203,7 +203,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Stream error.
 		m.waiting = false
 		if m.reader != nil {
-			m.reader.Close()
+			_ = m.reader.Close()
 			m.reader = nil
 		}
 		m.streamBuf = ""
@@ -608,7 +608,7 @@ func (m Model) handleViewportMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) cancelStreaming() (tea.Model, tea.Cmd) {
 	m.waiting = false
 	if m.reader != nil {
-		m.reader.Close()
+		_ = m.reader.Close()
 		m.reader = nil
 	}
 	m.streamBuf = ""
@@ -694,7 +694,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 		// Terminal event — stream complete.
 		m.waiting = false
 		if m.reader != nil {
-			m.reader.Close()
+			_ = m.reader.Close()
 			m.reader = nil
 		}
 		m.streamBuf = ""
@@ -705,7 +705,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 		// Terminal event — error.
 		m.waiting = false
 		if m.reader != nil {
-			m.reader.Close()
+			_ = m.reader.Close()
 			m.reader = nil
 		}
 		errText := event.Error
@@ -735,11 +735,11 @@ func (m Model) readNextStreamEvent() tea.Cmd {
 	return func() tea.Msg {
 		event, err := m.reader.Read()
 		if err == io.EOF {
-			m.reader.Close()
+			_ = m.reader.Close()
 			return streamDoneMsg{}
 		}
 		if err != nil {
-			m.reader.Close()
+			_ = m.reader.Close()
 			return streamErrMsg{err: err}
 		}
 		return streamEventMsg{event: event}

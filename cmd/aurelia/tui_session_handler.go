@@ -258,25 +258,3 @@ func handleTUISessionDelete(ctx context.Context, a *app, msg ipc.IPCMessage, emi
 	}
 	return emit(ipc.IPCEvent{Type: ipc.EventTypeStreamEnd, Done: true, RequestID: msg.RequestID})
 }
-
-// allocateTUISessionChatID finds the next available ChatID in the reserved
-// TUI range [-9000009, -9000002]. The default DM (-9000001) is skipped — it
-// always exists implicitly. Returns an error if all slots are taken.
-func allocateTUISessionChatID(ctx context.Context, a *app) (int64, error) {
-	existing, err := a.tuiSessions.List(ctx)
-	if err != nil {
-		return 0, fmt.Errorf("list sessions for allocation: %w", err)
-	}
-	taken := make(map[int64]bool, len(existing))
-	for _, s := range existing {
-		taken[s.ChatID] = true
-	}
-
-	// Scan -9000002 down to -9000009 for the first free slot.
-	for chatID := ipc.ReservedTUIChatID - 1; chatID >= ipc.ReservedTUIChatIDFloor; chatID-- {
-		if !taken[chatID] {
-			return chatID, nil
-		}
-	}
-	return 0, fmt.Errorf("no free TUI session slots (all %d slots in use)", int(ipc.ReservedTUIChatID-ipc.ReservedTUIChatIDFloor))
-}
