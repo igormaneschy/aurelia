@@ -2,12 +2,10 @@ package telegram
 
 import (
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"log"
-	"mime"
 	"os"
 	"path/filepath"
 	"sort"
@@ -17,7 +15,8 @@ import (
 	"gopkg.in/telebot.v3"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
-	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
+	"github.com/igormaneschy/aurelia/internal/pipeline"
+	"github.com/igormaneschy/aurelia/pkg/images"
 )
 
 func (bc *BotController) handleText(c telebot.Context) error {
@@ -102,7 +101,7 @@ func (bc *BotController) processPhotoInput(c telebot.Context, caption string, ph
 // failed) a user-visible message describing what was dropped.
 func (bc *BotController) collectPhotoAttachments(photos []albumPhoto) ([]bridge.ImageAttachment, []string, string) {
 	var (
-		images      []bridge.ImageAttachment
+		attachments []bridge.ImageAttachment
 		downloaded  []string
 		downloadErr int
 		tooLargeMsg string
@@ -116,10 +115,9 @@ func (bc *BotController) collectPhotoAttachments(photos []albumPhoto) ([]bridge.
 			continue
 		}
 		downloaded = append(downloaded, filePath)
-		img, err := encodeImageAttachment(filePath, "image/jpeg", bc.maxImageBytes())
+		img, err := images.Encode(filePath, "image/jpeg", bc.maxImageBytes())
 		if err != nil {
-			log.Printf("Failed to encode photo: %v", err)
-			var tooLarge imageTooLargeError
+			var tooLarge images.TooLargeError
 			if errors.As(err, &tooLarge) {
 				if tooLargeMsg == "" {
 					tooLargeMsg = tooLarge.UserMessage()
@@ -129,10 +127,10 @@ func (bc *BotController) collectPhotoAttachments(photos []albumPhoto) ([]bridge.
 			}
 			continue
 		}
-		images = append(images, img)
+		attachments = append(attachments, img)
 	}
 
-	return images, downloaded, buildPartialMsg(len(images), len(photos), downloadErr, tooLargeMsg)
+	return attachments, downloaded, buildPartialMsg(len(attachments), len(photos), downloadErr, tooLargeMsg)
 }
 
 func buildPartialMsg(ok, total, downloadErr int, tooLargeMsg string) string {
@@ -155,65 +153,13 @@ func buildPartialMsg(ok, total, downloadErr int, tooLargeMsg string) string {
 	return base
 }
 
-const fallbackMaxImageBytes = 10 * 1024 * 1024
 const maxDocumentPromptBytes = 64 * 1024
-
-type imageTooLargeError struct {
-	path  string
-	size  int
-	limit int
-}
-
-func (e imageTooLargeError) Error() string {
-	return fmt.Sprintf("image %q is %d bytes, exceeds %d byte limit", e.path, e.size, e.limit)
-}
-
-func (e imageTooLargeError) UserMessage() string {
-	return fmt.Sprintf("Imagem muito grande (%s). O limite configurado é %s.", humanBytes(e.size), humanBytes(e.limit))
-}
-
-func humanBytes(n int) string {
-	const (
-		kib = 1024
-		mib = kib * 1024
-	)
-
-	if n < kib {
-		return fmt.Sprintf("%d B", n)
-	}
-	if n < mib {
-		return fmt.Sprintf("%.1f KB", float64(n)/kib)
-	}
-	return fmt.Sprintf("%.1f MB", float64(n)/mib)
-}
 
 func (bc *BotController) maxImageBytes() int {
 	if bc != nil && bc.config != nil && bc.config.MaxImageBytes > 0 {
 		return bc.config.MaxImageBytes
 	}
-	return fallbackMaxImageBytes
-}
-
-// encodeImageAttachment reads an image file, base64-encodes it, and returns
-// an ImageAttachment suitable for the bridge protocol.
-// If the file exceeds maxImageBytes, it returns an error.
-func encodeImageAttachment(filePath, defaultMIME string, maxImageBytes int) (bridge.ImageAttachment, error) {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return bridge.ImageAttachment{}, fmt.Errorf("read image %q: %w", filePath, err)
-	}
-	if maxImageBytes <= 0 {
-		maxImageBytes = fallbackMaxImageBytes
-	}
-	if len(data) > maxImageBytes {
-		return bridge.ImageAttachment{}, imageTooLargeError{path: filePath, size: len(data), limit: maxImageBytes}
-	}
-	encoded := base64.StdEncoding.EncodeToString(data)
-	return bridge.ImageAttachment{
-		Path:      filePath,
-		Data:      encoded,
-		MediaType: defaultMIME,
-	}, nil
+	return images.DefaultMaxBytes
 }
 
 func (bc *BotController) handleDocument(c telebot.Context) error {
@@ -222,7 +168,7 @@ func (bc *BotController) handleDocument(c telebot.Context) error {
 		return nil
 	}
 
-	if isSupportedImageDocument(doc.FileName, doc.MIME) {
+	if images.IsSupportedImageFile(doc.FileName, doc.MIME) {
 		return bc.handleImageDocument(c, doc)
 	}
 
@@ -281,10 +227,9 @@ func (bc *BotController) handleImageDocument(c telebot.Context, doc *telebot.Doc
 		}
 	}
 
-	img, err := encodeImageAttachment(filePath, mimeType, bc.maxImageBytes())
+	img, err := images.Encode(filePath, mimeType, bc.maxImageBytes())
 	if err != nil {
-		log.Printf("Failed to encode image document: %v", err)
-		var tooLarge imageTooLargeError
+		var tooLarge images.TooLargeError
 		if errors.As(err, &tooLarge) {
 			bc.confirmMessage(c.Message())
 			return SendContextText(c, tooLarge.UserMessage(), &telebot.SendOptions{ThreadID: c.Message().ThreadID})
@@ -328,22 +273,7 @@ func isSupportedDocument(filename, mimeType string) bool {
 	return strings.HasSuffix(filename, ".md") || mimeType == "application/pdf"
 }
 
-func isSupportedImageDocument(filename, mimeType string) bool {
-	if isSupportedImageMIME(mimeType) {
-		return true
-	}
-	guessed := mime.TypeByExtension(strings.ToLower(filepath.Ext(filename)))
-	return isSupportedImageMIME(guessed)
-}
 
-func isSupportedImageMIME(mimeType string) bool {
-	switch strings.ToLower(strings.TrimSpace(mimeType)) {
-	case "image/jpeg", "image/png", "image/gif", "image/webp":
-		return true
-	default:
-		return false
-	}
-}
 
 func (bc *BotController) downloadTelegramFile(file *telebot.File, name string) (string, error) {
 	base := filepath.Base(name)
@@ -408,7 +338,7 @@ func readDocumentPromptContent(filePath string, maxBytes int64) (string, bool, e
 	if err != nil {
 		return "", false, fmt.Errorf("read document %q: %w", filePath, err)
 	}
-	contentStr := pipelinepkg.RedactSecrets(string(content))
+	contentStr := pipeline.RedactSecrets(string(content))
 	if int64(len(contentStr)) > maxBytes {
 		return contentStr[:maxBytes], true, nil
 	}
