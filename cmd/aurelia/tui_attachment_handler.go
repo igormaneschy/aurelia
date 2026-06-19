@@ -1,0 +1,181 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"syscall"
+
+	"github.com/igormaneschy/aurelia/internal/ipc"
+)
+
+// copiedAttachment records the result of copying one attachment file.
+type copiedAttachment struct {
+	// OriginalName is the user-visible name (from Name field or path base).
+	OriginalName string
+	// FinalName is the actual filename on disk (may differ due to dedup).
+	FinalName string
+	// Size is the number of bytes copied.
+	Size int64
+}
+
+// copyAttachmentsToCWD copies document attachments into <cwd>/uploads/.
+// Each attachment is validated against symlinks, path traversal, and size
+// limits (MaxAttachmentBytes). On any failure, the function returns immediately
+// with the error — partial files are left in place (no rollback).
+func copyAttachmentsToCWD(ctx context.Context, cwd string, attachments []ipc.IPCAttachment) ([]copiedAttachment, error) {
+	uploadsDir := filepath.Join(cwd, "uploads")
+
+	if err := os.MkdirAll(uploadsDir, 0o750); err != nil {
+		return nil, fmt.Errorf("create uploads dir: %w", err)
+	}
+
+	var copied []copiedAttachment
+
+	for _, att := range attachments {
+		// Determine destination name: prefer Name field, fall back to basename.
+		destName := att.Name
+		if destName == "" {
+			destName = filepath.Base(att.Path)
+		}
+
+		// Defense against path traversal: filepath.Base("..") returns "..".
+		if destName == "." || destName == ".." {
+			return nil, fmt.Errorf("attachment %s: invalid name", filepath.Base(att.Path))
+		}
+
+		dst, err := uniqueUploadPath(uploadsDir, destName)
+		if err != nil {
+			return nil, fmt.Errorf("attachment %s: %w", filepath.Base(att.Path), err)
+		}
+
+		n, err := copyFileNoFollow(att.Path, dst, ipc.MaxAttachmentBytes)
+		if err != nil {
+			return nil, fmt.Errorf("attachment %s: %w", filepath.Base(att.Path), err)
+		}
+
+		copied = append(copied, copiedAttachment{
+			OriginalName: destName,
+			FinalName:    filepath.Base(dst),
+			Size:         n,
+		})
+	}
+
+	return copied, nil
+}
+
+// uniqueUploadPath returns a non-existent path under dir for the given name.
+// If the name already exists, it appends _1, _2, ... before the extension
+// (e.g. doc_1.md, doc_2.md). After 1000 conflicts it returns an error.
+// The name is sanitized via filepath.Base first, and path traversal
+// (. / ..) is explicitly rejected.
+func uniqueUploadPath(dir, name string) (string, error) {
+	base := filepath.Base(name)
+	if base == "." || base == ".." {
+		return "", fmt.Errorf("invalid name: %s", base)
+	}
+
+	candidate := filepath.Join(dir, base)
+	if _, err := os.Stat(candidate); os.IsNotExist(err) {
+		return candidate, nil
+	} else if err != nil {
+		return "", errNoPath("stat", base, err)
+	}
+
+	ext := filepath.Ext(base)
+	stem := strings.TrimSuffix(base, ext)
+	for i := 1; i <= 1000; i++ {
+		candidate = filepath.Join(dir, fmt.Sprintf("%s_%d%s", stem, i, ext))
+		if _, err := os.Stat(candidate); os.IsNotExist(err) {
+			return candidate, nil
+		} else if err != nil {
+			return "", errNoPath("stat", fmt.Sprintf("%s_%d%s", stem, i, ext), err)
+		}
+	}
+
+	return "", fmt.Errorf("could not find unique name for %s", name)
+}
+
+// errNoPath wraps an OS error with a descriptive prefix while stripping the
+// full path from the OS error message. Only the basename is retained in
+// the output, preventing path leakage in logs and user-facing messages.
+func errNoPath(prefix, name string, err error) error {
+	s := err.Error()
+	if idx := strings.LastIndex(s, ": "); idx >= 0 {
+		return fmt.Errorf("%s %s: %s", prefix, name, s[idx+2:])
+	}
+	return fmt.Errorf("%s %s: %v", prefix, name, err)
+}
+
+// copyFileNoFollow copies a regular file from src to dst, refusing symlinks
+// on both sides. The source is opened with O_RDONLY|O_NOFOLLOW and verified to
+// be a regular file via fstat. The destination is created with O_WRONLY|
+// O_CREATE|O_EXCL|O_NOFOLLOW and mode 0o640. A TOCTOU-resistant size check
+// is performed: the file is stat'd before copy, and a LimitReader rejects
+// files larger than maxBytes. Returns the number of bytes copied.
+func copyFileNoFollow(src, dst string, maxBytes int64) (int64, error) {
+	// Open source with O_NOFOLLOW — rejects symlinks at open time.
+	srcFd, err := os.OpenFile(src, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
+		return 0, errNoPath("open source", filepath.Base(src), err)
+	}
+	defer srcFd.Close()
+
+	// Verify it is a regular file via fstat on the opened fd.
+	fi, err := srcFd.Stat()
+	if err != nil {
+		return 0, errNoPath("stat source", filepath.Base(src), err)
+	}
+	if !fi.Mode().IsRegular() {
+		return 0, fmt.Errorf("source is not a regular file: %s", filepath.Base(src))
+	}
+	if fi.Size() > maxBytes {
+		return 0, fmt.Errorf("file %s exceeds max size (%d > %d bytes)",
+			filepath.Base(src), fi.Size(), maxBytes)
+	}
+
+	// Open destination with O_EXCL|O_NOFOLLOW — refuses to overwrite
+	// existing files and rejects symlink targets.
+	dstFd, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0o640)
+	if err != nil {
+		return 0, errNoPath("open destination", filepath.Base(dst), err)
+	}
+	defer dstFd.Close()
+
+	// Copy with LimitReader(maxBytes+1) to detect size changes (TOCTOU).
+	written, err := io.Copy(dstFd, io.LimitReader(srcFd, maxBytes+1))
+	if err != nil {
+		// Best-effort cleanup of partial file.
+		os.Remove(dst)
+		return 0, fmt.Errorf("copy error: %s", filepath.Base(src))
+	}
+
+	if written > maxBytes {
+		os.Remove(dst)
+		return 0, fmt.Errorf("file %s exceeds max size after copy", filepath.Base(src))
+	}
+
+	return written, nil
+}
+
+// buildAttachmentNote returns a markdown-formatted note describing the copied
+// attachments. Returns "" when copied is empty.
+// The note is appended to the user's message text so the agent can reference
+// files by their uploads/ name.
+func buildAttachmentNote(copied []copiedAttachment) string {
+	if len(copied) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	b.WriteString("\n\n[Attached files copied to ./uploads/]\n")
+	for _, c := range copied {
+		b.WriteString("- ")
+		b.WriteString(c.FinalName)
+		b.WriteString("\n")
+	}
+	return b.String()
+}

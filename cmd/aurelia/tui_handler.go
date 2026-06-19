@@ -288,7 +288,7 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 	chatID, threadID, userID := msg.ChatID, int(msg.ThreadID), msg.UserID
 
 	text := strings.TrimSpace(msg.Text)
-	if text == "" && len(msg.Images) == 0 {
+	if text == "" && len(msg.Images) == 0 && len(msg.Attachments) == 0 {
 		if err := emit(ipc.IPCEvent{Type: ipc.EventTypeMessage, Body: "Empty message", RequestID: msg.RequestID}); err != nil {
 			return err
 		}
@@ -351,8 +351,41 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 		}
 	}
 
+	// Handle document attachments: copy to <cwd>/uploads/ and build a note
+	// that tells the agent where to find them.
+	var attachmentNote string
+	if len(msg.Attachments) > 0 {
+		chatKey := projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID}
+		resolved, err := a.bindings.Resolve(ctx, chatKey)
+		if err != nil || resolved == nil || resolved.Binding == nil || resolved.Binding.CWD == "" {
+			return emit(ipc.IPCEvent{
+				Type:      ipc.EventTypeError,
+				Error:     "Set a project with /cwd first to attach documents",
+				RequestID: msg.RequestID,
+			})
+		}
+
+		copied, err := copyAttachmentsToCWD(ctx, resolved.Binding.CWD, msg.Attachments)
+		if err != nil {
+			log.Printf("tui: attachment copy error: %s", err)
+			return emit(ipc.IPCEvent{
+				Type:      ipc.EventTypeError,
+				Error:     fmt.Sprintf("Failed to copy attachment: %s", err),
+				RequestID: msg.RequestID,
+			})
+		}
+
+		attachmentNote = buildAttachmentNote(copied)
+	}
+
+	// Enrich text with attachment note if any.
+	enrichedText := text
+	if attachmentNote != "" {
+		enrichedText = text + attachmentNote
+	}
+
 	// Launch pipeline processing (async).
-	pipeErr := pipeSvc.Process(chatID, threadID, 0, text, attachments, userID, true)
+	pipeErr := pipeSvc.Process(chatID, threadID, 0, enrichedText, attachments, userID, true)
 	if pipeErr != nil {
 		log.Printf("tui: pipeline process error: %s", pipeline.RedactSecrets(pipeErr.Error()))
 		_ = output.SendError(chatID, threadID, pipeErr.Error())
