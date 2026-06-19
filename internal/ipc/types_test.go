@@ -266,6 +266,36 @@ func TestValidateMessage_AttachmentPathTooLong(t *testing.T) {
 	}
 }
 
+func TestValidateMessage_AttachmentRelativePath(t *testing.T) {
+	msg := IPCMessage{
+		Type: MsgTypeSend,
+		Text: "attachment with relative path",
+		Attachments: []IPCAttachment{
+			{Path: "spec.md"},
+		},
+	}
+	err := validateMessage(msg)
+	if err == nil {
+		t.Fatal("expected error for relative attachment path")
+	}
+	if !strings.Contains(err.Error(), "must be absolute") {
+		t.Errorf("expected 'must be absolute' in error, got: %v", err)
+	}
+}
+
+func TestValidateMessage_AttachmentAbsolutePath(t *testing.T) {
+	msg := IPCMessage{
+		Type: MsgTypeSend,
+		Text: "attachment with absolute path",
+		Attachments: []IPCAttachment{
+			{Path: "/home/user/doc.pdf", Name: "spec.pdf"},
+		},
+	}
+	if err := validateMessage(msg); err != nil {
+		t.Errorf("absolute path attachment should pass, got: %v", err)
+	}
+}
+
 func TestValidateMessage_AttachmentNilAndEmpty(t *testing.T) {
 	// Nil attachments field.
 	msg := IPCMessage{

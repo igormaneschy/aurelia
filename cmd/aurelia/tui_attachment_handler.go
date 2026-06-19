@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,6 +30,10 @@ type copiedAttachment struct {
 func copyAttachmentsToCWD(ctx context.Context, cwd string, attachments []ipc.IPCAttachment) ([]copiedAttachment, error) {
 	uploadsDir := filepath.Join(cwd, "uploads")
 
+	// Debug logging gated by env var to avoid noise in production.
+	// Set AURELIA_ATTACH_DEBUG=1 to enable per-attachment diagnostic output.
+	debugLog := os.Getenv("AURELIA_ATTACH_DEBUG") == "1"
+
 	if err := os.MkdirAll(uploadsDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create uploads dir: %w", err)
 	}
@@ -47,9 +52,28 @@ func copyAttachmentsToCWD(ctx context.Context, cwd string, attachments []ipc.IPC
 			return nil, fmt.Errorf("attachment %s: invalid name", filepath.Base(att.Path))
 		}
 
+		// Pre-copy stat — detect TOCTOU races where the source file is
+		// deleted or moved between /attach and send (Fixes T4-T5 gap).
+		if fi, err := os.Lstat(att.Path); err != nil {
+			if os.IsNotExist(err) {
+				return nil, fmt.Errorf("attachment %q: no longer available at %s (was it deleted or moved between /attach and send?)", filepath.Base(att.Path), att.Path)
+			}
+			return nil, fmt.Errorf("attachment %q: cannot stat source: %w", filepath.Base(att.Path), err)
+		} else if !fi.Mode().IsRegular() {
+			// Let copyFileNoFollow produce its own error for non-regular
+			// files (symlinks, dirs) — Lstat succeeds but the file may be
+			// replaced before open. This check catches the obvious case
+			// early with a clear user-facing message.
+			return nil, fmt.Errorf("attachment %q: source is not a regular file: %s", filepath.Base(att.Path), att.Path)
+		}
+
 		dst, err := uniqueUploadPath(uploadsDir, destName)
 		if err != nil {
 			return nil, fmt.Errorf("attachment %s: %w", filepath.Base(att.Path), err)
+		}
+
+		if debugLog {
+			log.Printf("tui: attach debug: copying attachment path=%q cwd=%q name=%q", att.Path, cwd, destName)
 		}
 
 		n, err := copyFileNoFollow(att.Path, dst, ipc.MaxAttachmentBytes)

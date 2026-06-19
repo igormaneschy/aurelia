@@ -418,6 +418,9 @@ func validateMessage(msg IPCMessage) error {
 		if len(att.Path) > 4096 {
 			return fmt.Errorf("attachment[%d]: path too long (%d bytes, max 4096)", i, len(att.Path))
 		}
+		if !filepath.IsAbs(att.Path) {
+			return fmt.Errorf("attachment[%d]: path must be absolute (got %q)", i, att.Path)
+		}
 	}
 	return nil
 }

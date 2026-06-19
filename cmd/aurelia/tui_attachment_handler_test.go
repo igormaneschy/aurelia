@@ -201,6 +201,39 @@ func TestCopyAttachmentsToCWD_PathTraversalName(t *testing.T) {
 	}
 }
 
+func TestCopyAttachmentsToCWD_FileMissingAfterAttach(t *testing.T) {
+	ctx := context.Background()
+	cwd := t.TempDir()
+	srcDir := t.TempDir()
+
+	// Create a source file.
+	src := filepath.Join(srcDir, "missing.pdf")
+	if err := os.WriteFile(src, []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Delete the file to simulate TOCTOU race (file existed during /attach
+	// but was removed before copyAttachmentsToCWD processes it).
+	if err := os.Remove(src); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := copyAttachmentsToCWD(ctx, cwd, []ipc.IPCAttachment{
+		{Path: src, Name: "missing.pdf"},
+	})
+	if err == nil {
+		t.Fatal("expected error for missing source file, got nil")
+	}
+
+	// The error must mention "no longer available" and include the full path.
+	if !strings.Contains(err.Error(), "no longer available") {
+		t.Errorf("expected 'no longer available' in error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), src) {
+		t.Errorf("expected full path %q in error, got: %v", src, err)
+	}
+}
+
 // ── copyFileNoFollow ──────────────────────────────────────────────────────
 
 func TestCopyFileNoFollow_SymlinkSourceRejected(t *testing.T) {
