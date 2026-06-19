@@ -198,6 +198,14 @@ func bootstrapApp() (*app, error) {
 		return nil, fmt.Errorf("initialize tui sessions store: %w", err)
 	}
 
+	// Defer cleanup so every subsequent error path closes tuiSessionsStore.
+	var tuiSessionsOK bool
+	defer func() {
+		if !tuiSessionsOK {
+			_ = tuiSessionsStore.Close()
+		}
+	}()
+
 	transcriber, err := buildTranscriber(cfg)
 	if err != nil {
 		if closeErr := onboardingStore.Close(); closeErr != nil {
@@ -401,6 +409,7 @@ func bootstrapApp() (*app, error) {
 	// TUI concurrency guard — one pipeline run at a time.
 	tuiGuard := &tuiRunGuard{}
 
+	tuiSessionsOK = true
 	return &app{
 		config:          cfg,
 		resolver:        resolver,

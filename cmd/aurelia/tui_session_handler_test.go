@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/igormaneschy/aurelia/internal/ipc"
@@ -375,6 +377,57 @@ func TestTUIHandler_SessionDeleteDefaultDMRejected(t *testing.T) {
 	}
 }
 
+func TestSanitizeSessionName_StripsControlChars(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{input: "normal name", expected: "normal name"},
+		{input: "  trimmed  ", expected: "trimmed"},
+		{input: "name\nwith\tnewline\r", expected: "namewithnewline"},
+		{input: "name\x00with\x1fNUL", expected: "namewithNUL"},
+		{input: "\x1b[31mred\x1b[0m", expected: "red"},
+		{input: "\x1b]0;title\x07name", expected: "name"},
+		{input: "\x1b]0;title\x1b\\name", expected: "name"},
+		{input: "\x1b[1;34m\x1b[Kbold blue\x1b[m", expected: "bold blue"},
+		{input: "na\x7fme", expected: "name"},
+		{input: "name\x80\x9fC1", expected: "nameC1"},
+		{input: "CSI:\x9b1m", expected: "CSI:1m"},
+	}
+	for _, tt := range tests {
+		got := sanitizeSessionName(tt.input)
+		if got != tt.expected {
+			t.Errorf("sanitizeSessionName(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
+func TestSanitizeSessionName_LimitsLength(t *testing.T) {
+	long := strings.Repeat("a", 100)
+	got := sanitizeSessionName(long)
+	if len([]rune(got)) > maxSessionNameLength {
+		t.Errorf("sanitized name too long: %d runes, max %d", len([]rune(got)), maxSessionNameLength)
+	}
+	if got != strings.Repeat("a", maxSessionNameLength) {
+		t.Errorf("expected %d a's, got %q (len=%d)", maxSessionNameLength, got, len(got))
+	}
+}
+
+func TestSanitizeSessionName_AllControlOnly(t *testing.T) {
+	got := sanitizeSessionName("\x1b[3m \x1b[0m  ")
+	if got != "" {
+		t.Errorf("expected empty for control-only input, got %q", got)
+	}
+}
+
+func TestSanitizeSessionName_PreservesUnicode(t *testing.T) {
+	input := "café résumé 日本語"
+	got := sanitizeSessionName(input)
+	if got != input {
+		t.Errorf("expected %q, got %q", input, got)
+	}
+}
+
 func TestTUIHandler_SessionCreateAllocatesSequentialSlots(t *testing.T) {
 	a, ctx, cleanup := testApp(t)
 	defer cleanup()
@@ -404,6 +457,78 @@ func TestTUIHandler_SessionCreateAllocatesSequentialSlots(t *testing.T) {
 	}
 
 	// All should be in the reserved range, not the default DM.
+	for cid := range chatIDs {
+		if !ipc.IsReservedTUIID(cid) {
+			t.Errorf("ChatID %d not in reserved range", cid)
+		}
+		if cid == ipc.ReservedTUIChatID {
+			t.Errorf("ChatID should not be the default DM")
+		}
+	}
+}
+
+func TestTUIHandler_SessionCreateConcurrentAllocation(t *testing.T) {
+	a, ctx, cleanup := testApp(t)
+	defer cleanup()
+
+	handler := makeTUIHandler(a)
+
+	// With 8 reserved slots (-9000002..-9000009) and 6 concurrent creates,
+	// every request must succeed with a distinct ChatID. No ErrSessionExists
+	// is acceptable because the atomic slot iteration guarantees a free slot
+	// is found as long as one remains.
+	const numSessions = 6
+	type result struct {
+		err    error
+		chatID int64
+	}
+	results := make(chan result, numSessions)
+
+	for i := 0; i < numSessions; i++ {
+		go func(n int) {
+			te := &testEmit{}
+			err := handler(ctx, ipc.IPCMessage{
+				Type: ipc.MsgTypeSessionCreate,
+				Text: fmt.Sprintf("session-%d", n),
+			}, te.emit)
+			if err != nil {
+				results <- result{err: err}
+				return
+			}
+			for _, ev := range te.events {
+				if ev.Type == ipc.EventTypeSessionCreated {
+					var s sessionJSON
+					_ = json.Unmarshal([]byte(ev.Body), &s)
+					results <- result{chatID: s.ChatID}
+					return
+				}
+			}
+			for _, ev := range te.events {
+				if ev.Type == ipc.EventTypeError {
+					results <- result{err: fmt.Errorf("%s", ev.Error)}
+					return
+				}
+			}
+			results <- result{err: fmt.Errorf("no session_created or error event")}
+		}(i)
+	}
+
+	chatIDs := make(map[int64]bool, numSessions)
+	for i := 0; i < numSessions; i++ {
+		r := <-results
+		if r.err != nil {
+			t.Fatalf("concurrent create failed: %v (no ErrSessionExists should occur while free slots remain)", r.err)
+		}
+		if chatIDs[r.chatID] {
+			t.Errorf("duplicate ChatID %d allocated concurrently", r.chatID)
+		}
+		chatIDs[r.chatID] = true
+	}
+
+	if len(chatIDs) != numSessions {
+		t.Fatalf("expected %d unique ChatIDs, got %d", numSessions, len(chatIDs))
+	}
+
 	for cid := range chatIDs {
 		if !ipc.IsReservedTUIID(cid) {
 			t.Errorf("ChatID %d not in reserved range", cid)

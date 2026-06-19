@@ -312,12 +312,13 @@ func (m Model) renderChatHeader() string {
 		stateLabel = m.spinner.View() + " thinking"
 	}
 
-	// Session name in the header.
+	// Session name in the header. Use the safe label to protect against
+	// legacy stored names that may contain terminal-control characters.
 	sessionName := "DM"
 	for _, s := range m.sessions {
 		if s.ChatID == m.activeSession {
 			if s.ChatID != ipc.ReservedTUIChatID {
-				sessionName = s.Name
+				sessionName = safeSessionLabel(s.Name)
 			}
 			break
 		}
@@ -364,7 +365,7 @@ func (m Model) renderSidebar() string {
 		lines = append(lines, sidebarMutedStyle.Render("  (no sessions)"))
 	} else {
 		for i, s := range m.sessions {
-			label := s.Name
+			label := safeSessionLabel(s.Name)
 			if s.ChatID == ipc.ReservedTUIChatID {
 				label = "DM"
 			}
@@ -587,4 +588,72 @@ func truncateMiddle(value string, width int) string {
 	}
 	keep := (width - 1) / 2
 	return value[:keep] + "…" + value[len(value)-keep:]
+}
+
+// safeSessionLabel strips terminal-control characters from a session name
+// for safe display in the sidebar and chat header. This is a defensive
+// measure: names newly created via sanitizeSessionName are always clean,
+// but legacy stored names from before sanitization existed could contain
+// ANSI escapes, newlines, tabs, or other control sequences.
+func safeSessionLabel(name string) string {
+	var b strings.Builder
+	i := 0
+	runes := []rune(name)
+	for i < len(runes) {
+		r := runes[i]
+		// ESC (0x1B): skip the entire ANSI/OSC sequence. Must be checked
+		// before the general C0 check below (since ESC IS a C0 code).
+		if r == 0x1B {
+			i++
+			if i >= len(runes) {
+				break
+			}
+			next := runes[i]
+			switch next {
+			case '[':
+				// ANSI CSI: ESC [ params... intermediate... final byte
+				i++ // skip '['
+				for i < len(runes) {
+					ch := runes[i]
+					if (ch >= 0x30 && ch <= 0x3F) || (ch >= 0x20 && ch <= 0x2F) {
+						i++
+						continue
+					}
+					if (ch >= 0x40 && ch <= 0x7E) || (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') {
+						i++
+						break
+					}
+					break
+				}
+			case ']':
+				// OSC: ESC ] ... BEL (0x07) or ESC \
+				i++ // skip ']'
+				for i < len(runes) {
+					if runes[i] == 0x07 {
+						i++
+						break
+					}
+					if runes[i] == 0x1B && i+1 < len(runes) && runes[i+1] == '\\' {
+						i += 2
+						break
+					}
+					i++
+				}
+			default:
+				// Other ESC sequence — skip this byte and continue.
+			}
+			continue
+		}
+		// Skip C0 (NUL..US, 0x00-0x1F), DEL (0x7F), C1 (U+0080-U+009F),
+		// and U+FFFD (replacement char for invalid UTF-8 bytes).
+		// ESC (0x1B) was handled above, so the effective C0 range is
+		// 0x00-0x1A, 0x1C-0x1F.
+		if r <= 0x1F || r == 0x7F || r == 0xFFFD || (r >= 0x80 && r <= 0x9F) {
+			i++
+			continue
+		}
+		b.WriteRune(r)
+		i++
+	}
+	return b.String()
 }

@@ -20,6 +20,15 @@ import (
 // maxLineSize is the maximum size of a single JSON line (scanner buffer).
 const maxLineSize = 64 * 1024
 
+// messageQueueSize is the capacity of the per-connection message channel
+// between the reader goroutine and the processing loop. If a remote client
+// queues more than this many valid messages while a stream handler blocks,
+// the reader treats it as backpressure, emits a clear error if possible,
+// and cancels the connection. This is acceptable because a local IPC client
+// queuing > capacity while a stream is active is not a normal TUI flow.
+// Exposed as a var for test override.
+var messageQueueSize = 10
+
 // readTimeout is the maximum idle time between reads from a client connection.
 // Exposed as a variable for test override.
 var readTimeout = 60 * time.Second
@@ -148,9 +157,38 @@ func (s *Server) acceptLoop() {
 	}
 }
 
-// handleConnection reads messages from a single client connection.
+// connMessage carries a parsed IPC message from the reader goroutine to the
+// processing loop. The reader goroutine owns all socket reads and sends only
+// validated messages here; invalid JSON and validation errors are handled
+// inline with error events written directly to the connection.
+type connMessage struct {
+	msg IPCMessage
+}
+
+// handleConnection manages the lifecycle of one client connection. It spins
+// up a reader goroutine that owns all socket reads/scanner work and sends
+// parsed, validated IPCMessages into an internal channel. The main goroutine
+// consumes queued messages sequentially and invokes StreamHandler/Handler for
+// each, preserving existing synchronous handler semantics.
+//
+// Write serialisation: all writes to the connection (error responses from the
+// reader, emit calls from StreamHandler, and dispatch responses) share a
+// per-connection mutex (writeMu). This prevents interleaved JSON lines.
+//
+// Queue saturation: if the internal message queue is full (backpressure),
+// the reader emits a clear error, cancels connCtx, and exits. This prevents
+// the queue-full deadlock where a reader blocked on send cannot observe EOF.
+//
+// Reader goroutine lifecycle: handleConnection waits for the reader via
+// readerWg after conn.Close() has unblocked the scanner. The defer ordering
+// guarantees conn.Close() runs before readerWg.Wait() (conn.Close is
+// registered before readerWg.Wait, so in LIFO, conn.Close runs after, i.e.
+// BEFORE readerWg.Wait).
 func (s *Server) handleConnection(conn net.Conn) {
+	var readerWg sync.WaitGroup
+
 	defer s.wg.Done()
+	defer readerWg.Wait()
 	defer func() { _ = conn.Close() }()
 	defer func() {
 		if r := recover(); r != nil {
@@ -158,115 +196,169 @@ func (s *Server) handleConnection(conn net.Conn) {
 		}
 	}()
 
-	// Connection was registered in acceptLoop before spawning this goroutine.
 	defer func() {
 		s.connsMu.Lock()
 		delete(s.conns, conn)
 		s.connsMu.Unlock()
 	}()
 
-	// Set read deadline to prevent slow-client DoS.
-	_ = conn.SetReadDeadline(time.Now().Add(readTimeout))
+	connCtx, connCancel := context.WithCancel(s.ctx)
+	defer connCancel()
 
-	scanner := bufio.NewScanner(conn)
-	scanner.Buffer(make([]byte, maxLineSize), maxLineSize)
+	// Per-connection write serialisation: all writes to conn share this
+	// mutex so that error responses from the reader goroutine and emit calls
+	// from the processing loop never interleave.
+	var writeMu sync.Mutex
+	writeLocked := func(ev IPCEvent) error {
+		writeMu.Lock()
+		defer writeMu.Unlock()
+		_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+		data, err := json.Marshal(ev)
+		if err != nil {
+			return fmt.Errorf("marshal event: %w", err)
+		}
+		data = append(data, '\n')
+		return writeAll(conn, data)
+	}
 
-	for scanner.Scan() {
-		// Extend read deadline on each successful read.
+	// Channel for parsed messages from the reader goroutine.
+	msgCh := make(chan connMessage, messageQueueSize)
+
+	// Reader goroutine: owns all socket reads. Exits on scanner EOF, read
+	// error, connCtx cancellation, or queue saturation. On exit it cancels
+	// connCtx (so the active handler aborts) and closes msgCh (so the
+	// processing loop drains remaining queued messages and exits).
+	readerWg.Add(1)
+	go func() {
+		defer readerWg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("ipc: panic in reader goroutine", "error", r, "stack", string(debug.Stack()))
+			}
+		}()
+		defer close(msgCh)
+		defer connCancel()
+
 		_ = conn.SetReadDeadline(time.Now().Add(readTimeout))
 
-		line := scanner.Text()
-		if line == "" {
-			continue
-		}
+		scanner := bufio.NewScanner(conn)
+		scanner.Buffer(make([]byte, maxLineSize), maxLineSize)
 
-		var msg IPCMessage
-		if err := json.Unmarshal([]byte(line), &msg); err != nil {
-			slog.Warn("ipc: invalid message", "error", err)
-			if err := s.writeEvent(conn, IPCEvent{
-				Type:  EventTypeError,
-				Error: fmt.Sprintf("invalid message: %v", err),
-			}); err != nil {
-				slog.Warn("ipc: write error", "error", err)
+		for scanner.Scan() {
+			_ = conn.SetReadDeadline(time.Now().Add(readTimeout))
+
+			line := scanner.Text()
+			if line == "" {
+				continue
 			}
-			continue
-		}
 
-		if err := validateMessage(msg); err != nil {
-			slog.Warn("ipc: invalid message", "error", err, "request_id", msg.RequestID)
-			if err := s.writeEvent(conn, IPCEvent{
-				Type:      EventTypeError,
-				Error:     fmt.Sprintf("invalid message: %v", err),
-				RequestID: msg.RequestID,
-			}); err != nil {
-				slog.Warn("ipc: write error", "error", err)
-			}
-			continue
-		}
-
-		if s.StreamHandler != nil {
-			// Create a per-connection context so that when the client
-			// disconnects (closes the socket), the handler's context is
-			// cancelled and long-running operations stop waiting.
-			connCtx, connCancel := context.WithCancel(s.ctx)
-			// Cancel when handleConnection returns (connection closed).
-			defer connCancel()
-
-			// Streaming dispatch: handler uses emit() to send events.
-			emit := func(event IPCEvent) error {
-				// Propagate request_id from message if not already set.
-				if event.RequestID == "" && msg.RequestID != "" {
-					event.RequestID = msg.RequestID
-				}
-				return s.writeEvent(conn, event)
-			}
-			if err := s.StreamHandler(connCtx, msg, emit); err != nil {
-				slog.Warn("ipc: stream handler error", "error", err, "request_id", msg.RequestID)
-				if e := s.writeEvent(conn, IPCEvent{
-					Type:      EventTypeError,
-					Error:     err.Error(),
-					RequestID: msg.RequestID,
+			var msg IPCMessage
+			if err := json.Unmarshal([]byte(line), &msg); err != nil {
+				slog.Warn("ipc: invalid message", "error", err)
+				if e := writeLocked(IPCEvent{
+					Type:  EventTypeError,
+					Error: fmt.Sprintf("invalid message: %v", err),
 				}); e != nil {
 					slog.Warn("ipc: write error", "error", e)
-				}
-			}
-		} else {
-			events, err := s.dispatch(s.ctx, msg)
-			if err != nil {
-				slog.Warn("ipc: handler error", "error", err, "request_id", msg.RequestID)
-				if err := s.writeEvent(conn, IPCEvent{
-					Type:      EventTypeError,
-					Error:     err.Error(),
-					RequestID: msg.RequestID,
-				}); err != nil {
-					slog.Warn("ipc: write error", "error", err)
 				}
 				continue
 			}
 
-			for _, event := range events {
-				// Propagate request_id from message if not already set.
-				if event.RequestID == "" && msg.RequestID != "" {
-					event.RequestID = msg.RequestID
+			if err := validateMessage(msg); err != nil {
+				slog.Warn("ipc: invalid message", "error", err, "request_id", msg.RequestID)
+				if e := writeLocked(IPCEvent{
+					Type:      EventTypeError,
+					Error:     fmt.Sprintf("invalid message: %v", err),
+					RequestID: msg.RequestID,
+				}); e != nil {
+					slog.Warn("ipc: write error", "error", e)
 				}
-				if err := s.writeEvent(conn, event); err != nil {
-					slog.Warn("ipc: write error", "error", err)
-					return // Connection is broken, stop reading.
-				}
+				continue
 			}
-		}
-	}
 
-	if err := scanner.Err(); err != nil {
-		if err == bufio.ErrTooLong {
-			if err := s.writeEvent(conn, IPCEvent{
-				Type:  EventTypeError,
-				Error: "line too long (max 64KB)",
-			}); err != nil {
-				slog.Warn("ipc: write error", "error", err)
+			select {
+			case msgCh <- connMessage{msg: msg}:
+			case <-connCtx.Done():
+				return
+			default:
+				// Queue full — backpressure. Cancel connCtx first so the
+				// active handler aborts immediately, then attempt a
+				// best-effort notification write to the client.
+				// Deferred connCancel() in handleConnection covers this
+				// path as well, so cancelling here is safe whether or
+				// not the reader's own defer also calls it.
+				slog.Warn("ipc: message queue full, cancelling connection")
+				connCancel()
+				if e := writeLocked(IPCEvent{
+					Type:  EventTypeError,
+					Error: "server busy: too many queued messages",
+				}); e != nil {
+					slog.Warn("ipc: write error", "error", e)
+				}
+				return
 			}
 		}
-		slog.Debug("ipc: client read error", "error", err)
+
+		if err := scanner.Err(); err != nil {
+			if err == bufio.ErrTooLong {
+				if e := writeLocked(IPCEvent{
+					Type:  EventTypeError,
+					Error: "line too long (max 64KB)",
+				}); e != nil {
+					slog.Warn("ipc: write error", "error", e)
+				}
+			}
+			slog.Debug("ipc: client read error", "error", err)
+		}
+	}()
+
+	// Processing loop: consume messages from the reader in FIFO order.
+	// Each message is dispatched to StreamHandler (preferred) or Handler.
+	// The loop exits when msgCh is closed (reader goroutine exited).
+	for cm := range msgCh {
+		if s.StreamHandler != nil {
+			handlerCtx, handlerCancel := context.WithCancel(connCtx)
+
+			emit := func(event IPCEvent) error {
+				if event.RequestID == "" && cm.msg.RequestID != "" {
+					event.RequestID = cm.msg.RequestID
+				}
+				return writeLocked(event)
+			}
+			if err := s.StreamHandler(handlerCtx, cm.msg, emit); err != nil {
+				slog.Warn("ipc: stream handler error", "error", err, "request_id", cm.msg.RequestID)
+				if e := writeLocked(IPCEvent{
+					Type:      EventTypeError,
+					Error:     err.Error(),
+					RequestID: cm.msg.RequestID,
+				}); e != nil {
+					slog.Warn("ipc: write error", "error", e)
+				}
+			}
+			handlerCancel()
+		} else {
+			events, err := s.dispatch(s.ctx, cm.msg)
+			if err != nil {
+				slog.Warn("ipc: handler error", "error", err, "request_id", cm.msg.RequestID)
+				if e := writeLocked(IPCEvent{
+					Type:      EventTypeError,
+					Error:     err.Error(),
+					RequestID: cm.msg.RequestID,
+				}); e != nil {
+					slog.Warn("ipc: write error", "error", e)
+				}
+				continue
+			}
+			for _, event := range events {
+				if event.RequestID == "" && cm.msg.RequestID != "" {
+					event.RequestID = cm.msg.RequestID
+				}
+				if e := writeLocked(event); e != nil {
+					slog.Warn("ipc: write error", "error", e)
+					return
+				}
+			}
+		}
 	}
 }
 
@@ -353,17 +445,6 @@ func writeAll(w io.Writer, data []byte) error {
 		data = data[n:]
 	}
 	return nil
-}
-
-// writeEvent marshals and writes a single IPCEvent as a JSON line.
-func (s *Server) writeEvent(conn net.Conn, event IPCEvent) error {
-	_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
-	data, err := json.Marshal(event)
-	if err != nil {
-		return fmt.Errorf("marshal event: %w", err)
-	}
-	data = append(data, '\n')
-	return writeAll(conn, data)
 }
 
 // Close gracefully shuts down the server: stops accepting new connections,

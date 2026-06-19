@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.27.1 - 2026-06-18
+
+### Fixed
+- **Bridge: symlink configurações do PI CLI** — partilha `settings.json`,
+  `context/`, `prompts/`, e `skills/` via symlinks do PI CLI global para o
+ -directório isolado do Aurelia, garantindo acesso a configurações, padrões
+  anti-racionalização, templates de prompt e skills.
+- **Cmd: sanitização de nomes de sessão TUI** — remove caracteres de controlo
+  terminais (ANSI, OSC, C0/C1) e limita a 64 runes para renderização segura
+  na sidebar. Alocação de ChatID é agora atómica via constraint SQL UNIQUE.
+- **IPC: reader goroutine com writes serializados** — refatora `handleConnection`
+  para usar goroutine dedicada para leituras e mutex per-connection para writes,
+  prevenindo linhas JSON intercaladas. Queue de mensagens (capacidade 10)
+  trata backpressure gracefully.
+- **Cmd: cleanup de tuiSessionsStore** — deferred close garante que o store
+  é fechado em todos os caminhos de erro durante bootstrap.
+- **TUI: safe session label** — `safeSessionLabel()` remove caracteres de
+  controlo terminais em nomes legados para exibição segura na sidebar e header.
+- **TUI: tratamento de erro no histórico** — mostra mensagem de aviso quando
+  o carregamento do histórico falha em vez de ignorar o erro silenciosamente.
+- **Dependências: golang.org/x/net v0.38.0** — corrige vulnerabilidade
+  GO-2025-3595 (neutralização incorreta de input durante geração de webpage).
+
 ## v0.27.0 - 2026-06-17
 
 ### Added

@@ -142,7 +142,16 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tuiHistoryMsg:
-		if msg.err == nil && len(msg.messages) > 0 {
+		if msg.err != nil {
+			m.messages = append(m.messages, chatMessage{
+				Sender: "⚠️",
+				Text:   fmt.Sprintf("Warning: failed to load chat history: %s", safeSessionLabel(msg.err.Error())),
+			})
+			m.updateViewport()
+			m.switchingSession = false
+			return m, nil
+		}
+		if len(msg.messages) > 0 {
 			if m.switchingSession || m.canApplyStartupHistory() {
 				m.messages = msg.messages
 				m.updateViewport()
@@ -749,12 +758,12 @@ func (m Model) handleViewportMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) cancelStreaming() (tea.Model, tea.Cmd) {
 	m.waiting = false
 	m.cleanupSubmittedTempImages()
-		if m.reader != nil {
-			_ = m.reader.Close()
-			m.reader = nil
-		}
-		m.streamBuf = ""
-		m.messages = append(m.messages, chatMessage{
+	if m.reader != nil {
+		_ = m.reader.Close()
+		m.reader = nil
+	}
+	m.streamBuf = ""
+	m.messages = append(m.messages, chatMessage{
 		Sender:    "⚠️",
 		Text:      "(cancelled — pipeline aborting)",
 		Timestamp: time.Now(),
