@@ -206,7 +206,7 @@ func copyFileNoFollow(ctx context.Context, src, dst string, maxBytes int64) (int
 	if err != nil {
 		// Best-effort cleanup of partial file.
 		os.Remove(dst)
-		return 0, fmt.Errorf("copy error: %s", filepath.Base(src))
+		return 0, fmt.Errorf("copy %s: %w", filepath.Base(src), err)
 	}
 
 	if written > maxBytes {

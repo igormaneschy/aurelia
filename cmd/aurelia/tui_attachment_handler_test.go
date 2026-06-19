@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/igormaneschy/aurelia/internal/ipc"
@@ -484,6 +486,73 @@ func TestCopyFileNoFollow_CtxCancelled(t *testing.T) {
 	// Destination should not exist after cancellation.
 	if _, err := os.Stat(dst); !os.IsNotExist(err) {
 		t.Errorf("destination should be removed after cancelled copy: %v", err)
+	}
+}
+
+func TestCopyFileNoFollow_IOCopyError_PreservesErr(t *testing.T) {
+	// This test verifies that when io.Copy fails inside copyFileNoFollow,
+	// the returned error preserves the original cause via %w so that
+	// errors.Unwrap and errors.Is work on the caller side.
+	//
+	// Technique: set RLIMIT_FSIZE to 0, causing any file-extending write
+	// to return EFBIG ("file too large"). Go's runtime handles SIGXFSZ
+	// on macOS and converts it to EFBIG. The limit is restored in a defer.
+	ctx := context.Background()
+	dir := t.TempDir()
+	srcDir := t.TempDir()
+
+	src := filepath.Join(srcDir, "testfile.txt")
+	content := []byte("Hello, World! This content triggers a write that exceeds RLIMIT_FSIZE.")
+	if err := os.WriteFile(src, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := filepath.Join(dir, "out.txt")
+
+	// Lower RLIMIT_FSIZE to 0 so every file-extending write fails.
+	var oldLimit syscall.Rlimit
+	if err := syscall.Getrlimit(syscall.RLIMIT_FSIZE, &oldLimit); err != nil {
+		t.Skip("skipping: RLIMIT_FSIZE not supported:", err)
+	}
+	zeroLimit := syscall.Rlimit{Cur: 0, Max: oldLimit.Max}
+	if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &zeroLimit); err != nil {
+		t.Skip("skipping: could not set RLIMIT_FSIZE:", err)
+	}
+	defer func() {
+		// Best-effort restore — if this fails the test binary is degraded
+		// but still exits. Use the old hard limit (Max) as Cur since we
+		// saved it before lowering.
+		_ = syscall.Setrlimit(syscall.RLIMIT_FSIZE, &oldLimit)
+	}()
+
+	_, err := copyFileNoFollow(ctx, src, dst, 1024*1024)
+	if err == nil {
+		t.Fatal("expected error from RLIMIT_FSIZE-limited write, got nil")
+	}
+
+	// A1: error message must contain the basename.
+	if !strings.Contains(err.Error(), "testfile.txt") {
+		t.Errorf("expected error to contain basename 'testfile.txt', got: %v", err)
+	}
+
+	// A1: error must start with "copy " (not "copy error: ").
+	if !strings.HasPrefix(err.Error(), "copy ") {
+		t.Errorf("expected error prefix 'copy ', got: %v", err)
+	}
+
+	// A1: errors.Unwrap must return non-nil (the original EFBIG error).
+	if unwrapped := errors.Unwrap(err); unwrapped == nil {
+		t.Error("errors.Unwrap(err) returned nil — expected original EFBIG error to be preserved via %w")
+	}
+
+	// A1: errors.Is must reach syscall.EFBIG through the wrapping chain.
+	if !errors.Is(err, syscall.EFBIG) {
+		t.Errorf("errors.Is(err, syscall.EFBIG) is false; original error not reachable via chain. err=%v", err)
+	}
+
+	// Destination must be cleaned up after failed copy.
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Errorf("destination should be removed after failed copy: %v", err)
 	}
 }
 
