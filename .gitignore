@@ -85,3 +85,6 @@ internal/bridge/bundle.js
 # Misplaced PI agent data (created when ~ was passed literally instead of expanded)
 /~/
 
+# Personal study notes
+ESTUDO.md
+

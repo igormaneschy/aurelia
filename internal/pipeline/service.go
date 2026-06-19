@@ -110,6 +110,10 @@ type Service struct {
 	// active tool monitoring state — set/cleared per-run for /status.
 	toolStateMu      sync.Mutex
 	activeToolStates map[string]activeToolState
+
+	// modelCataloger checks model capability (SupportsImages) via the PI model
+	// registry. Defaults to bridgeModelCataloger; overridden in tests.
+	modelCataloger ModelCataloger
 }
 
 type activeToolState struct {
@@ -150,6 +154,7 @@ func NewService(cfg Config) *Service {
 	}
 
 	if cfg.Bridge != nil {
+		s.modelCataloger = &bridgeModelCataloger{br: cfg.Bridge}
 		rbCfg := DefaultResilientConfig()
 		if cfg.AppConfig != nil {
 			rbCfg.OpenRouterAPIKey = cfg.AppConfig.ProviderAPIKey("openrouter")
