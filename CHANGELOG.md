@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.29.0 - 2026-06-19
+
+### Added
+- **TUI: Painel de Estado do Projeto** — overlay `Ctrl+P` mostra cwd, binding source, agente ativo, modelo, bridge status, memory layers, checkpoint target e último run/checkpoint. Atualiza a cada 30s enquanto aberto.
+
+### Changed
+- **Makefile: `make deploy` também builda e instala o binary TUI** (`~/.aurelia/bin/aurelia-tui`), garantindo que daemon e TUI estejam sempre sincronizados.
+
+### Fixed
+- **IPC: validação de `project_state`** — adicionado `MsgTypeProjectState` à whitelist do server para que o daemon não rejeite o novo tipo de mensagem.
+- **TUI: overlay preserva background do chat** — painel de estado renderiza sobre o chat em vez de substituí-lo.
+- **TUI: cancelamento imediato do ping do bridge** no handler do project state.
+
 ## v0.28.1 - 2026-06-19
 
 ### Changed
