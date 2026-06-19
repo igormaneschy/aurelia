@@ -50,7 +50,7 @@ var (
 			BorderForeground(lipgloss.Color("238")).
 			Padding(0, 1)
 
-	inputWaitingStyle = inputBoxStyle.Copy().
+	inputWaitingStyle = inputBoxStyle.
 				BorderForeground(lipgloss.Color("205"))
 
 	statusBarStyle = lipgloss.NewStyle().
@@ -262,14 +262,16 @@ func renderPromptedTextarea(prompt, rawPrompt, text string) string {
 }
 
 func (m Model) renderStatusBar() string {
-	chromeState := m.chromeState()
-	state := statusReadyStyle.Render("● ready")
-	if chromeState == "connecting" {
+	var state string
+	switch m.chromeState() {
+	case "connecting":
 		state = statusBusyStyle.Render("● connecting")
-	} else if chromeState == "waiting" {
+	case "waiting":
 		state = statusBusyStyle.Render("● waiting")
-	} else if chromeState == "error" {
+	case "error":
 		state = statusErrorStyle.Render("● error")
+	default:
+		state = statusReadyStyle.Render("● ready")
 	}
 
 	// Items ordered by priority — less critical ones are dropped on narrow
@@ -501,7 +503,7 @@ func (m *Model) renderMessagesPlain(b *strings.Builder, messages []chatMessage) 
 		if i > 0 {
 			b.WriteString("\n\n")
 		}
-		b.WriteString(fmt.Sprintf("%s:\n%s", msg.Sender, msg.Text))
+		fmt.Fprintf(b, "%s:\n%s", msg.Sender, msg.Text)
 	}
 }
 

@@ -203,11 +203,6 @@ func forceTUIIDs(msg *ipc.IPCMessage) {
 	msg.UserID = int64(os.Getuid())
 }
 
-// tuiIDs returns the forced local TUI identity for the default DM session.
-func tuiIDs() (chatID int64, threadID int, userID int64) {
-	return ipc.ReservedTUIChatID, 0, int64(os.Getuid())
-}
-
 // handleTUICommand processes a TUI command (/cwd, /status, etc.).
 func handleTUICommand(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
 	text := strings.TrimSpace(msg.Text)
@@ -348,7 +343,7 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 	pipeErr := pipeSvc.Process(chatID, threadID, 0, text, attachments, userID, true)
 	if pipeErr != nil {
 		log.Printf("tui: pipeline process error: %s", pipeline.RedactSecrets(pipeErr.Error()))
-		output.SendError(chatID, threadID, pipeErr.Error())
+		_ = output.SendError(chatID, threadID, pipeErr.Error())
 	}
 
 	// Wait for pipeline completion or context cancellation (client
@@ -428,7 +423,7 @@ func buildTUICwdStatus(ctx context.Context, a *app, chatID int64, threadID int) 
 	var b strings.Builder
 	b.WriteString("**Current Working Directory**\n")
 	if resolved != nil && resolved.Binding != nil {
-		b.WriteString(fmt.Sprintf("📂 Path: `%s`\n", resolved.Binding.CWD))
+		fmt.Fprintf(&b, "📂 Path: `%s`\n", resolved.Binding.CWD)
 		if resolved.Inherited {
 			b.WriteString("   (inherited from group)\n")
 		}
@@ -439,7 +434,7 @@ func buildTUICwdStatus(ctx context.Context, a *app, chatID int64, threadID int) 
 
 	if a.sessions != nil {
 		if cwd := a.sessions.GetCwd(chatID, threadID); cwd != "" {
-			b.WriteString(fmt.Sprintf("📁 Session CWD: `%s`\n", cwd))
+			fmt.Fprintf(&b, "📁 Session CWD: `%s`\n", cwd)
 		}
 	}
 
@@ -459,16 +454,16 @@ func handleTUIStatus(ctx context.Context, a *app, chatID int64, threadID int, us
 			bridgeStatus = "online"
 		}
 	}
-	b.WriteString(fmt.Sprintf("🧠 Bridge: **%s**\n", bridgeStatus))
+	fmt.Fprintf(&b, "🧠 Bridge: **%s**\n", bridgeStatus)
 
 	if a.config != nil {
-		b.WriteString(fmt.Sprintf("⚙️ Model: **%s**\n", a.config.ModelDisplayName()))
+		fmt.Fprintf(&b, "⚙️ Model: **%s**\n", a.config.ModelDisplayName())
 	}
 
 	if a.bindings != nil {
 		resolved, err := a.bindings.Resolve(ctx, projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID})
 		if err == nil && resolved != nil && resolved.Binding != nil {
-			b.WriteString(fmt.Sprintf("📂 CWD: `%s`\n", resolved.Binding.CWD))
+			fmt.Fprintf(&b, "📂 CWD: `%s`\n", resolved.Binding.CWD)
 		} else {
 			b.WriteString("📂 No project set.\n")
 		}

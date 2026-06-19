@@ -324,7 +324,7 @@ func (m *Model) tempImagePaths() []string {
 
 func (m *Model) cleanupSubmittedTempImages() {
 	for _, path := range m.submittedTempImagePaths {
-		os.Remove(path)
+		_ = os.Remove(path)
 	}
 	m.submittedTempImagePaths = nil
 }

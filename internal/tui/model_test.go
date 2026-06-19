@@ -449,6 +449,7 @@ func TestModel_MouseWheelScrollsViewport(t *testing.T) {
 	m.viewport.GotoBottom()
 	bottomOffset := m.viewport.YOffset
 
+	//nolint:staticcheck // tea.MouseWheelUp deprecated but no replacement in v1.3.10
 	updated, _ := m.Update(tea.MouseMsg{
 		Type:   tea.MouseWheelUp,
 		Button: tea.MouseButtonWheelUp,
@@ -1038,7 +1039,7 @@ func TestModel_ErrorStateKeys(t *testing.T) {
 	}
 
 	// Enter in error state retries (goes to loading).
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	m2 := updated.(Model)
 	if m2.state != stateLoading {
 		t.Errorf("expected stateLoading after enter in error, got %v", m2.state)
