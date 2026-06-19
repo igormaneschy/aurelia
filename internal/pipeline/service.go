@@ -154,7 +154,7 @@ func NewService(cfg Config) *Service {
 	}
 
 	if cfg.Bridge != nil {
-		s.modelCataloger = &bridgeModelCataloger{br: cfg.Bridge}
+		s.modelCataloger = &bridgeModelCataloger{br: cfg.Bridge, ttl: defaultModelsCacheTTL}
 		rbCfg := DefaultResilientConfig()
 		if cfg.AppConfig != nil {
 			rbCfg.OpenRouterAPIKey = cfg.AppConfig.ProviderAPIKey("openrouter")

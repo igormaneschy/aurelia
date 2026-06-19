@@ -283,8 +283,8 @@ func (m Model) submitMessage(text string) tea.Cmd {
 		RequestID: m.requestID,
 	}
 
-	// Clear pending images after capturing them.
-	m.pendingImages = nil
+	// Note: pendingImages cleanup happens in update.go after submitMessage
+	// returns, because Model is a value type and mutations here are discarded.
 
 	return func() tea.Msg {
 		ctx, cancel := contextWithTimeout(30 * time.Minute)

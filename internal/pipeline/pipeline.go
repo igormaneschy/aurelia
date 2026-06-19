@@ -37,14 +37,47 @@ type ModelCataloger interface {
 	ModelSupportsImagesByID(ctx context.Context, modelID string) (supports bool, found bool, err error)
 }
 
+// defaultModelsCacheTTL is how long the model catalog is cached to avoid
+// redundant bridge ListModels calls per request.
+const defaultModelsCacheTTL = 30 * time.Second
+
 // bridgeModelCataloger adapts *bridge.Bridge to ModelCataloger using
 // ListModels which returns ModelInfo with SupportsImages capability.
+// Results are cached with a configurable TTL to avoid redundant bridge calls.
 type bridgeModelCataloger struct {
-	br *bridge.Bridge
+	br       *bridge.Bridge
+	mu       sync.Mutex
+	cached   []bridge.ModelInfo
+	cachedAt time.Time
+	ttl      time.Duration
+}
+
+// getModels returns the model catalog, using a cached copy if still fresh.
+func (b *bridgeModelCataloger) getModels(ctx context.Context) ([]bridge.ModelInfo, error) {
+	b.mu.Lock()
+	// Fast path: cache hit within TTL.
+	if b.cached != nil && time.Since(b.cachedAt) < b.ttl {
+		models := b.cached
+		b.mu.Unlock()
+		return models, nil
+	}
+	b.mu.Unlock()
+
+	// Cache miss: fetch from bridge.
+	models, err := b.br.ListModels(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+
+	b.mu.Lock()
+	b.cached = models
+	b.cachedAt = time.Now()
+	b.mu.Unlock()
+	return models, nil
 }
 
 func (b *bridgeModelCataloger) ModelSupportsImages(ctx context.Context, provider, model string) (bool, error) {
-	models, err := b.br.ListModels(ctx, false)
+	models, err := b.getModels(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -59,7 +92,7 @@ func (b *bridgeModelCataloger) ModelSupportsImages(ctx context.Context, provider
 // ModelSupportsImagesByID searches the catalog for a model by ID alone.
 // Returns (_, found=false) when zero or multiple providers offer this model.
 func (b *bridgeModelCataloger) ModelSupportsImagesByID(ctx context.Context, modelID string) (supports bool, found bool, err error) {
-	models, err2 := b.br.ListModels(ctx, false)
+	models, err2 := b.getModels(ctx)
 	if err2 != nil {
 		return false, false, err2
 	}
@@ -526,9 +559,8 @@ func (s *Service) applyVisionFallback(ctx context.Context, req *bridge.Request, 
 	if provider != "" && model != "" && s.modelCataloger != nil {
 		// Case B: Exact provider+model lookup (explicit provider or parsed from qualified model).
 		checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
-		defer checkCancel()
-
 		supports, err := s.modelCataloger.ModelSupportsImages(checkCtx, provider, model)
+		checkCancel()
 		if err == nil {
 			if supports {
 				slog.Debug("vision: current model supports images, keeping model",
@@ -551,9 +583,8 @@ func (s *Service) applyVisionFallback(ctx context.Context, req *bridge.Request, 
 		// Case C: Unqualified model (no provider). Search by model ID across the catalog.
 		// Only accept the result when exactly one provider offers this model ID.
 		checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
-		defer checkCancel()
-
 		supports, found, err := s.modelCataloger.ModelSupportsImagesByID(checkCtx, model)
+		checkCancel()
 		if err == nil && found {
 			if supports {
 				slog.Debug("vision: unqualified model supports images (single catalog match), keeping model",

@@ -191,7 +191,7 @@ func validateImageContent(data []byte) (string, error) {
 		return "image/jpeg", nil
 
 	case len(data) >= 4 && data[0] == 0x47 && data[1] == 0x49 && data[2] == 0x46:
-		if _, err := gif.Decode(bytes.NewReader(data)); err != nil {
+		if _, err := gif.DecodeConfig(bytes.NewReader(data)); err != nil {
 			return "", fmt.Errorf("invalid GIF: %w", err)
 		}
 		return "image/gif", nil
@@ -339,7 +339,7 @@ func SanitizedError(err error) string {
 		after := s[idx+len(pathPrefix):]
 		if colon := strings.IndexAny(after, ":"); colon >= 0 {
 			// s has the form "... access filename: ..." — keep just "filename: ..."
-			return after[colon+1:]
+			return strings.TrimSpace(after[colon+1:])
 		}
 		if after != "" {
 			return after
