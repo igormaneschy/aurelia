@@ -108,6 +108,15 @@ const MaxImageCount = 10
 // MaxTotalImageBytes is the maximum total size of all images (15 MB).
 const MaxTotalImageBytes = 15 * 1024 * 1024
 
+// MaxAttachmentCount is the maximum number of document attachments per message.
+const MaxAttachmentCount = 10
+
+// MaxAttachmentBytes is the maximum file size for a single attachment (25 MB).
+const MaxAttachmentBytes = 25 * 1024 * 1024
+
+// MaxTotalAttachmentBytes is the maximum total size of all attachments (100 MB).
+const MaxTotalAttachmentBytes = 100 * 1024 * 1024
+
 // IPCImage represents an image sent from the TUI to the daemon.
 // The TUI sends file paths (not base64) because the daemon reads files
 // from the local filesystem and base64-encodes them for the bridge.
@@ -120,6 +129,16 @@ type IPCImage struct {
 	MediaType string `json:"media_type"`
 }
 
+// IPCAttachment represents a document file attached to a TUI message.
+// The TUI sends a filesystem path; the daemon copies the file into
+// <cwd>/uploads/ before forwarding the message to the pipeline.
+type IPCAttachment struct {
+	// Path is the absolute filesystem path to the document file.
+	Path string `json:"path"`
+	// Name is an optional display name (defaults to basename of Path).
+	Name string `json:"name,omitempty"`
+}
+
 // IPCMessage is sent from the TUI client to the daemon.
 type IPCMessage struct {
 	Type     string `json:"type"`
@@ -129,6 +148,8 @@ type IPCMessage struct {
 	Text     string `json:"text,omitempty"`
 	// Images are optional image attachments for the message.
 	Images []IPCImage `json:"images,omitempty"`
+	// Attachments are optional document attachments for the message.
+	Attachments []IPCAttachment `json:"attachments,omitempty"`
 	// RequestID is an optional correlation ID for matching responses.
 	RequestID string `json:"request_id,omitempty"`
 }

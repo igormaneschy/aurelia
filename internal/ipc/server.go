@@ -407,6 +407,18 @@ func validateMessage(msg IPCMessage) error {
 	if totalImageBytes > MaxTotalImageBytes {
 		return fmt.Errorf("total image data too large (%d bytes, max %d)", totalImageBytes, MaxTotalImageBytes)
 	}
+	// Validate attachments if present.
+	if len(msg.Attachments) > MaxAttachmentCount {
+		return fmt.Errorf("too many attachments (%d, max %d)", len(msg.Attachments), MaxAttachmentCount)
+	}
+	for i, att := range msg.Attachments {
+		if att.Path == "" {
+			return fmt.Errorf("attachment[%d]: path required", i)
+		}
+		if len(att.Path) > 4096 {
+			return fmt.Errorf("attachment[%d]: path too long (%d bytes, max 4096)", i, len(att.Path))
+		}
+	}
 	return nil
 }
 
