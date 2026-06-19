@@ -81,7 +81,7 @@ func TestMIMEFromPath(t *testing.T) {
 		{"anim.gif", "image/gif"},
 		{"pic.webp", "image/webp"},
 		{"doc.txt", "text/plain; charset=utf-8"},
-		{"unknown.xyz", "chemical/x-xyz"}, // system-registered MIME
+		{"doc.json", "application/json"}, // Go built-in MIME, no system dependency
 	}
 	for _, tt := range tests {
 		if got := MIMEFromPath(tt.path); got != tt.want {
@@ -552,7 +552,4 @@ func TestReadImageSafely_FileNotFound(t *testing.T) {
 	}
 }
 
-// containsPath is a helper that checks if s contains the given path.
-func containsPath(s, path string) bool {
-	return len(s) > 0 && len(path) > 0 && strings.Contains(s, path)
-}
+

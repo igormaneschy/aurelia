@@ -139,7 +139,7 @@ func DetectMIMEFromFile(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	buf := make([]byte, 512)
 	n, err := io.ReadFull(f, buf)
@@ -279,7 +279,7 @@ func ReadImageSafely(path string, maxBytes int) (data []byte, mediaType string, 
 		}
 		return nil, "", fmt.Errorf("open %s: %w", filepath.Base(path), err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	// Stat the opened fd (guaranteed same file — not a symlink).
 	fi, err := f.Stat()

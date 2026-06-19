@@ -144,12 +144,9 @@ func TestClipboardPasteFromClipboard_FileCreatedOnTempDir(t *testing.T) {
 	// want to verify that any created temp file follows the pattern.
 	if path != "" {
 		// The temp file should start with the pre-determined prefix.
-		dir, name := filepath.Split(path)
+		_, name := filepath.Split(path)
 		if !strings.HasPrefix(name, "aurelia-clip-") {
 			t.Errorf("expected temp file prefix 'aurelia-clip-', got %q", name)
-		}
-		if dir != "" && !strings.HasPrefix(os.TempDir(), dir) {
-			// dir will be empty if in cwd; verify it's in OS temp.
 		}
 		// Clean up if not already removed.
 		if _, statErr := os.Stat(path); statErr == nil {

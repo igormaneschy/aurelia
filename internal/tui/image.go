@@ -99,19 +99,6 @@ func imagePathCandidates(text string) []imagePathCandidate {
 	return candidates
 }
 
-func startsWithLocalImagePath(text string) bool {
-	candidates := imagePathCandidates(text)
-	if len(candidates) == 0 || candidates[0].start != 0 {
-		return false
-	}
-	absPath, err := filepath.Abs(normalizeImagePath(candidates[0].path))
-	if err != nil {
-		return false
-	}
-	_, err = images.ValidateImagePath(absPath, 0)
-	return err == nil
-}
-
 // startsWithSyntacticImagePath checks whether text starts with a string that
 // syntactically looks like a local image path (leading /, ~/, or file:// with
 // an image extension). Unlike startsWithLocalImagePath, it does NOT validate

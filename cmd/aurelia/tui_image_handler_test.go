@@ -4,9 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"image"
-	"image/color"
-	"image/gif"
-	"image/jpeg"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -16,9 +13,6 @@ import (
 	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/pkg/images"
 )
-
-// pngMagic is the shortest unambiguous PNG signature prefix (4 bytes).
-var pngMagic = []byte{0x89, 0x50, 0x4e, 0x47}
 
 func TestConvertIPCImages_Empty(t *testing.T) {
 	result, err := convertIPCImages(nil, 0)
@@ -187,27 +181,6 @@ func testPNG() []byte {
 	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
 	if err := png.Encode(&buf, img); err != nil {
 		panic("testPNG: " + err.Error())
-	}
-	return buf.Bytes()
-}
-
-// testJPEG returns a minimal valid JPEG encoded by the stdlib.
-func testJPEG() []byte {
-	var buf bytes.Buffer
-	img := image.NewRGBA(image.Rect(0, 0, 1, 1))
-	if err := jpeg.Encode(&buf, img, nil); err != nil {
-		panic("testJPEG: " + err.Error())
-	}
-	return buf.Bytes()
-}
-
-// testGIF returns a minimal valid GIF encoded by the stdlib.
-func testGIF() []byte {
-	var buf bytes.Buffer
-	img := image.NewPaletted(image.Rect(0, 0, 1, 1), []color.Color{color.Black, color.White})
-	img.Set(0, 0, color.Black)
-	if err := gif.Encode(&buf, img, nil); err != nil {
-		panic("testGIF: " + err.Error())
 	}
 	return buf.Bytes()
 }

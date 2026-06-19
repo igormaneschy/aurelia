@@ -68,7 +68,7 @@ func pasteFromClipboardMacOS(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}
 	tempPath := f.Name()
-	f.Close()
+	_ = f.Close()
 
 	// Use osascript to get clipboard as PNG and write to file.
 	// The -e flag runs the AppleScript command.
@@ -88,7 +88,7 @@ end try`
 	cmd := exec.CommandContext(ctx, "osascript", "-e", script)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath)
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("clipboard timed out after %v", clipboardTimeout)
 		}
@@ -105,7 +105,7 @@ end try`
 		return "", fmt.Errorf("temp file not created: %w", err)
 	}
 	if info.Size() == 0 {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath)
 		return "", fmt.Errorf("no image in clipboard")
 	}
 
@@ -138,12 +138,12 @@ func pasteFromXClip(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}
 	tempPath := f.Name()
-	f.Close()
+	_ = f.Close()
 
 	cmd := exec.CommandContext(ctx, "xclip", "-selection", "clipboard", "-t", "image/png", "-o")
 	output, err := cmd.Output()
 	if err != nil {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath)
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("clipboard timed out after %v", clipboardTimeout)
 		}
@@ -151,12 +151,12 @@ func pasteFromXClip(ctx context.Context) (string, error) {
 	}
 
 	if len(output) == 0 {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath)
 		return "", fmt.Errorf("no image in clipboard")
 	}
 
 	if err := os.WriteFile(tempPath, output, 0o600); err != nil {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath)
 		return "", fmt.Errorf("write temp file: %w", err)
 	}
 
