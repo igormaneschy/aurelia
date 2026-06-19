@@ -279,10 +279,10 @@ func (m *Model) attachTempImage(path string) string {
 	mimeType, err := images.ValidateImagePath(absPath, 0)
 	if err != nil {
 		if err == images.ErrSymlinkRejected {
-			os.Remove(absPath)
+			_ = os.Remove(absPath)
 			return "Symlinks are not allowed for image attachments"
 		}
-		os.Remove(absPath)
+		_ = os.Remove(absPath)
 		return images.SanitizedError(err)
 	}
 
@@ -307,7 +307,7 @@ func (m *Model) clearPendingImages() {
 func (m *Model) cleanupTempImages() {
 	for _, img := range m.pendingImages {
 		if img.isTemp {
-			os.Remove(img.path)
+			_ = os.Remove(img.path)
 		}
 	}
 }
