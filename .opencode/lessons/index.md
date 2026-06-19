@@ -30,6 +30,11 @@
 - [pattern] pi-sdk-session-compaction
 - [process] parallel-delegation-batching
 
+## Change tui-project-state-panel-fase4 (2026-06-19)
+- [pattern] tui-overlay-line-by-line-compositing
+- [anti-pattern] ipc-message-type-whitelist
+- [process] tui-deploy-binary-pair
+
 ## Change deploy-automation-post-commit (2026-05-20)
 - [process] deploy-via-launchd
 
