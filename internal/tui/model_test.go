@@ -1822,7 +1822,7 @@ func TestModel_ProjectPanelRendersInheritedBinding(t *testing.T) {
 		projectState: &ipc.ProjectStatePayload{
 			CWD:           "/Users/igor/dev/shared",
 			BindingSource: "inherited",
-			BindingFrom:   "-9000005:0",
+			BindingFrom:   "TUI session",
 			ActiveAgent:   "architect",
 			Model:         "claude-opus-4-0",
 			BridgeStatus:  "online",
@@ -1834,7 +1834,7 @@ func TestModel_ProjectPanelRendersInheritedBinding(t *testing.T) {
 	panel := m.renderProjectPanel()
 	plain := stripANSIForTest(panel)
 
-	for _, want := range []string{"inherited", "-9000005:0", "architect"} {
+	for _, want := range []string{"inherited", "TUI session", "architect"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("expected panel to contain %q, got:\n%s", want, plain)
 		}

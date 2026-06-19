@@ -701,9 +701,10 @@ func (m Model) renderProjectPanel() string {
 	return b.String()
 }
 
-// overlayPanel renders the full view with a centered panel overlay.
-// Uses lipgloss.Place for correct ANSI-aware centering.
-func (m Model) overlayPanel(view, panel string) string {
+// overlayPanel renders the full view with a centered panel overlay on top of
+// the background chat view. The panel replaces background rows line-by-line so
+// the chat remains visible above, below, and to the sides of the overlay.
+func (m Model) overlayPanel(bg, panel string) string {
 	panelWidth := maxInt(50, minInt(m.width-8, 70))
 
 	box := lipgloss.NewStyle().
@@ -713,7 +714,42 @@ func (m Model) overlayPanel(view, panel string) string {
 		Width(panelWidth).
 		Render(panel)
 
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
+	bgLines := strings.Split(bg, "\n")
+	panelLines := strings.Split(box, "\n")
+
+	// Vertically center the panel in the background.
+	startRow := (len(bgLines) - len(panelLines)) / 2
+	if startRow < 0 {
+		startRow = 0
+	}
+	// Horizontally center the box.
+	boxWidth := lipgloss.Width(box)
+	startCol := (m.width - boxWidth) / 2
+	if startCol < 0 {
+		startCol = 0
+	}
+
+	var out []string
+	for i, line := range bgLines {
+		if i >= startRow && i-startRow < len(panelLines) {
+			pl := panelLines[i-startRow]
+			pw := lipgloss.Width(pl)
+			// Build the overlay line: left padding + panel line + right padding.
+			var sb strings.Builder
+			if startCol > 0 {
+				sb.WriteString(strings.Repeat(" ", startCol))
+			}
+			sb.WriteString(pl)
+			rightPad := m.width - startCol - pw
+			if rightPad > 0 {
+				sb.WriteString(strings.Repeat(" ", rightPad))
+			}
+			out = append(out, sb.String())
+		} else {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // safeSessionLabel strips terminal-control characters from a session name

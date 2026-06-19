@@ -501,8 +501,9 @@ func handleTUIProjectState(ctx context.Context, a *app, msg ipc.IPCMessage, emit
 	bridgeStatus := "offline"
 	if a.bridge != nil {
 		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		defer cancel()
-		if err := a.bridge.Ping(pingCtx); err == nil {
+		err := a.bridge.Ping(pingCtx)
+		cancel()
+		if err == nil {
 			bridgeStatus = "online"
 		}
 	}
@@ -557,7 +558,11 @@ func fillTUIProjectBinding(ctx context.Context, a *app, chatID int64, threadID i
 	payload.CWD = resolved.Binding.CWD
 	if resolved.Inherited {
 		payload.BindingSource = "inherited"
-		payload.BindingFrom = fmt.Sprintf("%d:%d", resolved.SourceKey.ChatID, resolved.SourceKey.ThreadID)
+		if ipc.IsReservedTUIID(resolved.SourceKey.ChatID) {
+			payload.BindingFrom = "TUI session"
+		} else {
+			payload.BindingFrom = fmt.Sprintf("%d:%d", resolved.SourceKey.ChatID, resolved.SourceKey.ThreadID)
+		}
 	} else {
 		payload.BindingSource = "manual"
 	}
