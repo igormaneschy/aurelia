@@ -366,7 +366,8 @@ func (s *Server) handleConnection(conn net.Conn) {
 func validateMessage(msg IPCMessage) error {
 	switch msg.Type {
 	case MsgTypeSend, MsgTypeSubscribe, MsgTypeCommand, MsgTypeHistory,
-		MsgTypeSessions, MsgTypeSessionCreate, MsgTypeSessionOpen, MsgTypeSessionDelete:
+		MsgTypeSessions, MsgTypeSessionCreate, MsgTypeSessionOpen, MsgTypeSessionDelete,
+		MsgTypeProjectState:
 		// valid
 	default:
 		return fmt.Errorf("unknown message type %q", msg.Type)
