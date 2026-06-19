@@ -259,6 +259,7 @@ Commands:
 - /cwd <path> — set the project working directory
 - /cwd clear — remove the project binding
 - /img <path> — attach an image (png, jpg, gif, webp)
+- /attach <path> — attach a document (md, docx, pdf, etc.)
 
 Keyboard:
 - Ctrl+P — toggle project state panel
@@ -275,7 +276,11 @@ Images:
 - Use /img <path> to attach images by file path
 - Use Ctrl+V to paste images from clipboard (macOS/Linux)
 - Drag-and-drop image files into the terminal
-- Multiple images can be attached before sending`)
+- Multiple images can be attached before sending
+
+Documents:
+- Use /attach <path> to attach documents by file path
+- Multiple documents can be attached before sending`)
 }
 
 // handleTUISend processes a TUI send message through the pipeline.

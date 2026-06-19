@@ -218,8 +218,18 @@ func (m Model) renderMainContent() string {
 }
 
 func (m Model) renderInput() string {
-	// Show pending image badges above the input.
-	badges := m.renderPendingImageBadges()
+	// Show pending image and document badges above the input.
+	imageBadges := m.renderPendingImageBadges()
+	attachmentBadges := m.renderPendingAttachmentBadges()
+
+	// Combine badges in separate lines: image badges first, attachment badges after.
+	var badgeLines []string
+	if imageBadges != "" {
+		badgeLines = append(badgeLines, imageBadges)
+	}
+	if attachmentBadges != "" {
+		badgeLines = append(badgeLines, attachmentBadges)
+	}
 
 	promptText := "> "
 	if m.waiting {
@@ -235,8 +245,8 @@ func (m Model) renderInput() string {
 		style = inputWaitingStyle
 	}
 	content := style.Width(boxWidth).Render(input)
-	if badges != "" {
-		content = badges + "\n" + content
+	if len(badgeLines) > 0 {
+		content = strings.Join(badgeLines, "\n") + "\n" + content
 	}
 	return content
 }
@@ -254,6 +264,21 @@ func (m Model) renderPendingImageBadges() string {
 		Foreground(lipgloss.Color("243")).
 		Italic(true)
 	return badgeStyle.Render(fmt.Sprintf("📎 %s", strings.Join(names, ", ")))
+}
+
+// renderPendingAttachmentBadges renders a line of document attachment badges
+// above the input. Uses distinct styling (yellow) from image badges (grey).
+func (m Model) renderPendingAttachmentBadges() string {
+	if len(m.pendingAttachments) == 0 {
+		return ""
+	}
+	var badges []string
+	for _, att := range m.pendingAttachments {
+		badges = append(badges, fmt.Sprintf("[📎 %s]", att.name))
+	}
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("226")).
+		Render(strings.Join(badges, " "))
 }
 
 func renderPromptedTextarea(prompt, rawPrompt, text string) string {

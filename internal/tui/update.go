@@ -419,12 +419,20 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case msg.String() == "ctrl+x":
-		// Clear pending images.
+		// Clear pending images and attachments.
+		cleared := false
 		if len(m.pendingImages) > 0 {
 			m.clearPendingImages()
+			cleared = true
+		}
+		if len(m.pendingAttachments) > 0 {
+			m.clearPendingAttachments()
+			cleared = true
+		}
+		if cleared {
 			m.messages = append(m.messages, chatMessage{
 				Sender: "📎",
-				Text:   "Cleared pending images",
+				Text:   "Cleared pending images and documents",
 			})
 			m.updateViewport()
 		}
@@ -489,7 +497,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		text := strings.TrimSpace(m.textarea.Value())
-		if text == "" && len(m.pendingImages) == 0 {
+		if text == "" && len(m.pendingImages) == 0 && len(m.pendingAttachments) == 0 {
 			return m, nil
 		}
 
@@ -519,6 +527,32 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Handle /attach command — attach document, don't send message.
+		if strings.HasPrefix(text, "/attach ") {
+			path := strings.TrimPrefix(text, "/attach ")
+			errMsg := m.attachDocumentFromPath(path)
+			m.textarea.Reset()
+			if errMsg != "" {
+				m.messages = append(m.messages, chatMessage{
+					Sender: "⚠️",
+					Text:   errMsg,
+				})
+				m.updateViewport()
+			}
+			return m, nil
+		}
+
+		// Handle bare /attach (no path).
+		if text == "/attach" {
+			m.textarea.Reset()
+			m.messages = append(m.messages, chatMessage{
+				Sender: "⚠️",
+				Text:   "Usage: /attach <path>",
+			})
+			m.updateViewport()
+			return m, nil
+		}
+
 		// Free-form image paths are message input, not command arguments. Keep
 		// slash commands untouched, except when the input itself starts with a
 		// local path such as /Users/me/screenshot.png. We use a syntactic check
@@ -536,7 +570,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			if attachedCount > 0 {
 				text = cleanedText
-				if text == "" && len(m.pendingImages) == 0 {
+				if text == "" && len(m.pendingImages) == 0 && len(m.pendingAttachments) == 0 {
 					return m, nil
 				}
 			}
@@ -545,13 +579,21 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.rememberInput(text)
 		m.textarea.Reset()
 
-		// Build display text with image badges.
+		// Build display text with image and attachment badges.
 		displayText := text
+		var badgeLines []string
 		if badges := m.pendingImageBadges(); badges != "" {
+			badgeLines = append(badgeLines, badges)
+		}
+		if badges := m.pendingAttachmentBadges(); badges != "" {
+			badgeLines = append(badgeLines, badges)
+		}
+		if len(badgeLines) > 0 {
+			combined := strings.Join(badgeLines, "\n")
 			if displayText != "" {
-				displayText = badges + "\n" + displayText
+				displayText = combined + "\n" + displayText
 			} else {
-				displayText = badges
+				displayText = combined
 			}
 		}
 
@@ -574,6 +616,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		cmd := m.submitMessage(text)
 		m.submittedTempImagePaths = append(m.submittedTempImagePaths, tempPaths...)
 		m.pendingImages = nil
+		m.pendingAttachments = nil
 		return m, tea.Batch(cmd, spinnerTickCmd())
 
 	case msg.String() == "alt+enter":
@@ -689,6 +732,24 @@ func (m Model) delegateKeyToTextarea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				})
 				m.updateViewport()
 			}
+			return m, nil
+		}
+
+		// Check if this is a paste event with a document path (drag-and-drop).
+		if name, docPath, ok := tryParseAsDocumentPath(text); ok {
+			errMsg := m.attachDocumentFromPath(docPath)
+			if errMsg != "" {
+				m.messages = append(m.messages, chatMessage{
+					Sender: "⚠️",
+					Text:   errMsg,
+				})
+			} else {
+				m.messages = append(m.messages, chatMessage{
+					Sender: "📎",
+					Text:   fmt.Sprintf("Document attached: %s", name),
+				})
+			}
+			m.updateViewport()
 			return m, nil
 		}
 	}
