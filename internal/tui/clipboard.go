@@ -174,12 +174,12 @@ func pasteFromWlPaste(ctx context.Context) (string, error) {
 		return "", fmt.Errorf("create temp file: %w", err)
 	}
 	tempPath := f.Name()
-	f.Close()
+	_ = f.Close()
 
 	cmd := exec.CommandContext(ctx, "wl-paste", "-t", "image/png")
 	output, err := cmd.Output()
 	if err != nil {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath)
 		if ctx.Err() != nil {
 			return "", fmt.Errorf("clipboard timed out after %v", clipboardTimeout)
 		}
@@ -187,12 +187,12 @@ func pasteFromWlPaste(ctx context.Context) (string, error) {
 	}
 
 	if len(output) == 0 {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath)
 		return "", fmt.Errorf("no image in clipboard")
 	}
 
 	if err := os.WriteFile(tempPath, output, 0o600); err != nil {
-		os.Remove(tempPath)
+		_ = os.Remove(tempPath)
 		return "", fmt.Errorf("write temp file: %w", err)
 	}
 
