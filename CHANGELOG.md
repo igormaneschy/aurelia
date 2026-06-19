@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.28.0 - 2026-06-19
+
+### Added
+- **Pipeline: visão fallback inteligente** — `ModelCataloger` consulta o
+  catálogo de modelos PI para verificar suporte a imagens antes de aplicar
+  fallback. Três modos de lookup: provider+model exacto, modelo qualificado
+  por provider (`openai/gpt-4`), e modelo não-qualificado (match único no
+  catálogo). Cache de 30s para evitar chamadas redundantes ao bridge.
+- **TUI: suporte a input de imagens** — comando `/img`, colagem de clipboard
+  (`ctrl+v`), detecção de caminhos via drag-and-drop e badges indicadores de
+  imagens pendentes.
+- **`pkg/images`: pacote compartilhado** — extrai `Encode`, `ReadImageSafely`,
+  `ValidateImagePath`, `SanitizedError`, `TooLargeError`, `HumanBytes` e
+  `SupportedMIMEType` para reuso entre TUI e Telegram.
+
+### Fixed
+- **Segurança: O_NOFOLLOW no `ReadImageSafely`** — previne seguimento de
+  symlinks (TOCTOU). Dupla verificação: cliente (Lstat) + daemon (O_NOFOLLOW).
+- **Segurança: detecção de MIME por magic bytes** — `DetectMIMEFromFile` usa
+  cabeçalhos de conteúdo, não extensão.
+- **CI: todos os checks golangci-lint** — resolve 15 issues em errcheck,
+  staticcheck, ineffassign e unused (código TUI pré-existente).
+- **Test: `TestMIMEFromPath`** — substitui caso `.xyz` (dependente de sistema)
+  por `.json` (tipo built-in Go), eliminando falha em CI Ubuntu.
+
 ## v0.27.1 - 2026-06-18
 
 ### Fixed
