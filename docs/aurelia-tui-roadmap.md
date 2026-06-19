@@ -1,7 +1,8 @@
 # Aurelia TUI — Plano de Implementação
 
 **Sprint:** J (pós Auto-Skills)
-**Status:** 🟢 Fase 3 implementada — branch `feature/tui-multi-session`
+**Status:** 🟢 Fases 0–3 e 4.5 concluídas e mergeadas em `main`. **Fase 4 — Painel de Estado do Projeto** é o próximo marco.
+**Versão atual:** `v0.28.0`
 **Depende de:** Sprint E (Project Memory), Sprint F (Wiki Memory Gateway)
 **Desbloqueia:** Interface alternativa ao Telegram, onboarding sem bot, uso em contexto de terminal/IDE
 
@@ -211,6 +212,10 @@ type IPCEvent struct {
 ### Fase 3 — Multi-sessão e Sidebar (3-4 dias) ✅
 *Sessões locais isoladas, cada uma com /cwd e session file PI próprios.*
 
+**Status:** Concluída, validada ao vivo e mergeada em `main` (via `stable/review-gap-fixes`, PR #17).
+**Versão:** `v0.27.1`
+**Branch:** `feature/tui-multi-session` → `stable/review-gap-fixes` → `main`
+
 **Conceito de sessões locais:**
 
 A TUI cria `ConversationKey` locais no namespace reservado [-9000009,
@@ -234,8 +239,8 @@ file PI, e histórico independentes. Um utilizador pode ter:
 
 ---
 
-### Fase 4 — Painel de Estado do Projeto (3 dias)
-*Painel informativo para o projecto activo: cwd, memória, contexto.*
+### Fase 4 — Painel de Estado do Projeto (3 dias) 🔜
+*Painel informativo para o projecto activo: cwd, memória, contexto. **Próximo marco do roadmap TUI.***
 
 O Plan Mode explícito foi removido (decisão 2026-05-24). Planejamento permanece conversacional.
 Em vez de um painel de plan mode, a TUI oferece um painel de estado do projecto activo sobrepondo-se
@@ -270,17 +275,21 @@ ao chat, útil para ver contexto rápido sem sair da conversa.
 
 ---
 
-### Fase 4.5 — Image Input / Vision (3-4 dias)
+### Fase 4.5 — Image Input / Vision (3-4 dias) ✅
 
 *Enviar imagens ao modelo vision directamente do terminal — screenshots,
 diagramas, fotos — sem trocar para o Telegram.*
+
+**Status:** Concluída, validada ao vivo e mergeada em `main`.
+**Versão:** `v0.27.x` → `v0.28.0` (smart vision fallback com model capability catalog)
+**Branch:** `feature/tui-image-input` → `stable/tui-image-input` → `main`
 
 **Spec:** `.specs/features/tui-image-input/spec.md`
 **Design:** `.specs/features/tui-image-input/design.md`
 **Tasks:** `.specs/features/tui-image-input/tasks.md`
 
-Toda a infraestrutura backend já existe (bridge protocol, pipeline,
-`applyVisionFallback`). Esta fase adiciona apenas a camada TUI.
+Toda a infraestrutura backend já existia (bridge protocol, pipeline,
+`applyVisionFallback`). Esta fase adicionou apenas a camada TUI.
 
 **Métodos de input:**
 
@@ -291,14 +300,14 @@ Toda a infraestrutura backend já existe (bridge protocol, pipeline,
 | Drag-and-drop | Arrastas ficheiro para o terminal | P3 |
 
 **Tasks:**
-- [ ] Extrair `encodeImageAttachment` para `pkg/images/` (partilhado Telegram + TUI)
-- [ ] Adicionar `IPCImage` ao protocolo IPC + validação
-- [ ] Handler do daemon: converter IPCImage → ImageAttachment, passar ao pipeline
-- [ ] TUI: comando `/img <path>` com badges `[📎 nome.png]`
-- [ ] TUI: `ctrl+v` clipboard (osascript macOS, xclip/wl-paste Linux)
-- [ ] TUI: drag-and-drop — detectar path de imagem em paste de texto
-- [ ] `ctrl+x` limpa imagens pendentes
-- [ ] Testes + validação ao vivo com modelo vision
+- [x] Extrair `encodeImageAttachment` para `pkg/images/` (partilhado Telegram + TUI)
+- [x] Adicionar `IPCImage` ao protocolo IPC + validação
+- [x] Handler do daemon: converter IPCImage → ImageAttachment, passar ao pipeline
+- [x] TUI: comando `/img <path>` com badges `[📎 nome.png]`
+- [x] TUI: `ctrl+v` clipboard (osascript macOS, xclip/wl-paste Linux)
+- [x] TUI: drag-and-drop — detectar path de imagem em paste de texto
+- [x] `ctrl+x` limpa imagens pendentes
+- [x] Testes + validação ao vivo com modelo vision
 
 **Critério de saída:** consegues enviar um screenshot à Aurelia pela TUI
 e receber uma análise do modelo vision, com `applyVisionFallback`
@@ -347,20 +356,20 @@ trocando automaticamente se o modelo activo não suportar imagens.
 
 ```
 Sprint D: ~~Plan Mode~~ 🗑️ Removido 2026-05-24
-Sprint E: User-Scoped Project Memory         📐 spec completa
+Sprint E: User-Scoped Project Memory         ✅ implementado
 Sprint F: Wiki Memory Gateway                📐 spec
 Sprint G: Nudge                              🔴 draft
 Sprint H: Agent Orchestration               🔴 draft
 Sprint I: Auto-Skills                        🔴 draft
-Sprint J: TUI ← AQUI                        🔴 proposta
-  ├─ Fase 0: Transport Abstraction (2d)
-  ├─ Fase 1: IPC Layer (3d)
-  ├─ Fase 2: TUI MVP (5d)
-  ├─ Fase 3: Multi-sessão (4d)
-  ├─ Fase 4: Painel de Estado do Projeto (3d)
-  ├─ Fase 4.5: Image Input / Vision (3-4d)
-  └─ Fase 5: Polish + Distribuição (3d)
-     Total estimado: ~3 semanas
+Sprint J: TUI ← AQUI                        🟢 em progresso
+  ├─ Fase 0: Transport Abstraction (2d)      ✅ v0.23.6
+  ├─ Fase 1: IPC Layer (3d)                  ✅ v0.24.0
+  ├─ Fase 2: TUI MVP (5d)                    ✅ v0.25.x
+  ├─ Fase 3: Multi-sessão (4d)               ✅ v0.27.1
+  ├─ Fase 4.5: Image Input / Vision (3-4d)   ✅ v0.27.x → v0.28.0
+  ├─ Fase 4: Painel de Estado do Projeto (3d) 🔜 próximo marco
+  └─ Fase 5: Polish + Distribuição (3d)      🔜 por fazer
+     Total estimado restante: ~1 semana
 ```
 
 **Nota:** A Fase 0 (Transport Abstraction) pode e deve ser feita **antes** do Sprint J — idealmente junto com o Sprint D0 ou E, porque não tem risco de regressão e a refactorização vai ser necessária de qualquer forma.
@@ -380,11 +389,11 @@ Sprint J: TUI ← AQUI                        🔴 proposta
 
 ## Critérios de Sucesso do Sprint J
 
-- [ ] `aurelia-tui` corre como binary independente sem configuração extra
-- [ ] Conversa completa com streaming funciona pela TUI
+- [x] `aurelia-tui` corre como binary independente sem configuração extra
+- [x] Conversa completa com streaming funciona pela TUI
 - [x] Sidebar mostra sessões locais com navegação e gestão (criar/abrir/apagar)
 - [ ] Painel de estado mostra cwd, binding source, resumo de memória
-- [ ] Envio de imagens funciona (`/img`, `ctrl+v` clipboard, drag-drop) com modelo vision
+- [x] Envio de imagens funciona (`/img`, `ctrl+v` clipboard, drag-drop) com modelo vision
 - [x] Nenhuma regressão no Telegram transport
 - [x] `go build ./... && go vet ./... && go test ./...` limpo
 - [ ] Funciona em macOS (darwin/arm64) e Linux (amd64/arm64)
