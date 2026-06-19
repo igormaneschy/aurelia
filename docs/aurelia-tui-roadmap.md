@@ -315,9 +315,15 @@ trocando automaticamente se o modelo activo não suportar imagens.
 
 ---
 
-### Fase 4.6 — Document Attachments (3-4 dias) 🔜
+### Fase 4.6 — Document Attachments (3-4 dias) ✅
 
 *Anexar documentos (md, docx, ppt, pdf, etc.) ao projeto ativo diretamente da TUI.*
+
+**Status:** Concluída, validada (build + vet + test + deploy) na branch `feature/tui-document-attachments` — aguarda merge em `main`.
+**Versão:** `v0.29.0+` (feature branch)
+**Branch:** `feature/tui-document-attachments` → `stable/tui-document-attachments` → `main`
+
+**Status note:** `notes/tui-document-attachments-status.md`
 
 **Conceito:**
 
@@ -342,11 +348,12 @@ prompt. O agente é responsável por processá-los com as suas ferramentas.
 
 **Tasks:**
 
-- [ ] `IPCAttachment` no protocolo IPC + validação
-- [ ] TUI: `/attach <path>`, drag-and-drop, badges `[📎 nome.pdf]`
-- [ ] Daemon: resolver CWD, copiar para `<cwd>/uploads/`, anexar nota ao prompt
-- [ ] Testes de unidade + integração
-- [ ] Teste ao vivo com `/cwd`, `/attach` e pergunta sobre o documento
+- [x] `IPCAttachment` no protocolo IPC + validação (T0)
+- [x] TUI: `/attach <path>`, drag-and-drop, badges `[📎 nome.pdf]` (T1-T3)
+- [x] Daemon: resolver CWD, copiar para `<cwd>/uploads/`, anexar nota ao prompt (T4-T5)
+- [x] Testes de unidade + integração
+- [x] Documentação e roadmap (T6)
+- [x] Validation: build, vet, test, deploy, passos de live test (T7)
 
 **Critério de saída:** consegues anexar um documento ao projeto ativo pela TUI e
 o agente responde com base no conteúdo do ficheiro.
@@ -481,7 +488,7 @@ Sprint J: TUI ← AQUI                        🟢 em progresso
   ├─ Fase 3: Multi-sessão (4d)               ✅ v0.27.1
   ├─ Fase 4.5: Image Input / Vision (3-4d)   ✅ v0.27.x → v0.28.0
   ├─ Fase 4: Painel de Estado do Projeto (3d) ✅ (este commit)
-  ├─ Fase 4.6: Document Attachments (3-4d)   🔜 próximo marco
+  ├─ Fase 4.6: Document Attachments (3-4d)   ✅ v0.29.0+ (feature branch)
   └─ Fase 5: Polish + Distribuição (5-7d)    🔜
        ├─ 5.1: Input & Interaction Polish (2-3d)
        ├─ 5.2: Visual Polish & Theming (2-3d)
