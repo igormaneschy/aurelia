@@ -13,6 +13,11 @@ import (
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
 
+// debugAttach controls per-attachment diagnostic logging.
+// Must be set before starting the daemon; changes after start
+// require a restart to take effect.
+var debugAttach = os.Getenv("AURELIA_ATTACH_DEBUG") == "1"
+
 // copiedAttachment records the result of copying one attachment file.
 type copiedAttachment struct {
 	// OriginalName is the user-visible name (from Name field or path base).
@@ -30,14 +35,11 @@ type copiedAttachment struct {
 func copyAttachmentsToCWD(ctx context.Context, cwd string, attachments []ipc.IPCAttachment) ([]copiedAttachment, error) {
 	uploadsDir := filepath.Join(cwd, "uploads")
 
-	// Debug logging gated by env var to avoid noise in production.
-	// Set AURELIA_ATTACH_DEBUG=1 to enable per-attachment diagnostic output.
-	debugLog := os.Getenv("AURELIA_ATTACH_DEBUG") == "1"
-
 	if err := os.MkdirAll(uploadsDir, 0o750); err != nil {
 		return nil, fmt.Errorf("create uploads dir: %w", err)
 	}
 
+	var totalSize int64
 	var copied []copiedAttachment
 
 	for _, att := range attachments {
@@ -53,13 +55,15 @@ func copyAttachmentsToCWD(ctx context.Context, cwd string, attachments []ipc.IPC
 		}
 
 		// Pre-copy stat — detect TOCTOU races where the source file is
-		// deleted or moved between /attach and send (Fixes T4-T5 gap).
-		if fi, err := os.Lstat(att.Path); err != nil {
+		// deleted or moved between /attach and send, and accumulate size.
+		fi, err := os.Lstat(att.Path)
+		if err != nil {
 			if os.IsNotExist(err) {
-				return nil, fmt.Errorf("attachment %q: no longer available at %s (was it deleted or moved between /attach and send?)", filepath.Base(att.Path), att.Path)
+				return nil, fmt.Errorf("attachment %q: no longer available (was it deleted or moved between /attach and send?)", filepath.Base(att.Path))
 			}
 			return nil, fmt.Errorf("attachment %q: cannot stat source: %w", filepath.Base(att.Path), err)
-		} else if !fi.Mode().IsRegular() {
+		}
+		if !fi.Mode().IsRegular() {
 			// Let copyFileNoFollow produce its own error for non-regular
 			// files (symlinks, dirs) — Lstat succeeds but the file may be
 			// replaced before open. This check catches the obvious case
@@ -67,16 +71,22 @@ func copyAttachmentsToCWD(ctx context.Context, cwd string, attachments []ipc.IPC
 			return nil, fmt.Errorf("attachment %q: source is not a regular file: %s", filepath.Base(att.Path), att.Path)
 		}
 
+		totalSize += fi.Size()
+		if totalSize > ipc.MaxTotalAttachmentBytes {
+			return nil, fmt.Errorf("total attachment size %d bytes exceeds %d byte limit",
+				totalSize, ipc.MaxTotalAttachmentBytes)
+		}
+
 		dst, err := uniqueUploadPath(uploadsDir, destName)
 		if err != nil {
 			return nil, fmt.Errorf("attachment %s: %w", filepath.Base(att.Path), err)
 		}
 
-		if debugLog {
+		if debugAttach {
 			log.Printf("tui: attach debug: copying attachment path=%q cwd=%q name=%q", att.Path, cwd, destName)
 		}
 
-		n, err := copyFileNoFollow(att.Path, dst, ipc.MaxAttachmentBytes)
+		n, err := copyFileNoFollow(ctx, att.Path, dst, ipc.MaxAttachmentBytes)
 		if err != nil {
 			return nil, fmt.Errorf("attachment %s: %w", filepath.Base(att.Path), err)
 		}
@@ -139,8 +149,9 @@ func errNoPath(prefix, name string, err error) error {
 // be a regular file via fstat. The destination is created with O_WRONLY|
 // O_CREATE|O_EXCL|O_NOFOLLOW and mode 0o640. A TOCTOU-resistant size check
 // is performed: the file is stat'd before copy, and a LimitReader rejects
-// files larger than maxBytes. Returns the number of bytes copied.
-func copyFileNoFollow(src, dst string, maxBytes int64) (int64, error) {
+// files larger than maxBytes. The context can cancel long copies: on ctx
+// cancellation the destination file is removed and ctx.Err() is returned.
+func copyFileNoFollow(ctx context.Context, src, dst string, maxBytes int64) (int64, error) {
 	// Open source with O_NOFOLLOW — rejects symlinks at open time.
 	srcFd, err := os.OpenFile(src, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
@@ -170,7 +181,28 @@ func copyFileNoFollow(src, dst string, maxBytes int64) (int64, error) {
 	defer dstFd.Close()
 
 	// Copy with LimitReader(maxBytes+1) to detect size changes (TOCTOU).
-	written, err := io.Copy(dstFd, io.LimitReader(srcFd, maxBytes+1))
+	// Run the copy in a goroutine so we can select on ctx.Done().
+	type copyResult struct {
+		n   int64
+		err error
+	}
+	ch := make(chan copyResult, 1)
+	go func() {
+		n, err := io.Copy(dstFd, io.LimitReader(srcFd, maxBytes+1))
+		ch <- copyResult{n, err}
+	}()
+
+	var written int64
+	select {
+	case res := <-ch:
+		written, err = res.n, res.err
+	case <-ctx.Done():
+		// Close fds to unblock the goroutine's Copy immediately.
+		srcFd.Close()
+		dstFd.Close()
+		os.Remove(dst)
+		return 0, ctx.Err()
+	}
 	if err != nil {
 		// Best-effort cleanup of partial file.
 		os.Remove(dst)
@@ -199,7 +231,22 @@ func buildAttachmentNote(copied []copiedAttachment) string {
 	for _, c := range copied {
 		b.WriteString("- ")
 		b.WriteString(c.FinalName)
-		b.WriteString("\n")
+		b.WriteString(" (")
+		b.WriteString(humanBytes(c.Size))
+		b.WriteString(")\n")
 	}
 	return b.String()
+}
+
+// humanBytes formats a byte count as a human-readable string (e.g. "12 B",
+// "1.5 KB", "2.3 MB").
+func humanBytes(n int64) string {
+	switch {
+	case n < 1024:
+		return fmt.Sprintf("%d B", n)
+	case n < 1024*1024:
+		return fmt.Sprintf("%.1f KB", float64(n)/1024)
+	default:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1024*1024))
+	}
 }

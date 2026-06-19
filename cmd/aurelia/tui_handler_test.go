@@ -949,6 +949,67 @@ func TestTUIHandler_ProjectStateCheckpointRedacted(t *testing.T) {
 	}
 }
 
+func TestTUIHandler_AttachmentOnlyBypassesEmptyMessage(t *testing.T) {
+	a, ctx, cleanup := testApp(t)
+	defer cleanup()
+
+	cwd := t.TempDir()
+
+	// Set up CWD binding.
+	now := time.Now()
+	err := a.bindings.Set(ctx, projectbinding.ProjectBinding{
+		Key:       projectbinding.ConversationKey{ChatID: ipc.ReservedTUIChatID, ThreadID: 0},
+		CWD:       cwd,
+		Source:    projectbinding.BindingManual,
+		CreatedBy: int64(os.Getuid()),
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("set binding: %v", err)
+	}
+
+	// Create source attachment file.
+	srcDir := t.TempDir()
+	srcPath := filepath.Join(srcDir, "spec.md")
+	if err := os.WriteFile(srcPath, []byte("# Specification"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := makeTUIHandler(a)
+	te := &testEmit{}
+
+	// Send: empty text + attachment (no images).
+	err = handler(ctx, ipc.IPCMessage{
+		Type: "send",
+		Text: "",
+		Attachments: []ipc.IPCAttachment{
+			{Path: srcPath, Name: "spec.md"},
+		},
+	}, te.emit)
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	// The "Empty message" guard should NOT fire when attachments are present.
+	for _, ev := range te.events {
+		if ev.Type == "message" && strings.Contains(ev.Body, "Empty message") {
+			t.Fatal("attachment-only send should NOT return 'Empty message'")
+		}
+	}
+
+	// File should be copied to uploads/.
+	copiedPath := filepath.Join(cwd, "uploads", "spec.md")
+	if _, err := os.Stat(copiedPath); err != nil {
+		t.Errorf("expected file at %s: %v", copiedPath, err)
+	}
+
+	// Must have at least an ack event.
+	if te.count() == 0 {
+		t.Fatal("expected at least an ack event")
+	}
+}
+
 // ── T5: Document Attachment Integration ──────────────────────────────────
 
 func TestTUIHandler_AttachmentWithoutCWD_ReturnsError(t *testing.T) {

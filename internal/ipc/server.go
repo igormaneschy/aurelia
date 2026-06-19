@@ -411,15 +411,16 @@ func validateMessage(msg IPCMessage) error {
 	if len(msg.Attachments) > MaxAttachmentCount {
 		return fmt.Errorf("too many attachments (%d, max %d)", len(msg.Attachments), MaxAttachmentCount)
 	}
-	for i, att := range msg.Attachments {
-		if att.Path == "" {
+	for i := range msg.Attachments {
+		if msg.Attachments[i].Path == "" {
 			return fmt.Errorf("attachment[%d]: path required", i)
 		}
-		if len(att.Path) > 4096 {
-			return fmt.Errorf("attachment[%d]: path too long (%d bytes, max 4096)", i, len(att.Path))
+		msg.Attachments[i].Path = filepath.Clean(msg.Attachments[i].Path)
+		if len(msg.Attachments[i].Path) > 4096 {
+			return fmt.Errorf("attachment[%d]: path too long (%d bytes, max 4096)", i, len(msg.Attachments[i].Path))
 		}
-		if !filepath.IsAbs(att.Path) {
-			return fmt.Errorf("attachment[%d]: path must be absolute (got %q)", i, att.Path)
+		if !filepath.IsAbs(msg.Attachments[i].Path) {
+			return fmt.Errorf("attachment[%d]: path must be absolute (got %q)", i, msg.Attachments[i].Path)
 		}
 	}
 	return nil

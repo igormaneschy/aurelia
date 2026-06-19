@@ -225,18 +225,60 @@ func TestCopyAttachmentsToCWD_FileMissingAfterAttach(t *testing.T) {
 		t.Fatal("expected error for missing source file, got nil")
 	}
 
-	// The error must mention "no longer available" and include the full path.
+	// The error must mention "no longer available" but must NOT include the
+	// full path (only basename, fixing path leakage in user-facing messages).
 	if !strings.Contains(err.Error(), "no longer available") {
 		t.Errorf("expected 'no longer available' in error, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), src) {
-		t.Errorf("expected full path %q in error, got: %v", src, err)
+	if strings.Contains(err.Error(), src) {
+		t.Errorf("error must NOT include full path %q, got: %v", src, err)
+	}
+	if !strings.Contains(err.Error(), filepath.Base(src)) {
+		t.Errorf("error should include basename %q, got: %v", filepath.Base(src), err)
+	}
+}
+
+func TestCopyAttachmentsToCWD_TotalSizeExceedsCap(t *testing.T) {
+	ctx := context.Background()
+	cwd := t.TempDir()
+	srcDir := t.TempDir()
+
+	// Create sparse files each under MaxAttachmentBytes (25 MB) but whose
+	// total exceeds MaxTotalAttachmentBytes (100 MB).
+	fileSize := int64(18 * 1024 * 1024) // 18 MB each — under 25 MB per-file limit
+
+	names := []string{"f1.bin", "f2.bin", "f3.bin", "f4.bin", "f5.bin", "f6.bin"} // 108 MB total
+	for _, name := range names {
+		p := filepath.Join(srcDir, name)
+		f, err := os.Create(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Truncate(fileSize); err != nil {
+			f.Close()
+			t.Fatal(err)
+		}
+		f.Close()
+	}
+
+	atts := make([]ipc.IPCAttachment, len(names))
+	for i, name := range names {
+		atts[i] = ipc.IPCAttachment{Path: filepath.Join(srcDir, name), Name: name}
+	}
+
+	_, err := copyAttachmentsToCWD(ctx, cwd, atts)
+	if err == nil {
+		t.Fatal("expected error for total size exceeding MaxTotalAttachmentBytes, got nil")
+	}
+	if !strings.Contains(err.Error(), "total attachment size") {
+		t.Errorf("expected 'total attachment size' in error, got: %v", err)
 	}
 }
 
 // ── copyFileNoFollow ──────────────────────────────────────────────────────
 
 func TestCopyFileNoFollow_SymlinkSourceRejected(t *testing.T) {
+	ctx := context.Background()
 	dir := t.TempDir()
 	srcDir := t.TempDir()
 
@@ -250,18 +292,19 @@ func TestCopyFileNoFollow_SymlinkSourceRejected(t *testing.T) {
 	}
 
 	dst := filepath.Join(dir, "out.txt")
-	_, err := copyFileNoFollow(linkPath, dst, 1024*1024)
+	_, err := copyFileNoFollow(ctx, linkPath, dst, 1024*1024)
 	if err == nil {
 		t.Fatal("expected error for symlink source")
 	}
 }
 
 func TestCopyFileNoFollow_DirectorySourceRejected(t *testing.T) {
+	ctx := context.Background()
 	dir := t.TempDir()
 	dst := filepath.Join(dir, "out.txt")
 
 	// Use the temp dir itself as source — it's a directory.
-	_, err := copyFileNoFollow(dir, dst, 1024*1024)
+	_, err := copyFileNoFollow(ctx, dir, dst, 1024*1024)
 	if err == nil {
 		t.Fatal("expected error for directory source")
 	}
@@ -270,7 +313,8 @@ func TestCopyFileNoFollow_DirectorySourceRejected(t *testing.T) {
 	}
 }
 
-func TestCopyFileNoFollow_FileExceedsMaxBytes(t *testing.T) {
+func TestCopyFileNoFollow_ExceedsCustomMaxBytes(t *testing.T) {
+	ctx := context.Background()
 	dir := t.TempDir()
 	srcDir := t.TempDir()
 
@@ -281,7 +325,7 @@ func TestCopyFileNoFollow_FileExceedsMaxBytes(t *testing.T) {
 	}
 
 	dst := filepath.Join(dir, "out.txt")
-	_, err := copyFileNoFollow(src, dst, 50) // max = 50, file = 100
+	_, err := copyFileNoFollow(ctx, src, dst, 50) // max = 50, file = 100
 	if err == nil {
 		t.Fatal("expected error for oversized file")
 	}
@@ -290,7 +334,32 @@ func TestCopyFileNoFollow_FileExceedsMaxBytes(t *testing.T) {
 	}
 }
 
+func TestCopyFileNoFollow_FileExceedsMaxBytes(t *testing.T) {
+	dir := t.TempDir()
+	srcDir := t.TempDir()
+
+	src := filepath.Join(srcDir, "oversized.bin")
+	data := make([]byte, ipc.MaxAttachmentBytes+1)
+	if err := os.WriteFile(src, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := filepath.Join(dir, "out.txt")
+	_, err := copyFileNoFollow(context.Background(), src, dst, ipc.MaxAttachmentBytes)
+	if err == nil {
+		t.Fatal("expected error for oversized file at MaxAttachmentBytes limit")
+	}
+	if !strings.Contains(err.Error(), "exceeds max size") {
+		t.Errorf("expected 'exceeds max size' error, got: %v", err)
+	}
+	// Destination should not exist after failure.
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Errorf("destination should not exist after failure: %v", err)
+	}
+}
+
 func TestCopyFileNoFollow_DestinationSymlinkRejected(t *testing.T) {
+	ctx := context.Background()
 	dir := t.TempDir()
 	srcDir := t.TempDir()
 
@@ -306,13 +375,14 @@ func TestCopyFileNoFollow_DestinationSymlinkRejected(t *testing.T) {
 	}
 
 	// Trying to copy over the symlink should fail with O_EXCL|O_NOFOLLOW.
-	_, err := copyFileNoFollow(src, dst, 1024*1024)
+	_, err := copyFileNoFollow(ctx, src, dst, 1024*1024)
 	if err == nil {
 		t.Fatal("expected error for destination symlink")
 	}
 }
 
 func TestCopyFileNoFollow_Success(t *testing.T) {
+	ctx := context.Background()
 	dir := t.TempDir()
 	srcDir := t.TempDir()
 
@@ -323,7 +393,7 @@ func TestCopyFileNoFollow_Success(t *testing.T) {
 	}
 
 	dst := filepath.Join(dir, "hello.txt")
-	n, err := copyFileNoFollow(src, dst, 1024*1024)
+	n, err := copyFileNoFollow(ctx, src, dst, 1024*1024)
 	if err != nil {
 		t.Fatalf("copyFileNoFollow: %v", err)
 	}
@@ -342,6 +412,7 @@ func TestCopyFileNoFollow_Success(t *testing.T) {
 }
 
 func TestCopyFileNoFollow_ExactMaxBytes(t *testing.T) {
+	ctx := context.Background()
 	dir := t.TempDir()
 	srcDir := t.TempDir()
 
@@ -352,7 +423,7 @@ func TestCopyFileNoFollow_ExactMaxBytes(t *testing.T) {
 	}
 
 	dst := filepath.Join(dir, "exact.bin")
-	n, err := copyFileNoFollow(src, dst, 50)
+	n, err := copyFileNoFollow(ctx, src, dst, 50)
 	if err != nil {
 		t.Fatalf("copyFileNoFollow: %v", err)
 	}
@@ -362,6 +433,7 @@ func TestCopyFileNoFollow_ExactMaxBytes(t *testing.T) {
 }
 
 func TestCopyFileNoFollow_ExceedsLimitByOne(t *testing.T) {
+	ctx := context.Background()
 	dir := t.TempDir()
 	srcDir := t.TempDir()
 
@@ -373,7 +445,7 @@ func TestCopyFileNoFollow_ExceedsLimitByOne(t *testing.T) {
 	}
 
 	dst := filepath.Join(dir, "over.bin")
-	_, err := copyFileNoFollow(src, dst, 50)
+	_, err := copyFileNoFollow(ctx, src, dst, 50)
 	if err == nil {
 		t.Fatal("expected error for file 1 byte over limit")
 	}
@@ -384,6 +456,34 @@ func TestCopyFileNoFollow_ExceedsLimitByOne(t *testing.T) {
 	// Destination should not exist.
 	if _, err := os.Stat(dst); !os.IsNotExist(err) {
 		t.Errorf("destination should not exist after failure: %v", err)
+	}
+}
+
+func TestCopyFileNoFollow_CtxCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	dir := t.TempDir()
+	srcDir := t.TempDir()
+
+	src := filepath.Join(srcDir, "large.bin")
+	// Write enough data that the copy will still be in progress when we cancel.
+	data := make([]byte, 10*1024*1024) // 10 MB
+	if err := os.WriteFile(src, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	dst := filepath.Join(dir, "out.bin")
+
+	// Cancel context immediately — the copy should not proceed.
+	cancel()
+
+	_, err := copyFileNoFollow(ctx, src, dst, 100*1024*1024)
+	if err == nil {
+		t.Fatal("expected error from cancelled context, got nil")
+	}
+
+	// Destination should not exist after cancellation.
+	if _, err := os.Stat(dst); !os.IsNotExist(err) {
+		t.Errorf("destination should be removed after cancelled copy: %v", err)
 	}
 }
 
@@ -567,30 +667,50 @@ func TestBuildAttachmentNote_Single(t *testing.T) {
 	if !strings.Contains(got, "[Attached files copied to ./uploads/]") {
 		t.Errorf("expected note header, got: %s", got)
 	}
-	if !strings.Contains(got, "- doc.md") {
-		t.Errorf("expected '- doc.md' in note, got: %s", got)
+	if !strings.Contains(got, "- doc.md (100 B)") {
+		t.Errorf("expected '- doc.md (100 B)' in note, got: %s", got)
+	}
+}
+
+func TestBuildAttachmentNote_HumanBytes(t *testing.T) {
+	tests := []struct {
+		bytes    int64
+		expected string
+	}{
+		{0, "- f (0 B)"},
+		{512, "- f (512 B)"},
+		{1024, "- f (1.0 KB)"},
+		{1536, "- f (1.5 KB)"},
+		{1048576, "- f (1.0 MB)"},
+		{1572864, "- f (1.5 MB)"},
+	}
+	for _, tc := range tests {
+		got := buildAttachmentNote([]copiedAttachment{{FinalName: "f", Size: tc.bytes}})
+		if !strings.Contains(got, tc.expected) {
+			t.Errorf("humanBytes(%d): expected %q in %q", tc.bytes, tc.expected, got)
+		}
 	}
 }
 
 func TestBuildAttachmentNote_Multiple(t *testing.T) {
 	copied := []copiedAttachment{
 		{FinalName: "spec.md", Size: 100},
-		{FinalName: "diagram.pdf", Size: 200},
-		{FinalName: "notes.txt", Size: 300},
+		{FinalName: "diagram.pdf", Size: 2048},
+		{FinalName: "notes.txt", Size: 3145728},
 	}
 	got := buildAttachmentNote(copied)
 
 	if !strings.Contains(got, "[Attached files copied to ./uploads/]") {
 		t.Errorf("expected note header, got: %s", got)
 	}
-	if !strings.Contains(got, "- spec.md") {
-		t.Errorf("expected '- spec.md', got: %s", got)
+	if !strings.Contains(got, "- spec.md (100 B)") {
+		t.Errorf("expected '- spec.md (100 B)', got: %s", got)
 	}
-	if !strings.Contains(got, "- diagram.pdf") {
-		t.Errorf("expected '- diagram.pdf', got: %s", got)
+	if !strings.Contains(got, "- diagram.pdf (2.0 KB)") {
+		t.Errorf("expected '- diagram.pdf (2.0 KB)', got: %s", got)
 	}
-	if !strings.Contains(got, "- notes.txt") {
-		t.Errorf("expected '- notes.txt', got: %s", got)
+	if !strings.Contains(got, "- notes.txt (3.0 MB)") {
+		t.Errorf("expected '- notes.txt (3.0 MB)', got: %s", got)
 	}
 }
 
@@ -600,7 +720,7 @@ func TestBuildAttachmentNote_Format(t *testing.T) {
 	}
 	got := buildAttachmentNote(copied)
 
-	// Expected: "\n\n[Attached files copied to ./uploads/]\n- readme.md\n"
+	// Expected: "\n\n[Attached files copied to ./uploads/]\n- readme.md (42 B)\n"
 	if !strings.HasPrefix(got, "\n\n[Attached files copied to ./uploads/]") {
 		t.Errorf("expected note to start with double newline, got: %q", got[:3])
 	}
