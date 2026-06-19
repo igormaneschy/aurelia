@@ -22,6 +22,96 @@ import (
 	"github.com/igormaneschy/aurelia/internal/security"
 )
 
+// ModelCataloger checks whether a given provider/model supports images
+// through the PI model registry. Used by applyVisionFallback to determine
+// whether the currently selected model can handle image input.
+type ModelCataloger interface {
+	// ModelSupportsImages performs an exact provider+model lookup.
+	// Returns (supports, error). Error means the model was not found
+	// or the catalog was unavailable.
+	ModelSupportsImages(ctx context.Context, provider, model string) (bool, error)
+
+	// ModelSupportsImagesByID looks up a model by ID alone (any provider).
+	// Returns (supports, found, error) where found=false means zero or
+	// multiple matches exist — caller must treat capability as unknown.
+	ModelSupportsImagesByID(ctx context.Context, modelID string) (supports bool, found bool, err error)
+}
+
+// defaultModelsCacheTTL is how long the model catalog is cached to avoid
+// redundant bridge ListModels calls per request.
+const defaultModelsCacheTTL = 30 * time.Second
+
+// bridgeModelCataloger adapts *bridge.Bridge to ModelCataloger using
+// ListModels which returns ModelInfo with SupportsImages capability.
+// Results are cached with a configurable TTL to avoid redundant bridge calls.
+type bridgeModelCataloger struct {
+	br       *bridge.Bridge
+	mu       sync.Mutex
+	cached   []bridge.ModelInfo
+	cachedAt time.Time
+	ttl      time.Duration
+}
+
+// getModels returns the model catalog, using a cached copy if still fresh.
+func (b *bridgeModelCataloger) getModels(ctx context.Context) ([]bridge.ModelInfo, error) {
+	b.mu.Lock()
+	// Fast path: cache hit within TTL.
+	if b.cached != nil && time.Since(b.cachedAt) < b.ttl {
+		models := b.cached
+		b.mu.Unlock()
+		return models, nil
+	}
+	b.mu.Unlock()
+
+	// Cache miss: fetch from bridge.
+	models, err := b.br.ListModels(ctx, false)
+	if err != nil {
+		return nil, err
+	}
+
+	b.mu.Lock()
+	b.cached = models
+	b.cachedAt = time.Now()
+	b.mu.Unlock()
+	return models, nil
+}
+
+func (b *bridgeModelCataloger) ModelSupportsImages(ctx context.Context, provider, model string) (bool, error) {
+	models, err := b.getModels(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, m := range models {
+		if m.Provider == provider && m.ID == model {
+			return m.SupportsImages, nil
+		}
+	}
+	return false, fmt.Errorf("model %s/%s not found in PI model catalog", provider, model)
+}
+
+// ModelSupportsImagesByID searches the catalog for a model by ID alone.
+// Returns (_, found=false) when zero or multiple providers offer this model.
+func (b *bridgeModelCataloger) ModelSupportsImagesByID(ctx context.Context, modelID string) (supports bool, found bool, err error) {
+	models, err2 := b.getModels(ctx)
+	if err2 != nil {
+		return false, false, err2
+	}
+	var match *bridge.ModelInfo
+	for _, m := range models {
+		if m.ID == modelID {
+			if match != nil {
+				return false, false, nil // ambiguous — multiple providers
+			}
+			cp := m
+			match = &cp
+		}
+	}
+	if match == nil {
+		return false, false, nil // not found
+	}
+	return match.SupportsImages, true, nil
+}
+
 // runLogState tracks per-run state for the run journal.
 // mu serializes summary mutations independently of the runLogState map lock,
 // preventing data races between recordToolUse/recordToolResult and completeRunLog.
@@ -366,7 +456,7 @@ func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, rese
 	req := s.buildBridgeRequest(userText, systemPrompt, profile, input.chatID, input.threadID, input.userID, input.isPrivateChat)
 	req.RequestID = fmt.Sprintf("run-%d", time.Now().UnixNano())
 	req.Options.Images = input.images
-	s.applyVisionFallback(&req, input.images)
+	s.applyVisionFallback(reservedCtx, &req, input.images)
 
 	if lcResult := s.applyLifecycle(reservedCtx, &req, input.chatID, input.threadID, input.userID); lcResult.SkipExecution {
 		log.Printf("lifecycle: execution skipped for chat=%d: %s", input.chatID, lcResult.ErrorMessage)
@@ -440,19 +530,89 @@ func (s *Service) resolveEffectiveProfile(text string, activeDefault string, isO
 	return nil, text, nil
 }
 
-func (s *Service) applyVisionFallback(req *bridge.Request, images []bridge.ImageAttachment) {
+func (s *Service) applyVisionFallback(ctx context.Context, req *bridge.Request, images []bridge.ImageAttachment) {
 	if len(images) == 0 || s.config == nil {
 		return
 	}
+
+	provider := req.Options.Provider
+	model := req.Options.Model
+
+	// ── Resolve the effective provider for catalog lookup ──
+
+	// Case A: Provider is empty but Model is provider-qualified (e.g. "openai/gpt-4").
+	// Profile overrides set req.Options.Model without setting req.Options.Provider,
+	// so the model string may carry an explicit provider prefix.
+	var parsedProvider bool
+	if provider == "" && model != "" && strings.Contains(model, "/") {
+		if parts := strings.SplitN(model, "/", 2); len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+			provider = parts[0]
+			model = parts[1]
+			parsedProvider = true
+			slog.Debug("vision: parsed provider-qualified model for catalog lookup",
+				"original", req.Options.Model, "parsed_provider", provider, "parsed_model", model)
+		}
+	}
+
+	// ── Check model capability via the catalog ──
+
+	if provider != "" && model != "" && s.modelCataloger != nil {
+		// Case B: Exact provider+model lookup (explicit provider or parsed from qualified model).
+		checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
+		supports, err := s.modelCataloger.ModelSupportsImages(checkCtx, provider, model)
+		checkCancel()
+		if err == nil {
+			if supports {
+				slog.Debug("vision: current model supports images, keeping model",
+					"provider", provider, "model", model)
+				if parsedProvider {
+					// Normalize the bridge request: the profile set Model="provider/model"
+					// without setting Provider. The bridge expects them as separate fields.
+					req.Options.Provider = provider
+					req.Options.Model = model
+				}
+				return
+			}
+			slog.Info("vision: current model does not support images, checking fallback",
+				"provider", provider, "model", model)
+		} else {
+			slog.Warn("vision: model capability lookup failed, using fallback if configured",
+				"provider", provider, "model", model, "error", err)
+		}
+	} else if provider == "" && model != "" && s.modelCataloger != nil {
+		// Case C: Unqualified model (no provider). Search by model ID across the catalog.
+		// Only accept the result when exactly one provider offers this model ID.
+		checkCtx, checkCancel := context.WithTimeout(ctx, 5*time.Second)
+		supports, found, err := s.modelCataloger.ModelSupportsImagesByID(checkCtx, model)
+		checkCancel()
+		if err == nil && found {
+			if supports {
+				slog.Debug("vision: unqualified model supports images (single catalog match), keeping model",
+					"model", model)
+				return
+			}
+			slog.Info("vision: unqualified model does not support images, checking fallback",
+				"model", model)
+		} else {
+			slog.Warn("vision: model capability lookup by ID failed, zero matches, or ambiguous, using fallback if configured",
+				"model", model, "found", found, "error", err)
+		}
+	} else {
+		slog.Debug("vision: provider/model unknown or no cataloger, applying fallback if configured",
+			"provider", provider, "model", model, "cataloger", s.modelCataloger != nil)
+	}
+
+	// ── Apply configured vision fallback when available ──
 	if vModel, vProvider := s.config.VisionFallback(); vModel != "" {
-		log.Printf("vision: switching to fallback model %s/%s for image input", vProvider, vModel)
+		slog.Info("vision: switching to fallback model",
+			"fallback_provider", vProvider, "fallback_model", vModel)
 		req.Options.Model = vModel
 		if vProvider != "" {
 			req.Options.Provider = vProvider
 		}
 		return
 	}
-	log.Printf("vision: no fallback configured, using default model")
+	slog.Info("vision: no fallback configured, using current model for image input")
 }
 
 // routeAgent resolves which agent should handle the message, first by @name

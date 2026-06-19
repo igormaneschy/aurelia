@@ -210,6 +210,9 @@ func (m Model) renderMainContent() string {
 }
 
 func (m Model) renderInput() string {
+	// Show pending image badges above the input.
+	badges := m.renderPendingImageBadges()
+
 	promptText := "> "
 	if m.waiting {
 		promptText = "… "
@@ -223,7 +226,26 @@ func (m Model) renderInput() string {
 	if m.waiting {
 		style = inputWaitingStyle
 	}
-	return style.Width(boxWidth).Render(input)
+	content := style.Width(boxWidth).Render(input)
+	if badges != "" {
+		content = badges + "\n" + content
+	}
+	return content
+}
+
+// renderPendingImageBadges renders a line of image badges above the input.
+func (m Model) renderPendingImageBadges() string {
+	if len(m.pendingImages) == 0 {
+		return ""
+	}
+	var names []string
+	for _, img := range m.pendingImages {
+		names = append(names, img.name)
+	}
+	badgeStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("243")).
+		Italic(true)
+	return badgeStyle.Render(fmt.Sprintf("📎 %s", strings.Join(names, ", ")))
 }
 
 func renderPromptedTextarea(prompt, rawPrompt, text string) string {
@@ -240,15 +262,16 @@ func renderPromptedTextarea(prompt, rawPrompt, text string) string {
 }
 
 func (m Model) renderStatusBar() string {
-	chromeState := m.chromeState()
-	state := statusReadyStyle.Render("● ready")
-	switch chromeState {
+	var state string
+	switch m.chromeState() {
 	case "connecting":
 		state = statusBusyStyle.Render("● connecting")
 	case "waiting":
 		state = statusBusyStyle.Render("● waiting")
 	case "error":
 		state = statusErrorStyle.Render("● error")
+	default:
+		state = statusReadyStyle.Render("● ready")
 	}
 
 	// Items ordered by priority — less critical ones are dropped on narrow

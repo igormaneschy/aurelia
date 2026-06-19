@@ -9,8 +9,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
+	"github.com/igormaneschy/aurelia/pkg/images"
 	"github.com/igormaneschy/aurelia/internal/pipeline"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runtime"
@@ -250,14 +252,23 @@ Commands:
 - /cwd — show current project binding
 - /cwd <path> — set the project working directory
 - /cwd clear — remove the project binding
+- /img <path> — attach an image (png, jpg, gif, webp)
 
 Keyboard:
 - Ctrl+S or F2 — focus sidebar to navigate sessions
 - In sidebar: ↑↓ navigate, enter open, n new, d delete, esc exit
 - Esc — cancel the current response
 - Ctrl+L — clear the screen
+- Ctrl+X — clear pending images
+- Ctrl+V — paste image from clipboard
 - Ctrl+C — quit
-- Alt+Enter or Ctrl+J — insert a newline`)
+- Alt+Enter or Ctrl+J — insert a newline
+
+Images:
+- Use /img <path> to attach images by file path
+- Use Ctrl+V to paste images from clipboard (macOS/Linux)
+- Drag-and-drop image files into the terminal
+- Multiple images can be attached before sending`)
 }
 
 // handleTUISend processes a TUI send message through the pipeline.
@@ -265,7 +276,7 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 	chatID, threadID, userID := msg.ChatID, int(msg.ThreadID), msg.UserID
 
 	text := strings.TrimSpace(msg.Text)
-	if text == "" {
+	if text == "" && len(msg.Images) == 0 {
 		if err := emit(ipc.IPCEvent{Type: ipc.EventTypeMessage, Body: "Empty message", RequestID: msg.RequestID}); err != nil {
 			return err
 		}
@@ -289,27 +300,47 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 
 	// Build pipeline config sharing the daemon's services.
 	pipeCfg := pipeline.Config{
-		AppConfig:    a.config,
-		Bridge:       a.bridge,
-		Agents:       a.agents,
-		Profiles:     a.bot.ProfileResolver(),
-		Persona:      a.bot.PersonaService(),
-		Sessions:     a.sessions,
-		Resolver:     a.resolver,
-		MemoryDir:    a.resolver.Memory(),
-		ExePath:      a.resolver.Root(),
-		BotCwd:       a.resolver.Root(),
-		Output:       output,
-		Bindings:     a.bindings,
-		RunLog:       a.runLog,
-		Continuity:   a.continuity,
-		UsersStore:   a.bot.UserStore(),
-		UserResolver: a.bot.UserResolver(),
+		AppConfig:  a.config,
+		Bridge:     a.bridge,
+		Agents:     a.agents,
+		Sessions:   a.sessions,
+		Resolver:   a.resolver,
+		MemoryDir:  a.resolver.Memory(),
+		ExePath:    a.resolver.Root(),
+		BotCwd:     a.resolver.Root(),
+		Output:     output,
+		Bindings:   a.bindings,
+		RunLog:     a.runLog,
+		Continuity: a.continuity,
+	}
+	if a.bot != nil {
+		pipeCfg.Profiles = a.bot.ProfileResolver()
+		pipeCfg.Persona = a.bot.PersonaService()
+		pipeCfg.UsersStore = a.bot.UserStore()
+		pipeCfg.UserResolver = a.bot.UserResolver()
 	}
 	pipeSvc := pipeline.NewService(pipeCfg)
 
+	// Convert images if present.
+	var attachments []bridge.ImageAttachment
+	if len(msg.Images) > 0 {
+		var err error
+		attachments, err = convertIPCImages(msg.Images, 0) // 0 = use default max
+		if err != nil {
+			// Log a sanitized version — no full local paths in routine logs.
+			log.Printf("tui: image conversion error: %s", images.SanitizedError(err))
+			// Use SanitizedError to avoid leaking full local paths in
+			// user-visible error messages.
+			return emit(ipc.IPCEvent{
+				Type:      ipc.EventTypeError,
+				Error:     fmt.Sprintf("Failed to process image: %s", images.SanitizedError(err)),
+				RequestID: msg.RequestID,
+			})
+		}
+	}
+
 	// Launch pipeline processing (async).
-	pipeErr := pipeSvc.Process(chatID, threadID, 0, text, nil, userID, true)
+	pipeErr := pipeSvc.Process(chatID, threadID, 0, text, attachments, userID, true)
 	if pipeErr != nil {
 		log.Printf("tui: pipeline process error: %s", pipeline.RedactSecrets(pipeErr.Error()))
 		_ = output.SendError(chatID, threadID, pipeErr.Error())

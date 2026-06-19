@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"io"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -163,6 +164,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.daemonLabel = "error"
 		m.waiting = false
 		m.streamBuf = ""
+		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
 			_ = m.reader.Close()
 			m.reader = nil
@@ -186,6 +188,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case streamDoneMsg:
 		// Stream ended (EOF) without explicit terminal event.
 		m.waiting = false
+		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
 			_ = m.reader.Close()
 			m.reader = nil
@@ -202,6 +205,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case streamErrMsg:
 		// Stream error.
 		m.waiting = false
+		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
 			_ = m.reader.Close()
 			m.reader = nil
@@ -301,6 +305,38 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			)
 		}
 		return m, fetchTUISessions(m.ipcClient)
+
+	case clipboardPasteMsg:
+		if msg.err != nil {
+			errText := msg.err.Error()
+			if errText == "" {
+				errText = "unknown error"
+			}
+			m.messages = append(m.messages, chatMessage{
+				Sender: "⚠️",
+				Text:   fmt.Sprintf("Clipboard paste failed: %s. Use /img <path> instead.", errText),
+			})
+			m.updateViewport()
+			return m, nil
+		}
+		// Add the clipboard image to pending images, tracking it as a temp
+		// file that Aurelia owns and must clean up.
+		errMsg := m.attachTempImage(msg.path)
+		if errMsg != "" {
+			// attachTempImage already removed the temp file on error.
+			m.messages = append(m.messages, chatMessage{
+				Sender: "⚠️",
+				Text:   errMsg,
+			})
+			m.updateViewport()
+			return m, nil
+		}
+		m.messages = append(m.messages, chatMessage{
+			Sender: "📎",
+			Text:   "Image attached from clipboard",
+		})
+		m.updateViewport()
+		return m, nil
 	}
 
 	return m, nil
@@ -357,12 +393,30 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	switch {
 	case msg.String() == "ctrl+c":
+		m.cleanupTempImages()
+		m.cleanupSubmittedTempImages()
 		return m, tea.Quit
 
 	case msg.String() == "ctrl+l":
 		m.messages = nil
 		m.updateViewport()
 		return m, nil
+
+	case msg.String() == "ctrl+x":
+		// Clear pending images.
+		if len(m.pendingImages) > 0 {
+			m.clearPendingImages()
+			m.messages = append(m.messages, chatMessage{
+				Sender: "📎",
+				Text:   "Cleared pending images",
+			})
+			m.updateViewport()
+		}
+		return m, nil
+
+	case msg.String() == "ctrl+v":
+		// Paste image from clipboard.
+		return m, pasteFromClipboardCmd()
 
 	case isSidebarToggleKey(msg):
 		m.showSidebar = !m.showSidebar
@@ -409,14 +463,75 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		text := strings.TrimSpace(m.textarea.Value())
-		if text == "" {
+		if text == "" && len(m.pendingImages) == 0 {
 			return m, nil
 		}
+
+		// Handle /img command — attach image, don't send message.
+		if strings.HasPrefix(text, "/img ") {
+			path := strings.TrimPrefix(text, "/img ")
+			errMsg := m.attachImageFromPath(path)
+			m.textarea.Reset()
+			if errMsg != "" {
+				m.messages = append(m.messages, chatMessage{
+					Sender: "⚠️",
+					Text:   errMsg,
+				})
+				m.updateViewport()
+			}
+			return m, nil
+		}
+
+		// Handle bare /img (no path).
+		if text == "/img" {
+			m.textarea.Reset()
+			m.messages = append(m.messages, chatMessage{
+				Sender: "⚠️",
+				Text:   "Usage: /img <path-to-image>",
+			})
+			m.updateViewport()
+			return m, nil
+		}
+
+		// Free-form image paths are message input, not command arguments. Keep
+		// slash commands untouched, except when the input itself starts with a
+		// local path such as /Users/me/screenshot.png. We use a syntactic check
+		// (file existence not required) so a missing/invalid file still routes
+		// through image error handling instead of being treated as a command.
+		if !strings.HasPrefix(text, "/") || startsWithSyntacticImagePath(text) {
+			cleanedText, attachedCount, errMsg := m.attachImagePathsFromText(text)
+			if errMsg != "" {
+				m.messages = append(m.messages, chatMessage{
+					Sender: "⚠️",
+					Text:   errMsg,
+				})
+				m.updateViewport()
+				return m, nil
+			}
+			if attachedCount > 0 {
+				text = cleanedText
+				if text == "" && len(m.pendingImages) == 0 {
+					return m, nil
+				}
+			}
+		}
+
 		m.rememberInput(text)
 		m.textarea.Reset()
+
+		// Build display text with image badges.
+		displayText := text
+		if badges := m.pendingImageBadges(); badges != "" {
+			if displayText != "" {
+				displayText = badges + "\n" + displayText
+			} else {
+				displayText = badges
+			}
+		}
+
 		m.messages = append(m.messages, chatMessage{
 			Sender:    "Igor",
-			Text:      text,
+			Text:      displayText,
 			Timestamp: time.Now(),
 		})
 		m.waiting = true
@@ -425,7 +540,15 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if strings.HasPrefix(text, "/") {
 			return m, tea.Batch(m.sendCommand(text), spinnerTickCmd())
 		}
-		return m, tea.Batch(m.submitMessage(text), spinnerTickCmd())
+
+		// Capture pending images before clearing. Clipboard temp files must stay
+		// on disk until the daemon has consumed the IPC image paths, so clean
+		// them up only after the submitted stream reaches a terminal state.
+		tempPaths := m.tempImagePaths()
+		cmd := m.submitMessage(text)
+		m.submittedTempImagePaths = append(m.submittedTempImagePaths, tempPaths...)
+		m.pendingImages = nil
+		return m, tea.Batch(cmd, spinnerTickCmd())
 
 	case msg.String() == "alt+enter":
 		// alt+enter: insert newline.
@@ -446,6 +569,8 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
+		m.cleanupTempImages()
+		m.cleanupSubmittedTempImages()
 		return m, tea.Quit
 
 	case "esc", "tab", "ctrl+i", "\t":
@@ -517,6 +642,31 @@ func (m Model) delegateKeyToTextarea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if !shouldDelegateKeyToTextarea(msg, m.textarea.KeyMap) {
 		return m, nil
 	}
+
+	// Check if this is a paste event with an image path (drag-and-drop).
+	if msg.Paste && msg.Type == tea.KeyRunes {
+		text := string(msg.Runes)
+		text = strings.TrimSpace(text)
+		if isImagePath(text) {
+			// Treat as image attachment, not text input.
+			errMsg := m.attachImageFromPath(text)
+			if errMsg != "" {
+				m.messages = append(m.messages, chatMessage{
+					Sender: "⚠️",
+					Text:   errMsg,
+				})
+				m.updateViewport()
+			} else {
+				m.messages = append(m.messages, chatMessage{
+					Sender: "📎",
+					Text:   fmt.Sprintf("Image attached: %s", filepath.Base(text)),
+				})
+				m.updateViewport()
+			}
+			return m, nil
+		}
+	}
+
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
 	return m, cmd
@@ -607,6 +757,7 @@ func (m Model) handleViewportMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handler context, which aborts the pipeline.
 func (m Model) cancelStreaming() (tea.Model, tea.Cmd) {
 	m.waiting = false
+	m.cleanupSubmittedTempImages()
 	if m.reader != nil {
 		_ = m.reader.Close()
 		m.reader = nil
@@ -693,6 +844,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 	case "stream_end":
 		// Terminal event — stream complete.
 		m.waiting = false
+		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
 			_ = m.reader.Close()
 			m.reader = nil
@@ -704,6 +856,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 	case "error":
 		// Terminal event — error.
 		m.waiting = false
+		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
 			_ = m.reader.Close()
 			m.reader = nil

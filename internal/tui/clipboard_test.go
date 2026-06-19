@@ -1,0 +1,160 @@
+package tui
+
+import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestClipboardMacOS_TimeoutReturnsPromptly(t *testing.T) {
+	// Create a pre-cancelled context — the function should return promptly
+	// with an error and clean up any temp file it created.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled
+
+	// Verify that osascript is available (required for the test).
+	if _, err := exec.LookPath("osascript"); err != nil {
+		t.Skip("osascript not available, skipping macOS clipboard test")
+	}
+
+	path, err := pasteFromClipboardMacOS(ctx)
+	if err == nil {
+		// If there's no error, we somehow got a clipboard image.
+		// Clean up and fail.
+		if path != "" {
+			os.Remove(path)
+		}
+		t.Fatal("expected error for cancelled context, got success")
+	}
+
+	// Verify the error mentions timeout/cancel.
+	if !strings.Contains(err.Error(), "timed out") && !strings.Contains(err.Error(), "context canceled") && !strings.Contains(err.Error(), "cancelled") {
+		t.Errorf("expected timeout/cancel error, got: %v", err)
+	}
+
+	// Verify the temp file was cleaned up.
+	if path != "" {
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Errorf("expected temp file %q to be removed after timeout, stat: %v", path, statErr)
+			os.Remove(path)
+		}
+	}
+}
+
+func TestClipboardLinux_TimeoutReturnsPromptly(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// This test always runs and validates the xclip path.
+	path, err := pasteFromXClip(ctx)
+	if err == nil {
+		if path != "" {
+			os.Remove(path)
+		}
+		t.Fatal("expected error for cancelled context")
+	}
+	// On systems without xclip, the error is about xclip not available — that's fine.
+	// We're testing that the function returns promptly, not that xclip works.
+	if path != "" {
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Errorf("expected temp file to be removed, stat: %v", statErr)
+			os.Remove(path)
+		}
+	}
+}
+
+func TestPasteFromClipboardLinux_TimeoutReturnsPromptly(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	path, err := pasteFromWlPaste(ctx)
+	if err == nil {
+		if path != "" {
+			os.Remove(path)
+		}
+		t.Fatal("expected error for cancelled context")
+	}
+	if path != "" {
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Errorf("expected temp file to be removed, stat: %v", statErr)
+			os.Remove(path)
+		}
+	}
+}
+
+func TestPasteFromClipboardLinux_NoTool(t *testing.T) {
+	// When no clipboard tool is available, the function should try xclip,
+	// fail, try wl-paste, fail, and return the fallback error.
+	// We test with a pre-cancelled context to avoid hanging.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	path, err := pasteFromClipboardLinux(ctx)
+	if err == nil {
+		if path != "" {
+			os.Remove(path)
+		}
+		t.Fatal("expected error for cancelled/no-tool context")
+	}
+	// The error should mention the fallback message or the individual tool errors.
+	if path != "" {
+		os.Remove(path)
+	}
+}
+
+func TestClipboardPasteFromClipboardCancelled(t *testing.T) {
+	// Test the top-level dispatch with a cancelled context via the
+	// clipboardNewContext override.
+	original := clipboardNewContext
+	clipboardNewContext = func() (context.Context, context.CancelFunc) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		return ctx, cancel
+	}
+	defer func() { clipboardNewContext = original }()
+
+	path, err := pasteFromClipboard()
+	// On macOS with osascript available, this would fail due to cancelled context.
+	// On other platforms, the dispatch handles it similarly.
+	if err == nil {
+		if path != "" {
+			os.Remove(path)
+		}
+		t.Fatal("expected error for cancelled clipboard context")
+	}
+	if path != "" {
+		// If somehow a file was created, ensure it's cleaned up.
+		if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+			os.Remove(path)
+		}
+	}
+}
+
+func TestClipboardPasteFromClipboard_FileCreatedOnTempDir(t *testing.T) {
+	// Verify that temp files created by clipboard operations use an
+	// OS-generated name in the system temp directory (not user-supplied).
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	path, err := pasteFromXClip(ctx)
+	// We don't care about the error (it's a cancelled context), but we
+	// want to verify that any created temp file follows the pattern.
+	if path != "" {
+		// The temp file should start with the pre-determined prefix.
+		_, name := filepath.Split(path)
+		if !strings.HasPrefix(name, "aurelia-clip-") {
+			t.Errorf("expected temp file prefix 'aurelia-clip-', got %q", name)
+		}
+		// Clean up if not already removed.
+		if _, statErr := os.Stat(path); statErr == nil {
+			os.Remove(path)
+		}
+	}
+	if err == nil {
+		// Context cancelled but somehow succeeded — shouldn't happen.
+		t.Error("expected error")
+	}
+}

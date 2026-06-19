@@ -386,7 +386,37 @@ func validateMessage(msg IPCMessage) error {
 	if len(msg.RequestID) > MaxRequestIDLength {
 		return fmt.Errorf("request_id too long (%d bytes, max %d)", len(msg.RequestID), MaxRequestIDLength)
 	}
+	// Validate images if present.
+	if len(msg.Images) > MaxImageCount {
+		return fmt.Errorf("too many images (%d, max %d)", len(msg.Images), MaxImageCount)
+	}
+	var totalImageBytes int
+	for i, img := range msg.Images {
+		if img.Path == "" && img.Data == "" {
+			return fmt.Errorf("image[%d]: path or data required", i)
+		}
+		if img.MediaType == "" {
+			return fmt.Errorf("image[%d]: media_type required", i)
+		}
+		if !isSupportedImageMIME(img.MediaType) {
+			return fmt.Errorf("image[%d]: unsupported media_type %q", i, img.MediaType)
+		}
+		totalImageBytes += len(img.Data)
+	}
+	if totalImageBytes > MaxTotalImageBytes {
+		return fmt.Errorf("total image data too large (%d bytes, max %d)", totalImageBytes, MaxTotalImageBytes)
+	}
 	return nil
+}
+
+// isSupportedImageMIME checks if the MIME type is supported for images.
+func isSupportedImageMIME(mimeType string) bool {
+	switch mimeType {
+	case "image/png", "image/jpeg", "image/gif", "image/webp":
+		return true
+	default:
+		return false
+	}
 }
 
 // dispatch routes a message to the configured handler or returns a default

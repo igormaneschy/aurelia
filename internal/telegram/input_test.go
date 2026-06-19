@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"gopkg.in/telebot.v3"
+
+	"github.com/igormaneschy/aurelia/pkg/images"
 )
 
 func TestIsSupportedImageDocument(t *testing.T) {
@@ -28,8 +30,8 @@ func TestIsSupportedImageDocument(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := isSupportedImageDocument(tc.filename, tc.mimeType); got != tc.want {
-				t.Fatalf("isSupportedImageDocument(%q, %q) = %t, want %t", tc.filename, tc.mimeType, got, tc.want)
+			if got := images.IsSupportedImageFile(tc.filename, tc.mimeType); got != tc.want {
+				t.Fatalf("IsSupportedImageFile(%q, %q) = %t, want %t", tc.filename, tc.mimeType, got, tc.want)
 			}
 		})
 	}
@@ -76,15 +78,15 @@ func TestEncodeImageAttachment_RejectsOversizeImage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err := encodeImageAttachment(path, "image/jpeg", 4)
+	_, err := images.Encode(path, "image/jpeg", 4)
 	if err == nil {
 		t.Fatal("expected oversize image error")
 	}
-	var tooLarge imageTooLargeError
+	var tooLarge images.TooLargeError
 	if !errors.As(err, &tooLarge) {
-		t.Fatalf("expected imageTooLargeError, got %T", err)
+		t.Fatalf("expected TooLargeError, got %T", err)
 	}
-	if tooLarge.limit != 4 || tooLarge.size != 5 {
+	if tooLarge.Limit != 4 || tooLarge.Size != 5 {
 		t.Fatalf("unexpected size/limit: %+v", tooLarge)
 	}
 }
@@ -106,8 +108,8 @@ func TestHumanBytes(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := humanBytes(tc.n); got != tc.want {
-				t.Fatalf("humanBytes(%d) = %q, want %q", tc.n, got, tc.want)
+			if got := images.HumanBytes(tc.n); got != tc.want {
+				t.Fatalf("HumanBytes(%d) = %q, want %q", tc.n, got, tc.want)
 			}
 		})
 	}
@@ -116,8 +118,8 @@ func TestHumanBytes(t *testing.T) {
 func TestImageTooLargeError_UserMessageUsesHumanBytes(t *testing.T) {
 	t.Parallel()
 
-	err := imageTooLargeError{size: 15728640, limit: 10485760}
-	want := "Imagem muito grande (15.0 MB). O limite configurado é 10.0 MB."
+	err := images.TooLargeError{Size: 15728640, Limit: 10485760}
+	want := "Image too large (15.0 MB). Limit is 10.0 MB."
 	if got := err.UserMessage(); got != want {
 		t.Fatalf("UserMessage() = %q, want %q", got, want)
 	}

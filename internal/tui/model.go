@@ -106,6 +106,10 @@ type Model struct {
 	// Cached glamour renderer (recreated when width changes)
 	glamourRenderer *glamour.TermRenderer
 	rendererWidth   int
+
+	// Pending image attachments (cleared after send)
+	pendingImages           []pendingImage
+	submittedTempImagePaths []string
 }
 
 // NewModel creates a new TUI model with the given socket path.
@@ -275,8 +279,12 @@ func (m Model) submitMessage(text string) tea.Cmd {
 		ThreadID:  0,
 		UserID:    userID,
 		Text:      text,
+		Images:    m.toIPCImages(),
 		RequestID: m.requestID,
 	}
+
+	// Note: pendingImages cleanup happens in update.go after submitMessage
+	// returns, because Model is a value type and mutations here are discarded.
 
 	return func() tea.Msg {
 		ctx, cancel := contextWithTimeout(30 * time.Minute)
@@ -398,7 +406,7 @@ func sessionsFromEvents(events []ipc.IPCEvent) tuiSessionsMsg {
 		}
 		sessions := make([]tuiSessionInfo, 0, len(payload))
 		for _, s := range payload {
-			sessions = append(sessions, tuiSessionInfo{ChatID: s.ChatID, Name: s.Name}) //nolint:staticcheck // S1016: different types, cannot convert
+			sessions = append(sessions, tuiSessionInfo(s))
 		}
 		return tuiSessionsMsg{sessions: sessions}
 	}
@@ -419,7 +427,7 @@ func sessionCreatedFromEvents(events []ipc.IPCEvent) tuiSessionCreatedMsg {
 		if err := json.Unmarshal([]byte(ev.Body), &s); err != nil {
 			return tuiSessionCreatedMsg{err: fmt.Errorf("parse created session: %w", err)}
 		}
-		return tuiSessionCreatedMsg{session: tuiSessionInfo{ChatID: s.ChatID, Name: s.Name}} //nolint:staticcheck // S1016: different types, cannot convert
+		return tuiSessionCreatedMsg{session: tuiSessionInfo(s)}
 	}
 	return tuiSessionCreatedMsg{}
 }
@@ -438,7 +446,7 @@ func sessionOpenedFromEvents(events []ipc.IPCEvent) tuiSessionOpenedMsg {
 		if err := json.Unmarshal([]byte(ev.Body), &s); err != nil {
 			return tuiSessionOpenedMsg{err: fmt.Errorf("parse opened session: %w", err)}
 		}
-		return tuiSessionOpenedMsg{session: tuiSessionInfo{ChatID: s.ChatID, Name: s.Name}} //nolint:staticcheck // S1016: different types, cannot convert
+		return tuiSessionOpenedMsg{session: tuiSessionInfo(s)}
 	}
 	return tuiSessionOpenedMsg{}
 }
