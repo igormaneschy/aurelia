@@ -122,3 +122,60 @@ func tryParseAsDocumentPath(text string) (name, path string, ok bool) {
 	}
 	return filepath.Base(text), text, true
 }
+
+// looksLikeFilePath detects whether text appears to be an absolute file path
+// after applying the same normalization used for images (stripping quotes,
+// file:// prefix, and escaped spaces), expanding ~, and validating the result
+// is absolute. Returns false for image paths (image flow should handle), text
+// that mentions a path (contains unquoted whitespace), relative paths, and
+// non-path text. Does NOT validate filesystem existence — use
+// attachDocumentFromPath for that.
+func looksLikeFilePath(text string) bool {
+	s := strings.TrimSpace(text)
+	if s == "" {
+		return false
+	}
+
+	// Detect explicit path indicators in the original (pre-normalization) text.
+	quoted := false
+	if len(s) >= 2 {
+		first, last := s[0], s[len(s)-1]
+		if first == last && (first == '"' || first == '\'') {
+			quoted = true
+		}
+	}
+	hasEscapedSpaces := strings.Contains(s, "\\ ")
+
+	// Normalize: strip wrapping quotes, file:// prefix, and unescape \ spaces.
+	normalized := normalizeImagePath(s)
+	if normalized == "" {
+		return false
+	}
+
+	// Expand ~ to home directory.
+	if strings.HasPrefix(normalized, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return false
+		}
+		normalized = filepath.Join(home, normalized[1:])
+	}
+
+	// Must be absolute after expansion.
+	if !filepath.IsAbs(normalized) {
+		return false
+	}
+
+	// Let image flow handle image paths.
+	if isImagePath(normalized) {
+		return false
+	}
+
+	// Text containing whitespace is only treated as a deliberate path if it
+	// was explicitly indicated as one (quotes or escaped spaces).
+	if !quoted && !hasEscapedSpaces && strings.ContainsAny(normalized, " \t") {
+		return false
+	}
+
+	return true
+}

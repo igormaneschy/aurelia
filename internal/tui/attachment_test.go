@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
 
@@ -311,6 +313,432 @@ func TestToIPCAttachments_Multiple(t *testing.T) {
 	}
 	if result[0].Path != path1 || result[1].Path != path2 {
 		t.Errorf("paths don't match expected")
+	}
+}
+
+func TestLooksLikeFilePath_ValidAbsolute(t *testing.T) {
+	if !looksLikeFilePath("/Users/foo/spec.md") {
+		t.Error("expected true for valid absolute path")
+	}
+}
+
+func TestLooksLikeFilePath_WithQuotes(t *testing.T) {
+	if !looksLikeFilePath(`"/Users/foo/spec.md"`) {
+		t.Error("expected true for quoted absolute path")
+	}
+}
+
+func TestLooksLikeFilePath_WithQuotesAndSpaces(t *testing.T) {
+	// Path with spaces wrapped in quotes.
+	if !looksLikeFilePath(`"/Users/foo/My File.md"`) {
+		t.Error("expected true for quoted path with spaces")
+	}
+}
+
+func TestLooksLikeFilePath_Tilde(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !looksLikeFilePath("~/Documents/spec.md") {
+		t.Error("expected true for tilde path")
+	}
+	// Verify the path doesn't actually need to exist — it's a syntactic check.
+	if !looksLikeFilePath("~/nonexistent/doc.md") {
+		t.Error("expected true for tilde path even if file doesn't exist")
+	}
+	_ = home // used implicitly by looksLikeFilePath
+}
+
+func TestLooksLikeFilePath_FileURL(t *testing.T) {
+	if !looksLikeFilePath("file:///Users/foo/spec.md") {
+		t.Error("expected true for file:// path")
+	}
+}
+
+func TestLooksLikeFilePath_EscapedSpaces(t *testing.T) {
+	if !looksLikeFilePath("/path/to/file\\ with\\ spaces.pdf") {
+		t.Error("expected true for path with escaped spaces")
+	}
+}
+
+func TestLooksLikeFilePath_UpperCaseFileURLQuoted(t *testing.T) {
+	if !looksLikeFilePath(`"FILE:///Users/test/SPEC.md"`) {
+		t.Error("expected true for quoted uppercase file:// path")
+	}
+}
+
+func TestLooksLikeFilePath_PlainText(t *testing.T) {
+	if looksLikeFilePath("hello world") {
+		t.Error("expected false for plain text")
+	}
+}
+
+func TestLooksLikeFilePath_URL(t *testing.T) {
+	if looksLikeFilePath("https://example.com") {
+		t.Error("expected false for URL")
+	}
+}
+
+func TestLooksLikeFilePath_Relative(t *testing.T) {
+	if looksLikeFilePath("relative/path/doc.pdf") {
+		t.Error("expected false for relative path")
+	}
+}
+
+func TestLooksLikeFilePath_ImagePath(t *testing.T) {
+	if looksLikeFilePath("/Users/foo/photo.png") {
+		t.Error("expected false for image path (image flow should handle)")
+	}
+}
+
+func TestDelegateKeyToTextarea_DocumentPaste_AttachesNotInserts(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "spec.md")
+	if err := os.WriteFile(path, testDocContent(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate paste of an absolute document path.
+	msg := tea.KeyMsg(tea.Key{
+		Type:  tea.KeyRunes,
+		Runes: []rune(path),
+		Paste: true,
+	})
+	result, _ := m.delegateKeyToTextarea(msg)
+	m2 := result.(Model)
+
+	// Should have added a pending attachment.
+	if len(m2.pendingAttachments) != 1 {
+		t.Fatalf("expected 1 pending attachment after paste, got %d", len(m2.pendingAttachments))
+	}
+	if m2.pendingAttachments[0].name != "spec.md" {
+		t.Errorf("attachment name = %q, want %q", m2.pendingAttachments[0].name, "spec.md")
+	}
+
+	// The viewport should have a 📎 message, NOT the path in the textarea.
+	if len(m2.messages) == 0 {
+		t.Fatal("expected at least 1 message (attachment confirmation)")
+	}
+	lastMsg := m2.messages[len(m2.messages)-1]
+	if lastMsg.Sender != "📎" {
+		t.Errorf("expected sender '📎', got %q", lastMsg.Sender)
+	}
+	if !strings.Contains(lastMsg.Text, "spec.md") {
+		t.Errorf("expected message to mention spec.md, got: %q", lastMsg.Text)
+	}
+
+	// The textarea content should be empty (path was NOT inserted).
+	if m2.textarea.Value() != "" {
+		t.Errorf("expected empty textarea, got %q", m2.textarea.Value())
+	}
+}
+
+func TestDelegateKeyToTextarea_DocumentPaste_WithQuotes_AttachesNotInserts(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "My Doc.pdf")
+	if err := os.WriteFile(path, testDocContent(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Simulate paste of a quoted path (common from Finder drag-drop on macOS).
+	quoted := fmt.Sprintf(`"%s"`, path)
+	msg := tea.KeyMsg(tea.Key{
+		Type:  tea.KeyRunes,
+		Runes: []rune(quoted),
+		Paste: true,
+	})
+	result, _ := m.delegateKeyToTextarea(msg)
+	m2 := result.(Model)
+
+	// Should have attached the document despite quotes.
+	if len(m2.pendingAttachments) != 1 {
+		t.Fatalf("expected 1 pending attachment after quoted paste, got %d", len(m2.pendingAttachments))
+	}
+	if m2.pendingAttachments[0].name != "My Doc.pdf" {
+		t.Errorf("attachment name = %q, want 'My Doc.pdf'", m2.pendingAttachments[0].name)
+	}
+	// The textarea must remain empty.
+	if m2.textarea.Value() != "" {
+		t.Errorf("expected empty textarea, got %q", m2.textarea.Value())
+	}
+}
+
+func TestDelegateKeyToTextarea_DocumentPaste_Tilde_AttachesNotInserts(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a real file in the home dir (using temp dir inside home).
+	realDir := filepath.Join(home, "Documents")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(realDir, "tilde-test.md")
+	if err := os.WriteFile(path, testDocContent(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(path) })
+
+	// Paste a ~/ path.
+	tildePath := "~/Documents/tilde-test.md"
+	msg := tea.KeyMsg(tea.Key{
+		Type:  tea.KeyRunes,
+		Runes: []rune(tildePath),
+		Paste: true,
+	})
+	result, _ := m.delegateKeyToTextarea(msg)
+	m2 := result.(Model)
+
+	if len(m2.pendingAttachments) != 1 {
+		t.Fatalf("expected 1 pending attachment for tilde paste, got %d", len(m2.pendingAttachments))
+	}
+	if m2.pendingAttachments[0].name != "tilde-test.md" {
+		t.Errorf("attachment name = %q, want 'tilde-test.md'", m2.pendingAttachments[0].name)
+	}
+	if m2.textarea.Value() != "" {
+		t.Errorf("expected empty textarea, got %q", m2.textarea.Value())
+	}
+}
+
+func TestDelegateKeyToTextarea_DocumentPaste_FileURL_AttachesNotInserts(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "from-web.pdf")
+	if err := os.WriteFile(path, testDocContent(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Paste a file:// URL.
+	fileURL := "file://" + path
+	msg := tea.KeyMsg(tea.Key{
+		Type:  tea.KeyRunes,
+		Runes: []rune(fileURL),
+		Paste: true,
+	})
+	result, _ := m.delegateKeyToTextarea(msg)
+	m2 := result.(Model)
+
+	if len(m2.pendingAttachments) != 1 {
+		t.Fatalf("expected 1 pending attachment for file:// paste, got %d", len(m2.pendingAttachments))
+	}
+	if m2.pendingAttachments[0].name != "from-web.pdf" {
+		t.Errorf("attachment name = %q, want 'from-web.pdf'", m2.pendingAttachments[0].name)
+	}
+	if m2.textarea.Value() != "" {
+		t.Errorf("expected empty textarea, got %q", m2.textarea.Value())
+	}
+}
+
+func TestDelegateKeyToTextarea_InvalidDocumentPath_NotExists_ShowsError(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+
+	// Paste a path that doesn't exist.
+	msg := tea.KeyMsg(tea.Key{
+		Type:  tea.KeyRunes,
+		Runes: []rune("/nonexistent/doc.md"),
+		Paste: true,
+	})
+	result, _ := m.delegateKeyToTextarea(msg)
+	m2 := result.(Model)
+
+	// Should show error message.
+	if len(m2.messages) == 0 {
+		t.Fatal("expected error message for nonexistent path")
+	}
+	lastMsg := m2.messages[len(m2.messages)-1]
+	if lastMsg.Sender != "⚠️" {
+		t.Errorf("expected sender '⚠️', got %q", lastMsg.Sender)
+	}
+	if !strings.Contains(lastMsg.Text, "not found") && !strings.Contains(lastMsg.Text, "Not found") {
+		t.Errorf("expected 'not found' in error, got: %q", lastMsg.Text)
+	}
+	// Should NOT be in textarea.
+	if m2.textarea.Value() != "" {
+		t.Errorf("expected empty textarea for invalid path paste, got %q", m2.textarea.Value())
+	}
+}
+
+func TestDelegateKeyToTextarea_InvalidDocumentPath_Symlink_ShowsError(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "real.md")
+	if err := os.WriteFile(target, testDocContent(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link.md")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+
+	msg := tea.KeyMsg(tea.Key{
+		Type:  tea.KeyRunes,
+		Runes: []rune(link),
+		Paste: true,
+	})
+	result, _ := m.delegateKeyToTextarea(msg)
+	m2 := result.(Model)
+
+	if len(m2.messages) == 0 {
+		t.Fatal("expected error message for symlink")
+	}
+	lastMsg := m2.messages[len(m2.messages)-1]
+	if lastMsg.Sender != "⚠️" {
+		t.Errorf("expected sender '⚠️', got %q", lastMsg.Sender)
+	}
+	if !strings.Contains(lastMsg.Text, "Symlink") {
+		t.Errorf("expected 'Symlink' in error, got: %q", lastMsg.Text)
+	}
+	if m2.textarea.Value() != "" {
+		t.Errorf("expected empty textarea for symlink paste, got %q", m2.textarea.Value())
+	}
+}
+
+func TestDelegateKeyToTextarea_InvalidDocumentPath_Directory_ShowsError(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+
+	dir := t.TempDir()
+	subdir := filepath.Join(dir, "mydir")
+	if err := os.Mkdir(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	msg := tea.KeyMsg(tea.Key{
+		Type:  tea.KeyRunes,
+		Runes: []rune(subdir),
+		Paste: true,
+	})
+	result, _ := m.delegateKeyToTextarea(msg)
+	m2 := result.(Model)
+
+	if len(m2.messages) == 0 {
+		t.Fatal("expected error message for directory")
+	}
+	lastMsg := m2.messages[len(m2.messages)-1]
+	if lastMsg.Sender != "⚠️" {
+		t.Errorf("expected sender '⚠️', got %q", lastMsg.Sender)
+	}
+	if !strings.Contains(lastMsg.Text, "Not a regular file") {
+		t.Errorf("expected 'Not a regular file' in error, got: %q", lastMsg.Text)
+	}
+	if m2.textarea.Value() != "" {
+		t.Errorf("expected empty textarea for directory paste, got %q", m2.textarea.Value())
+	}
+}
+
+func TestDelegateKeyToTextarea_NormalText_InsertsInTextarea(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+
+	// Paste plain text (not a path).
+	msg := tea.KeyMsg(tea.Key{
+		Type:  tea.KeyRunes,
+		Runes: []rune("hello world"),
+		Paste: true,
+	})
+	result, _ := m.delegateKeyToTextarea(msg)
+	m2 := result.(Model)
+
+	// Should be inserted into the textarea, not attached.
+	if m2.textarea.Value() != "hello world" {
+		t.Errorf("expected 'hello world' in textarea, got %q", m2.textarea.Value())
+	}
+	if len(m2.pendingAttachments) != 0 {
+		t.Errorf("expected 0 pending attachments for plain text, got %d", len(m2.pendingAttachments))
+	}
+}
+
+func TestDelegateKeyToTextarea_TextMentioningPath_InsertsInTextarea(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+
+	// Paste a sentence that mentions a path (not a pure path paste).
+	msg := tea.KeyMsg(tea.Key{
+		Type:  tea.KeyRunes,
+		Runes: []rune("veja /etc/passwd para referência"),
+		Paste: true,
+	})
+	result, _ := m.delegateKeyToTextarea(msg)
+	m2 := result.(Model)
+
+	// Should be inserted into the textarea (it has spaces, not a deliberate path).
+	if m2.textarea.Value() != "veja /etc/passwd para referência" {
+		t.Errorf("expected full sentence in textarea, got %q", m2.textarea.Value())
+	}
+	if len(m2.pendingAttachments) != 0 {
+		t.Errorf("expected 0 pending attachments, got %d", len(m2.pendingAttachments))
+	}
+}
+
+func TestDelegateKeyToTextarea_ImagePaste_StillHandledByImageFlow(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "photo.png")
+	if err := os.WriteFile(path, testPNG(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	msg := tea.KeyMsg(tea.Key{
+		Type:  tea.KeyRunes,
+		Runes: []rune(path),
+		Paste: true,
+	})
+	result, _ := m.delegateKeyToTextarea(msg)
+	m2 := result.(Model)
+
+	// Image should be attached (existing image flow), not inserted as text.
+	if len(m2.pendingImages) != 1 {
+		t.Fatalf("expected 1 pending image after paste, got %d", len(m2.pendingImages))
+	}
+	if m2.pendingImages[0].name != "photo.png" {
+		t.Errorf("image name = %q, want 'photo.png'", m2.pendingImages[0].name)
+	}
+	if m2.textarea.Value() != "" {
+		t.Errorf("expected empty textarea for image paste, got %q", m2.textarea.Value())
+	}
+}
+
+func TestDelegateKeyToTextarea_DocumentPaste_WithQuotedEscapedSpaces_Attaches(t *testing.T) {
+	m := NewModel("/tmp/test.sock")
+
+	dir := t.TempDir()
+	// Create a file within a directory with spaces.
+	subdir := filepath.Join(dir, "My Folder")
+	if err := os.MkdirAll(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(subdir, "My Doc.pdf")
+	if err := os.WriteFile(path, testDocContent(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The original text has escaped spaces (as macOS Finder would present it).
+	escapedPath := strings.ReplaceAll(path, " ", "\\ ")
+	msg := tea.KeyMsg(tea.Key{
+		Type:  tea.KeyRunes,
+		Runes: []rune(escapedPath),
+		Paste: true,
+	})
+	result, _ := m.delegateKeyToTextarea(msg)
+	m2 := result.(Model)
+
+	// Should attach (not insert into textarea).
+	if len(m2.pendingAttachments) != 1 {
+		t.Fatalf("expected 1 pending attachment for escaped-space path, got %d", len(m2.pendingAttachments))
+	}
+	if m2.pendingAttachments[0].name != "My Doc.pdf" {
+		t.Errorf("attachment name = %q, want 'My Doc.pdf'", m2.pendingAttachments[0].name)
+	}
+	if m2.textarea.Value() != "" {
+		t.Errorf("expected empty textarea, got %q", m2.textarea.Value())
 	}
 }
 

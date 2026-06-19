@@ -736,14 +736,22 @@ func (m Model) delegateKeyToTextarea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 		// Check if this is a paste event with a document path (drag-and-drop).
-		if name, docPath, ok := tryParseAsDocumentPath(text); ok {
-			errMsg := m.attachDocumentFromPath(docPath)
+		if looksLikeFilePath(text) {
+			// Normalize the text before passing to attachDocumentFromPath
+			// (strips quotes, file:// prefix, unescapes spaces).
+			normalized := normalizeImagePath(strings.TrimSpace(text))
+			errMsg := m.attachDocumentFromPath(normalized)
 			if errMsg != "" {
 				m.messages = append(m.messages, chatMessage{
 					Sender: "⚠️",
 					Text:   errMsg,
 				})
 			} else {
+				// Use the actual filename from the pending attachment.
+				name := filepath.Base(normalized)
+				if len(m.pendingAttachments) > 0 {
+					name = m.pendingAttachments[len(m.pendingAttachments)-1].name
+				}
 				m.messages = append(m.messages, chatMessage{
 					Sender: "📎",
 					Text:   fmt.Sprintf("Document attached: %s", name),
