@@ -110,6 +110,10 @@ type Model struct {
 	// Pending image attachments (cleared after send)
 	pendingImages           []pendingImage
 	submittedTempImagePaths []string
+
+	// Project state panel
+	projectPanelOpen bool
+	projectState     *ipc.ProjectStatePayload
 }
 
 // NewModel creates a new TUI model with the given socket path.
@@ -193,6 +197,53 @@ func runHealthCheck(client *ipc.Client) tea.Cmd {
 		}
 		return healthCheckResultMsg{latency: time.Since(started)}
 	}
+}
+
+// projectStatePollInterval is the delay between automatic project state polls
+// while the panel is open.
+const projectStatePollInterval = 30 * time.Second
+
+// scheduleProjectStatePoll returns a command that fires a poll tick after
+// the configured interval.
+func scheduleProjectStatePoll() tea.Cmd {
+	return tea.Tick(projectStatePollInterval, func(time.Time) tea.Msg {
+		return projectStatePollTickMsg{}
+	})
+}
+
+// fetchTUIProjectState returns a command that requests the full project state
+// snapshot from the daemon for the project panel (ctrl+p).
+func fetchTUIProjectState(client *ipc.Client, chatID int64) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := contextWithTimeout(3 * time.Second)
+		defer cancel()
+		events, err := client.SendAndWait(ctx, ipc.IPCMessage{
+			Type:      ipc.MsgTypeProjectState,
+			ChatID:    chatID,
+			ThreadID:  0,
+			UserID:    int64(os.Getuid()),
+			RequestID: fmt.Sprintf("tui-project-state-%d", time.Now().UnixNano()),
+		})
+		if err != nil {
+			return tuiProjectStateMsg{err: err}
+		}
+		return projectStateFromEvents(events)
+	}
+}
+
+// projectStateFromEvents parses the project state payload from IPC events.
+func projectStateFromEvents(events []ipc.IPCEvent) tuiProjectStateMsg {
+	for _, ev := range events {
+		if ev.Type != ipc.EventTypeProjectState || ev.Body == "" {
+			continue
+		}
+		var payload ipc.ProjectStatePayload
+		if err := json.Unmarshal([]byte(ev.Body), &payload); err != nil {
+			return tuiProjectStateMsg{err: fmt.Errorf("parse project state: %w", err)}
+		}
+		return tuiProjectStateMsg{state: &payload}
+	}
+	return tuiProjectStateMsg{err: fmt.Errorf("no project state event in response")}
 }
 
 // fetchTUIStatus returns a command that asks the daemon for lightweight

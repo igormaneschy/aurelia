@@ -1356,11 +1356,11 @@ func TestModel_ChatViewStartsWithTopMargin(t *testing.T) {
 func TestModel_StatusBarUsesCompactShortcuts(t *testing.T) {
 	m := NewModel("/tmp/test.sock")
 	m.state = stateChat
-	m.width = 150
+	m.width = 175
 
-	status := m.renderStatusBar()
+	status := stripANSIForTest(m.renderStatusBar())
 
-	for _, want := range []string{"↵ send", "alt+enter newline", "esc cancel", "⌃L clear", "tab sidebar", "⌃C quit"} {
+	for _, want := range []string{"↵ send", "alt+enter newline", "esc cancel", "⌃L clear", "⌃P project", "tab sidebar", "⌃C quit"} {
 		if !strings.Contains(status, want) {
 			t.Errorf("expected status bar to contain %q, got %q", want, status)
 		}
@@ -1381,6 +1381,9 @@ func TestModel_StatusBarDropsItemsOnNarrowTerminal(t *testing.T) {
 	if strings.Contains(status, "tab sidebar") {
 		t.Errorf("expected 'tab sidebar' to be dropped on width=50, got %q", status)
 	}
+	if strings.Contains(status, "⌃P project") {
+		t.Errorf("expected '⌃P project' to be dropped on width=50, got %q", status)
+	}
 	// High-priority items should remain.
 	if !strings.Contains(status, "↵ send") {
 		t.Errorf("expected '↵ send' to remain on width=50, got %q", status)
@@ -1388,7 +1391,7 @@ func TestModel_StatusBarDropsItemsOnNarrowTerminal(t *testing.T) {
 }
 
 func TestModel_StatusBarNeverWraps(t *testing.T) {
-	for _, width := range []int{40, 60, 80, 100, 120, 150} {
+	for _, width := range []int{40, 60, 80, 100, 120, 150, 175} {
 		m := NewModel("/tmp/test.sock")
 		m.state = stateChat
 		m.width = width
@@ -1646,3 +1649,289 @@ func TestModel_ChatViewDoesNotExceedVeryShortTerminalHeight(t *testing.T) {
 		}
 	}
 }
+
+// ---- Project Panel Tests ----
+
+func TestModel_CtrlPTogglesProjectPanel(t *testing.T) {
+	m := Model{
+		state:            stateChat,
+		ready:            true,
+		projectPanelOpen: false,
+	}
+
+	// Toggle on.
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m2 := updated.(Model)
+
+	if !m2.projectPanelOpen {
+		t.Error("expected projectPanelOpen=true after ctrl+p")
+	}
+	if cmd == nil {
+		t.Fatal("expected non-nil command (fetch state + poll)")
+	}
+
+	// Toggle off.
+	updated, cmd = m2.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	m3 := updated.(Model)
+
+	if m3.projectPanelOpen {
+		t.Error("expected projectPanelOpen=false after second ctrl+p")
+	}
+	if cmd != nil {
+		t.Fatal("expected nil command when closing panel")
+	}
+}
+
+func TestModel_ProjectStateMsgUpdatesState(t *testing.T) {
+	m := Model{
+		state:        stateChat,
+		ready:        true,
+		projectState: nil,
+	}
+
+	ps := &ipc.ProjectStatePayload{
+		CWD:           "/Users/igor/dev/aurelia",
+		BindingSource: "manual",
+		ActiveAgent:   "coder",
+		Model:         "claude-sonnet-4-6",
+		BridgeStatus:  "online",
+	}
+
+	updated, cmd := m.Update(tuiProjectStateMsg{state: ps})
+	m2 := updated.(Model)
+
+	if m2.projectState == nil {
+		t.Fatal("expected projectState to be set")
+	}
+	if m2.projectState.CWD != "/Users/igor/dev/aurelia" {
+		t.Errorf("expected CWD, got %q", m2.projectState.CWD)
+	}
+	if m2.projectState.ActiveAgent != "coder" {
+		t.Errorf("expected ActiveAgent=coder, got %q", m2.projectState.ActiveAgent)
+	}
+	if cmd != nil {
+		t.Fatal("expected nil command (no poll since panel is closed)")
+	}
+}
+
+func TestModel_ProjectStateErrorDoesNotPanic(t *testing.T) {
+	m := Model{
+		state:        stateChat,
+		ready:        true,
+		projectState: nil,
+	}
+
+	updated, _ := m.Update(tuiProjectStateMsg{err: assertError("timeout")})
+	m2 := updated.(Model)
+
+	if m2.projectState != nil {
+		t.Error("expected projectState to remain nil on error")
+	}
+}
+
+func TestModel_ProjectStateMsgWithOpenPanelSchedulesPoll(t *testing.T) {
+	m := Model{
+		state:            stateChat,
+		ready:            true,
+		projectPanelOpen: true,
+		projectState:     nil,
+	}
+
+	ps := &ipc.ProjectStatePayload{
+		CWD:           "/tmp/test",
+		BindingSource: "manual",
+		ActiveAgent:   "general",
+		Model:         "PI default",
+		BridgeStatus:  "offline",
+	}
+
+	updated, cmd := m.Update(tuiProjectStateMsg{state: ps})
+	m2 := updated.(Model)
+
+	if m2.projectState == nil {
+		t.Fatal("expected projectState to be set")
+	}
+	if cmd == nil {
+		t.Fatal("expected poll command since panel is open")
+	}
+}
+
+func TestModel_ProjectPanelRendersFields(t *testing.T) {
+	m := Model{
+		state:            stateChat,
+		ready:            true,
+		projectPanelOpen: true,
+		projectState: &ipc.ProjectStatePayload{
+			CWD:           "/Users/igor/dev/aurelia",
+			BindingSource: "manual",
+			ActiveAgent:   "coder",
+			Model:         "claude-sonnet-4-6",
+			BridgeStatus:  "online",
+			MemoryLayers: []ipc.ProjectStateMemoryLayer{
+				{Name: "Global", Scope: "global", Exists: true, FileCount: 14},
+				{Name: "Team", Scope: "team", Exists: true, FileCount: 8},
+			},
+			CheckpointLayer: "cwd_overlay",
+		},
+		messages: []chatMessage{{Sender: "Igor", Text: "hello"}},
+		width:    80,
+		height:   40,
+	}
+
+	panel := m.renderProjectPanel()
+	plain := stripANSIForTest(panel)
+
+	for _, want := range []string{"Project State", "/Users/igor/dev/aurelia", "manual", "coder", "claude-sonnet-4-6", "online", "Global", "Team", "14 files", "8 files"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("expected panel to contain %q, got:\n%s", want, plain)
+		}
+	}
+}
+
+func TestModel_ProjectPanelRendersNoCWD(t *testing.T) {
+	m := Model{
+		state:            stateChat,
+		ready:            true,
+		projectPanelOpen: true,
+		projectState: &ipc.ProjectStatePayload{
+			CWD:           "",
+			BindingSource: "none",
+			ActiveAgent:   "general",
+			Model:         "PI default",
+			BridgeStatus:  "offline",
+		},
+		width:  80,
+		height: 40,
+	}
+
+	panel := m.renderProjectPanel()
+	plain := stripANSIForTest(panel)
+
+	for _, want := range []string{"not set", "none", "offline", "general"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("expected panel to contain %q, got:\n%s", want, plain)
+		}
+	}
+}
+
+func TestModel_ProjectPanelRendersInheritedBinding(t *testing.T) {
+	m := Model{
+		state:            stateChat,
+		ready:            true,
+		projectPanelOpen: true,
+		projectState: &ipc.ProjectStatePayload{
+			CWD:           "/Users/igor/dev/shared",
+			BindingSource: "inherited",
+			BindingFrom:   "-9000005:0",
+			ActiveAgent:   "architect",
+			Model:         "claude-opus-4-0",
+			BridgeStatus:  "online",
+		},
+		width:  80,
+		height: 40,
+	}
+
+	panel := m.renderProjectPanel()
+	plain := stripANSIForTest(panel)
+
+	for _, want := range []string{"inherited", "-9000005:0", "architect"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("expected panel to contain %q, got:\n%s", want, plain)
+		}
+	}
+}
+
+func TestModel_ProjectPanelRendersLatestRun(t *testing.T) {
+	started := time.Date(2026, 6, 19, 10, 30, 0, 0, time.UTC)
+	m := Model{
+		state:            stateChat,
+		ready:            true,
+		projectPanelOpen: true,
+		projectState: &ipc.ProjectStatePayload{
+			CWD:           "/tmp/test",
+			BindingSource: "manual",
+			ActiveAgent:   "general",
+			Model:         "PI default",
+			BridgeStatus:  "online",
+			LatestRun: &ipc.ProjectStateRun{
+				Status:     "completed",
+				Checkpoint: "Refactoring done",
+				AgentName:  "coder",
+				StartedAt:  started,
+				DurationMs: 3500,
+			},
+		},
+		width:  80,
+		height: 40,
+	}
+
+	panel := m.renderProjectPanel()
+	plain := stripANSIForTest(panel)
+
+	for _, want := range []string{"completed", "Refactoring done", "coder", "3.5s"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("expected panel to contain %q, got:\n%s", want, plain)
+		}
+	}
+}
+
+func TestModel_ProjectStatePollTickWhilePanelClosedDoesNothing(t *testing.T) {
+	m := Model{
+		state:            stateChat,
+		ready:            true,
+		projectPanelOpen: false,
+	}
+
+	updated, cmd := m.Update(projectStatePollTickMsg{})
+	m2 := updated.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected nil command when panel is closed")
+	}
+	if m2.projectPanelOpen {
+		t.Error("expected panel to remain closed")
+	}
+}
+
+func TestModel_ProjectStatePollTickWhileWaitingDoesNothing(t *testing.T) {
+	m := Model{
+		state:            stateChat,
+		ready:            true,
+		projectPanelOpen: true,
+		waiting:          true,
+	}
+
+	updated, cmd := m.Update(projectStatePollTickMsg{})
+	m2 := updated.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected nil command when already waiting")
+	}
+	if !m2.projectPanelOpen {
+		t.Error("expected panel to remain open")
+	}
+}
+
+func TestModel_ProjectStatePollTickFetchesState(t *testing.T) {
+	m := Model{
+		state:            stateChat,
+		ready:            true,
+		projectPanelOpen: true,
+		waiting:          false,
+	}
+
+	updated, cmd := m.Update(projectStatePollTickMsg{})
+	m2 := updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected non-nil command when panel is open and not waiting")
+	}
+	if !m2.projectPanelOpen {
+		t.Error("expected panel to remain open")
+	}
+}
+
+// assertError is a simple error for test assertions.
+type assertError string
+
+func (e assertError) Error() string { return string(e) }
