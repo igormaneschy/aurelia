@@ -2,17 +2,20 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
+	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/session"
 	"github.com/igormaneschy/aurelia/internal/tuisessions"
@@ -716,5 +719,230 @@ func TestTUIHandler_UserIDFallbackToGetuid(t *testing.T) {
 	// Just verify it works — the specific UID assertion is in the spoofed test.
 	if te.events[1].Type != "message" {
 		t.Errorf("event[1] = %q, want message", te.events[1].Type)
+	}
+}
+
+func TestTUIHandler_ProjectStateNoBindingReturnsNone(t *testing.T) {
+	a, ctx, cleanup := testApp(t)
+	defer cleanup()
+
+	handler := makeTUIHandler(a)
+	te := &testEmit{}
+
+	err := handler(ctx, ipc.IPCMessage{
+		Type:      ipc.MsgTypeProjectState,
+		RequestID: "proj-test-1",
+	}, te.emit)
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	if te.count() != 3 {
+		t.Fatalf("expected 3 events (ack, project_state, stream_end), got %d", te.count())
+	}
+	if te.events[0].Type != ipc.EventTypeAck {
+		t.Errorf("event[0] = %q, want ack", te.events[0].Type)
+	}
+	if te.events[1].Type != ipc.EventTypeProjectState {
+		t.Fatalf("event[1] = %q, want project_state", te.events[1].Type)
+	}
+	if te.events[1].Body == "" {
+		t.Fatal("expected non-empty Body")
+	}
+	if te.events[2].Type != ipc.EventTypeStreamEnd {
+		t.Fatalf("event[2] = %q, want stream_end", te.events[2].Type)
+	}
+
+	var payload ipc.ProjectStatePayload
+	if err := json.Unmarshal([]byte(te.events[1].Body), &payload); err != nil {
+		t.Fatalf("unmarshal project state: %v", err)
+	}
+	if payload.BindingSource != "none" {
+		t.Errorf("expected binding_source=none, got %q", payload.BindingSource)
+	}
+	if payload.CWD != "" {
+		t.Errorf("expected empty cwd, got %q", payload.CWD)
+	}
+	if payload.ActiveAgent == "" {
+		t.Error("expected non-empty active_agent")
+	}
+	if payload.BridgeStatus == "" {
+		t.Error("expected non-empty bridge_status")
+	}
+	if payload.Model == "" {
+		t.Error("expected non-empty model")
+	}
+	if payload.MemoryLayers == nil {
+		t.Error("expected memory_layers field (may be empty)")
+	}
+}
+
+func TestTUIHandler_ProjectStateWithCwdReturnsManualBinding(t *testing.T) {
+	a, ctx, cleanup := testApp(t)
+	defer cleanup()
+
+	validDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+
+	// Set up a manual binding first.
+	handler := makeTUIHandler(a)
+	te := &testEmit{}
+	_ = handler(ctx, ipc.IPCMessage{
+		Type: "command",
+		Text: "/cwd " + validDir,
+	}, te.emit)
+
+	// Now fetch project state.
+	te2 := &testEmit{}
+	err = handler(ctx, ipc.IPCMessage{
+		Type:      ipc.MsgTypeProjectState,
+		RequestID: "proj-test-2",
+	}, te2.emit)
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+
+	if te2.count() != 3 {
+		t.Fatalf("expected 3 events (ack, project_state, stream_end), got %d", te2.count())
+	}
+	if te2.events[2].Type != ipc.EventTypeStreamEnd {
+		t.Fatalf("event[2] = %q, want stream_end", te2.events[2].Type)
+	}
+
+	var payload ipc.ProjectStatePayload
+	if err := json.Unmarshal([]byte(te2.events[1].Body), &payload); err != nil {
+		t.Fatalf("unmarshal project state: %v", err)
+	}
+	if payload.BindingSource != "manual" {
+		t.Errorf("expected binding_source=manual, got %q", payload.BindingSource)
+	}
+	if payload.CWD != validDir {
+		t.Errorf("expected cwd=%q, got %q", validDir, payload.CWD)
+	}
+}
+
+func TestTUIHandler_ProjectStateCheckpointTruncated(t *testing.T) {
+	dir := t.TempDir()
+	rl, err := runlog.NewSQLiteStore(filepath.Join(dir, "runlog.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer rl.Close()
+
+	a, ctx, cleanup := testApp(t)
+	defer cleanup()
+	a.runLog = rl
+
+	// Insert a run record with a checkpoint > 200 runes (no secrets).
+	longCheckpoint := "Starting round " + strings.Repeat("x", 250)
+	if utf8.RuneCountInString(longCheckpoint) <= 200 {
+		t.Fatal("test precondition failed: checkpoint must be > 200 runes")
+	}
+	rec := runlog.RunRecord{
+		RunID:      "trunc-test-1",
+		ChatID:     ipc.ReservedTUIChatID,
+		ThreadID:   0,
+		Status:     runlog.RunCompleted,
+		Checkpoint: longCheckpoint,
+		StartedAt:  time.Now().Add(-1 * time.Minute),
+	}
+	if err := rl.Start(ctx, rec); err != nil {
+		t.Fatalf("rl.Start: %v", err)
+	}
+
+	handler := makeTUIHandler(a)
+	te := &testEmit{}
+
+	err = handler(ctx, ipc.IPCMessage{
+		Type:      ipc.MsgTypeProjectState,
+		RequestID: "proj-trunc",
+	}, te.emit)
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if te.count() != 3 {
+		t.Fatalf("expected 3 events (ack, project_state, stream_end), got %d", te.count())
+	}
+	if te.events[1].Type != ipc.EventTypeProjectState {
+		t.Fatalf("event[1] = %q, want project_state", te.events[1].Type)
+	}
+	var payload ipc.ProjectStatePayload
+	if err := json.Unmarshal([]byte(te.events[1].Body), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload.LatestRun == nil {
+		t.Fatal("expected LatestRun to be present")
+	}
+	cp := payload.LatestRun.Checkpoint
+	if !strings.HasSuffix(cp, "...") {
+		t.Errorf("checkpoint should end with '...', got %q", cp)
+	}
+	maxRunes := 200 + 3 // 200 content + "..."
+	if runeCount := utf8.RuneCountInString(cp); runeCount > maxRunes {
+		t.Errorf("checkpoint too long: %d runes, want <= %d", runeCount, maxRunes)
+	}
+	if strings.Contains(cp, "[API_KEY_REDACTED]") {
+		t.Errorf("no redaction marker expected in truncation-only checkpoint, got %q", cp)
+	}
+}
+
+func TestTUIHandler_ProjectStateCheckpointRedacted(t *testing.T) {
+	dir := t.TempDir()
+	rl, err := runlog.NewSQLiteStore(filepath.Join(dir, "runlog.db"))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	defer rl.Close()
+
+	a, ctx, cleanup := testApp(t)
+	defer cleanup()
+	a.runLog = rl
+
+	// Insert a run record with a secret in the checkpoint.
+	rec := runlog.RunRecord{
+		RunID:      "redact-test-1",
+		ChatID:     ipc.ReservedTUIChatID,
+		ThreadID:   0,
+		Status:     runlog.RunCompleted,
+		Checkpoint: "System checkpoint: sk-ant-abc123def456ghi789jkl --project finalized",
+		StartedAt:  time.Now().Add(-1 * time.Minute),
+	}
+	if err := rl.Start(ctx, rec); err != nil {
+		t.Fatalf("rl.Start: %v", err)
+	}
+
+	handler := makeTUIHandler(a)
+	te := &testEmit{}
+
+	err = handler(ctx, ipc.IPCMessage{
+		Type:      ipc.MsgTypeProjectState,
+		RequestID: "proj-sec",
+	}, te.emit)
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if te.count() != 3 {
+		t.Fatalf("expected 3 events (ack, project_state, stream_end), got %d", te.count())
+	}
+	if te.events[1].Type != ipc.EventTypeProjectState {
+		t.Fatalf("event[1] = %q, want project_state", te.events[1].Type)
+	}
+	if te.events[2].Type != ipc.EventTypeStreamEnd {
+		t.Fatalf("event[2] = %q, want stream_end", te.events[2].Type)
+	}
+	var payload ipc.ProjectStatePayload
+	if err := json.Unmarshal([]byte(te.events[1].Body), &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload.LatestRun == nil {
+		t.Fatal("expected LatestRun to be present")
+	}
+	if strings.Contains(payload.LatestRun.Checkpoint, "sk-ant-") {
+		t.Errorf("checkpoint contains unredacted secret pattern: %q", payload.LatestRun.Checkpoint)
+	}
+	if !strings.Contains(payload.LatestRun.Checkpoint, "[API_KEY_REDACTED]") {
+		t.Errorf("expected [API_KEY_REDACTED] in checkpoint, got %q", payload.LatestRun.Checkpoint)
 	}
 }

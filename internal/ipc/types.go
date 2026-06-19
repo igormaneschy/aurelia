@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // DefaultSocketName is the default basename for the Unix socket file.
@@ -71,6 +72,8 @@ const (
 	MsgTypeSessionOpen = "session_open"
 	// MsgTypeSessionDelete removes a TUI local session.
 	MsgTypeSessionDelete = "session_delete"
+	// MsgTypeProjectState requests a full project state snapshot for the panel.
+	MsgTypeProjectState = "project_state"
 )
 
 // IPC event types sent from server to client.
@@ -95,6 +98,8 @@ const (
 	EventTypeSessionOpened = "session_opened"
 	// EventTypeSessionDeleted confirms a session was deleted.
 	EventTypeSessionDeleted = "session_deleted"
+	// EventTypeProjectState returns the project state snapshot JSON in Body.
+	EventTypeProjectState = "project_state"
 )
 
 // MaxImageCount is the maximum number of images per message.
@@ -136,4 +141,34 @@ type IPCEvent struct {
 	RequestID string `json:"request_id,omitempty"`
 	// Error message, present when Type is EventTypeError.
 	Error string `json:"error,omitempty"`
+}
+
+// ProjectStatePayload is the JSON payload for EventTypeProjectState.
+type ProjectStatePayload struct {
+	CWD             string                    `json:"cwd"`
+	BindingSource   string                    `json:"binding_source"`
+	BindingFrom     string                    `json:"binding_from,omitempty"`
+	ActiveAgent     string                    `json:"active_agent"`
+	Model           string                    `json:"model"`
+	BridgeStatus    string                    `json:"bridge_status"`
+	MemoryLayers    []ProjectStateMemoryLayer `json:"memory_layers"`
+	CheckpointLayer string                    `json:"checkpoint_layer"`
+	LatestRun       *ProjectStateRun          `json:"latest_run,omitempty"`
+}
+
+// ProjectStateMemoryLayer describes one memory layer in the project state.
+type ProjectStateMemoryLayer struct {
+	Name      string `json:"name"`
+	Scope     string `json:"scope"`
+	Exists    bool   `json:"exists"`
+	FileCount int    `json:"file_count"`
+}
+
+// ProjectStateRun describes the latest run in the project state.
+type ProjectStateRun struct {
+	Status     string    `json:"status"`
+	Checkpoint string    `json:"checkpoint,omitempty"`
+	AgentName  string    `json:"agent_name,omitempty"`
+	StartedAt  time.Time `json:"started_at"`
+	DurationMs int64     `json:"duration_ms,omitempty"`
 }

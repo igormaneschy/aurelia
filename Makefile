@@ -10,7 +10,11 @@ LOG_DIR       := $(HOME)/.aurelia/logs
 STDERR_LOG    := $(LOG_DIR)/aurelia.stderr.log
 STDOUT_LOG    := $(LOG_DIR)/aurelia.stdout.log
 
-.PHONY: help build test race vet lint sec cover check bridge install install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
+TUI_BINARY    := $(HOME)/.aurelia/bin/aurelia-tui
+TUI_PKG       := ./cmd/aurelia-tui
+TUI_TMP       := $(TUI_BINARY).new
+
+.PHONY: help build test race vet lint sec cover check bridge install tui install-tui install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
 
 help:
 	@echo "Common targets:"
@@ -23,6 +27,7 @@ help:
 	@echo "  make sec              Run gosec and govulncheck"
 	@echo "  make check            Run lint, security, tests, and vet"
 	@echo "  make bridge           Rebuild the TS bridge bundle"
+	@echo "  make tui              Compile the TUI binary to $(TUI_BINARY)"
 	@echo ""
 	@echo "Service targets:"
 	@echo "  make install-service     Auto-detect OS and install service"
@@ -54,6 +59,18 @@ install:
 	go build -o $(TMP_BINARY) $(PKG)
 	mv $(TMP_BINARY) $(BINARY)
 	$(MAKE) sign
+
+# --- TUI Build ---
+
+tui:
+	mkdir -p $(dir $(TUI_BINARY))
+	go build -o $(TUI_BINARY) $(TUI_PKG)
+
+# Atomic build: same .new → mv pattern as install to avoid half-written files.
+install-tui:
+	mkdir -p $(dir $(TUI_BINARY))
+	go build -o $(TUI_TMP) $(TUI_PKG)
+	mv $(TUI_TMP) $(TUI_BINARY)
 
 test:
 	go test ./... -short -count=1
@@ -101,13 +118,13 @@ install-service-linux:
 	./scripts/install-systemd.sh
 
 # Atomic deploy: build + swap + kickstart. Use this for every change.
-deploy: install
+deploy: install install-tui
 	@if launchctl print $(SERVICE) >/dev/null 2>&1; then \
 		launchctl kickstart -k $(SERVICE); \
-		echo "deployed: $(BINARY) (service kicked)"; \
+		echo "deployed: $(BINARY) and $(TUI_BINARY) (service kicked)"; \
 	else \
 		echo "warning: service not loaded — run 'make install-service' first"; \
-		echo "binary updated at: $(BINARY)"; \
+		echo "binaries updated at: $(BINARY) and $(TUI_BINARY)"; \
 	fi
 
 restart:

@@ -167,13 +167,21 @@ func (m Model) chatView() string {
 		body = m.renderMainPane(mainContentHeight, m.width)
 	}
 
-	return lipgloss.JoinVertical(
+	full := lipgloss.JoinVertical(
 		lipgloss.Left,
 		m.renderTopMargin(),
 		body,
 		inputBar,
 		statusBar,
 	)
+
+	// Overlay project panel when open.
+	if m.projectPanelOpen {
+		panel := m.renderProjectPanel()
+		return m.overlayPanel(full, panel)
+	}
+
+	return full
 }
 
 func (m Model) renderTopMargin() string {
@@ -285,10 +293,11 @@ func (m Model) renderStatusBar() string {
 		{label: fmt.Sprintf("%s newline", newlineFallbackKey), min: 48},
 		{label: "pg scroll", min: 64},
 		{label: "esc cancel", min: 82},
-		{label: "⌃L clear", min: 96},
-		{label: "⌃S/f2 sessions", min: 108},
-		{label: "tab sidebar", min: 124},
-		{label: "⌃C quit", min: 138},
+		{label: "⌃L clear", min: 98},
+		{label: "⌃P project", min: 114},
+		{label: "⌃S/f2 sessions", min: 136},
+		{label: "tab sidebar", min: 156},
+		{label: "⌃C quit", min: 172},
 	}
 
 	parts := []string{}
@@ -582,12 +591,165 @@ func maxInt(a, b int) int {
 	return b
 }
 
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 func truncateMiddle(value string, width int) string {
 	if width < 8 || len(value) <= width {
 		return value
 	}
 	keep := (width - 1) / 2
 	return value[:keep] + "…" + value[len(value)-keep:]
+}
+
+// renderProjectPanel renders the project state overlay panel.
+func (m Model) renderProjectPanel() string {
+	state := m.projectState
+
+	var b strings.Builder
+	b.WriteString(headerTitleStyle.Render("Project State"))
+	b.WriteString("\n\n")
+
+	if state == nil {
+		b.WriteString(sidebarMutedStyle.Render("Loading..."))
+		return b.String()
+	}
+
+	// CWD
+	cwdDisplay := state.CWD
+	if cwdDisplay == "" {
+		cwdDisplay = sidebarMutedStyle.Render("not set")
+	} else {
+		cwdDisplay = truncateMiddle(state.CWD, 50)
+	}
+	fmt.Fprintf(&b, "📂 Path: %s\n", cwdDisplay)
+
+	// Binding source
+	b.WriteString("Binding: ")
+	switch state.BindingSource {
+	case "manual":
+		b.WriteString("manual")
+	case "inherited":
+		if state.BindingFrom != "" {
+			fmt.Fprintf(&b, "inherited (from %s)", state.BindingFrom)
+		} else {
+			b.WriteString("inherited")
+		}
+	default:
+		b.WriteString("none")
+	}
+	b.WriteString("\n")
+
+	// Active agent
+	fmt.Fprintf(&b, "🤖 Agent: %s\n", state.ActiveAgent)
+
+	// Model
+	fmt.Fprintf(&b, "⚙️ Model: %s\n", state.Model)
+
+	// Bridge status
+	bridgeLabel := state.BridgeStatus
+	if bridgeLabel == "online" {
+		bridgeLabel = statusReadyStyle.Render("online")
+	} else {
+		bridgeLabel = statusErrorStyle.Render("offline")
+	}
+	fmt.Fprintf(&b, "🧠 Bridge: %s\n", bridgeLabel)
+
+	// Memory layers
+	if len(state.MemoryLayers) > 0 {
+		b.WriteString("\n")
+		b.WriteString(headerTitleStyle.Render("Memory"))
+		b.WriteString("\n")
+		for _, l := range state.MemoryLayers {
+			icon := "◯"
+			if l.Exists {
+				icon = "🟢"
+			}
+			fmt.Fprintf(&b, " %s %s: %d files\n", icon, l.Name, l.FileCount)
+		}
+		fmt.Fprintf(&b, " Checkpoint target: %s\n", state.CheckpointLayer)
+	} else {
+		b.WriteString("\nMemory: unavailable\n")
+	}
+
+	// Latest run
+	if state.LatestRun != nil {
+		b.WriteString("\n")
+		b.WriteString(headerTitleStyle.Render("Latest Run"))
+		b.WriteString("\n")
+		fmt.Fprintf(&b, " Status: %s\n", state.LatestRun.Status)
+		if state.LatestRun.AgentName != "" {
+			fmt.Fprintf(&b, " Agent: %s\n", state.LatestRun.AgentName)
+		}
+		if state.LatestRun.Checkpoint != "" {
+			fmt.Fprintf(&b, " Checkpoint: %s\n", state.LatestRun.Checkpoint)
+		}
+		fmt.Fprintf(&b, " Started: %s\n", state.LatestRun.StartedAt.Format("15:04 02/01/2006"))
+		if state.LatestRun.DurationMs > 0 {
+			fmt.Fprintf(&b, " Duration: %.1fs\n", float64(state.LatestRun.DurationMs)/1000)
+		}
+	}
+
+	// Footer hint
+	b.WriteString("\n")
+	b.WriteString(sidebarMutedStyle.Render("Ctrl+P to close"))
+
+	return b.String()
+}
+
+// overlayPanel renders the full view with a centered panel overlay on top of
+// the background chat view. The panel replaces background rows line-by-line so
+// the chat remains visible above, below, and to the sides of the overlay.
+func (m Model) overlayPanel(bg, panel string) string {
+	panelWidth := maxInt(50, minInt(m.width-8, 70))
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("205")).
+		Padding(1, 2).
+		Width(panelWidth).
+		Render(panel)
+
+	bgLines := strings.Split(bg, "\n")
+	panelLines := strings.Split(box, "\n")
+
+	// Vertically center the panel in the background.
+	startRow := (len(bgLines) - len(panelLines)) / 2
+	if startRow < 0 {
+		startRow = 0
+	}
+	// Horizontally center the box.
+	boxWidth := lipgloss.Width(box)
+	startCol := (m.width - boxWidth) / 2
+	if startCol < 0 {
+		startCol = 0
+	}
+
+	var out []string
+	for i, line := range bgLines {
+		if i >= startRow && i-startRow < len(panelLines) {
+			pl := panelLines[i-startRow]
+			pw := lipgloss.Width(pl)
+			// Build the overlay line: left padding + panel line + right padding.
+			var sb strings.Builder
+			if startCol > 0 {
+				sb.WriteString(strings.Repeat(" ", startCol))
+			}
+			sb.WriteString(pl)
+			rightPad := m.width - startCol - pw
+			if rightPad > 0 {
+				sb.WriteString(strings.Repeat(" ", rightPad))
+			}
+			out = append(out, sb.String())
+		} else {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
 }
 
 // safeSessionLabel strips terminal-control characters from a session name

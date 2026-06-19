@@ -96,6 +96,16 @@ type tuiSessionInfo struct {
 	Name   string
 }
 
+// tuiProjectStateMsg carries the project state panel data from the daemon.
+type tuiProjectStateMsg struct {
+	state *ipc.ProjectStatePayload
+	err   error
+}
+
+// projectStatePollTickMsg triggers a periodic poll of project state while the
+// panel is open.
+type projectStatePollTickMsg struct{}
+
 // contextWithTimeout is a test-accessible timeout helper.
 var contextWithTimeout = func(d time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), d)

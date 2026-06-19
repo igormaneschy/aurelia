@@ -2,15 +2,18 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/ipc"
+	"github.com/igormaneschy/aurelia/internal/memoryux"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/pkg/images"
 	"github.com/igormaneschy/aurelia/internal/pipeline"
@@ -182,6 +185,9 @@ func makeTUIHandler(a *app) func(context.Context, ipc.IPCMessage, func(ipc.IPCEv
 			return handleTUISessionOpen(ctx, a, msg, emit)
 		case ipc.MsgTypeSessionDelete:
 			return handleTUISessionDelete(ctx, a, msg, emit)
+		case ipc.MsgTypeProjectState:
+			forceTUIIDs(&msg)
+			return handleTUIProjectState(ctx, a, msg, emit)
 		case ipc.MsgTypeSubscribe:
 			// Terminal error: subscribe not supported.
 			return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "subscribe not supported", RequestID: msg.RequestID})
@@ -255,6 +261,7 @@ Commands:
 - /img <path> — attach an image (png, jpg, gif, webp)
 
 Keyboard:
+- Ctrl+P — toggle project state panel
 - Ctrl+S or F2 — focus sidebar to navigate sessions
 - In sidebar: ↑↓ navigate, enter open, n new, d delete, esc exit
 - Esc — cancel the current response
@@ -478,4 +485,169 @@ func handleTUIStatus(ctx context.Context, a *app, chatID int64, threadID int, us
 	}
 
 	return b.String()
+}
+
+// handleTUIProjectState gathers project state data and emits a
+// EventTypeProjectState event. This is used by the TUI project panel (ctrl+p).
+func handleTUIProjectState(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
+	chatID, threadID, userID := msg.ChatID, int(msg.ThreadID), msg.UserID
+
+	payload := ipc.ProjectStatePayload{}
+
+	// Resolve binding (CWD + source).
+	fillTUIProjectBinding(ctx, a, chatID, threadID, &payload)
+
+	// Bridge status.
+	bridgeStatus := "offline"
+	if a.bridge != nil {
+		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		err := a.bridge.Ping(pingCtx)
+		cancel()
+		if err == nil {
+			bridgeStatus = "online"
+		}
+	}
+	payload.BridgeStatus = bridgeStatus
+
+	// Model.
+	if a.config != nil {
+		payload.Model = a.config.ModelDisplayName()
+	}
+
+	// Active agent via profile resolver.
+	fillTUIProjectAgent(a, userID, &payload)
+
+	// Memory status via memoryux.
+	fillTUIProjectMemory(ctx, a, chatID, threadID, payload.CWD, &payload)
+
+	// Latest run log entry.
+	fillTUIProjectRunLog(ctx, a, chatID, threadID, &payload)
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal project state: %w", err)
+	}
+
+	if err := emit(ipc.IPCEvent{
+		Type:      ipc.EventTypeProjectState,
+		Body:      string(body),
+		RequestID: msg.RequestID,
+	}); err != nil {
+		return err
+	}
+	return emit(ipc.IPCEvent{
+		Type:      ipc.EventTypeStreamEnd,
+		Done:      true,
+		RequestID: msg.RequestID,
+	})
+}
+
+// fillTUIProjectBinding populates payload CWD and binding source fields.
+func fillTUIProjectBinding(ctx context.Context, a *app, chatID int64, threadID int, payload *ipc.ProjectStatePayload) {
+	if a.bindings == nil {
+		payload.CWD = ""
+		payload.BindingSource = "none"
+		return
+	}
+	resolved, err := a.bindings.Resolve(ctx, projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID})
+	if err != nil || resolved == nil || resolved.Binding == nil {
+		payload.CWD = ""
+		payload.BindingSource = "none"
+		return
+	}
+	payload.CWD = resolved.Binding.CWD
+	if resolved.Inherited {
+		payload.BindingSource = "inherited"
+		if ipc.IsReservedTUIID(resolved.SourceKey.ChatID) {
+			payload.BindingFrom = "TUI session"
+		} else {
+			payload.BindingFrom = fmt.Sprintf("%d:%d", resolved.SourceKey.ChatID, resolved.SourceKey.ThreadID)
+		}
+	} else {
+		payload.BindingSource = "manual"
+	}
+}
+
+// fillTUIProjectAgent populates payload ActiveAgent using the profile resolver.
+func fillTUIProjectAgent(a *app, userID int64, payload *ipc.ProjectStatePayload) {
+	if a.bot == nil {
+		payload.ActiveAgent = "general"
+		return
+	}
+	resolver := a.bot.ProfileResolver()
+	if resolver == nil {
+		payload.ActiveAgent = "general"
+		return
+	}
+	// ResolveEffectiveForUser with empty text (no @mention) and isOwner=true
+	// for the TUI (all local users are trusted).
+	profile, _, err := resolver.ResolveEffectiveForUser("", "", true)
+	if err != nil || profile == nil {
+		payload.ActiveAgent = "general"
+		return
+	}
+	payload.ActiveAgent = profile.Name
+}
+
+// fillTUIProjectMemory populates payload memory layers and checkpoint layer.
+func fillTUIProjectMemory(ctx context.Context, a *app, chatID int64, threadID int, cwd string, payload *ipc.ProjectStatePayload) {
+	if a.resolver == nil {
+		return
+	}
+	memDir := a.resolver.Memory()
+	if memDir == "" {
+		return
+	}
+	svc := memoryux.New(memDir, a.resolver)
+	status, err := svc.Status(chatID, threadID, cwd)
+	if err != nil {
+		log.Printf("tui: project state memory status error: %v", err)
+		return
+	}
+	payload.CheckpointLayer = status.CheckpointLayer
+	payload.MemoryLayers = make([]ipc.ProjectStateMemoryLayer, 0, len(status.Layers))
+	for _, l := range status.Layers {
+		payload.MemoryLayers = append(payload.MemoryLayers, ipc.ProjectStateMemoryLayer{
+			Name:      l.Name,
+			Scope:     l.Scope,
+			Exists:    l.Exists,
+			FileCount: l.MarkdownFiles,
+		})
+	}
+}
+
+// fillTUIProjectRunLog populates payload latest run from the run log store.
+func fillTUIProjectRunLog(ctx context.Context, a *app, chatID int64, threadID int, payload *ipc.ProjectStatePayload) {
+	if a.runLog == nil {
+		return
+	}
+	rec, err := a.runLog.Latest(ctx, chatID, threadID)
+	if err != nil {
+		log.Printf("tui: project state runlog error: %v", err)
+		return
+	}
+	if rec == nil {
+		return
+	}
+	checkpoint := pipeline.RedactSecrets(rec.Checkpoint)
+	// Truncate to 200 runes after redaction (as required by contract).
+	if utf8.RuneCountInString(checkpoint) > 200 {
+		var b strings.Builder
+		count := 0
+		for _, r := range checkpoint {
+			if count >= 200 {
+				break
+			}
+			b.WriteRune(r)
+			count++
+		}
+		checkpoint = b.String() + "..."
+	}
+	payload.LatestRun = &ipc.ProjectStateRun{
+		Status:     string(rec.Status),
+		Checkpoint: checkpoint,
+		AgentName:  rec.AgentName,
+		StartedAt:  rec.StartedAt,
+		DurationMs: rec.DurationMs,
+	}
 }

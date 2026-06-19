@@ -306,6 +306,22 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, fetchTUISessions(m.ipcClient)
 
+	case tuiProjectStateMsg:
+		if msg.err == nil && msg.state != nil {
+			m.projectState = msg.state
+		}
+		// Schedule next poll if panel is still open.
+		if m.projectPanelOpen {
+			return m, scheduleProjectStatePoll()
+		}
+		return m, nil
+
+	case projectStatePollTickMsg:
+		if m.projectPanelOpen && !m.waiting {
+			return m, fetchTUIProjectState(m.ipcClient, m.activeSession)
+		}
+		return m, nil
+
 	case clipboardPasteMsg:
 		if msg.err != nil {
 			errText := msg.err.Error()
@@ -417,6 +433,16 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.String() == "ctrl+v":
 		// Paste image from clipboard.
 		return m, pasteFromClipboardCmd()
+
+	case isProjectPanelToggleKey(msg):
+		m.projectPanelOpen = !m.projectPanelOpen
+		if m.projectPanelOpen {
+			return m, tea.Batch(
+				fetchTUIProjectState(m.ipcClient, m.activeSession),
+				scheduleProjectStatePoll(),
+			)
+		}
+		return m, nil
 
 	case isSidebarToggleKey(msg):
 		m.showSidebar = !m.showSidebar
@@ -814,6 +840,12 @@ func isSidebarToggleKey(msg tea.KeyMsg) bool {
 func isSidebarFocusKey(msg tea.KeyMsg) bool {
 	s := msg.String()
 	return s == "ctrl+s" || s == "f2"
+}
+
+// isProjectPanelToggleKey returns true for ctrl+p, which toggles the
+// project state overlay panel.
+func isProjectPanelToggleKey(msg tea.KeyMsg) bool {
+	return msg.String() == "ctrl+p"
 }
 
 // handleStreamEvent processes a single IPC event.

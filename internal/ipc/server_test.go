@@ -1023,6 +1023,57 @@ func TestStreamHandlerContextCancelledWhenMessageQueueFull(t *testing.T) {
 	}
 }
 
+func TestServerProjectStateValidation(t *testing.T) {
+	socketPath := filepath.Join(t.TempDir(), "ps.sock")
+
+	handlerCalled := false
+	server, err := NewServer(socketPath)
+	if err != nil {
+		t.Fatalf("NewServer() error: %v", err)
+	}
+	defer server.EnsureClose()
+
+	server.Handler = func(ctx context.Context, msg IPCMessage) ([]IPCEvent, error) {
+		handlerCalled = true
+		if msg.Type != MsgTypeProjectState {
+			t.Errorf("expected type %q, got %q", MsgTypeProjectState, msg.Type)
+		}
+		return []IPCEvent{
+			{Type: EventTypeAck, Body: "project state received"},
+		}, nil
+	}
+	server.Start()
+
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("Dial() error: %v", err)
+	}
+	defer conn.Close()
+
+	msg := IPCMessage{
+		Type:      MsgTypeProjectState,
+		ChatID:    ReservedTUIChatID,
+		UserID:    1000,
+		RequestID: "test-project-state-001",
+	}
+	data, _ := json.Marshal(msg)
+	data = append(data, '\n')
+	conn.Write(data)
+
+	scanner := bufio.NewScanner(conn)
+	if !scanner.Scan() {
+		t.Fatal("expected response")
+	}
+	var event IPCEvent
+	json.Unmarshal([]byte(scanner.Text()), &event)
+	if event.Type == EventTypeError {
+		t.Fatalf("project_state message rejected: %s", event.Error)
+	}
+	if !handlerCalled {
+		t.Error("handler was not called — message was likely rejected by validateMessage")
+	}
+}
+
 // shortWriteWriter simulates a writer that returns short writes on the first call.
 type shortWriteWriter struct {
 	io.Writer

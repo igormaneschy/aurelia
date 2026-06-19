@@ -1,7 +1,7 @@
 # Aurelia TUI — Plano de Implementação
 
 **Sprint:** J (pós Auto-Skills)
-**Status:** 🟢 Fases 0–3 e 4.5 concluídas e mergeadas em `main`. **Fase 4 — Painel de Estado do Projeto** é o próximo marco.
+**Status:** 🟢 Fases 0–4 e 4.5 concluídas e mergeadas em `main`. **Fase 5 — Polish e Distribuição** é o próximo marco.
 **Versão atual:** `v0.28.0`
 **Depende de:** Sprint E (Project Memory), Sprint F (Wiki Memory Gateway)
 **Desbloqueia:** Interface alternativa ao Telegram, onboarding sem bot, uso em contexto de terminal/IDE
@@ -267,11 +267,11 @@ ao chat, útil para ver contexto rápido sem sair da conversa.
 ```
 
 **Tasks:**
-- [ ] Overlay de estado (`ctrl+p` para abrir/fechar)
-- [ ] Informação do projecto activo (cwd, binding source)
-- [ ] Resumo de memória (camadas activas, contagem de facts)
-- [ ] Último checkpoint da conversa
-- [ ] Sincronização em tempo real com o daemon (poll ou subscribe)
+- [x] Overlay de estado (`ctrl+p` para abrir/fechar)
+- [x] Informação do projecto activo (cwd, binding source)
+- [x] Resumo de memória (camadas activas, contagem de facts)
+- [x] Último checkpoint da conversa
+- [x] Sincronização em tempo real com o daemon (poll 30s)
 
 ---
 
@@ -367,8 +367,8 @@ Sprint J: TUI ← AQUI                        🟢 em progresso
   ├─ Fase 2: TUI MVP (5d)                    ✅ v0.25.x
   ├─ Fase 3: Multi-sessão (4d)               ✅ v0.27.1
   ├─ Fase 4.5: Image Input / Vision (3-4d)   ✅ v0.27.x → v0.28.0
-  ├─ Fase 4: Painel de Estado do Projeto (3d) 🔜 próximo marco
-  └─ Fase 5: Polish + Distribuição (3d)      🔜 por fazer
+  ├─ Fase 4: Painel de Estado do Projeto (3d) ✅ (este commit)
+  └─ Fase 5: Polish + Distribuição (3d)      🔜 próximo marco
      Total estimado restante: ~1 semana
 ```
 
@@ -392,7 +392,7 @@ Sprint J: TUI ← AQUI                        🟢 em progresso
 - [x] `aurelia-tui` corre como binary independente sem configuração extra
 - [x] Conversa completa com streaming funciona pela TUI
 - [x] Sidebar mostra sessões locais com navegação e gestão (criar/abrir/apagar)
-- [ ] Painel de estado mostra cwd, binding source, resumo de memória
+- [x] Painel de estado mostra cwd, binding source, resumo de memória
 - [x] Envio de imagens funciona (`/img`, `ctrl+v` clipboard, drag-drop) com modelo vision
 - [x] Nenhuma regressão no Telegram transport
 - [x] `go build ./... && go vet ./... && go test ./...` limpo
