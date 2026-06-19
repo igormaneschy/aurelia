@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.28.1 - 2026-06-19
+
+### Changed
+- **Docs: roadmap TUI atualizado** — marca Fase 3 (multi-sessão) e Fase 4.5 (image input/vision) como concluídas e mergeadas em `main`; define Fase 4 (Painel de Estado do Projeto) como próximo marco.
+
 ## v0.28.0 - 2026-06-19
 
 ### Added
