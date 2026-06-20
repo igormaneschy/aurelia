@@ -462,25 +462,27 @@ func TestCopyFileNoFollow_ExceedsLimitByOne(t *testing.T) {
 }
 
 func TestCopyFileNoFollow_CtxCancelled(t *testing.T) {
+	// Cancel the context before calling copyFileNoFollow. The early ctx.Err()
+	// check in copyFileNoFollow returns immediately without spawning the copy
+	// goroutine, making this test deterministic regardless of filesystem speed.
 	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
 	dir := t.TempDir()
 	srcDir := t.TempDir()
 
-	src := filepath.Join(srcDir, "large.bin")
-	// Write enough data that the copy will still be in progress when we cancel.
-	data := make([]byte, 10*1024*1024) // 10 MB
-	if err := os.WriteFile(src, data, 0o644); err != nil {
+	src := filepath.Join(srcDir, "small.txt")
+	if err := os.WriteFile(src, []byte("data"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
 	dst := filepath.Join(dir, "out.bin")
-
-	// Cancel context immediately — the copy should not proceed.
-	cancel()
-
-	_, err := copyFileNoFollow(ctx, src, dst, 100*1024*1024)
+	_, err := copyFileNoFollow(ctx, src, dst, 1024)
 	if err == nil {
 		t.Fatal("expected error from cancelled context, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got: %v", err)
 	}
 
 	// Destination should not exist after cancellation.

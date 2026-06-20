@@ -30,8 +30,8 @@ type copiedAttachment struct {
 
 // copyAttachmentsToCWD copies document attachments into <cwd>/uploads/.
 // Each attachment is validated against symlinks, path traversal, and size
-// limits (MaxAttachmentBytes). On any failure, the function returns immediately
-// with the error — partial files are left in place (no rollback).
+// limits (MaxAttachmentBytes). On any failure, the function rolls back any
+// files already copied and returns the error.
 func copyAttachmentsToCWD(ctx context.Context, cwd string, attachments []ipc.IPCAttachment) ([]copiedAttachment, error) {
 	uploadsDir := filepath.Join(cwd, "uploads")
 
@@ -41,6 +41,7 @@ func copyAttachmentsToCWD(ctx context.Context, cwd string, attachments []ipc.IPC
 
 	var totalSize int64
 	var copied []copiedAttachment
+	var created []string // tracks destination paths for rollback on error
 
 	for _, att := range attachments {
 		// Determine destination name: prefer Name field, fall back to basename.
@@ -51,13 +52,18 @@ func copyAttachmentsToCWD(ctx context.Context, cwd string, attachments []ipc.IPC
 
 		// Defense against path traversal: filepath.Base("..") returns "..".
 		if destName == "." || destName == ".." {
+			rollbackCreated(created)
 			return nil, fmt.Errorf("attachment %s: invalid name", filepath.Base(att.Path))
 		}
 
 		// Pre-copy stat — detect TOCTOU races where the source file is
 		// deleted or moved between /attach and send, and accumulate size.
+		// This is an additional defense before copyFileNoFollow's own
+		// fstat-on-open, providing earlier, clearer error messages for
+		// common failure modes (deleted file, oversized, non-regular).
 		fi, err := os.Lstat(att.Path)
 		if err != nil {
+			rollbackCreated(created)
 			if os.IsNotExist(err) {
 				return nil, fmt.Errorf("attachment %q: no longer available (was it deleted or moved between /attach and send?)", filepath.Base(att.Path))
 			}
@@ -68,17 +74,20 @@ func copyAttachmentsToCWD(ctx context.Context, cwd string, attachments []ipc.IPC
 			// files (symlinks, dirs) — Lstat succeeds but the file may be
 			// replaced before open. This check catches the obvious case
 			// early with a clear user-facing message.
+			rollbackCreated(created)
 			return nil, fmt.Errorf("attachment %q: source is not a regular file: %s", filepath.Base(att.Path), att.Path)
 		}
 
 		totalSize += fi.Size()
 		if totalSize > ipc.MaxTotalAttachmentBytes {
+			rollbackCreated(created)
 			return nil, fmt.Errorf("total attachment size %d bytes exceeds %d byte limit",
 				totalSize, ipc.MaxTotalAttachmentBytes)
 		}
 
 		dst, err := uniqueUploadPath(uploadsDir, destName)
 		if err != nil {
+			rollbackCreated(created)
 			return nil, fmt.Errorf("attachment %s: %w", filepath.Base(att.Path), err)
 		}
 
@@ -88,9 +97,11 @@ func copyAttachmentsToCWD(ctx context.Context, cwd string, attachments []ipc.IPC
 
 		n, err := copyFileNoFollow(ctx, att.Path, dst, ipc.MaxAttachmentBytes)
 		if err != nil {
+			rollbackCreated(created)
 			return nil, fmt.Errorf("attachment %s: %w", filepath.Base(att.Path), err)
 		}
 
+		created = append(created, dst)
 		copied = append(copied, copiedAttachment{
 			OriginalName: destName,
 			FinalName:    filepath.Base(dst),
@@ -99,6 +110,16 @@ func copyAttachmentsToCWD(ctx context.Context, cwd string, attachments []ipc.IPC
 	}
 
 	return copied, nil
+}
+
+// rollbackCreated removes all tracked destination files, logging any errors.
+// Used to clean up partial copies when an attachment in the batch fails.
+func rollbackCreated(paths []string) {
+	for _, p := range paths {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			log.Printf("tui: attach: rollback remove %s: %v", filepath.Base(p), err)
+		}
+	}
 }
 
 // uniqueUploadPath returns a non-existent path under dir for the given name.
@@ -188,6 +209,14 @@ func copyFileNoFollow(ctx context.Context, src, dst string, maxBytes int64) (int
 		}
 	}()
 
+	// Check for pre-cancelled context before starting the copy goroutine.
+	// Without this check, a cancelled context races with io.Copy on fast
+	// filesystems (both ctx.Done() and ch may be ready simultaneously).
+	if err := ctx.Err(); err != nil {
+		_ = os.Remove(dst)
+		return 0, err
+	}
+
 	// Copy with LimitReader(maxBytes+1) to detect size changes (TOCTOU).
 	// Run the copy in a goroutine so we can select on ctx.Done().
 	type copyResult struct {
@@ -209,6 +238,7 @@ func copyFileNoFollow(ctx context.Context, src, dst string, maxBytes int64) (int
 		_ = srcFd.Close()
 		_ = dstFd.Close()
 		_ = os.Remove(dst)
+		<-ch // drain channel — wait for goroutine to finish before returning
 		return 0, ctx.Err()
 	}
 	if err != nil {

@@ -102,8 +102,21 @@ func (m *Model) toIPCAttachments() []ipc.IPCAttachment {
 // non-image document file. Returns the display name, resolved path, and true
 // if valid. Returns ("", "", false) for image paths (image flow should handle),
 // non-existent paths, symlinks, directories, or text that is not a path.
+// Normalization (quote stripping, file:// prefix, escaped spaces) is applied
+// internally, consistent with looksLikeFilePath and the image flow.
 func tryParseAsDocumentPath(text string) (name, path string, ok bool) {
-	text = strings.TrimSpace(text)
+	text = normalizeImagePath(strings.TrimSpace(text))
+	if text == "" {
+		return "", "", false
+	}
+	// Expand ~ to home directory (consistent with attachDocumentFromPath).
+	if strings.HasPrefix(text, "~") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", "", false
+		}
+		text = filepath.Join(home, text[1:])
+	}
 	if !filepath.IsAbs(text) {
 		return "", "", false
 	}
