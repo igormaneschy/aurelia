@@ -157,7 +157,11 @@ func copyFileNoFollow(ctx context.Context, src, dst string, maxBytes int64) (int
 	if err != nil {
 		return 0, errNoPath("open source", filepath.Base(src), err)
 	}
-	defer srcFd.Close()
+	defer func() {
+		if err := srcFd.Close(); err != nil {
+			log.Printf("tui: attach: error closing source %s: %v", filepath.Base(src), err)
+		}
+	}()
 
 	// Verify it is a regular file via fstat on the opened fd.
 	fi, err := srcFd.Stat()
@@ -178,7 +182,11 @@ func copyFileNoFollow(ctx context.Context, src, dst string, maxBytes int64) (int
 	if err != nil {
 		return 0, errNoPath("open destination", filepath.Base(dst), err)
 	}
-	defer dstFd.Close()
+	defer func() {
+		if err := dstFd.Close(); err != nil {
+			log.Printf("tui: attach: error closing destination %s: %v", filepath.Base(dst), err)
+		}
+	}()
 
 	// Copy with LimitReader(maxBytes+1) to detect size changes (TOCTOU).
 	// Run the copy in a goroutine so we can select on ctx.Done().
@@ -198,19 +206,23 @@ func copyFileNoFollow(ctx context.Context, src, dst string, maxBytes int64) (int
 		written, err = res.n, res.err
 	case <-ctx.Done():
 		// Close fds to unblock the goroutine's Copy immediately.
-		srcFd.Close()
-		dstFd.Close()
-		os.Remove(dst)
+		_ = srcFd.Close()
+		_ = dstFd.Close()
+		_ = os.Remove(dst)
 		return 0, ctx.Err()
 	}
 	if err != nil {
 		// Best-effort cleanup of partial file.
-		os.Remove(dst)
+		if rmErr := os.Remove(dst); rmErr != nil {
+			log.Printf("tui: attach: cleanup remove of partial %s: %v", filepath.Base(dst), rmErr)
+		}
 		return 0, fmt.Errorf("copy %s: %w", filepath.Base(src), err)
 	}
 
 	if written > maxBytes {
-		os.Remove(dst)
+		if rmErr := os.Remove(dst); rmErr != nil {
+			log.Printf("tui: attach: cleanup remove of oversized %s: %v", filepath.Base(dst), rmErr)
+		}
 		return 0, fmt.Errorf("file %s exceeds max size after copy", filepath.Base(src))
 	}
 
