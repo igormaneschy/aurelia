@@ -111,6 +111,9 @@ type Model struct {
 	pendingImages           []pendingImage
 	submittedTempImagePaths []string
 
+	// Pending document attachments (cleared after send)
+	pendingAttachments []pendingAttachment
+
 	// Project state panel
 	projectPanelOpen bool
 	projectState     *ipc.ProjectStatePayload
@@ -325,13 +328,14 @@ func (m Model) submitMessage(text string) tea.Cmd {
 
 	userID := int64(os.Getuid())
 	msg := ipc.IPCMessage{
-		Type:      ipc.MsgTypeSend,
-		ChatID:    m.activeSession,
-		ThreadID:  0,
-		UserID:    userID,
-		Text:      text,
-		Images:    m.toIPCImages(),
-		RequestID: m.requestID,
+		Type:        ipc.MsgTypeSend,
+		ChatID:      m.activeSession,
+		ThreadID:    0,
+		UserID:      userID,
+		Text:        text,
+		Images:      m.toIPCImages(),
+		Attachments: m.toIPCAttachments(),
+		RequestID:   m.requestID,
 	}
 
 	// Note: pendingImages cleanup happens in update.go after submitMessage

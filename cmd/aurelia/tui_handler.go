@@ -259,6 +259,7 @@ Commands:
 - /cwd <path> — set the project working directory
 - /cwd clear — remove the project binding
 - /img <path> — attach an image (png, jpg, gif, webp)
+- /attach <path> — attach a document (md, docx, pdf, etc.)
 
 Keyboard:
 - Ctrl+P — toggle project state panel
@@ -275,7 +276,11 @@ Images:
 - Use /img <path> to attach images by file path
 - Use Ctrl+V to paste images from clipboard (macOS/Linux)
 - Drag-and-drop image files into the terminal
-- Multiple images can be attached before sending`)
+- Multiple images can be attached before sending
+
+Documents:
+- Use /attach <path> to attach documents by file path
+- Multiple documents can be attached before sending`)
 }
 
 // handleTUISend processes a TUI send message through the pipeline.
@@ -283,11 +288,44 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 	chatID, threadID, userID := msg.ChatID, int(msg.ThreadID), msg.UserID
 
 	text := strings.TrimSpace(msg.Text)
-	if text == "" && len(msg.Images) == 0 {
+	if text == "" && len(msg.Images) == 0 && len(msg.Attachments) == 0 {
 		if err := emit(ipc.IPCEvent{Type: ipc.EventTypeMessage, Body: "Empty message", RequestID: msg.RequestID}); err != nil {
 			return err
 		}
 		return emit(ipc.IPCEvent{Type: ipc.EventTypeStreamEnd, Done: true, RequestID: msg.RequestID})
+	}
+
+	// Handle document attachments BEFORE the concurrency guard so that
+	// I/O (stat, copy) does not block other TUI sends (fix A3).
+	var attachmentNote string
+	if len(msg.Attachments) > 0 {
+		chatKey := projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID}
+		resolved, err := a.bindings.Resolve(ctx, chatKey)
+		if err != nil || resolved == nil || resolved.Binding == nil || resolved.Binding.CWD == "" {
+			return emit(ipc.IPCEvent{
+				Type:      ipc.EventTypeError,
+				Error:     "Set a project with /cwd first to attach documents",
+				RequestID: msg.RequestID,
+			})
+		}
+
+		copied, err := copyAttachmentsToCWD(ctx, resolved.Binding.CWD, msg.Attachments)
+		if err != nil {
+			log.Printf("tui: attachment copy error: %s", err)
+			return emit(ipc.IPCEvent{
+				Type:      ipc.EventTypeError,
+				Error:     fmt.Sprintf("Failed to copy attachment: %s", err),
+				RequestID: msg.RequestID,
+			})
+		}
+
+		attachmentNote = buildAttachmentNote(copied)
+	}
+
+	// Enrich text with attachment note if any.
+	enrichedText := text
+	if attachmentNote != "" {
+		enrichedText = text + attachmentNote
 	}
 
 	// Concurrency guard: only one TUI pipeline run at a time.
@@ -347,7 +385,7 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 	}
 
 	// Launch pipeline processing (async).
-	pipeErr := pipeSvc.Process(chatID, threadID, 0, text, attachments, userID, true)
+	pipeErr := pipeSvc.Process(chatID, threadID, 0, enrichedText, attachments, userID, true)
 	if pipeErr != nil {
 		log.Printf("tui: pipeline process error: %s", pipeline.RedactSecrets(pipeErr.Error()))
 		_ = output.SendError(chatID, threadID, pipeErr.Error())

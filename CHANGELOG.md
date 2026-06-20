@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.30.0 - 2026-06-20
+
+### Added
+- **TUI: Anexo de documentos** — comando `/attach <path>`, colagem de paths absolutos (Ctrl+V), e drag-and-drop. Arquivos são copiados para `<cwd>/uploads/`. IPC estendido com `IPCAttachment` + validação de tipo de mensagem. Badges na TUI mostram documentos pendentes.
+- **80+ novos testes** — cobertura em IPC, TUI, daemon, e integração.
+
+### Fixed
+- **Daemon: copyFileNoFollow preserva causa original de erros** — `io.Copy` agora usa `%w` em vez de descartar o erro com `fmt.Errorf`.
+- **TUI: paste routing consistente** — `looksLikeFilePath` decide syntacticamente se um path colado é tentativa de anexo vs texto.
+- **Segurança: TOCTOU em anexos** — `O_NOFOLLOW` + `Lstat` dupla verificação. Paths canônicos rejeitam `.`/`..`.
+- **Daemon: MaxTotalAttachmentBytes enforcecido** — limite de 100MB total verificado antes da cópia.
+
 ## v0.29.0 - 2026-06-19
 
 ### Added

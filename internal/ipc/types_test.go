@@ -1,6 +1,7 @@
 package ipc
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -195,5 +196,173 @@ func TestValidateMessage_ImageDataTooLarge(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "total image data too large") {
 		t.Errorf("expected 'total image data too large' in error, got: %v", err)
+	}
+}
+
+func TestValidateMessage_AttachmentValid(t *testing.T) {
+	msg := IPCMessage{
+		Type: MsgTypeSend,
+		Text: "review this document",
+		Attachments: []IPCAttachment{
+			{Path: "/home/user/doc.pdf", Name: "spec.pdf"},
+		},
+	}
+	if err := validateMessage(msg); err != nil {
+		t.Errorf("valid attachment message should pass, got: %v", err)
+	}
+}
+
+func TestValidateMessage_AttachmentTooMany(t *testing.T) {
+	atts := make([]IPCAttachment, MaxAttachmentCount+1)
+	for i := range atts {
+		atts[i] = IPCAttachment{Path: "/tmp/doc.pdf"}
+	}
+	msg := IPCMessage{
+		Type:        MsgTypeSend,
+		Text:        "many attachments",
+		Attachments: atts,
+	}
+	err := validateMessage(msg)
+	if err == nil {
+		t.Fatal("expected error for too many attachments")
+	}
+	if !strings.Contains(err.Error(), "too many attachments") {
+		t.Errorf("expected 'too many attachments' in error, got: %v", err)
+	}
+}
+
+func TestValidateMessage_AttachmentPathRequired(t *testing.T) {
+	msg := IPCMessage{
+		Type: MsgTypeSend,
+		Text: "attachment with no path",
+		Attachments: []IPCAttachment{
+			{Name: "doc.pdf"},
+		},
+	}
+	err := validateMessage(msg)
+	if err == nil {
+		t.Fatal("expected error for attachment without path")
+	}
+	if !strings.Contains(err.Error(), "path required") {
+		t.Errorf("expected 'path required' in error, got: %v", err)
+	}
+}
+
+func TestValidateMessage_AttachmentPathTooLong(t *testing.T) {
+	longPath := strings.Repeat("a", 4097)
+	msg := IPCMessage{
+		Type: MsgTypeSend,
+		Text: "attachment with long path",
+		Attachments: []IPCAttachment{
+			{Path: longPath},
+		},
+	}
+	err := validateMessage(msg)
+	if err == nil {
+		t.Fatal("expected error for attachment path too long")
+	}
+	if !strings.Contains(err.Error(), "path too long") {
+		t.Errorf("expected 'path too long' in error, got: %v", err)
+	}
+}
+
+func TestValidateMessage_AttachmentRelativePath(t *testing.T) {
+	msg := IPCMessage{
+		Type: MsgTypeSend,
+		Text: "attachment with relative path",
+		Attachments: []IPCAttachment{
+			{Path: "spec.md"},
+		},
+	}
+	err := validateMessage(msg)
+	if err == nil {
+		t.Fatal("expected error for relative attachment path")
+	}
+	if !strings.Contains(err.Error(), "must be absolute") {
+		t.Errorf("expected 'must be absolute' in error, got: %v", err)
+	}
+}
+
+func TestValidateMessage_AttachmentAbsolutePath(t *testing.T) {
+	msg := IPCMessage{
+		Type: MsgTypeSend,
+		Text: "attachment with absolute path",
+		Attachments: []IPCAttachment{
+			{Path: "/home/user/doc.pdf", Name: "spec.pdf"},
+		},
+	}
+	if err := validateMessage(msg); err != nil {
+		t.Errorf("absolute path attachment should pass, got: %v", err)
+	}
+}
+
+func TestValidateMessage_AttachmentNilAndEmpty(t *testing.T) {
+	// Nil attachments field.
+	msg := IPCMessage{
+		Type: MsgTypeSend,
+		Text: "no attachments",
+	}
+	if err := validateMessage(msg); err != nil {
+		t.Errorf("nil attachments should pass, got: %v", err)
+	}
+
+	// Empty slice.
+	msg.Attachments = []IPCAttachment{}
+	if err := validateMessage(msg); err != nil {
+		t.Errorf("empty attachments should pass, got: %v", err)
+	}
+}
+
+func TestValidateMessage_ImageAndAttachmentTogether(t *testing.T) {
+	msg := IPCMessage{
+		Type: MsgTypeSend,
+		Text: "review with image and document",
+		Images: []IPCImage{
+			{Path: "/tmp/diagram.png", MediaType: "image/png"},
+		},
+		Attachments: []IPCAttachment{
+			{Path: "/tmp/spec.pdf", Name: "spec.pdf"},
+		},
+	}
+	if err := validateMessage(msg); err != nil {
+		t.Errorf("message with image and attachment should pass, got: %v", err)
+	}
+}
+
+func TestAttachmentJSONRoundTrip(t *testing.T) {
+	original := IPCMessage{
+		Type:   MsgTypeSend,
+		ChatID: ReservedTUIChatID,
+		Text:   "review these files",
+		Attachments: []IPCAttachment{
+			{Path: "/tmp/spec.pdf", Name: "spec.pdf"},
+			{Path: "/home/user/report.docx"},
+		},
+	}
+
+	data, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal error: %v", err)
+	}
+
+	var decoded IPCMessage
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal error: %v", err)
+	}
+
+	if len(decoded.Attachments) != 2 {
+		t.Fatalf("expected 2 attachments, got %d", len(decoded.Attachments))
+	}
+	if decoded.Attachments[0].Path != "/tmp/spec.pdf" {
+		t.Errorf("attachment[0].Path = %q, want %q", decoded.Attachments[0].Path, "/tmp/spec.pdf")
+	}
+	if decoded.Attachments[0].Name != "spec.pdf" {
+		t.Errorf("attachment[0].Name = %q, want %q", decoded.Attachments[0].Name, "spec.pdf")
+	}
+	if decoded.Attachments[1].Path != "/home/user/report.docx" {
+		t.Errorf("attachment[1].Path = %q, want %q", decoded.Attachments[1].Path, "/home/user/report.docx")
+	}
+	if decoded.Attachments[1].Name != "" {
+		t.Errorf("attachment[1].Name should be empty (omitempty), got %q", decoded.Attachments[1].Name)
 	}
 }

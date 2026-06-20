@@ -315,40 +315,160 @@ trocando automaticamente se o modelo activo não suportar imagens.
 
 ---
 
-### Fase 5 — Polish e Distribuição (2-3 dias)
+### Fase 4.6 — Document Attachments (3-4 dias) ✅
+
+*Anexar documentos (md, docx, ppt, pdf, etc.) ao projeto ativo diretamente da TUI.*
+
+**Status:** Concluída, validada (build + vet + test + deploy) na branch `feature/tui-document-attachments` — aguarda merge em `main`.
+**Versão:** `v0.29.0+` (feature branch)
+**Branch:** `feature/tui-document-attachments` → `stable/tui-document-attachments` → `main`
+
+**Status note:** `notes/tui-document-attachments-status.md`
+
+**Conceito:**
+
+Ao contrário das imagens, que são base64-encodadas e enviadas ao modelo vision,
+documentos genéricos são **copiados para `<cwd>/uploads/`** e mencionados no
+prompt. O agente é responsável por processá-los com as suas ferramentas.
+
+**Decisões:**
+
+- **CWD obrigatório** — `/attach` só funciona quando há um projeto ativo.
+- **Qualquer formato permitido** — md, docx, ppt, pdf, txt, csv, etc.
+- **Cópia segura** — `O_NOFOLLOW`, rejeição de symlinks, path traversal defense,
+  renomeação em caso de conflito de nome.
+- **Agente processa** — Aurelia não extrai/converte conteúdo.
+
+**Métodos de input:**
+
+| Método | UX | Prioridade |
+|--------|-----|------------|
+| `/attach <path>` | Escreves `/attach ~/docs/spec.pdf` + pergunta | P1 |
+| Drag-and-drop | Arrastas ficheiro para o terminal | P2 |
 
 **Tasks:**
-- [ ] Tema claro/escuro (detecta `$TERM_PROGRAM` e `$COLORTERM`)
+
+- [x] `IPCAttachment` no protocolo IPC + validação (T0)
+- [x] TUI: `/attach <path>`, drag-and-drop, badges `[📎 nome.pdf]` (T1-T3)
+- [x] Daemon: resolver CWD, copiar para `<cwd>/uploads/`, anexar nota ao prompt (T4-T5)
+- [x] Testes de unidade + integração
+- [x] Documentação e roadmap (T6)
+- [x] Validation: build, vet, test, deploy, passos de live test (T7)
+
+**Critério de saída:** consegues anexar um documento ao projeto ativo pela TUI e
+o agente responde com base no conteúdo do ficheiro.
+
+**Spec:** `.specs/features/tui-document-attachments/spec.md`
+**Design:** `.specs/features/tui-document-attachments/design.md`
+**Tasks:** `.specs/features/tui-document-attachments/tasks.md`
+
+---
+
+### Fase 5 — Polish e Distribuição (5-7 dias)
+
+A Fase 5 foi reestruturada em três sub-fases para separar interação,
+visual e distribuição. Os pontos críticos identificados são: (1) o mouse
+está habilitado mas bloqueia a seleção nativa de texto do terminal;
+(2) enviar uma segunda mensagem enquanto a primeira está a ser
+processada é silenciosamente ignorada; (3) a experiência visual pode
+ser enriquecida sem adicionar complexidade ao core.
+
+**Decisão 2026-06-17 — `--attach` removido do roadmap.**
+O `--attach telegram:chat_id/thread_id` foi originalmente planeado para
+permitir retomar no terminal uma conversa iniciada no Telegram. Com a
+Fase 3 (multi-sessão local), cada sessão TUI tem o seu próprio /cwd,
+session file PI, e histórico — o isolamento é nativo e não precisa de
+importar nada do Telegram.
+
+Análise de trade-offs:
+- **A favor de remover**: complexidade de segurança (permitir ChatID
+  positivo no IPC quebra o namespace local), races cross-surface (TUI
+  e Telegram a enviar turnos concorrentes no mesmo session file),
+  modelo mental confuso ("esta sessão é local ou espelho?"), caso de
+  uso raro (se estás no computador, usas a TUI; se não estás, usas o
+  Telegram — a sobreposição é marginal).
+- **O contexto real é o /cwd**, não a conversa. O PI lê os ficheiros
+  do projecto independentemente de onde a conversa aconteceu.
+- **A infraestrutura para `--attach` já existe** (session.Store indexa
+  por ChatID) — se a necessidade surgir no futuro, é uma camada fina
+  por cima. A decisão não é irreversível.
+
+As sessões Telegram e TUI são agora **compartimentos estanques** por
+design. Telegram = comunicação assíncrona fora do computador. TUI =
+trabalho focado no terminal.
+
+---
+
+#### Fase 5.1 — Input & Interaction Polish (2-3 dias)
+
+Melhorias na forma como o utilizador interage com a TUI.
+
+**Tasks:**
+- [ ] **Mouse toggle (`ctrl+m`)**: ligar/desligar captura de mouse.
+  - Quando ligado: scroll no viewport funciona.
+  - Quando desligado: seleção nativa de texto do terminal funciona.
+  - Estado guardado na sessão atual (não persistente).
+- [ ] **Fila de mensagens**: permitir enviar uma segunda mensagem
+  enquanto a primeira está em streaming.
+  - Mensagens pendentes são enfileiradas no modelo da TUI.
+  - Badge visual `⏳ N pending` acima do input.
+  - Próxima mensagem é enviada automaticamente após `stream_end`.
+  - `esc` cancela apenas o turno atual; a fila continua.
+- [ ] **Histórico persistente de input**: guardar input history em
+  `~/.aurelia/tui_history.json` e carregar no startup.
+- [ ] **Auto-complete de comandos**: `tab` ou `?` mostra sugestões
+  quando o input começa com `/`.
+
+**Critério de saída:** consegues desligar o mouse para copiar texto,
+enviar 2 mensagens em sequência sem perder a segunda, e reutilizar
+histórico de input entre execuções.
+
+---
+
+#### Fase 5.2 — Visual Polish & Theming (2-3 dias)
+
+Melhorias visuais e de descoberta de funcionalidades.
+
+**Tasks:**
+- [ ] **Tema claro/escuro**: detectar `$TERM_PROGRAM`, `$COLORTERM` e
+  preferência do sistema; permitir override via `--theme` ou config.
+- [ ] **Status bar enriquecida**: mostrar modelo ativo, estado do
+  daemon, contagem de mensagens pendentes, e duração do turno.
+- [ ] **Help overlay (`?`)**: painel flutuante com keybindings e
+  comandos, sem sair da conversa.
+- [ ] **Indicadores de estado do daemon**: transição visual clara entre
+  online/offline/reconnecting no header e na status bar.
+- [ ] **Separação visual mais forte entre mensagens**: alternância
+  sutil de background ou bordas para facilitar leitura longa.
+
+**Critério de saída:** a TUI adapta-se ao tema do terminal, mostra
+estado rico na status bar, e o utilizador pode descobrir todos os
+atalhos com `?`.
+
+---
+
+#### Fase 5.3 — Distribution & Build (1-2 dias)
+
+Tornar o `aurelia-tui` distribuível e fácil de instalar.
+
+**Tasks:**
 - [x] Mouse support (`tea.WithMouseCellMotion()` + scroll no viewport)
 - [x] Resize handling básico (terminal window resize)
-- [ ] `--session` flag para abrir directamente numa sessão: `aurelia-tui --session tui:work`
-- [ ] Build targets: `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`
-- [ ] Instalação via `go install`: `go install github.com/igormaneschy/aurelia/cmd/aurelia-tui@latest`
-- [ ] Makefile target: `make tui`
+- [ ] **`--session` flag**: `aurelia-tui --session tui:work` abre
+  directamente na sessão indicada, criando-a se não existir.
+- [ ] **Build targets**: `linux/amd64`, `linux/arm64`, `darwin/amd64`,
+  `darwin/arm64`.
+- [ ] **`go install`**: `go install github.com/igormaneschy/aurelia/cmd/aurelia-tui@latest`.
+- [ ] **`make tui`**: target no Makefile para build do binary TUI.
+- [ ] **Release pipeline**: produzir artifacts para as 4 arquiteturas.
 
-> **Decisão 2026-06-17 — `--attach` removido do roadmap.**
-> O `--attach telegram:chat_id/thread_id` foi originalmente planeado para
-> permitir retomar no terminal uma conversa iniciada no Telegram. Com a
-> Fase 3 (multi-sessão local), cada sessão TUI tem o seu próprio /cwd,
-> session file PI, e histórico — o isolamento é nativo e não precisa de
-> importar nada do Telegram.
->
-> Análise de trade-offs:
-> - **A favor de remover**: complexidade de segurança (permitir ChatID
->   positivo no IPC quebra o namespace local), races cross-surface (TUI
->   e Telegram a enviar turnos concorrentes no mesmo session file),
->   modelo mental confuso ("esta sessão é local ou espelho?"), caso de
->   uso raro (se estás no computador, usas a TUI; se não estás, usas o
->   Telegram — a sobreposição é marginal).
-> - **O contexto real é o /cwd**, não a conversa. O PI lê os ficheiros
->   do projecto independentemente de onde a conversa aconteceu.
-> - **A infraestrutura para `--attach` já existe** (session.Store indexa
->   por ChatID) — se a necessidade surgir no futuro, é uma camada fina
->   por cima. A decisão não é irreversível.
->
-> As sessões Telegram e TUI são agora **compartimentos estanques** por
-> design. Telegram = comunicação assíncrona fora do computador. TUI =
-> trabalho focado no terminal.
+**Critério de saída:** `make tui` compila o binary; `go install`
+instala; `--session tui:work` abre a sessão correcta; CI gera
+artifacts para as 4 plataformas.
+
+**Spec:** `.specs/features/tui-polish-distribution/spec.md`
+**Design:** `.specs/features/tui-polish-distribution/design.md`
+**Tasks:** `.specs/features/tui-polish-distribution/tasks.md`
 
 ---
 
@@ -368,8 +488,12 @@ Sprint J: TUI ← AQUI                        🟢 em progresso
   ├─ Fase 3: Multi-sessão (4d)               ✅ v0.27.1
   ├─ Fase 4.5: Image Input / Vision (3-4d)   ✅ v0.27.x → v0.28.0
   ├─ Fase 4: Painel de Estado do Projeto (3d) ✅ (este commit)
-  └─ Fase 5: Polish + Distribuição (3d)      🔜 próximo marco
-     Total estimado restante: ~1 semana
+  ├─ Fase 4.6: Document Attachments (3-4d)   ✅ v0.29.0+ (feature branch)
+  └─ Fase 5: Polish + Distribuição (5-7d)    🔜
+       ├─ 5.1: Input & Interaction Polish (2-3d)
+       ├─ 5.2: Visual Polish & Theming (2-3d)
+       └─ 5.3: Distribution & Build (1-2d)
+     Total estimado restante: ~2 semanas
 ```
 
 **Nota:** A Fase 0 (Transport Abstraction) pode e deve ser feita **antes** do Sprint J — idealmente junto com o Sprint D0 ou E, porque não tem risco de regressão e a refactorização vai ser necessária de qualquer forma.
