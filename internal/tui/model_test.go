@@ -2440,3 +2440,125 @@ func TestModel_HelpOverlayRendersScoped(t *testing.T) {
 		t.Error("expected view to contain help overlay when open")
 	}
 }
+
+// ── T5.2.4 Daemon state indicator tests ───────────────────────────────────
+
+func TestModel_ChromeStateReturnsOffline(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.daemonLabel = "offline"
+
+	got := m.chromeState()
+	if got != "offline" {
+		t.Errorf("chromeState() = %q, want offline", got)
+	}
+}
+
+func TestModel_ChromeStateReturnsReadyByDefault(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.daemonLabel = "ready"
+
+	got := m.chromeState()
+	if got != "ready" {
+		t.Errorf("chromeState() = %q, want ready", got)
+	}
+}
+
+func TestModel_ChromeStateReturnsWaiting(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.waiting = true
+	m.daemonLabel = "ready"
+
+	got := m.chromeState()
+	if got != "waiting" {
+		t.Errorf("chromeState() = %q, want waiting", got)
+	}
+}
+
+func TestModel_StatusBarShowsOffline(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.daemonLabel = "offline"
+
+	status := stripANSIForTest(m.renderStatusBar())
+
+	if !strings.Contains(status, "offline") {
+		t.Errorf("expected status bar to contain 'offline', got %q", status)
+	}
+}
+
+func TestModel_ChatHeaderHighlightsOfflineDaemon(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.height = 40
+	m.daemonLabel = "offline"
+	m.cwdPath = "/Users/igor/dev"
+
+	header := stripANSIForTest(m.renderChatHeader())
+
+	if !strings.Contains(header, "daemon offline") {
+		t.Errorf("expected header to contain 'daemon offline', got %q", header)
+	}
+}
+
+func TestModel_ChatHeaderNormalDaemon(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.height = 40
+	m.daemonLabel = "ready"
+	m.cwdPath = "/Users/igor/dev"
+
+	header := stripANSIForTest(m.renderChatHeader())
+
+	if !strings.Contains(header, "daemon ready") {
+		t.Errorf("expected header to contain 'daemon ready', got %q", header)
+	}
+}
+
+func TestModel_ReconnectionToast(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 80
+	m.height = 40
+	m.daemonLabel = "offline"
+	m.messages = []chatMessage{{Sender: "Igor", Text: "hello"}}
+
+	// Simulate health check recovery.
+	updated, _ := m.Update(healthCheckResultMsg{latency: 10 * time.Millisecond})
+	m2 := updated.(Model)
+
+	if m2.daemonLabel != "ready" {
+		t.Errorf("expected daemonLabel=ready, got %q", m2.daemonLabel)
+	}
+	if len(m2.messages) != 2 {
+		t.Fatalf("expected 2 messages (original + reconnect toast), got %d", len(m2.messages))
+	}
+	if m2.messages[1].Text != "Daemon reconnected." {
+		t.Errorf("expected reconnect toast, got %q", m2.messages[1].Text)
+	}
+	if m2.messages[1].Sender != "🔗" {
+		t.Errorf("expected sender=🔗, got %q", m2.messages[1].Sender)
+	}
+}
+
+func TestModel_NoReconnectionToastWhenAlreadyReady(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 80
+	m.height = 40
+	m.daemonLabel = "ready"
+	m.messages = []chatMessage{{Sender: "Igor", Text: "hello"}}
+
+	// Health check success when already ready should NOT add toast.
+	updated, _ := m.Update(healthCheckResultMsg{latency: 10 * time.Millisecond})
+	m2 := updated.(Model)
+
+	if len(m2.messages) != 1 {
+		t.Errorf("expected 1 message (no toast), got %d", len(m2.messages))
+	}
+}

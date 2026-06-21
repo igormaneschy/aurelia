@@ -122,6 +122,14 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			m.daemonLabel = "offline"
 		} else {
+			if m.daemonLabel == "offline" {
+				// Daemon recovered — notify user.
+				m.messages = append(m.messages, chatMessage{
+					Sender: "🔗",
+					Text:   "Daemon reconnected.",
+				})
+				m.updateViewport()
+			}
 			m.daemonLabel = "ready"
 			m.connectLatency = msg.latency
 		}

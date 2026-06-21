@@ -276,6 +276,8 @@ func (m Model) renderStatusBar() string {
 		state = m.styles.StatusBusyStyle.Render("● waiting")
 	case "error":
 		state = m.styles.StatusErrorStyle.Render("● error")
+	case "offline":
+		state = m.styles.StatusErrorStyle.Render("● offline")
 	default:
 		state = m.styles.StatusReadyStyle.Render("● ready")
 	}
@@ -386,7 +388,14 @@ func (m Model) renderChatHeader() string {
 		projectName := truncateMiddle(projectName(m.cwdPath), maxInt(12, m.contentWidth()/3))
 		projectPart = m.styles.HeaderMetaStyle.Render("project " + projectName)
 	}
-	meta := fmt.Sprintf("%s   ·   daemon %s   ·   %s", projectPart, m.daemonLabel, stateLabel)
+
+	// Daemon state label: highlight offline/error states.
+	daemonPart := m.styles.HeaderMetaStyle.Render("daemon " + m.daemonLabel)
+	if m.daemonLabel == "offline" || m.daemonLabel == "error" {
+		daemonPart = m.styles.StatusErrorStyle.Render("daemon " + m.daemonLabel)
+	}
+
+	meta := fmt.Sprintf("%s   ·   %s   ·   %s", projectPart, daemonPart, stateLabel)
 	header := lipgloss.JoinVertical(
 		lipgloss.Left,
 		m.styles.HeaderTitleStyle.Render("Aurelia / "+sessionName)+"  "+m.styles.HeaderMetaStyle.Render(meta),
@@ -396,6 +405,9 @@ func (m Model) renderChatHeader() string {
 }
 
 func (m Model) chromeState() string {
+	if m.daemonLabel == "offline" {
+		return "offline"
+	}
 	if m.waiting {
 		return "waiting"
 	}
