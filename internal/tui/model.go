@@ -117,6 +117,10 @@ type Model struct {
 	// Project state panel
 	projectPanelOpen bool
 	projectState     *ipc.ProjectStatePayload
+
+	// Style palette — owned by theme.go. Default is dark; T5.2.1 will
+	// select light vs dark based on terminal hints and --theme flag.
+	styles themeStyles
 }
 
 // NewModel creates a new TUI model with the given socket path.
@@ -146,6 +150,7 @@ func NewModel(socketPath string) Model {
 		messages:          make([]chatMessage, 0),
 		inputHistoryIndex: 0,
 		activeSession:     ipc.ReservedTUIChatID,
+		styles:            newDarkStyles(),
 	}
 }
 

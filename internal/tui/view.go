@@ -30,77 +30,9 @@ const (
 	minSidebarScreenHeight = 22
 )
 
-var (
-	userStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("39"))
-
-	assistantStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("205"))
-
-	errorStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("196"))
-
-	inputPromptStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("39"))
-
-	inputBoxStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("238")).
-			Padding(0, 1)
-
-	inputWaitingStyle = inputBoxStyle.
-				BorderForeground(lipgloss.Color("205"))
-
-	statusBarStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244")).
-			Background(lipgloss.Color("235")).
-			Padding(0, 1)
-
-	sidebarStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(lipgloss.Color("238")).
-			Padding(0, 1).
-			Width(sidebarWidth)
-
-	sidebarTitleStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("205"))
-
-	sidebarMutedStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("244"))
-
-	sidebarActiveStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("39")).
-			Bold(true)
-
-	sidebarCursorStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("226")).
-				Bold(true)
-
-	headerTitleStyle = lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("205"))
-
-	headerMetaStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("244"))
-
-	headerRuleStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("238"))
-
-	messageSeparatorStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("238"))
-
-	statusReadyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("42"))
-	statusBusyStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-	statusErrorStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("196"))
-
-	// chatModeStyle highlights that file system tools are disabled.
-	chatModeStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("214")). // amber
-			Italic(true)
-)
+// All lipgloss.Style instances live in theme.go as a themeStyles struct on
+// the Model. This keeps the view layer testable and theme-swappable; the
+// palette constructors (newDarkStyles, newLightStyles) own the actual colors.
 
 // View implements tea.Model.
 func (m Model) View() string {
@@ -160,7 +92,7 @@ func (m Model) chatView() string {
 		viewContent := m.renderMainPane(mainContentHeight, m.contentWidth())
 		body = lipgloss.JoinHorizontal(
 			lipgloss.Top,
-			sidebarStyle.Render(sidebar),
+			m.styles.SidebarStyle.Render(sidebar),
 			viewContent,
 		)
 	} else {
@@ -197,7 +129,7 @@ func (m Model) errorView() string {
 	return lipgloss.Place(
 		m.width, m.height,
 		lipgloss.Center, lipgloss.Center,
-		errorStyle.Render(errText),
+		m.styles.ErrorStyle.Render(errText),
 	)
 }
 
@@ -235,14 +167,14 @@ func (m Model) renderInput() string {
 	if m.waiting {
 		promptText = "… "
 	}
-	prompt := inputPromptStyle.Render(promptText)
+	prompt := m.styles.InputPromptStyle.Render(promptText)
 	input := renderPromptedTextarea(prompt, promptText, m.textarea.View())
 	// Lipgloss width is applied before border/padding, so leave enough room
 	// to avoid terminal wrapping artifacts when toggling the sidebar.
 	boxWidth := inputBoxContentWidth(m.width)
-	style := inputBoxStyle
+	style := m.styles.InputBoxStyle
 	if m.waiting {
-		style = inputWaitingStyle
+		style = m.styles.InputWaitingStyle
 	}
 	content := style.Width(boxWidth).Render(input)
 	if len(badgeLines) > 0 {
@@ -298,13 +230,13 @@ func (m Model) renderStatusBar() string {
 	var state string
 	switch m.chromeState() {
 	case "connecting":
-		state = statusBusyStyle.Render("● connecting")
+		state = m.styles.StatusBusyStyle.Render("● connecting")
 	case "waiting":
-		state = statusBusyStyle.Render("● waiting")
+		state = m.styles.StatusBusyStyle.Render("● waiting")
 	case "error":
-		state = statusErrorStyle.Render("● error")
+		state = m.styles.StatusErrorStyle.Render("● error")
 	default:
-		state = statusReadyStyle.Render("● ready")
+		state = m.styles.StatusReadyStyle.Render("● ready")
 	}
 
 	// Items ordered by priority — less critical ones are dropped on narrow
@@ -332,7 +264,7 @@ func (m Model) renderStatusBar() string {
 		}
 	}
 
-	return statusBarStyle.Width(maxInt(20, m.width-2)).Render(strings.Join(parts, "   ·   "))
+	return m.styles.StatusBarStyle.Width(maxInt(20, m.width-2)).Render(strings.Join(parts, "   ·   "))
 }
 
 type statusBarItem struct {
@@ -360,16 +292,16 @@ func (m Model) renderChatHeader() string {
 
 	var projectPart string
 	if m.isChatMode() {
-		projectPart = chatModeStyle.Render("chat mode")
+		projectPart = m.styles.ChatModeStyle.Render("chat mode")
 	} else {
 		projectName := truncateMiddle(projectName(m.cwdPath), maxInt(12, m.contentWidth()/3))
-		projectPart = headerMetaStyle.Render("project " + projectName)
+		projectPart = m.styles.HeaderMetaStyle.Render("project " + projectName)
 	}
 	meta := fmt.Sprintf("%s   ·   daemon %s   ·   %s", projectPart, m.daemonLabel, stateLabel)
 	header := lipgloss.JoinVertical(
 		lipgloss.Left,
-		headerTitleStyle.Render("Aurelia / "+sessionName)+"  "+headerMetaStyle.Render(meta),
-		headerRuleStyle.Render(strings.Repeat("─", maxInt(20, m.contentWidth()-2))),
+		m.styles.HeaderTitleStyle.Render("Aurelia / "+sessionName)+"  "+m.styles.HeaderMetaStyle.Render(meta),
+		m.styles.HeaderRuleStyle.Render(strings.Repeat("─", maxInt(20, m.contentWidth()-2))),
 	)
 	return lipgloss.NewStyle().Width(m.contentWidth()).Render(header)
 }
@@ -389,14 +321,14 @@ func (m Model) chromeState() string {
 
 func (m Model) renderSidebar() string {
 	lines := []string{
-		sidebarTitleStyle.Render("Aurelia"),
-		sidebarMutedStyle.Render("local terminal"),
+		m.styles.SidebarTitleStyle.Render("Aurelia"),
+		m.styles.SidebarMutedStyle.Render("local terminal"),
 		"",
-		sidebarTitleStyle.Render("Sessions"),
+		m.styles.SidebarTitleStyle.Render("Sessions"),
 	}
 
 	if len(m.sessions) == 0 {
-		lines = append(lines, sidebarMutedStyle.Render("  (no sessions)"))
+		lines = append(lines, m.styles.SidebarMutedStyle.Render("  (no sessions)"))
 	} else {
 		for i, s := range m.sessions {
 			label := safeSessionLabel(s.Name)
@@ -412,16 +344,16 @@ func (m Model) renderSidebar() string {
 			switch {
 			case isActive && isCursor:
 				prefix = "▶ ●"
-				lines = append(lines, sidebarActiveStyle.Render(prefix+" "+label))
+				lines = append(lines, m.styles.SidebarActiveStyle.Render(prefix+" "+label))
 			case isActive:
 				prefix = "●"
-				lines = append(lines, sidebarActiveStyle.Render(prefix+" "+label))
+				lines = append(lines, m.styles.SidebarActiveStyle.Render(prefix+" "+label))
 			case isCursor:
 				prefix = "▶"
-				lines = append(lines, sidebarCursorStyle.Render(prefix+" "+label))
+				lines = append(lines, m.styles.SidebarCursorStyle.Render(prefix+" "+label))
 			default:
 				prefix = "○"
-				lines = append(lines, sidebarMutedStyle.Render(prefix+" "+label))
+				lines = append(lines, m.styles.SidebarMutedStyle.Render(prefix+" "+label))
 			}
 		}
 	}
@@ -429,23 +361,23 @@ func (m Model) renderSidebar() string {
 	// Sidebar navigation hints when focused.
 	if m.sidebarFocused {
 		lines = append(lines, "",
-			sidebarMutedStyle.Render("↑↓ navigate"),
-			sidebarMutedStyle.Render("enter open"),
-			sidebarMutedStyle.Render("n new"),
-			sidebarMutedStyle.Render("d delete"),
-			sidebarMutedStyle.Render("esc exit"),
+			m.styles.SidebarMutedStyle.Render("↑↓ navigate"),
+			m.styles.SidebarMutedStyle.Render("enter open"),
+			m.styles.SidebarMutedStyle.Render("n new"),
+			m.styles.SidebarMutedStyle.Render("d delete"),
+			m.styles.SidebarMutedStyle.Render("esc exit"),
 		)
 	} else {
 		lines = append(lines, "",
-			sidebarTitleStyle.Render("Project"),
+			m.styles.SidebarTitleStyle.Render("Project"),
 			truncateMiddle(projectName(m.cwdPath), sidebarWidth-4),
-			sidebarMutedStyle.Render(truncateMiddle(m.cwdPath, sidebarWidth-4)),
+			m.styles.SidebarMutedStyle.Render(truncateMiddle(m.cwdPath, sidebarWidth-4)),
 		)
 		if m.isChatMode() {
-			lines = append(lines, chatModeStyle.Render("(chat mode)"))
+			lines = append(lines, m.styles.ChatModeStyle.Render("(chat mode)"))
 		}
 		lines = append(lines, "",
-			sidebarTitleStyle.Render("Daemon"),
+			m.styles.SidebarTitleStyle.Render("Daemon"),
 			m.daemonLabel,
 		)
 	}
@@ -485,7 +417,7 @@ func (m *Model) getOrCreateRenderer(width int) (*glamour.TermRenderer, error) {
 // Uses a cached renderer to avoid expensive re-creation on every call.
 func (m *Model) renderMessages(messages []chatMessage, width int) string {
 	if len(messages) == 0 {
-		return renderEmptyState(width)
+		return renderEmptyState(width, m.styles)
 	}
 
 	var b strings.Builder
@@ -506,14 +438,14 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 		switch msg.Sender {
 		case "Igor":
 			header := fmt.Sprintf("▶ Igor · %s", timestamp)
-			b.WriteString(userStyle.Render(header))
+			b.WriteString(m.styles.UserStyle.Render(header))
 			b.WriteString("\n")
-			b.WriteString(messageSeparatorStyle.Render(strings.Repeat("─", maxInt(20, width-4))))
+			b.WriteString(m.styles.MessageSeparatorStyle.Render(strings.Repeat("─", maxInt(20, width-4))))
 			b.WriteString("\n")
 			b.WriteString(msg.Text)
 		case "Aurelia":
 			header := fmt.Sprintf("▶ Aurelia · %s", timestamp)
-			b.WriteString(assistantStyle.Render(header))
+			b.WriteString(m.styles.AssistantStyle.Render(header))
 			b.WriteString("\n")
 			rendered, err := renderer.Render(msg.Text)
 			if err != nil || rendered == "" {
@@ -523,7 +455,7 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 			}
 		default:
 			header := fmt.Sprintf("▶ %s · %s", msg.Sender, timestamp)
-			b.WriteString(errorStyle.Render(header))
+			b.WriteString(m.styles.ErrorStyle.Render(header))
 			b.WriteString("\n")
 			b.WriteString(msg.Text)
 		}
@@ -544,14 +476,14 @@ func (m *Model) renderMessagesPlain(b *strings.Builder, messages []chatMessage) 
 
 // renderEmptyState returns a friendly welcome panel shown when the chat
 // history is empty (initial connect or after Ctrl+L clear).
-func renderEmptyState(width int) string {
+func renderEmptyState(width int, styles themeStyles) string {
 	contentWidth := width - 8
 	if contentWidth < 30 {
 		contentWidth = 30
 	}
 
-	title := headerTitleStyle.Render("Aurelia TUI")
-	hint := sidebarMutedStyle.Render(
+	title := styles.HeaderTitleStyle.Render("Aurelia TUI")
+	hint := styles.SidebarMutedStyle.Render(
 		"Type a message or /help to start.\n" +
 			"/cwd to set a project directory.",
 	)
@@ -636,18 +568,18 @@ func (m Model) renderProjectPanel() string {
 	state := m.projectState
 
 	var b strings.Builder
-	b.WriteString(headerTitleStyle.Render("Project State"))
+	b.WriteString(m.styles.HeaderTitleStyle.Render("Project State"))
 	b.WriteString("\n\n")
 
 	if state == nil {
-		b.WriteString(sidebarMutedStyle.Render("Loading..."))
+		b.WriteString(m.styles.SidebarMutedStyle.Render("Loading..."))
 		return b.String()
 	}
 
 	// CWD
 	cwdDisplay := state.CWD
 	if cwdDisplay == "" {
-		cwdDisplay = sidebarMutedStyle.Render("not set")
+		cwdDisplay = m.styles.SidebarMutedStyle.Render("not set")
 	} else {
 		cwdDisplay = truncateMiddle(state.CWD, 50)
 	}
@@ -678,16 +610,16 @@ func (m Model) renderProjectPanel() string {
 	// Bridge status
 	bridgeLabel := state.BridgeStatus
 	if bridgeLabel == "online" {
-		bridgeLabel = statusReadyStyle.Render("online")
+		bridgeLabel = m.styles.StatusReadyStyle.Render("online")
 	} else {
-		bridgeLabel = statusErrorStyle.Render("offline")
+		bridgeLabel = m.styles.StatusErrorStyle.Render("offline")
 	}
 	fmt.Fprintf(&b, "🧠 Bridge: %s\n", bridgeLabel)
 
 	// Memory layers
 	if len(state.MemoryLayers) > 0 {
 		b.WriteString("\n")
-		b.WriteString(headerTitleStyle.Render("Memory"))
+		b.WriteString(m.styles.HeaderTitleStyle.Render("Memory"))
 		b.WriteString("\n")
 		for _, l := range state.MemoryLayers {
 			icon := "◯"
@@ -704,7 +636,7 @@ func (m Model) renderProjectPanel() string {
 	// Latest run
 	if state.LatestRun != nil {
 		b.WriteString("\n")
-		b.WriteString(headerTitleStyle.Render("Latest Run"))
+		b.WriteString(m.styles.HeaderTitleStyle.Render("Latest Run"))
 		b.WriteString("\n")
 		fmt.Fprintf(&b, " Status: %s\n", state.LatestRun.Status)
 		if state.LatestRun.AgentName != "" {
@@ -721,7 +653,7 @@ func (m Model) renderProjectPanel() string {
 
 	// Footer hint
 	b.WriteString("\n")
-	b.WriteString(sidebarMutedStyle.Render("Ctrl+P to close"))
+	b.WriteString(m.styles.SidebarMutedStyle.Render("Ctrl+P to close"))
 
 	return b.String()
 }
