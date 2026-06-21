@@ -274,6 +274,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tuiSessionsMsg:
 		if msg.err == nil {
 			m.sessions = msg.sessions
+			m.syncSidebarRows()
 			// Ensure the active session is in the list (the default DM
 			// always exists implicitly even if not in the store).
 			m.ensureDefaultSessionInList()
@@ -482,6 +483,7 @@ func (m *Model) ensureDefaultSessionInList() {
 	m.sessions = append([]tuiSessionInfo{
 		{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
 	}, m.sessions...)
+	m.syncSidebarRows()
 }
 
 // handleKeyMsg processes keyboard input.
@@ -821,6 +823,11 @@ func (m Model) toggleMouseCapture() (tea.Model, tea.Cmd) {
 
 // handleSidebarKey processes keys when the sidebar is focused.
 func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Delegate navigation to the table component.
+	updatedTable, _ := m.sidebarTable.Update(msg)
+	m.sidebarTable = updatedTable
+	m.sidebarCursor = m.sidebarTable.Cursor()
+
 	switch msg.String() {
 	case "ctrl+c":
 		m.cleanupTempImages()

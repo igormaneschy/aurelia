@@ -11,6 +11,7 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/table"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
@@ -60,6 +61,7 @@ type Model struct {
 	sessions       []tuiSessionInfo
 	sidebarCursor  int // index into sessions, 0-based
 	sidebarFocused bool
+	sidebarTable   table.Model // bubbles/table for sidebar (v0.32+)
 
 	// Chat history (active session only — reloaded on session switch)
 	messages []chatMessage
@@ -190,6 +192,7 @@ func newModel(socketPath, historyPath string, theme Theme) Model {
 		activeSession:     ipc.ReservedTUIChatID,
 		theme:             theme,
 		styles:            newStylesForTheme(theme),
+		sidebarTable:      newSidebarTable(),
 	}
 }
 
