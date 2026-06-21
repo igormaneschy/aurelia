@@ -1,5 +1,9 @@
 # Lessons Index
 
+## Change fix-tui-message-timestamps (2026-06-21)
+- [pattern] pi-session-message-timestamps
+- [anti-pattern] no-current-time-for-restored-history
+
 ## Change cwd-scope-and-workspace-fix (2026-05-18)
 - [tool] daemon-log-visibility
 - [anti-pattern] backwards-compatible-validation

@@ -517,7 +517,7 @@ func TestModel_HealthCheckTickTriggersPing(t *testing.T) {
 func TestHistoryFromEventsParsesHistoryPayload(t *testing.T) {
 	msg := historyFromEvents([]ipc.IPCEvent{{
 		Type: ipc.EventTypeHistory,
-		Body: `[{"sender":"Igor","text":"hello"},{"sender":"Aurelia","text":"hi"}]`,
+		Body: `[{"sender":"Igor","text":"hello","timestamp":"2026-06-21T14:05:00Z"},{"sender":"Aurelia","text":"hi"}]`,
 	}})
 
 	if msg.err != nil {
@@ -528,6 +528,12 @@ func TestHistoryFromEventsParsesHistoryPayload(t *testing.T) {
 	}
 	if msg.messages[0].Sender != "Igor" || msg.messages[0].Text != "hello" {
 		t.Fatalf("unexpected first history message: %#v", msg.messages[0])
+	}
+	if got := msg.messages[0].Timestamp.Format(time.RFC3339); got != "2026-06-21T14:05:00Z" {
+		t.Fatalf("first timestamp = %q, want 2026-06-21T14:05:00Z", got)
+	}
+	if !msg.messages[1].Timestamp.IsZero() {
+		t.Fatalf("missing timestamp should remain zero, got %s", msg.messages[1].Timestamp)
 	}
 }
 
@@ -2570,6 +2576,20 @@ func TestFormatMessageTime_TimeOnly(t *testing.T) {
 	got := formatMessageTime(ts, false)
 	if got != "14:05" {
 		t.Errorf("formatMessageTime(timeOnly) = %q, want 14:05", got)
+	}
+}
+
+func TestFormatMessageTime_ZeroReturnsEmpty(t *testing.T) {
+	got := formatMessageTime(time.Time{}, false)
+	if got != "" {
+		t.Errorf("formatMessageTime(zero) = %q, want empty", got)
+	}
+}
+
+func TestFormatMessageHeader_OmitsSeparatorWithoutTimestamp(t *testing.T) {
+	got := formatMessageHeader("Igor", "")
+	if got != "▶ Igor" {
+		t.Errorf("formatMessageHeader(empty timestamp) = %q, want ▶ Igor", got)
 	}
 }
 

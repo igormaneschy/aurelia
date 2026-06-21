@@ -536,12 +536,12 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 		}
 
 		// Show full date on the first message of a new day; time-only otherwise.
-		showDate := i > 0 && !sameDay(msg.Timestamp, messages[i-1].Timestamp)
+		showDate := shouldShowMessageDate(messages, i)
 		timestamp := formatMessageTime(msg.Timestamp, showDate)
 
 		switch msg.Sender {
 		case "Igor":
-			header := fmt.Sprintf("▶ Igor · %s", timestamp)
+			header := formatMessageHeader("Igor", timestamp)
 			b.WriteString(m.styles.UserStyle.Render(header))
 			b.WriteString("\n")
 			b.WriteString(m.styles.MessageSeparatorStyle.Render(strings.Repeat("─", maxInt(20, width-4))))
@@ -549,7 +549,7 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 			b.WriteString(msg.Text)
 			b.WriteString("\n")
 		case "Aurelia":
-			header := fmt.Sprintf("▶ Aurelia · %s", timestamp)
+			header := formatMessageHeader("Aurelia", timestamp)
 			b.WriteString(m.styles.AssistantStyle.Render(header))
 			b.WriteString("\n")
 			rendered, err := renderer.Render(msg.Text)
@@ -560,7 +560,7 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 			}
 			b.WriteString("\n")
 		default:
-			header := fmt.Sprintf("▶ %s · %s", msg.Sender, timestamp)
+			header := formatMessageHeader(msg.Sender, timestamp)
 			b.WriteString(m.styles.ErrorStyle.Render(header))
 			b.WriteString("\n")
 			b.WriteString(msg.Text)
@@ -1011,10 +1011,29 @@ func (m Model) overlayPanelWide(bg, panel string) string {
 // When showDate is true, includes the date (e.g. "21/06 15:04").
 // When showDate is false, shows time only (e.g. "15:04").
 func formatMessageTime(t time.Time, showDate bool) string {
+	if t.IsZero() {
+		return ""
+	}
 	if showDate {
 		return t.Format("02/01 15:04")
 	}
 	return t.Format("15:04")
+}
+
+func shouldShowMessageDate(messages []chatMessage, i int) bool {
+	if i <= 0 || i >= len(messages) {
+		return false
+	}
+	current := messages[i].Timestamp
+	previous := messages[i-1].Timestamp
+	return !current.IsZero() && !previous.IsZero() && !sameDay(current, previous)
+}
+
+func formatMessageHeader(sender, timestamp string) string {
+	if timestamp == "" {
+		return fmt.Sprintf("▶ %s", sender)
+	}
+	return fmt.Sprintf("▶ %s · %s", sender, timestamp)
 }
 
 // sameDay returns true if a and b fall on the same calendar day.

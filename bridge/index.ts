@@ -102,7 +102,7 @@ interface ChatSessionState {
 interface SessionHistoryMessage {
   sender: "Igor" | "Aurelia";
   text: string;
-  timestamp: string;
+  timestamp?: string;
 }
 
 const activeRequests = new Map<string, ActiveRequest>();
@@ -918,6 +918,18 @@ function textFromMessageContent(content: unknown): string {
   return "";
 }
 
+function sessionMessageTimestampISO(msg: Record<string, unknown>): string | undefined {
+  const raw = msg.timestamp;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return new Date(raw).toISOString();
+  }
+  if (typeof raw === "string" && raw.trim() !== "") {
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+  }
+  return undefined;
+}
+
 function sessionHistoryFromMessages(messages: unknown[], limit = 100): SessionHistoryMessage[] {
   const history: SessionHistoryMessage[] = [];
   for (const raw of messages) {
@@ -931,9 +943,9 @@ function sessionHistoryFromMessages(messages: unknown[], limit = 100): SessionHi
     const text = textFromMessageContent(msg.content).trim();
     if (!text) continue;
 
-    // Extract timestamp from the PI session message (ISO 8601 format).
-    const ts = typeof msg.timestamp === "string" ? msg.timestamp : new Date().toISOString();
-    history.push({ sender, text, timestamp: ts });
+    // PI stores message timestamps as Unix milliseconds; normalize to ISO for Go.
+    const timestamp = sessionMessageTimestampISO(msg);
+    history.push({ sender, text, ...(timestamp ? { timestamp } : {}) });
   }
   if (history.length <= limit) return history;
   return history.slice(history.length - limit);

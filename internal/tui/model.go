@@ -368,7 +368,7 @@ func historyFromEvents(events []ipc.IPCEvent) tuiHistoryMsg {
 			if item.Text == "" || item.Sender == "" {
 				continue
 			}
-			ts := time.Now()
+			ts := time.Time{}
 			if item.Timestamp != "" {
 				if parsed, err := time.Parse(time.RFC3339Nano, item.Timestamp); err == nil {
 					ts = parsed

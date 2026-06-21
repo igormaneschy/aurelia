@@ -303184,6 +303184,17 @@ function textFromMessageContent(content) {
   if (obj.content !== void 0) return textFromMessageContent(obj.content);
   return "";
 }
+function sessionMessageTimestampISO(msg) {
+  const raw = msg.timestamp;
+  if (typeof raw === "number" && Number.isFinite(raw)) {
+    return new Date(raw).toISOString();
+  }
+  if (typeof raw === "string" && raw.trim() !== "") {
+    const parsed = Date.parse(raw);
+    if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+  }
+  return void 0;
+}
 function sessionHistoryFromMessages(messages, limit2 = 100) {
   const history = [];
   for (const raw of messages) {
@@ -303194,8 +303205,8 @@ function sessionHistoryFromMessages(messages, limit2 = 100) {
     if (!sender) continue;
     const text = textFromMessageContent(msg.content).trim();
     if (!text) continue;
-    const ts2 = typeof msg.timestamp === "string" ? msg.timestamp : (/* @__PURE__ */ new Date()).toISOString();
-    history.push({ sender, text, timestamp: ts2 });
+    const timestamp = sessionMessageTimestampISO(msg);
+    history.push({ sender, text, ...timestamp ? { timestamp } : {} });
   }
   if (history.length <= limit2) return history;
   return history.slice(history.length - limit2);
