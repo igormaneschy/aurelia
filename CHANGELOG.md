@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.31.0 - 2026-06-21
+
+### Added
+- **TUI persona unification** — novo campo `default_persona_user_id` no config.
+  TUI agora usa o mesmo persona ID do Telegram (50929027) em vez de `os.Getuid()`.
+  Unifica memória, Dream e Nudge entre TUI e Telegram.
+
+### Changed
+- **`forceTUIIDs()`** — aceita `personaUserID` em vez de hardcoded `os.Getuid()`.
+  Fallback chain: `default_persona_user_id` → `default_owner_user_id` →
+  `TelegramAllowedUserIDs[0]` → `os.Getuid()` (comportamento original).
+
 ## v0.30.2 - 2026-06-21
 
 ### Changed
