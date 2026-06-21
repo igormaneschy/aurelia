@@ -2562,3 +2562,91 @@ func TestModel_NoReconnectionToastWhenAlreadyReady(t *testing.T) {
 		t.Errorf("expected 1 message (no toast), got %d", len(m2.messages))
 	}
 }
+
+// ── Smart timestamp tests ─────────────────────────────────────────────────
+
+func TestFormatMessageTime_TimeOnly(t *testing.T) {
+	ts := time.Date(2026, 6, 21, 14, 5, 0, 0, time.UTC)
+	got := formatMessageTime(ts, false)
+	if got != "14:05" {
+		t.Errorf("formatMessageTime(timeOnly) = %q, want 14:05", got)
+	}
+}
+
+func TestFormatMessageTime_WithDate(t *testing.T) {
+	ts := time.Date(2026, 6, 21, 14, 5, 0, 0, time.UTC)
+	got := formatMessageTime(ts, true)
+	if got != "21/06 14:05" {
+		t.Errorf("formatMessageTime(withDate) = %q, want 21/06 14:05", got)
+	}
+}
+
+func TestSameDay_SameDay(t *testing.T) {
+	a := time.Date(2026, 6, 21, 10, 0, 0, 0, time.UTC)
+	b := time.Date(2026, 6, 21, 23, 59, 0, 0, time.UTC)
+	if !sameDay(a, b) {
+		t.Error("expected sameDay=true for same calendar day")
+	}
+}
+
+func TestSameDay_DifferentDay(t *testing.T) {
+	a := time.Date(2026, 6, 21, 23, 59, 0, 0, time.UTC)
+	b := time.Date(2026, 6, 22, 0, 1, 0, 0, time.UTC)
+	if sameDay(a, b) {
+		t.Error("expected sameDay=false for different calendar day")
+	}
+}
+
+func TestSameDay_DifferentMonth(t *testing.T) {
+	a := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
+	b := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	if sameDay(a, b) {
+		t.Error("expected sameDay=false for different month")
+	}
+}
+
+func TestModel_DateShownOnFirstMessageOfDay(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 80
+	m.height = 40
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+
+	// Two messages on the same day — first shows time only, second also time only.
+	m.messages = []chatMessage{
+		{Sender: "Igor", Text: "morning", Timestamp: time.Date(2026, 6, 21, 9, 0, 0, 0, time.UTC)},
+		{Sender: "Aurelia", Text: "hello", Timestamp: time.Date(2026, 6, 21, 9, 5, 0, 0, time.UTC)},
+	}
+	m.updateViewport()
+	content := stripANSIForTest(m.viewport.View())
+
+	if !strings.Contains(content, "09:00") {
+		t.Errorf("expected first message to show '09:00', got:\n%s", content)
+	}
+	// Same day, so date should NOT appear.
+	if strings.Contains(content, "21/06") {
+		t.Errorf("expected NO date for same-day messages, got:\n%s", content)
+	}
+}
+
+func TestModel_DateShownOnFirstMessageOfNewDay(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 80
+	m.height = 40
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+
+	// Two messages across day boundary — second message shows date.
+	m.messages = []chatMessage{
+		{Sender: "Igor", Text: "night", Timestamp: time.Date(2026, 6, 20, 23, 50, 0, 0, time.UTC)},
+		{Sender: "Aurelia", Text: "morning", Timestamp: time.Date(2026, 6, 21, 9, 0, 0, 0, time.UTC)},
+	}
+	m.updateViewport()
+	content := stripANSIForTest(m.viewport.View())
+
+	if !strings.Contains(content, "21/06") {
+		t.Errorf("expected new-day message to show date '21/06', got:\n%s", content)
+	}
+}

@@ -531,12 +531,12 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 
 	for i, msg := range messages {
 		if i > 0 {
-			// Subtle divider between consecutive messages for visual separation.
-			b.WriteString(m.styles.MessageDividerStyle.Render(strings.Repeat("─", maxInt(20, width-4))))
 			b.WriteString("\n\n")
 		}
 
-		timestamp := msg.Timestamp.Format("15:04")
+		// Show full date on the first message of a new day; time-only otherwise.
+		showDate := i > 0 && !sameDay(msg.Timestamp, messages[i-1].Timestamp)
+		timestamp := formatMessageTime(msg.Timestamp, showDate)
 
 		switch msg.Sender {
 		case "Igor":
@@ -1002,4 +1002,21 @@ func (m Model) overlayPanelWide(bg, panel string) string {
 		}
 	}
 	return strings.Join(out, "\n")
+}
+
+// formatMessageTime formats the message timestamp for display.
+// When showDate is true, includes the date (e.g. "21/06 15:04").
+// When showDate is false, shows time only (e.g. "15:04").
+func formatMessageTime(t time.Time, showDate bool) string {
+	if showDate {
+		return t.Format("02/01 15:04")
+	}
+	return t.Format("15:04")
+}
+
+// sameDay returns true if a and b fall on the same calendar day.
+func sameDay(a, b time.Time) bool {
+	ay, am, ad := a.Date()
+	by, bm, bd := b.Date()
+	return ay == by && am == bm && ad == bd
 }
