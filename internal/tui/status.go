@@ -20,7 +20,19 @@ func cwdFromEvents(events []ipc.IPCEvent) string {
 	return ""
 }
 
-// cwdFromText extracts a markdown-backticked cwd from known daemon messages.
+// modelFromText extracts a markdown-bolded model name from status text.
+// The daemon formats it as: ⚙️ Model: **gpt-5.5**
+func modelFromText(text string) string {
+	// Match "⚙️ Model: **<name>**"
+	if idx := strings.Index(text, "⚙️ Model: **"); idx >= 0 {
+		start := idx + len("⚙️ Model: **")
+		rest := text[start:]
+		if end := strings.Index(rest, "**"); end >= 0 {
+			return rest[:end]
+		}
+	}
+	return ""
+}
 func cwdFromText(text string) string {
 	for _, marker := range []string{"📂 CWD:", "📂 Path:", "Project set to:"} {
 		if cwd := valueAfterMarker(text, marker); cwd != "" {

@@ -21,13 +21,15 @@ type daemonUnreachableMsg struct {
 
 // daemonErrorMsg is sent when the daemon returns an error.
 type daemonErrorMsg struct {
-	err error
+	err      error
+	streamID int64
 }
 
 // tuiStatusMsg carries daemon state used by chrome/sidebar rendering.
 type tuiStatusMsg struct {
-	cwd string
-	err error
+	cwd   string
+	model string
+	err   error
 }
 
 // tuiHistoryMsg carries recent user/assistant transcript messages loaded from
@@ -39,20 +41,25 @@ type tuiHistoryMsg struct {
 
 // streamReaderMsg wraps an IPC response reader for the update loop.
 type streamReaderMsg struct {
-	reader *ipc.ResponseReader
+	reader   *ipc.ResponseReader
+	streamID int64
 }
 
 // streamEventMsg wraps a single IPC event from the stream.
 type streamEventMsg struct {
-	event ipc.IPCEvent
+	event    ipc.IPCEvent
+	streamID int64
 }
 
 // streamDoneMsg signals that the stream has ended.
-type streamDoneMsg struct{}
+type streamDoneMsg struct {
+	streamID int64
+}
 
 // streamErrMsg signals a stream error.
 type streamErrMsg struct {
-	err error
+	err      error
+	streamID int64
 }
 
 // healthCheckTickMsg triggers a periodic daemon reachability check.

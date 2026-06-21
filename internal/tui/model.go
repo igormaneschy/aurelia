@@ -136,6 +136,14 @@ type Model struct {
 	// theme is the requested theme (auto, light, dark). The effective palette
 	// in styles is resolved from this value at startup.
 	theme Theme
+
+	// activeModel is the display name of the currently active AI model
+	// (e.g. "gpt-5.5", "deepseek-v4-pro"). Populated from daemon status.
+	activeModel string
+
+	// turnStart marks when the current turn began. Reset when no turn is
+	// active. Used by the status bar to show elapsed time.
+	turnStart time.Time
 }
 
 // NewModel creates a new TUI model with the given socket path and theme.
@@ -296,8 +304,21 @@ func fetchTUIStatus(client *ipc.Client, chatID int64) tea.Cmd {
 		if err != nil {
 			return tuiStatusMsg{err: err}
 		}
-		return tuiStatusMsg{cwd: cwdFromEvents(events)}
+		return statusFromEvents(events)
 	}
+}
+
+// statusFromEvents extracts cwd and model from the daemon's /status response.
+func statusFromEvents(events []ipc.IPCEvent) tuiStatusMsg {
+	for _, ev := range events {
+		if ev.Type != ipc.EventTypeMessage || ev.Body == "" {
+			continue
+		}
+		cwd := cwdFromText(ev.Body)
+		model := modelFromText(ev.Body)
+		return tuiStatusMsg{cwd: cwd, model: model}
+	}
+	return tuiStatusMsg{}
 }
 
 type tuiHistoryPayload struct {
@@ -358,6 +379,7 @@ func (m Model) submitMessage(text string) tea.Cmd {
 func (m Model) submitMessageWithPayload(chatID int64, text string, images []ipc.IPCImage, attachments []ipc.IPCAttachment, streamID int64) tea.Cmd {
 	m.requestID = fmt.Sprintf("tui-%d", time.Now().UnixNano())
 	m.waiting = true
+	m.turnStart = time.Now()
 
 	userID := int64(os.Getuid())
 	msg := ipc.IPCMessage{

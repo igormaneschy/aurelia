@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	"github.com/charmbracelet/glamour"
@@ -274,31 +275,71 @@ func (m Model) renderStatusBar() string {
 
 	// Items ordered by priority — less critical ones are dropped on narrow
 	// terminals so the status bar never wraps to a second line.
-	// Thresholds account for: content width = m.width - 4 (Width - 2, Padding - 2).
-	// Cumulative visible widths: state(7) +sep(7)+ send(6) +sep(7)+ newline(17)
-	// +sep(7)+ scroll(9) +sep(7)+ esc(10) +sep(7)+ clear(8) +sep(7)+ tab(11) +sep(7)+ quit(7).
+	// min values increased to accommodate new fields (model, pending, elapsed).
 	allParts := []statusBarItem{
 		{label: state, min: 0},
-		{label: "↵ send", min: 24},
-		{label: fmt.Sprintf("%s newline", newlineFallbackKey), min: 48},
-		{label: m.mouseStatusLabel(), min: 64},
-		{label: "pg scroll", min: 82},
-		{label: "esc cancel", min: 100},
-		{label: "⌃L clear", min: 116},
-		{label: "⌃P project", min: 132},
-		{label: "⌃S/f2 sessions", min: 154},
-		{label: "tab sidebar", min: 174},
-		{label: "⌃C quit", min: 190},
+
+		// Active model — shown when known.
+		{label: m.activeModelLabel(), min: 14},
+
+		// Pending count — shown when > 0.
+		{label: m.pendingCountLabel(), min: 24},
+
+		// Elapsed time — shown when waiting.
+		{label: m.elapsedLabel(), min: 34},
+
+		{label: "↵ send", min: 44},
+		{label: fmt.Sprintf("%s newline", newlineFallbackKey), min: 62},
+		{label: m.mouseStatusLabel(), min: 80},
+		{label: "pg scroll", min: 94},
+		{label: "esc cancel", min: 106},
+		{label: "⌃L clear", min: 118},
+		{label: "⌃P project", min: 130},
+		{label: "⌃S/f2 sessions", min: 146},
+		{label: "tab sidebar", min: 162},
+		{label: "⌃C quit", min: 178},
 	}
 
 	parts := []string{}
 	for _, item := range allParts {
+		if item.label == "" {
+			continue
+		}
 		if m.width >= item.min {
 			parts = append(parts, item.label)
 		}
 	}
 
 	return m.styles.StatusBarStyle.Width(maxInt(20, m.width-2)).Render(strings.Join(parts, "   ·   "))
+}
+
+// activeModelLabel returns the model label for the status bar.
+// Returns empty string if no model is known.
+func (m Model) activeModelLabel() string {
+	if m.activeModel == "" {
+		return ""
+	}
+	return m.activeModel
+}
+
+// pendingCountLabel returns the pending count badge for the status bar.
+// Returns empty string when there are no pending messages.
+func (m Model) pendingCountLabel() string {
+	count := len(m.pendingQueue)
+	if count == 0 {
+		return ""
+	}
+	return fmt.Sprintf("⏳ %d", count)
+}
+
+// elapsedLabel returns the elapsed time label for the status bar.
+// Returns empty string when no turn is active.
+func (m Model) elapsedLabel() string {
+	if m.turnStart.IsZero() {
+		return ""
+	}
+	elapsed := time.Since(m.turnStart)
+	return elapsed.Truncate(time.Second).String()
 }
 
 func (m Model) mouseStatusLabel() string {

@@ -100,6 +100,9 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleKeyMsg(msg)
 
 	case tea.MouseMsg:
+		if !m.mouseEnabled {
+			return m, nil
+		}
 		return m.handleViewportMsg(msg)
 
 	case spinner.TickMsg:
@@ -138,6 +141,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// No cwd marker in status response — session has no project.
 				m.cwdPath = "not set"
 			}
+			m.activeModel = msg.model
 		}
 		return m, nil
 
@@ -161,8 +165,12 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case daemonErrorMsg:
+		if msg.streamID != 0 && msg.streamID != m.streamID {
+			return m, nil
+		}
 		m.daemonLabel = "error"
 		m.waiting = false
+		m.turnStart = time.Time{}
 		m.streamBuf = ""
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
@@ -176,18 +184,29 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Timestamp: time.Now(),
 		})
 		m.updateViewport()
-		return m, nil
+		return m.continueWithNextQueuedMessage()
 
 	case *streamReaderMsg:
+		if msg.streamID != m.streamID {
+			_ = msg.reader.Close()
+			return m, nil
+		}
 		m.reader = msg.reader
 		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
 
 	case streamEventMsg:
+		if msg.streamID != m.streamID {
+			return m, nil
+		}
 		return m.handleStreamEvent(msg.event)
 
 	case streamDoneMsg:
+		if msg.streamID != m.streamID {
+			return m, nil
+		}
 		// Stream ended (EOF) without explicit terminal event.
 		m.waiting = false
+		m.turnStart = time.Time{}
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
 			_ = m.reader.Close()
@@ -200,11 +219,15 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Timestamp: time.Now(),
 		})
 		m.updateViewport()
-		return m, nil
+		return m.continueWithNextQueuedMessage()
 
 	case streamErrMsg:
+		if msg.streamID != m.streamID {
+			return m, nil
+		}
 		// Stream error.
 		m.waiting = false
+		m.turnStart = time.Time{}
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
 			_ = m.reader.Close()
@@ -221,7 +244,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Timestamp: time.Now(),
 		})
 		m.updateViewport()
-		return m, nil
+		return m.continueWithNextQueuedMessage()
 
 	case tuiSessionsMsg:
 		if msg.err == nil {
@@ -353,6 +376,21 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 		m.updateViewport()
 		return m, nil
+
+	case clipboardCopyMsg:
+		if msg.err != nil {
+			m.messages = append(m.messages, chatMessage{
+				Sender: "⚠️",
+				Text:   fmt.Sprintf("Copy %s failed: %s", msg.label, msg.err),
+			})
+		} else {
+			m.messages = append(m.messages, chatMessage{
+				Sender: "📋",
+				Text:   fmt.Sprintf("Copied %s to clipboard", msg.label),
+			})
+		}
+		m.updateViewport()
+		return m, nil
 	}
 
 	return m, nil
@@ -402,6 +440,10 @@ func (m *Model) ensureDefaultSessionInList() {
 // ctrl+j is also accepted as a portable newline fallback.
 // When the sidebar is focused, ↑↓ navigate sessions, enter opens, n creates.
 func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+o" {
+		return m.toggleMouseCapture()
+	}
+
 	// Sidebar-focused mode: intercept navigation keys.
 	if m.sidebarFocused && m.state == stateChat {
 		return m.handleSidebarKey(msg)
@@ -411,6 +453,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.String() == "ctrl+c":
 		m.cleanupTempImages()
 		m.cleanupSubmittedTempImages()
+		m.cleanupQueuedTempImages()
 		return m, tea.Quit
 
 	case msg.String() == "ctrl+l":
@@ -441,6 +484,18 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.String() == "ctrl+v":
 		// Paste image from clipboard.
 		return m, pasteFromClipboardCmd()
+
+	case msg.String() == "ctrl+y":
+		return m, copyChatToClipboardCmd(m.messages)
+
+	case msg.String() == "ctrl+r":
+		return m, copyLastAureliaToClipboardCmd(m.messages)
+
+	case isAutocompleteKey(msg) && m.inputCommandPrefix() != "":
+		if m.hasAutocomplete() {
+			return m.cycleAutocomplete(), nil
+		}
+		return m.refreshAutocomplete(), nil
 
 	case isProjectPanelToggleKey(msg):
 		m.projectPanelOpen = !m.projectPanelOpen
@@ -492,10 +547,11 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case msg.String() == "enter":
-		// Submit.
-		if m.waiting {
-			return m, nil
+		if m.hasAutocomplete() {
+			return m.applyAutocomplete(), nil
 		}
+
+		// Submit.
 		text := strings.TrimSpace(m.textarea.Value())
 		if text == "" && len(m.pendingImages) == 0 && len(m.pendingAttachments) == 0 {
 			return m, nil
@@ -576,6 +632,16 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if m.waiting && len(m.pendingQueue) >= maxPendingQueue {
+			m.messages = append(m.messages, chatMessage{
+				Sender:    "⚠️",
+				Text:      fmt.Sprintf("Queue full: %d pending messages", maxPendingQueue),
+				Timestamp: time.Now(),
+			})
+			m.updateViewport()
+			return m, nil
+		}
+
 		m.rememberInput(text)
 		m.textarea.Reset()
 
@@ -602,10 +668,36 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			Text:      displayText,
 			Timestamp: time.Now(),
 		})
+
+		isCommand := strings.HasPrefix(text, "/")
+		queued := queuedMessage{
+			chatID:         m.activeSession,
+			text:           text,
+			displayText:    displayText,
+			images:         m.toIPCImages(),
+			attachments:    m.toIPCAttachments(),
+			tempImagePaths: m.tempImagePaths(),
+			isCommand:      isCommand,
+		}
+		if m.waiting {
+			if err := m.enqueueMessage(queued); err != nil {
+				m.messages = append(m.messages, chatMessage{
+					Sender:    "⚠️",
+					Text:      err.Error(),
+					Timestamp: time.Now(),
+				})
+			}
+			m.pendingImages = nil
+			m.pendingAttachments = nil
+			m.updateViewport()
+			return m, nil
+		}
+
 		m.waiting = true
+		m.streamID++
 		m.updateViewport()
 
-		if strings.HasPrefix(text, "/") {
+		if isCommand {
 			return m, tea.Batch(m.sendCommand(text), spinnerTickCmd())
 		}
 
@@ -634,12 +726,21 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+func (m Model) toggleMouseCapture() (tea.Model, tea.Cmd) {
+	m.mouseEnabled = !m.mouseEnabled
+	if m.mouseEnabled {
+		return m, tea.EnableMouseCellMotion
+	}
+	return m, tea.DisableMouse
+}
+
 // handleSidebarKey processes keys when the sidebar is focused.
 func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
 		m.cleanupTempImages()
 		m.cleanupSubmittedTempImages()
+		m.cleanupQueuedTempImages()
 		return m, tea.Quit
 
 	case "esc", "tab", "ctrl+i", "\t":
@@ -764,10 +865,18 @@ func (m Model) delegateKeyToTextarea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
+	m.clearAutocomplete()
 	return m, cmd
 }
 
-const maxInputHistory = 100
+func isAutocompleteKey(msg tea.KeyMsg) bool {
+	if msg.String() == "?" {
+		return true
+	}
+	return isSidebarToggleKey(msg)
+}
+
+const maxInputHistory = 1000
 
 func (m *Model) rememberInput(text string) {
 	text = strings.TrimSpace(text)
@@ -852,6 +961,7 @@ func (m Model) handleViewportMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 // handler context, which aborts the pipeline.
 func (m Model) cancelStreaming() (tea.Model, tea.Cmd) {
 	m.waiting = false
+	m.streamID++
 	m.cleanupSubmittedTempImages()
 	if m.reader != nil {
 		_ = m.reader.Close()
@@ -945,6 +1055,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 	case "stream_end":
 		// Terminal event — stream complete.
 		m.waiting = false
+		m.turnStart = time.Time{}
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
 			_ = m.reader.Close()
@@ -952,11 +1063,12 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 		}
 		m.streamBuf = ""
 		m.updateViewport()
-		return m, nil
+		return m.continueWithNextQueuedMessage()
 
 	case "error":
 		// Terminal event — error.
 		m.waiting = false
+		m.turnStart = time.Time{}
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
 			_ = m.reader.Close()
@@ -973,7 +1085,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 			Timestamp: time.Now(),
 		})
 		m.updateViewport()
-		return m, nil
+		return m.continueWithNextQueuedMessage()
 	}
 
 	// Unknown event type — keep reading.
@@ -986,17 +1098,18 @@ func (m Model) readNextStreamEvent() tea.Cmd {
 	if m.reader == nil {
 		return nil
 	}
+	streamID := m.streamID
 	return func() tea.Msg {
 		event, err := m.reader.Read()
 		if err == io.EOF {
 			_ = m.reader.Close()
-			return streamDoneMsg{}
+			return streamDoneMsg{streamID: streamID}
 		}
 		if err != nil {
 			_ = m.reader.Close()
-			return streamErrMsg{err: err}
+			return streamErrMsg{err: err, streamID: streamID}
 		}
-		return streamEventMsg{event: event}
+		return streamEventMsg{event: event, streamID: streamID}
 	}
 }
 
