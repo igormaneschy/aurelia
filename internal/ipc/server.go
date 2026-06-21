@@ -30,8 +30,12 @@ const maxLineSize = 64 * 1024
 var messageQueueSize = 10
 
 // readTimeout is the maximum idle time between reads from a client connection.
+// Must be >= the maximum pipeline execution time (bridgeExecutionTimeout, 30 min)
+// to prevent the IPC socket deadline from killing long-running TUI sessions.
+// Dead client connections are detected immediately via EOF when the client
+// process exits — this timeout only applies to live-but-silent connections.
 // Exposed as a variable for test override.
-var readTimeout = 60 * time.Second
+var readTimeout = 30 * time.Minute
 
 // writeTimeout is the maximum time to write a single event.
 // Exposed as a variable for test override.
@@ -366,7 +370,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 func validateMessage(msg IPCMessage) error {
 	switch msg.Type {
 	case MsgTypeSend, MsgTypeSubscribe, MsgTypeCommand, MsgTypeHistory,
-		MsgTypeSessions, MsgTypeSessionCreate, MsgTypeSessionOpen, MsgTypeSessionDelete,
+		MsgTypeSessions, MsgTypeSessionCreate, MsgTypeSessionOpen, MsgTypeSessionDelete, MsgTypeSessionRename,
 		MsgTypeProjectState:
 		// valid
 	default:

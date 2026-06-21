@@ -109,6 +109,20 @@ func (s *SQLiteStore) Create(ctx context.Context, chatID int64, name string) (*S
 	}, nil
 }
 
+func (s *SQLiteStore) Rename(ctx context.Context, chatID int64, name string) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE tui_sessions SET name = ? WHERE chat_id = ?`,
+		name, chatID)
+	if err != nil {
+		return fmt.Errorf("rename tui session %d: %w", chatID, err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrSessionNotFound
+	}
+	return nil
+}
+
 func (s *SQLiteStore) Touch(ctx context.Context, chatID int64) error {
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE tui_sessions SET last_used_at = ? WHERE chat_id = ?`,
@@ -129,6 +143,22 @@ func (s *SQLiteStore) Delete(ctx context.Context, chatID int64) error {
 		return fmt.Errorf("delete tui session %d: %w", chatID, err)
 	}
 	return nil
+}
+
+// NextChatID returns the next available ChatID for a new session.
+// It queries MIN(chat_id) from the database and returns one below it.
+// Returns -1 when the table is empty (caller should use a default).
+func (s *SQLiteStore) NextChatID(ctx context.Context) (int64, error) {
+	var minID sql.NullInt64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT MIN(chat_id) FROM tui_sessions`).Scan(&minID)
+	if err != nil {
+		return 0, fmt.Errorf("next chat id query: %w", err)
+	}
+	if !minID.Valid {
+		return -1, nil
+	}
+	return minID.Int64 - 1, nil
 }
 
 func (s *SQLiteStore) Close() error {

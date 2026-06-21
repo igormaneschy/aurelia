@@ -303194,7 +303194,8 @@ function sessionHistoryFromMessages(messages, limit2 = 100) {
     if (!sender) continue;
     const text = textFromMessageContent(msg.content).trim();
     if (!text) continue;
-    history.push({ sender, text });
+    const ts2 = typeof msg.timestamp === "string" ? msg.timestamp : (/* @__PURE__ */ new Date()).toISOString();
+    history.push({ sender, text, timestamp: ts2 });
   }
   if (history.length <= limit2) return history;
   return history.slice(history.length - limit2);

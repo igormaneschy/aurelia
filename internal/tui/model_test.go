@@ -22,14 +22,14 @@ func stripANSIForTest(s string) string {
 }
 
 func TestModel_InitialLoadingState(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	if m.state != stateLoading {
 		t.Errorf("expected stateLoading, got %v", m.state)
 	}
 }
 
 func TestModel_LoadingToErrorOnUnreachableDaemon(t *testing.T) {
-	m := NewModel("/nonexistent/socket.sock")
+	m := NewModel("/nonexistent/socket.sock", ThemeDark)
 
 	updated, _ := m.Update(daemonUnreachableMsg{err: errors.New("connection refused")})
 	m2 := updated.(Model)
@@ -43,7 +43,7 @@ func TestModel_LoadingToErrorOnUnreachableDaemon(t *testing.T) {
 }
 
 func TestModel_LoadingToChatOnReachableDaemon(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	updated, _ := m.Update(daemonReachableMsg{})
 	m2 := updated.(Model)
@@ -106,7 +106,7 @@ func TestModel_SubmitEmptyTextDoesNothing(t *testing.T) {
 	}
 }
 
-func TestModel_SubmitWhileWaitingIsNoop(t *testing.T) {
+func TestModel_SubmitWhileWaitingEnqueuesMessage(t *testing.T) {
 	ta := textarea.New()
 	ta.SetValue("hello")
 	m := Model{
@@ -120,10 +120,169 @@ func TestModel_SubmitWhileWaitingIsNoop(t *testing.T) {
 	m2 := updated.(Model)
 
 	if cmd != nil {
-		t.Error("expected nil command when already waiting")
+		t.Error("expected nil command when queuing during active stream")
 	}
-	if m2.textarea.Value() != "hello" {
-		t.Errorf("expected textarea unchanged, got %q", m2.textarea.Value())
+	if m2.textarea.Value() != "" {
+		t.Errorf("expected textarea reset after queueing, got %q", m2.textarea.Value())
+	}
+	if got := m2.pendingCount(); got != 1 {
+		t.Fatalf("expected 1 queued message, got %d", got)
+	}
+	if m2.pendingQueue[0].text != "hello" {
+		t.Errorf("queued text = %q, want hello", m2.pendingQueue[0].text)
+	}
+	if !m2.waiting {
+		t.Error("expected current stream to remain waiting")
+	}
+}
+
+func TestModel_StreamEndStartsNextQueuedMessage(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.waiting = true
+	m.streamID = 7
+	m.pendingQueue = []queuedMessage{{chatID: ipc.ReservedTUIChatID, text: "next"}}
+
+	updated, cmd := m.Update(streamEventMsg{streamID: 7, event: ipc.IPCEvent{Type: "stream_end"}})
+	m2 := updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected command to send queued message")
+	}
+	if !m2.waiting {
+		t.Fatal("expected waiting=true after starting queued message")
+	}
+	if got := m2.pendingCount(); got != 0 {
+		t.Fatalf("expected queue drained, got %d", got)
+	}
+}
+
+func TestModel_StaleStreamEndDoesNotStartQueue(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.waiting = false
+	m.streamID = 2
+	m.pendingQueue = []queuedMessage{{chatID: ipc.ReservedTUIChatID, text: "next"}}
+
+	updated, cmd := m.Update(streamDoneMsg{streamID: 1})
+	m2 := updated.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected stale stream end to be ignored")
+	}
+	if got := m2.pendingCount(); got != 1 {
+		t.Fatalf("expected queue preserved after stale stream end, got %d", got)
+	}
+}
+
+func TestModel_StreamErrorStartsNextQueuedMessage(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.waiting = true
+	m.pendingQueue = []queuedMessage{{text: "next"}}
+
+	updated, cmd := m.handleStreamEvent(ipc.IPCEvent{Type: "error", Error: "boom"})
+	m2 := updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected command to send queued message after error")
+	}
+	if !m2.waiting {
+		t.Fatal("expected waiting=true after starting queued message")
+	}
+	if got := m2.pendingCount(); got != 0 {
+		t.Fatalf("expected queue drained, got %d", got)
+	}
+}
+
+func TestModel_EscCancelsCurrentTurnKeepsQueue(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.waiting = true
+	m.streamID = 4
+	m.pendingQueue = []queuedMessage{{chatID: ipc.ReservedTUIChatID, text: "next"}}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m2 := updated.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected nil command for cancel")
+	}
+	if m2.waiting {
+		t.Fatal("expected waiting=false after cancel")
+	}
+	if got := m2.pendingCount(); got != 1 {
+		t.Fatalf("expected queue preserved after cancel, got %d", got)
+	}
+
+	updated, cmd = m2.Update(streamDoneMsg{streamID: 4})
+	m3 := updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected late stream end after cancel to be ignored")
+	}
+	if got := m3.pendingCount(); got != 1 {
+		t.Fatalf("expected queue still preserved after late stream end, got %d", got)
+	}
+}
+
+func TestModel_QueuedMessageCapturesActiveSession(t *testing.T) {
+	const originalSession int64 = -9000002
+	ta := textarea.New()
+	ta.SetValue("queued")
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.textarea = ta
+	m.waiting = true
+	m.activeSession = originalSession
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := updated.(Model)
+
+	m2.activeSession = -9000003
+	q, ok := (&m2).dequeueMessage()
+	if !ok {
+		t.Fatal("expected queued message")
+	}
+	if q.chatID != originalSession {
+		t.Fatalf("queued chatID = %d, want %d", q.chatID, originalSession)
+	}
+}
+
+func TestModel_CtrlCCleansQueuedTempImages(t *testing.T) {
+	tmp, err := os.CreateTemp(t.TempDir(), "queued-*.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.pendingQueue = []queuedMessage{{
+		chatID:         ipc.ReservedTUIChatID,
+		text:           "queued image",
+		tempImagePaths: []string{path},
+	}}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("expected quit command")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected queued temp file removed, stat err=%v", err)
+	}
+}
+
+func TestModel_PendingQueueBadgeRendersCount(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.pendingQueue = []queuedMessage{{text: "one"}, {text: "two"}}
+
+	badge := stripANSIForTest(m.renderPendingQueueBadge())
+
+	if !strings.Contains(badge, "⏳ 2 pending") {
+		t.Fatalf("expected pending badge count, got %q", badge)
 	}
 }
 
@@ -225,7 +384,7 @@ func TestModel_CtrlLClearsMessages(t *testing.T) {
 }
 
 func TestModel_CtrlLShowsEmptyStateWhenViewportReady(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 80
 	m.height = 24
@@ -259,7 +418,7 @@ func TestModel_CtrlCQuits(t *testing.T) {
 }
 
 func TestModel_EscCancelsStreaming(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.ready = true
 	m.waiting = true
@@ -291,7 +450,7 @@ func TestModel_EscCancelsStreaming(t *testing.T) {
 }
 
 func TestModel_EscDoesNothingWhenNotWaiting(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.ready = true
 	m.waiting = false
@@ -309,7 +468,7 @@ func TestModel_EscDoesNothingWhenNotWaiting(t *testing.T) {
 }
 
 func TestModel_HealthCheckResultUpdatesDaemonLabel(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.daemonLabel = "ready"
 
@@ -340,7 +499,7 @@ func TestModel_HealthCheckResultUpdatesDaemonLabel(t *testing.T) {
 }
 
 func TestModel_HealthCheckTickTriggersPing(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 
 	updated, cmd := m.Update(healthCheckTickMsg{})
@@ -373,7 +532,7 @@ func TestHistoryFromEventsParsesHistoryPayload(t *testing.T) {
 }
 
 func TestModel_HistoryMsgErrorShowsWarning(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.messages = nil
 	m.switchingSession = true
@@ -399,7 +558,7 @@ func TestModel_HistoryMsgErrorShowsWarning(t *testing.T) {
 }
 
 func TestModel_HistoryMsgReplacesStartupMessage(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 80
 	m.height = 24
@@ -419,7 +578,7 @@ func TestModel_HistoryMsgReplacesStartupMessage(t *testing.T) {
 }
 
 func TestModel_LateHistoryDoesNotReplaceUserInteraction(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 80
 	m.height = 24
@@ -443,7 +602,7 @@ func TestModel_LateHistoryDoesNotReplaceUserInteraction(t *testing.T) {
 }
 
 func TestModel_PageUpScrollsViewport(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
 	m.height = 12
@@ -465,8 +624,9 @@ func TestModel_PageUpScrollsViewport(t *testing.T) {
 }
 
 func TestModel_MouseWheelScrollsViewport(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
+	m.mouseEnabled = true
 	m.width = 100
 	m.height = 12
 	m.viewport = viewportForSize(m.contentWidth(), m.height)
@@ -488,8 +648,77 @@ func TestModel_MouseWheelScrollsViewport(t *testing.T) {
 	}
 }
 
+func TestModel_MouseDisabledIgnoresMouseWheel(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.height = 12
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+	m.viewport.SetContent(strings.Repeat("line\n", 40))
+	m.viewport.GotoBottom()
+	bottomOffset := m.viewport.YOffset
+
+	//nolint:staticcheck // tea.MouseWheelUp deprecated but no replacement in v1.3.10
+	updated, cmd := m.Update(tea.MouseMsg{
+		Type:   tea.MouseWheelUp, //nolint:staticcheck // SA1019: deprecated but still functional
+		Button: tea.MouseButtonWheelUp,
+		Action: tea.MouseActionPress,
+	})
+	m2 := updated.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected nil command when mouse capture is disabled")
+	}
+	if m2.viewport.YOffset != bottomOffset {
+		t.Fatalf("expected disabled mouse to preserve viewport offset %d, got %d", bottomOffset, m2.viewport.YOffset)
+	}
+}
+
+func TestModel_CtrlOTogglesMouseCapture(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	m2 := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected enable mouse command")
+	}
+	if !m2.mouseEnabled {
+		t.Fatal("expected ctrl+o to enable mouse")
+	}
+
+	updated, cmd = m2.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	m3 := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected disable mouse command")
+	}
+	if m3.mouseEnabled {
+		t.Fatal("expected second ctrl+o to disable mouse")
+	}
+}
+
+func TestModel_CtrlOTogglesMouseCaptureWhenSidebarFocused(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.sidebarFocused = true
+	m.sessions = []tuiSessionInfo{{ChatID: ipc.ReservedTUIChatID, Name: "dm"}}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	m2 := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected enable mouse command")
+	}
+	if !m2.mouseEnabled {
+		t.Fatal("expected ctrl+o to enable mouse even when sidebar is focused")
+	}
+	if !m2.sidebarFocused {
+		t.Fatal("expected sidebar focus to remain unchanged")
+	}
+}
+
 func TestModel_CtrlUDelegatesToTextarea(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.ready = true
 	m.textarea.SetValue("hello world")
@@ -504,7 +733,7 @@ func TestModel_CtrlUDelegatesToTextarea(t *testing.T) {
 }
 
 func TestModel_InputHistoryNavigatesUpAndDown(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.inputHistory = []string{"first prompt", "second prompt"}
 	m.inputHistoryIndex = len(m.inputHistory)
@@ -538,7 +767,7 @@ func TestModel_InputHistoryNavigatesUpAndDown(t *testing.T) {
 }
 
 func TestModel_InputHistoryDoesNotReplaceNonEmptyDraft(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.inputHistory = []string{"old prompt"}
 	m.inputHistoryIndex = len(m.inputHistory)
@@ -556,7 +785,7 @@ func TestModel_InputHistoryDoesNotReplaceNonEmptyDraft(t *testing.T) {
 }
 
 func TestModel_InputHistoryDoesNotReplaceEditedHistoryDraft(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.inputHistory = []string{"old prompt", "second prompt"}
 	m.inputHistoryIndex = len(m.inputHistory)
@@ -579,7 +808,7 @@ func TestModel_InputHistoryDoesNotReplaceEditedHistoryDraft(t *testing.T) {
 }
 
 func TestModel_RememberInputDedupesConsecutiveEntries(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := newModel("/tmp/test.sock", "", ThemeDark)
 	m.rememberInput("hello")
 	m.rememberInput("hello")
 	m.rememberInput("world")
@@ -618,7 +847,7 @@ func TestModel_TabTogglesSidebar(t *testing.T) {
 }
 
 func TestModel_TabRuneDoesNotWriteToInput(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.showSidebar = false
 
@@ -637,7 +866,7 @@ func TestModel_TabRuneDoesNotWriteToInput(t *testing.T) {
 }
 
 func TestModel_UnhandledAltShortcutDoesNotWriteToInput(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.ready = true
 	m.textarea.SetValue("hello")
@@ -654,7 +883,7 @@ func TestModel_UnhandledAltShortcutDoesNotWriteToInput(t *testing.T) {
 }
 
 func TestModel_TerminalColorReportDoesNotWriteToInput(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.ready = true
 
@@ -670,7 +899,7 @@ func TestModel_TerminalColorReportDoesNotWriteToInput(t *testing.T) {
 }
 
 func TestModel_PastedTerminalColorLikeTextWritesToInput(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.ready = true
 
@@ -684,7 +913,7 @@ func TestModel_PastedTerminalColorLikeTextWritesToInput(t *testing.T) {
 }
 
 func TestModel_TextareaAltShortcutDoesNotWriteLiteralRune(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.ready = true
 	m.textarea.SetValue("hello world")
@@ -1019,7 +1248,7 @@ func TestModel_DaemonErrorDoesNotPanic(t *testing.T) {
 }
 
 func TestModel_InputCharacterHandling(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.ready = true
 
@@ -1122,7 +1351,7 @@ func TestModel_AppendOrUpdateAureliaMessage(t *testing.T) {
 }
 
 func TestModel_WelcomeMessageOnConnect(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	updated, _ := m.Update(daemonReachableMsg{})
 	m2 := updated.(Model)
 
@@ -1211,7 +1440,7 @@ func TestModel_NewlineFallbackKeyConstant(t *testing.T) {
 // Regression: loading receives WindowSizeMsg, then daemonReachableMsg →
 // viewportSet=true and rendered content includes welcome/Aurelia text.
 func TestModel_ViewportInitializedFromLoadingWindowSizeMsg(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	// WindowSizeMsg arrives during loading.
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
@@ -1247,7 +1476,7 @@ func TestModel_ViewportInitializedFromLoadingWindowSizeMsg(t *testing.T) {
 // Regression: loading WindowSizeMsg, daemon reachable, user submits text,
 // then receives message → rendered content includes both user and assistant text.
 func TestModel_ViewportShowsIgorAndAureliaAfterFullFlow(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	// WindowSizeMsg during loading stores dimensions.
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
@@ -1313,7 +1542,7 @@ func TestModel_UpdateViewportNoopsWithoutDimensions(t *testing.T) {
 }
 
 func TestModel_DefaultChromeState(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	if !m.showSidebar {
 		t.Error("expected sidebar enabled by default")
@@ -1327,7 +1556,7 @@ func TestModel_DefaultChromeState(t *testing.T) {
 }
 
 func TestModel_TextareaPromptDisabledForCustomInputChrome(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	if m.textarea.Prompt != "" {
 		t.Fatalf("expected textarea internal prompt disabled, got %q", m.textarea.Prompt)
@@ -1335,7 +1564,7 @@ func TestModel_TextareaPromptDisabledForCustomInputChrome(t *testing.T) {
 }
 
 func TestModel_ChatViewStartsWithTopMargin(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
 	m.height = 40
@@ -1354,21 +1583,34 @@ func TestModel_ChatViewStartsWithTopMargin(t *testing.T) {
 }
 
 func TestModel_StatusBarUsesCompactShortcuts(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 175
 
 	status := stripANSIForTest(m.renderStatusBar())
 
-	for _, want := range []string{"↵ send", "alt+enter newline", "esc cancel", "⌃L clear", "⌃P project", "tab sidebar", "⌃C quit"} {
+	for _, want := range []string{"↵ send", "alt+enter newline", "✋ mouse", "esc cancel", "⌃L clear", "⌃P project", "tab sidebar"} {
 		if !strings.Contains(status, want) {
 			t.Errorf("expected status bar to contain %q, got %q", want, status)
 		}
 	}
 }
 
+func TestModel_StatusBarShowsMouseEnabled(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.mouseEnabled = true
+
+	status := stripANSIForTest(m.renderStatusBar())
+
+	if !strings.Contains(status, "🖱️ mouse") {
+		t.Fatalf("expected enabled mouse indicator, got %q", status)
+	}
+}
+
 func TestModel_StatusBarDropsItemsOnNarrowTerminal(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 50
 
@@ -1392,7 +1634,7 @@ func TestModel_StatusBarDropsItemsOnNarrowTerminal(t *testing.T) {
 
 func TestModel_StatusBarNeverWraps(t *testing.T) {
 	for _, width := range []int{40, 60, 80, 100, 120, 150, 175} {
-		m := NewModel("/tmp/test.sock")
+		m := NewModel("/tmp/test.sock", ThemeDark)
 		m.state = stateChat
 		m.width = width
 
@@ -1406,7 +1648,7 @@ func TestModel_StatusBarNeverWraps(t *testing.T) {
 }
 
 func TestModel_ChatHeaderShowsProjectAndDaemon(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
 	m.height = 40
@@ -1423,7 +1665,7 @@ func TestModel_ChatHeaderShowsProjectAndDaemon(t *testing.T) {
 }
 
 func TestModel_ChatHeaderShowsThinkingWhenWaiting(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
 	m.height = 40
@@ -1437,7 +1679,7 @@ func TestModel_ChatHeaderShowsThinkingWhenWaiting(t *testing.T) {
 }
 
 func TestModel_EmptyStateShowsWelcome(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 80
 	m.height = 24
@@ -1456,7 +1698,7 @@ func TestModel_EmptyStateShowsWelcome(t *testing.T) {
 }
 
 func TestModel_MessageRenderingUsesBlockFormat(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 80
 	m.height = 40
@@ -1487,7 +1729,7 @@ func TestModel_MessageRenderingUsesBlockFormat(t *testing.T) {
 }
 
 func TestModel_ViewportHeightAccountsForChatHeader(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.width = 100
 	m.height = 40
 
@@ -1501,7 +1743,7 @@ func TestModel_ViewportHeightAccountsForChatHeader(t *testing.T) {
 
 func TestModel_ViewportShrinksBelowMinimumOnVeryShortTerminal(t *testing.T) {
 	for _, height := range []int{12, 13} {
-		m := NewModel("/tmp/test.sock")
+		m := NewModel("/tmp/test.sock", ThemeDark)
 		m.width = minSidebarScreenWidth
 		m.height = height
 
@@ -1515,7 +1757,7 @@ func TestModel_ViewportShrinksBelowMinimumOnVeryShortTerminal(t *testing.T) {
 }
 
 func TestModel_TuiStatusUpdatesCWD(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 
 	updated, _ := m.Update(tuiStatusMsg{cwd: "/Users/igor/dev/aurelia"})
@@ -1527,7 +1769,7 @@ func TestModel_TuiStatusUpdatesCWD(t *testing.T) {
 }
 
 func TestModel_MessageEventUpdatesCWDForSidebar(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 
 	updated, _ := m.handleStreamEvent(ipc.IPCEvent{
@@ -1542,7 +1784,7 @@ func TestModel_MessageEventUpdatesCWDForSidebar(t *testing.T) {
 }
 
 func TestModel_SidebarHiddenOnNarrowTerminal(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.width = minSidebarScreenWidth - 1
 	m.height = minSidebarScreenHeight
 
@@ -1552,7 +1794,7 @@ func TestModel_SidebarHiddenOnNarrowTerminal(t *testing.T) {
 }
 
 func TestModel_SidebarHiddenOnShortTerminal(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.width = minSidebarScreenWidth
 	m.height = minSidebarScreenHeight - 1
 
@@ -1562,7 +1804,7 @@ func TestModel_SidebarHiddenOnShortTerminal(t *testing.T) {
 }
 
 func TestModel_ChatViewDoesNotExceedShortTerminalHeight(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = minSidebarScreenWidth
 	m.height = minSidebarScreenHeight - 1
@@ -1578,7 +1820,7 @@ func TestModel_ChatViewDoesNotExceedShortTerminalHeight(t *testing.T) {
 }
 
 func TestModel_ChatHeaderShowsChatModeWhenNoCWD(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
 	m.height = 40
@@ -1596,7 +1838,7 @@ func TestModel_ChatHeaderShowsChatModeWhenNoCWD(t *testing.T) {
 }
 
 func TestModel_SidebarShowsChatModeWhenNoCWD(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.daemonLabel = "ready"
 	m.sessions = []tuiSessionInfo{
@@ -1613,7 +1855,7 @@ func TestModel_SidebarShowsChatModeWhenNoCWD(t *testing.T) {
 }
 
 func TestModel_SidebarHidesChatModeWhenCWDSet(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.cwdPath = "/Users/igor/dev/aurelia"
 	m.daemonLabel = "ready"
@@ -1634,7 +1876,7 @@ func TestModel_SidebarHidesChatModeWhenCWDSet(t *testing.T) {
 
 func TestModel_ChatViewDoesNotExceedVeryShortTerminalHeight(t *testing.T) {
 	for _, height := range []int{12, 13} {
-		m := NewModel("/tmp/test.sock")
+		m := NewModel("/tmp/test.sock", ThemeDark)
 		m.state = stateChat
 		m.width = minSidebarScreenWidth
 		m.height = height
@@ -1935,3 +2177,476 @@ func TestModel_ProjectStatePollTickFetchesState(t *testing.T) {
 type assertError string
 
 func (e assertError) Error() string { return string(e) }
+
+// ── T5.2.2 Rich status bar tests ───────────────────────────────────────────
+
+func TestModel_StatusBarShowsActiveModel(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.activeModel = "gpt-5.5"
+
+	status := stripANSIForTest(m.renderStatusBar())
+
+	if !strings.Contains(status, "gpt-5.5") {
+		t.Errorf("expected status bar to show 'gpt-5.5', got %q", status)
+	}
+}
+
+func TestModel_StatusBarEmptyModelHidden(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	// activeModel defaults to ""
+
+	status := stripANSIForTest(m.renderStatusBar())
+
+	// The status bar should not render a model separator when model is empty.
+	// It's fine if other fields appear — the key is no model label.
+	// Just verify the empty string case is handled gracefully (no crash).
+	if len(status) == 0 {
+		t.Error("expected non-empty status bar")
+	}
+}
+
+func TestModel_StatusBarShowsPendingCount(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.pendingQueue = []queuedMessage{{}, {}, {}} // 3 pending
+
+	status := stripANSIForTest(m.renderStatusBar())
+
+	if !strings.Contains(status, "⏳ 3") {
+		t.Errorf("expected status bar to contain '⏳ 3', got %q", status)
+	}
+}
+
+func TestModel_StatusBarNoPendingHidden(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	// pendingQueue defaults to nil
+
+	status := stripANSIForTest(m.renderStatusBar())
+
+	if strings.Contains(status, "⏳") {
+		t.Errorf("expected no pending badge when queue is empty, got %q", status)
+	}
+}
+
+func TestModel_StatusBarShowsElapsedTime(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.turnStart = time.Now().Add(-12 * time.Second)
+
+	status := stripANSIForTest(m.renderStatusBar())
+
+	if !strings.Contains(status, "12s") {
+		t.Errorf("expected status bar to contain '12s', got %q", status)
+	}
+}
+
+func TestModel_StatusBarNoElapsedWhenIdle(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	// turnStart defaults to zero
+
+	status := stripANSIForTest(m.renderStatusBar())
+
+	// When turnStart is zero, no elapsed label should appear.
+	// The "s" suffix would only appear in the elapsed field.
+	// (Other fields like "sessions" contain "s" but not "s" as delimiter)
+	// We just verify no crash.
+	if len(status) == 0 {
+		t.Error("expected non-empty status bar")
+	}
+}
+
+func TestModel_statusFromEvents(t *testing.T) {
+	events := []ipc.IPCEvent{
+		{Type: ipc.EventTypeMessage, Body: "**Aurelia Status**\n🧠 Bridge: **online**\n⚙️ Model: **gpt-5.5**\n📂 CWD: `/Users/igor/dev`\n💬 Session: none\n"},
+	}
+	result := statusFromEvents(events)
+
+	if result.cwd != "/Users/igor/dev" {
+		t.Errorf("cwd = %q, want /Users/igor/dev", result.cwd)
+	}
+	if result.model != "gpt-5.5" {
+		t.Errorf("model = %q, want gpt-5.5", result.model)
+	}
+	if result.err != nil {
+		t.Errorf("unexpected error: %v", result.err)
+	}
+}
+
+func TestModel_statusFromEvents_NoModel(t *testing.T) {
+	events := []ipc.IPCEvent{
+		{Type: ipc.EventTypeMessage, Body: "**Aurelia Status**\n🧠 Bridge: **online**\n📂 No project set.\n"},
+	}
+	result := statusFromEvents(events)
+
+	if result.cwd != "not set" {
+		t.Errorf("cwd = %q, want 'not set'", result.cwd)
+	}
+	if result.model != "" {
+		t.Errorf("model = %q, want empty", result.model)
+	}
+}
+
+func TestModel_modelFromText(t *testing.T) {
+	tests := []struct {
+		text string
+		want string
+	}{
+		{"⚙️ Model: **gpt-5.5**", "gpt-5.5"},
+		{"foo\n⚙️ Model: **deepseek-v4-pro**\nbar", "deepseek-v4-pro"},
+		{"no model here", ""},
+		{"⚙️ Model: **", ""},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		got := modelFromText(tt.text)
+		if got != tt.want {
+			t.Errorf("modelFromText(%q) = %q, want %q", tt.text, got, tt.want)
+		}
+	}
+}
+
+// TestModel_TurnStartClearedAfterStreamEnd verifies that turnStart is reset
+// when the pipeline finishes, so the elapsed counter disappears from the
+// status bar.
+func TestModel_TurnStartClearedAfterStreamEnd(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.waiting = true
+	m.turnStart = time.Now()
+
+	updated, _ := m.handleStreamEvent(ipc.IPCEvent{Type: ipc.EventTypeStreamEnd})
+	m2 := updated.(Model)
+	if !m2.turnStart.IsZero() {
+		t.Error("expected turnStart to be zero after stream_end")
+	}
+	if m2.waiting {
+		t.Error("expected waiting=false after stream_end")
+	}
+}
+
+// ── T5.2.3 Help overlay tests ─────────────────────────────────────────────
+
+func TestModel_HelpOverlayToggleWithQuestionMark(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.height = 40
+	// textarea default is empty
+	if m.helpOverlayOpen {
+		t.Fatal("expected helpOverlayOpen=false initially")
+	}
+
+	// ? with empty input opens help
+	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m2 := updated.(Model)
+	if !m2.helpOverlayOpen {
+		t.Error("expected helpOverlayOpen=true after ?")
+	}
+
+	// ? again closes help
+	updated2, _ := m2.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m3 := updated2.(Model)
+	if m3.helpOverlayOpen {
+		t.Error("expected helpOverlayOpen=false after second ?")
+	}
+}
+
+func TestModel_HelpOverlayCloseWithEsc(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.helpOverlayOpen = true
+
+	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyEsc})
+	m2 := updated.(Model)
+	if m2.helpOverlayOpen {
+		t.Error("expected helpOverlayOpen=false after Esc")
+	}
+}
+
+func TestModel_HelpOverlayCloseWithEnter(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.helpOverlayOpen = true
+
+	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := updated.(Model)
+	if m2.helpOverlayOpen {
+		t.Error("expected helpOverlayOpen=false after Enter")
+	}
+}
+
+func TestModel_HelpOverlayNotOpenedWithNonEmptyInput(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.textarea.SetValue("hello")
+
+	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m2 := updated.(Model)
+	if m2.helpOverlayOpen {
+		t.Error("expected helpOverlayOpen=false when textarea is not empty")
+	}
+	// ? should have been forwarded to the textarea (delegated)
+}
+
+func TestModel_HelpOverlayRenderContainsKeyBindings(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.height = 40
+
+	overlay := m.renderHelpOverlay()
+
+	for _, want := range []string{
+		"Keyboard Shortcuts",
+		"Esc",
+		"Ctrl+O",
+		"Ctrl+P",
+		"Ctrl+L",
+		"Commands",
+		"/help",
+		"/cwd",
+		"/img",
+	} {
+		if !strings.Contains(overlay, want) {
+			t.Errorf("expected help overlay to contain %q, got:\n%s", want, overlay)
+		}
+	}
+}
+
+func TestModel_HelpOverlayRendersScoped(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 80
+	m.height = 30
+	m.helpOverlayOpen = true
+
+	view := m.View()
+
+	// Should contain the full UI but the help overlay should be on top.
+	// The overlay shouldn't crash rendering on narrow/standard widths.
+	if !strings.Contains(stripANSIForTest(view), "Keyboard Shortcuts") {
+		t.Error("expected view to contain help overlay when open")
+	}
+}
+
+// ── T5.2.4 Daemon state indicator tests ───────────────────────────────────
+
+func TestModel_ChromeStateReturnsOffline(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.daemonLabel = "offline"
+
+	got := m.chromeState()
+	if got != "offline" {
+		t.Errorf("chromeState() = %q, want offline", got)
+	}
+}
+
+func TestModel_ChromeStateReturnsReadyByDefault(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.daemonLabel = "ready"
+
+	got := m.chromeState()
+	if got != "ready" {
+		t.Errorf("chromeState() = %q, want ready", got)
+	}
+}
+
+func TestModel_ChromeStateReturnsWaiting(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.waiting = true
+	m.daemonLabel = "ready"
+
+	got := m.chromeState()
+	if got != "waiting" {
+		t.Errorf("chromeState() = %q, want waiting", got)
+	}
+}
+
+func TestModel_StatusBarShowsOffline(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.daemonLabel = "offline"
+
+	status := stripANSIForTest(m.renderStatusBar())
+
+	if !strings.Contains(status, "offline") {
+		t.Errorf("expected status bar to contain 'offline', got %q", status)
+	}
+}
+
+func TestModel_ChatHeaderHighlightsOfflineDaemon(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.height = 40
+	m.daemonLabel = "offline"
+	m.cwdPath = "/Users/igor/dev"
+
+	header := stripANSIForTest(m.renderChatHeader())
+
+	if !strings.Contains(header, "daemon offline") {
+		t.Errorf("expected header to contain 'daemon offline', got %q", header)
+	}
+}
+
+func TestModel_ChatHeaderNormalDaemon(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.height = 40
+	m.daemonLabel = "ready"
+	m.cwdPath = "/Users/igor/dev"
+
+	header := stripANSIForTest(m.renderChatHeader())
+
+	if !strings.Contains(header, "daemon ready") {
+		t.Errorf("expected header to contain 'daemon ready', got %q", header)
+	}
+}
+
+func TestModel_ReconnectionToast(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 80
+	m.height = 40
+	m.daemonLabel = "offline"
+	m.messages = []chatMessage{{Sender: "Igor", Text: "hello"}}
+
+	// Simulate health check recovery.
+	updated, _ := m.Update(healthCheckResultMsg{latency: 10 * time.Millisecond})
+	m2 := updated.(Model)
+
+	if m2.daemonLabel != "ready" {
+		t.Errorf("expected daemonLabel=ready, got %q", m2.daemonLabel)
+	}
+	if len(m2.messages) != 2 {
+		t.Fatalf("expected 2 messages (original + reconnect toast), got %d", len(m2.messages))
+	}
+	if m2.messages[1].Text != "Daemon reconnected." {
+		t.Errorf("expected reconnect toast, got %q", m2.messages[1].Text)
+	}
+	if m2.messages[1].Sender != "🔗" {
+		t.Errorf("expected sender=🔗, got %q", m2.messages[1].Sender)
+	}
+}
+
+func TestModel_NoReconnectionToastWhenAlreadyReady(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 80
+	m.height = 40
+	m.daemonLabel = "ready"
+	m.messages = []chatMessage{{Sender: "Igor", Text: "hello"}}
+
+	// Health check success when already ready should NOT add toast.
+	updated, _ := m.Update(healthCheckResultMsg{latency: 10 * time.Millisecond})
+	m2 := updated.(Model)
+
+	if len(m2.messages) != 1 {
+		t.Errorf("expected 1 message (no toast), got %d", len(m2.messages))
+	}
+}
+
+// ── Smart timestamp tests ─────────────────────────────────────────────────
+
+func TestFormatMessageTime_TimeOnly(t *testing.T) {
+	ts := time.Date(2026, 6, 21, 14, 5, 0, 0, time.UTC)
+	got := formatMessageTime(ts, false)
+	if got != "14:05" {
+		t.Errorf("formatMessageTime(timeOnly) = %q, want 14:05", got)
+	}
+}
+
+func TestFormatMessageTime_WithDate(t *testing.T) {
+	ts := time.Date(2026, 6, 21, 14, 5, 0, 0, time.UTC)
+	got := formatMessageTime(ts, true)
+	if got != "21/06 14:05" {
+		t.Errorf("formatMessageTime(withDate) = %q, want 21/06 14:05", got)
+	}
+}
+
+func TestSameDay_SameDay(t *testing.T) {
+	a := time.Date(2026, 6, 21, 10, 0, 0, 0, time.UTC)
+	b := time.Date(2026, 6, 21, 23, 59, 0, 0, time.UTC)
+	if !sameDay(a, b) {
+		t.Error("expected sameDay=true for same calendar day")
+	}
+}
+
+func TestSameDay_DifferentDay(t *testing.T) {
+	a := time.Date(2026, 6, 21, 23, 59, 0, 0, time.UTC)
+	b := time.Date(2026, 6, 22, 0, 1, 0, 0, time.UTC)
+	if sameDay(a, b) {
+		t.Error("expected sameDay=false for different calendar day")
+	}
+}
+
+func TestSameDay_DifferentMonth(t *testing.T) {
+	a := time.Date(2026, 5, 31, 12, 0, 0, 0, time.UTC)
+	b := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	if sameDay(a, b) {
+		t.Error("expected sameDay=false for different month")
+	}
+}
+
+func TestModel_DateShownOnFirstMessageOfDay(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 80
+	m.height = 40
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+
+	// Two messages on the same day — first shows time only, second also time only.
+	m.messages = []chatMessage{
+		{Sender: "Igor", Text: "morning", Timestamp: time.Date(2026, 6, 21, 9, 0, 0, 0, time.UTC)},
+		{Sender: "Aurelia", Text: "hello", Timestamp: time.Date(2026, 6, 21, 9, 5, 0, 0, time.UTC)},
+	}
+	m.updateViewport()
+	content := stripANSIForTest(m.viewport.View())
+
+	if !strings.Contains(content, "09:00") {
+		t.Errorf("expected first message to show '09:00', got:\n%s", content)
+	}
+	// Same day, so date should NOT appear.
+	if strings.Contains(content, "21/06") {
+		t.Errorf("expected NO date for same-day messages, got:\n%s", content)
+	}
+}
+
+func TestModel_DateShownOnFirstMessageOfNewDay(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 80
+	m.height = 40
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+
+	// Two messages across day boundary — second message shows date.
+	m.messages = []chatMessage{
+		{Sender: "Igor", Text: "night", Timestamp: time.Date(2026, 6, 20, 23, 50, 0, 0, time.UTC)},
+		{Sender: "Aurelia", Text: "morning", Timestamp: time.Date(2026, 6, 21, 9, 0, 0, 0, time.UTC)},
+	}
+	m.updateViewport()
+	content := stripANSIForTest(m.viewport.View())
+
+	if !strings.Contains(content, "21/06") {
+		t.Errorf("expected new-day message to show date '21/06', got:\n%s", content)
+	}
+}

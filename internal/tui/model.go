@@ -74,13 +74,23 @@ type Model struct {
 	// Textarea for multiline input
 	textarea textarea.Model
 
+	// Command autocomplete state.
+	autocompleteOptions []string
+	autocompleteIndex   int
+
 	// In-memory prompt/command history for ↑/↓ navigation.
 	inputHistory      []string
 	inputHistoryIndex int
+	historyPath       string
 
 	// Pending request tracking
 	requestID string
 	waiting   bool
+	streamID  int64
+
+	// Messages submitted while a stream is active. The daemon still processes
+	// one turn at a time; the TUI client sends the next item after stream_end.
+	pendingQueue []queuedMessage
 
 	// switchingSession is true while waiting for history after a session
 	// switch. It tells tuiHistoryMsg to replace messages even when the
@@ -97,6 +107,7 @@ type Model struct {
 	width          int
 	height         int
 	showSidebar    bool
+	mouseEnabled   bool
 	err            error
 	ready          bool
 	daemonLabel    string
@@ -117,10 +128,37 @@ type Model struct {
 	// Project state panel
 	projectPanelOpen bool
 	projectState     *ipc.ProjectStatePayload
+
+	// Help overlay — toggled with ?.
+	helpOverlayOpen bool
+
+	// renameTargetChatID is non-zero when the user is renaming a session.
+	// The textarea shows the current name and Enter sends the rename.
+	renameTargetChatID int64
+
+	// Style palette — owned by theme.go. Default is dark; T5.2.1 will
+	// select light vs dark based on terminal hints and --theme flag.
+	styles themeStyles
+
+	// theme is the requested theme (auto, light, dark). The effective palette
+	// in styles is resolved from this value at startup.
+	theme Theme
+
+	// activeModel is the display name of the currently active AI model
+	// (e.g. "gpt-5.5", "deepseek-v4-pro"). Populated from daemon status.
+	activeModel string
+
+	// turnStart marks when the current turn began. Reset when no turn is
+	// active. Used by the status bar to show elapsed time.
+	turnStart time.Time
 }
 
-// NewModel creates a new TUI model with the given socket path.
-func NewModel(socketPath string) Model {
+// NewModel creates a new TUI model with the given socket path and theme.
+func NewModel(socketPath string, theme Theme) Model {
+	return newModel(socketPath, defaultInputHistoryPath(), theme)
+}
+
+func newModel(socketPath, historyPath string, theme Theme) Model {
 	s := spinner.New()
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
@@ -134,6 +172,8 @@ func NewModel(socketPath string) Model {
 
 	ta.SetHeight(2)
 
+	inputHistory := loadInputHistory(historyPath)
+
 	return Model{
 		state:             stateLoading,
 		socketPath:        socketPath,
@@ -144,8 +184,12 @@ func NewModel(socketPath string) Model {
 		daemonLabel:       "connecting",
 		cwdPath:           "not set",
 		messages:          make([]chatMessage, 0),
-		inputHistoryIndex: 0,
+		inputHistory:      inputHistory,
+		inputHistoryIndex: len(inputHistory),
+		historyPath:       historyPath,
 		activeSession:     ipc.ReservedTUIChatID,
+		theme:             theme,
+		styles:            newStylesForTheme(theme),
 	}
 }
 
@@ -267,13 +311,27 @@ func fetchTUIStatus(client *ipc.Client, chatID int64) tea.Cmd {
 		if err != nil {
 			return tuiStatusMsg{err: err}
 		}
-		return tuiStatusMsg{cwd: cwdFromEvents(events)}
+		return statusFromEvents(events)
 	}
 }
 
+// statusFromEvents extracts cwd and model from the daemon's /status response.
+func statusFromEvents(events []ipc.IPCEvent) tuiStatusMsg {
+	for _, ev := range events {
+		if ev.Type != ipc.EventTypeMessage || ev.Body == "" {
+			continue
+		}
+		cwd := cwdFromText(ev.Body)
+		model := modelFromText(ev.Body)
+		return tuiStatusMsg{cwd: cwd, model: model}
+	}
+	return tuiStatusMsg{}
+}
+
 type tuiHistoryPayload struct {
-	Sender string `json:"sender"`
-	Text   string `json:"text"`
+	Sender    string `json:"sender"`
+	Text      string `json:"text"`
+	Timestamp string `json:"timestamp"`
 }
 
 // fetchTUIHistory asks the daemon for recent PI session transcript messages.
@@ -310,10 +368,16 @@ func historyFromEvents(events []ipc.IPCEvent) tuiHistoryMsg {
 			if item.Text == "" || item.Sender == "" {
 				continue
 			}
+			ts := time.Now()
+			if item.Timestamp != "" {
+				if parsed, err := time.Parse(time.RFC3339Nano, item.Timestamp); err == nil {
+					ts = parsed
+				}
+			}
 			messages = append(messages, chatMessage{
 				Sender:    item.Sender,
 				Text:      item.Text,
-				Timestamp: time.Now(),
+				Timestamp: ts,
 			})
 		}
 		return tuiHistoryMsg{messages: messages}
@@ -323,18 +387,23 @@ func historyFromEvents(events []ipc.IPCEvent) tuiHistoryMsg {
 
 // submitMessage sends a message to the daemon and returns a command.
 func (m Model) submitMessage(text string) tea.Cmd {
+	return m.submitMessageWithPayload(m.activeSession, text, m.toIPCImages(), m.toIPCAttachments(), m.streamID)
+}
+
+func (m Model) submitMessageWithPayload(chatID int64, text string, images []ipc.IPCImage, attachments []ipc.IPCAttachment, streamID int64) tea.Cmd {
 	m.requestID = fmt.Sprintf("tui-%d", time.Now().UnixNano())
 	m.waiting = true
+	m.turnStart = time.Now()
 
 	userID := int64(os.Getuid())
 	msg := ipc.IPCMessage{
 		Type:        ipc.MsgTypeSend,
-		ChatID:      m.activeSession,
+		ChatID:      chatID,
 		ThreadID:    0,
 		UserID:      userID,
 		Text:        text,
-		Images:      m.toIPCImages(),
-		Attachments: m.toIPCAttachments(),
+		Images:      images,
+		Attachments: attachments,
 		RequestID:   m.requestID,
 	}
 
@@ -346,21 +415,25 @@ func (m Model) submitMessage(text string) tea.Cmd {
 		defer cancel()
 		reader, err := m.ipcClient.Send(ctx, msg)
 		if err != nil {
-			return daemonErrorMsg{err: err}
+			return daemonErrorMsg{err: err, streamID: streamID}
 		}
-		return &streamReaderMsg{reader: reader}
+		return &streamReaderMsg{reader: reader, streamID: streamID}
 	}
 }
 
 // sendCommand sends a command to the daemon.
 func (m Model) sendCommand(text string) tea.Cmd {
+	return m.sendCommandToSession(m.activeSession, text, m.streamID)
+}
+
+func (m Model) sendCommandToSession(chatID int64, text string, streamID int64) tea.Cmd {
 	m.requestID = fmt.Sprintf("tui-%d", time.Now().UnixNano())
 	m.waiting = true
 
 	userID := int64(os.Getuid())
 	msg := ipc.IPCMessage{
 		Type:      ipc.MsgTypeCommand,
-		ChatID:    m.activeSession,
+		ChatID:    chatID,
 		ThreadID:  0,
 		UserID:    userID,
 		Text:      text,
@@ -372,9 +445,9 @@ func (m Model) sendCommand(text string) tea.Cmd {
 		defer cancel()
 		reader, err := m.ipcClient.Send(ctx, msg)
 		if err != nil {
-			return daemonErrorMsg{err: err}
+			return daemonErrorMsg{err: err, streamID: streamID}
 		}
-		return &streamReaderMsg{reader: reader}
+		return &streamReaderMsg{reader: reader, streamID: streamID}
 	}
 }
 
@@ -443,6 +516,43 @@ func deleteTUISession(client *ipc.Client, chatID int64) tea.Cmd {
 		}
 		return tuiSessionDeletedMsg{chatID: chatID}
 	}
+}
+
+// renameTUISession asks the daemon to rename a session.
+func renameTUISession(client *ipc.Client, chatID int64, name string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := contextWithTimeout(3 * time.Second)
+		defer cancel()
+		events, err := client.SendAndWait(ctx, ipc.IPCMessage{
+			Type:      ipc.MsgTypeSessionRename,
+			ChatID:    chatID,
+			Text:      name,
+			RequestID: fmt.Sprintf("tui-session-rename-%d", time.Now().UnixNano()),
+		})
+		if err != nil {
+			return tuiSessionRenamedMsg{chatID: chatID, err: err}
+		}
+		return sessionRenamedFromEvents(events)
+	}
+}
+
+// sessionRenamedFromEvents parses a renamed session from IPC events.
+func sessionRenamedFromEvents(events []ipc.IPCEvent) tuiSessionRenamedMsg {
+	type sessionPayload struct {
+		ChatID int64  `json:"chat_id"`
+		Name   string `json:"name"`
+	}
+	for _, ev := range events {
+		if ev.Type != ipc.EventTypeSessionRenamed || ev.Body == "" {
+			continue
+		}
+		var s sessionPayload
+		if err := json.Unmarshal([]byte(ev.Body), &s); err != nil {
+			return tuiSessionRenamedMsg{err: fmt.Errorf("parse renamed session: %w", err)}
+		}
+		return tuiSessionRenamedMsg{chatID: s.ChatID, name: s.Name}
+	}
+	return tuiSessionRenamedMsg{}
 }
 
 // sessionsFromEvents parses the sessions list from IPC events.

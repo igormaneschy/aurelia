@@ -12,11 +12,11 @@
 
 **Objetivo:** Preparar os estilos para suportar light/dark antes de adicionar novas funcionalidades.
 
-- [ ] Criar `internal/tui/theme.go` com `themeStyles` struct e funções `newLightStyles()` / `newDarkStyles()`.
-- [ ] Mover todas as definições de estilo de `view.go` para `theme.go`.
-- [ ] Adicionar campo `styles themeStyles` ao `Model`.
-- [ ] Refatorar `view.go` para usar `m.styles.*` em vez de variáveis globais.
-- [ ] Garantir que `go build ./... && go test ./internal/tui/...` continua a passar.
+- [x] Criar `internal/tui/theme.go` com `themeStyles` struct e funções `newLightStyles()` / `newDarkStyles()`.
+- [x] Mover todas as definições de estilo de `view.go` para `theme.go`.
+- [x] Adicionar campo `styles themeStyles` ao `Model`.
+- [x] Refatorar `view.go` para usar `m.styles.*` em vez de variáveis globais.
+- [x] Garantir que `go build ./... && go test ./internal/tui/...` continua a passar.
 
 **Critério de saída:** Nenhuma regressão visual; estilos centralizados.
 

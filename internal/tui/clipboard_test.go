@@ -2,12 +2,127 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
+
+func TestFormatChatForClipboardCopiesOnlyMessages(t *testing.T) {
+	got := formatChatForClipboard([]chatMessage{
+		{Sender: "Aurelia", Text: "Connected to Aurelia daemon. Type a message or /help."},
+		{Sender: "Igor", Text: "hello"},
+		{Sender: "Aurelia", Text: "hi\nthere"},
+		{Sender: "📋", Text: "Copied chat to clipboard"},
+		{Sender: "📎", Text: "Image attached"},
+		{Sender: "⚠️", Text: "Copy failed"},
+		{Sender: "⚠️", Text: "   "},
+	})
+	want := "Igor:\nhello\n\nAurelia:\nhi\nthere"
+
+	if got != want {
+		t.Fatalf("clipboard text = %q, want %q", got, want)
+	}
+}
+
+func TestLastAureliaMessageText(t *testing.T) {
+	got := lastAureliaMessageText([]chatMessage{
+		{Sender: "Aurelia", Text: "Connected to Aurelia daemon. Type a message or /help."},
+		{Sender: "Aurelia", Text: "first"},
+		{Sender: "Igor", Text: "question"},
+		{Sender: "Aurelia", Text: " latest answer \n"},
+	})
+
+	if got != "latest answer" {
+		t.Fatalf("last Aurelia text = %q", got)
+	}
+}
+
+func TestCopyChatShortcutUsesClipboardText(t *testing.T) {
+	original := copyTextToClipboard
+	var copied string
+	copyTextToClipboard = func(text string) error {
+		copied = text
+		return nil
+	}
+	defer func() { copyTextToClipboard = original }()
+
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.messages = []chatMessage{{Sender: "Igor", Text: "hello"}}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	if cmd == nil {
+		t.Fatal("expected copy command")
+	}
+	msg := cmd().(clipboardCopyMsg)
+
+	if msg.err != nil {
+		t.Fatalf("copy msg err: %v", msg.err)
+	}
+	if copied != "Igor:\nhello" {
+		t.Fatalf("copied = %q", copied)
+	}
+}
+
+func TestCopyLastResponseShortcutUsesClipboardText(t *testing.T) {
+	original := copyTextToClipboard
+	var copied string
+	copyTextToClipboard = func(text string) error {
+		copied = text
+		return nil
+	}
+	defer func() { copyTextToClipboard = original }()
+
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.messages = []chatMessage{
+		{Sender: "Aurelia", Text: "first"},
+		{Sender: "Igor", Text: "next"},
+		{Sender: "Aurelia", Text: "second"},
+	}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	if cmd == nil {
+		t.Fatal("expected copy command")
+	}
+	msg := cmd().(clipboardCopyMsg)
+
+	if msg.err != nil {
+		t.Fatalf("copy msg err: %v", msg.err)
+	}
+	if copied != "second" {
+		t.Fatalf("copied = %q", copied)
+	}
+}
+
+func TestClipboardCopyMsgAppendsStatusMessage(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+
+	updated, _ := m.Update(clipboardCopyMsg{label: "chat"})
+	m2 := updated.(Model)
+
+	if len(m2.messages) != 1 || !strings.Contains(m2.messages[0].Text, "Copied chat") {
+		t.Fatalf("expected copied status message, got %#v", m2.messages)
+	}
+}
+
+func TestClipboardCopyMsgAppendsErrorMessage(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+
+	updated, _ := m.Update(clipboardCopyMsg{label: "chat", err: errors.New("no clipboard")})
+	m2 := updated.(Model)
+
+	if len(m2.messages) != 1 || m2.messages[0].Sender != "⚠️" || !strings.Contains(m2.messages[0].Text, "no clipboard") {
+		t.Fatalf("expected copy error message, got %#v", m2.messages)
+	}
+}
 
 func TestClipboardMacOS_TimeoutReturnsPromptly(t *testing.T) {
 	// Create a pre-cancelled context — the function should return promptly

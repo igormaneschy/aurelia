@@ -84,7 +84,7 @@ func TestSessionOpenedFromEvents_ParsesSession(t *testing.T) {
 }
 
 func TestTUISessionsMsg_UpdatesSessionList(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.sessions = nil
 
@@ -102,7 +102,7 @@ func TestTUISessionsMsg_UpdatesSessionList(t *testing.T) {
 }
 
 func TestTUISessionsMsg_EnsuresDefaultDMInList(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 
 	// Daemon returns only a named session, not the DM.
@@ -126,7 +126,7 @@ func TestTUISessionsMsg_EnsuresDefaultDMInList(t *testing.T) {
 }
 
 func TestTUISessionOpenedMsg_SwitchesActiveSession(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.activeSession = ipc.ReservedTUIChatID
 	m.messages = []chatMessage{{Sender: "Aurelia", Text: "old message"}}
@@ -152,7 +152,7 @@ func TestTUISessionOpenedMsg_SwitchesActiveSession(t *testing.T) {
 }
 
 func TestTUIHistoryMsg_AppliedOnSessionSwitch(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.activeSession = -9000002
 	m.messages = []chatMessage{} // empty after session switch
@@ -178,7 +178,7 @@ func TestTUIHistoryMsg_AppliedOnSessionSwitch(t *testing.T) {
 }
 
 func TestTUIHistoryMsg_NotAppliedWhenNotSwitchingAndNoStartupMessage(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.messages = []chatMessage{{Sender: "Igor", Text: "my message"}}
 	m.switchingSession = false
@@ -198,7 +198,7 @@ func TestTUIHistoryMsg_NotAppliedWhenNotSwitchingAndNoStartupMessage(t *testing.
 }
 
 func TestTUISessionCreatedMsg_SwitchesToNewSession(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.activeSession = ipc.ReservedTUIChatID
 
@@ -216,7 +216,7 @@ func TestTUISessionCreatedMsg_SwitchesToNewSession(t *testing.T) {
 }
 
 func TestTUISessionDeletedMsg_FallsBackToDM(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.activeSession = -9000002 // on a named session
 
@@ -229,7 +229,7 @@ func TestTUISessionDeletedMsg_FallsBackToDM(t *testing.T) {
 }
 
 func TestTUISessionDeletedMsg_OtherSessionKeepsActive(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.activeSession = -9000003 // on a different session
 
@@ -242,7 +242,7 @@ func TestTUISessionDeletedMsg_OtherSessionKeepsActive(t *testing.T) {
 }
 
 func TestHandleSidebarKey_UpNavigatesCursor(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.sidebarFocused = true
 	m.sidebarCursor = 2
@@ -261,7 +261,7 @@ func TestHandleSidebarKey_UpNavigatesCursor(t *testing.T) {
 }
 
 func TestHandleSidebarKey_DownNavigatesCursor(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.sidebarFocused = true
 	m.sidebarCursor = 0
@@ -279,7 +279,7 @@ func TestHandleSidebarKey_DownNavigatesCursor(t *testing.T) {
 }
 
 func TestHandleSidebarKey_DownClampsAtEnd(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.sidebarFocused = true
 	m.sidebarCursor = 1
@@ -297,7 +297,7 @@ func TestHandleSidebarKey_DownClampsAtEnd(t *testing.T) {
 }
 
 func TestHandleSidebarKey_EscExitsFocus(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.sidebarFocused = true
 
@@ -310,7 +310,7 @@ func TestHandleSidebarKey_EscExitsFocus(t *testing.T) {
 }
 
 func TestHandleSidebarKey_EnterOpensSession(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.sidebarFocused = true
 	m.sidebarCursor = 1
@@ -335,7 +335,7 @@ func TestHandleSidebarKey_EnterOpensSession(t *testing.T) {
 }
 
 func TestHandleSidebarKey_EnterOnActiveSessionJustUnfocuses(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.sidebarFocused = true
 	m.sidebarCursor = 0
@@ -356,7 +356,7 @@ func TestHandleSidebarKey_EnterOnActiveSessionJustUnfocuses(t *testing.T) {
 }
 
 func TestHandleSidebarKey_NCreatesSession(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.sidebarFocused = true
 	m.sessions = []tuiSessionInfo{
@@ -372,7 +372,7 @@ func TestHandleSidebarKey_NCreatesSession(t *testing.T) {
 }
 
 func TestHandleSidebarKey_DDeletesSession(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.sidebarFocused = true
 	m.sidebarCursor = 1
@@ -390,7 +390,7 @@ func TestHandleSidebarKey_DDeletesSession(t *testing.T) {
 }
 
 func TestHandleSidebarKey_DOnDMShowsMessage(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.sidebarFocused = true
 	m.sidebarCursor = 0
@@ -410,7 +410,7 @@ func TestHandleSidebarKey_DOnDMShowsMessage(t *testing.T) {
 }
 
 func TestCtrlS_FocusesSidebar(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.showSidebar = true
 	m.sessions = []tuiSessionInfo{
@@ -439,7 +439,7 @@ func TestCtrlS_FocusesSidebar(t *testing.T) {
 }
 
 func TestCtrlS_NoopWhenSidebarHidden(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.showSidebar = false
 
@@ -452,7 +452,7 @@ func TestCtrlS_NoopWhenSidebarHidden(t *testing.T) {
 }
 
 func TestRenderSidebar_ShowsSessionList(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 120
 	m.height = 30
@@ -478,7 +478,7 @@ func TestRenderSidebar_ShowsSessionList(t *testing.T) {
 }
 
 func TestRenderSidebar_FocusedShowsHints(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.sidebarFocused = true
 	m.sessions = []tuiSessionInfo{
@@ -497,7 +497,7 @@ func TestRenderSidebar_FocusedShowsHints(t *testing.T) {
 }
 
 func TestRenderChatHeader_ShowsActiveSessionName(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 120
 	m.height = 30
@@ -516,7 +516,7 @@ func TestRenderChatHeader_ShowsActiveSessionName(t *testing.T) {
 }
 
 func TestRenderChatHeader_DefaultDM(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 120
 	m.height = 30
@@ -556,7 +556,7 @@ func TestSafeSessionLabel_StripsControlCharacters(t *testing.T) {
 }
 
 func TestRenderSidebar_SanitizesLegacySessionNames(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.messages = append(m.messages, chatMessage{
 		Sender: "Aurelia",
@@ -596,7 +596,7 @@ func TestRenderSidebar_SanitizesLegacySessionNames(t *testing.T) {
 }
 
 func TestRenderChatHeader_SanitizesLegacySessionNames(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 120
 	m.height = 30

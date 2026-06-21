@@ -102,6 +102,7 @@ interface ChatSessionState {
 interface SessionHistoryMessage {
   sender: "Igor" | "Aurelia";
   text: string;
+  timestamp: string;
 }
 
 const activeRequests = new Map<string, ActiveRequest>();
@@ -929,7 +930,10 @@ function sessionHistoryFromMessages(messages: unknown[], limit = 100): SessionHi
 
     const text = textFromMessageContent(msg.content).trim();
     if (!text) continue;
-    history.push({ sender, text });
+
+    // Extract timestamp from the PI session message (ISO 8601 format).
+    const ts = typeof msg.timestamp === "string" ? msg.timestamp : new Date().toISOString();
+    history.push({ sender, text, timestamp: ts });
   }
   if (history.length <= limit) return history;
   return history.slice(history.length - limit);

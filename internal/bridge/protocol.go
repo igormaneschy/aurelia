@@ -69,8 +69,9 @@ type SessionStats struct {
 // SessionHistoryMessage is a UI-safe transcript message derived from the PI
 // session file. Tool/system/internal messages are filtered out by the bridge.
 type SessionHistoryMessage struct {
-	Sender string `json:"sender"`
-	Text   string `json:"text"`
+	Sender    string `json:"sender"`
+	Text      string `json:"text"`
+	Timestamp string `json:"timestamp"`
 }
 
 // SecurityContext carries capability profile and policy configuration to the
