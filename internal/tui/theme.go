@@ -11,9 +11,10 @@ import (
 // whole UI can be repainted in a different palette by swapping the struct.
 type themeStyles struct {
 	// Chat messages.
-	UserStyle      lipgloss.Style
-	AssistantStyle lipgloss.Style
-	ErrorStyle     lipgloss.Style
+	UserStyle       lipgloss.Style
+	AssistantStyle  lipgloss.Style
+	ErrorStyle      lipgloss.Style
+	MessageDividerStyle lipgloss.Style // subtle divider between consecutive messages
 
 	// Input box.
 	InputPromptStyle  lipgloss.Style
@@ -142,6 +143,11 @@ func newDarkStyles() themeStyles {
 		ErrorStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("196")),
 
+		// MessageDividerStyle: subtle horizontal rule between consecutive messages.
+		// Uses a very dim color so it separates without distracting.
+		MessageDividerStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("236")),
+
 		InputPromptStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("39")),
 
@@ -219,6 +225,11 @@ func newLightStyles() themeStyles {
 
 		ErrorStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("160")), // strong red
+
+		// MessageDividerStyle: subtle horizontal rule between consecutive messages.
+		// Uses a very dim color so it separates without distracting.
+		MessageDividerStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("250")),
 
 		InputPromptStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("25")),

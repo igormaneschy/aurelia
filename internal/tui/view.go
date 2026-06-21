@@ -531,6 +531,8 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 
 	for i, msg := range messages {
 		if i > 0 {
+			// Subtle divider between consecutive messages for visual separation.
+			b.WriteString(m.styles.MessageDividerStyle.Render(strings.Repeat("─", maxInt(20, width-4))))
 			b.WriteString("\n\n")
 		}
 
@@ -544,6 +546,7 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 			b.WriteString(m.styles.MessageSeparatorStyle.Render(strings.Repeat("─", maxInt(20, width-4))))
 			b.WriteString("\n")
 			b.WriteString(msg.Text)
+			b.WriteString("\n")
 		case "Aurelia":
 			header := fmt.Sprintf("▶ Aurelia · %s", timestamp)
 			b.WriteString(m.styles.AssistantStyle.Render(header))
@@ -554,11 +557,13 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 			} else {
 				b.WriteString(strings.TrimSpace(rendered))
 			}
+			b.WriteString("\n")
 		default:
 			header := fmt.Sprintf("▶ %s · %s", msg.Sender, timestamp)
 			b.WriteString(m.styles.ErrorStyle.Render(header))
 			b.WriteString("\n")
 			b.WriteString(msg.Text)
+			b.WriteString("\n")
 		}
 	}
 

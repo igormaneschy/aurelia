@@ -62,6 +62,7 @@ func TestNewDarkStylesPopulatesAllFields(t *testing.T) {
 	checkRenderable("HeaderMetaStyle", s.HeaderMetaStyle)
 	checkRenderable("HeaderRuleStyle", s.HeaderRuleStyle)
 	checkRenderable("MessageSeparatorStyle", s.MessageSeparatorStyle)
+	checkRenderable("MessageDividerStyle", s.MessageDividerStyle)
 	checkRenderable("ChatModeStyle", s.ChatModeStyle)
 }
 
@@ -96,6 +97,7 @@ func TestNewLightStylesPopulatesAllFields(t *testing.T) {
 	checkRenderable("HeaderMetaStyle", s.HeaderMetaStyle)
 	checkRenderable("HeaderRuleStyle", s.HeaderRuleStyle)
 	checkRenderable("MessageSeparatorStyle", s.MessageSeparatorStyle)
+	checkRenderable("MessageDividerStyle", s.MessageDividerStyle)
 	checkRenderable("ChatModeStyle", s.ChatModeStyle)
 }
 
