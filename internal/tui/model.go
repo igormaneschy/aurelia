@@ -325,8 +325,9 @@ func statusFromEvents(events []ipc.IPCEvent) tuiStatusMsg {
 }
 
 type tuiHistoryPayload struct {
-	Sender string `json:"sender"`
-	Text   string `json:"text"`
+	Sender    string `json:"sender"`
+	Text      string `json:"text"`
+	Timestamp string `json:"timestamp"`
 }
 
 // fetchTUIHistory asks the daemon for recent PI session transcript messages.
@@ -363,10 +364,16 @@ func historyFromEvents(events []ipc.IPCEvent) tuiHistoryMsg {
 			if item.Text == "" || item.Sender == "" {
 				continue
 			}
+			ts := time.Now()
+			if item.Timestamp != "" {
+				if parsed, err := time.Parse(time.RFC3339Nano, item.Timestamp); err == nil {
+					ts = parsed
+				}
+			}
 			messages = append(messages, chatMessage{
 				Sender:    item.Sender,
 				Text:      item.Text,
-				Timestamp: time.Now(),
+				Timestamp: ts,
 			})
 		}
 		return tuiHistoryMsg{messages: messages}
