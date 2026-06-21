@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,12 +29,121 @@ type clipboardPasteMsg struct {
 	err  error  // error if paste failed
 }
 
+// clipboardCopyMsg is sent when text copy completes.
+type clipboardCopyMsg struct {
+	label string
+	err   error
+}
+
 // pasteFromClipboardCmd returns a tea.Cmd that reads an image from clipboard.
 func pasteFromClipboardCmd() tea.Cmd {
 	return func() tea.Msg {
 		path, err := pasteFromClipboard()
 		return clipboardPasteMsg{path: path, err: err}
 	}
+}
+
+var copyTextToClipboard = systemCopyTextToClipboard
+
+func copyChatToClipboardCmd(messages []chatMessage) tea.Cmd {
+	return copyTextCmd("chat", formatChatForClipboard(messages))
+}
+
+func copyLastAureliaToClipboardCmd(messages []chatMessage) tea.Cmd {
+	return copyTextCmd("last response", lastAureliaMessageText(messages))
+}
+
+func copyTextCmd(label, text string) tea.Cmd {
+	return func() tea.Msg {
+		if strings.TrimSpace(text) == "" {
+			return clipboardCopyMsg{label: label, err: fmt.Errorf("nothing to copy")}
+		}
+		return clipboardCopyMsg{label: label, err: copyTextToClipboard(text)}
+	}
+}
+
+func formatChatForClipboard(messages []chatMessage) string {
+	var blocks []string
+	for _, msg := range messages {
+		if !isClipboardTranscriptMessage(msg) {
+			continue
+		}
+		text := strings.TrimSpace(msg.Text)
+		if text == "" {
+			continue
+		}
+		blocks = append(blocks, fmt.Sprintf("%s:\n%s", msg.Sender, text))
+	}
+	return strings.Join(blocks, "\n\n")
+}
+
+func lastAureliaMessageText(messages []chatMessage) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Sender == "Aurelia" && isClipboardTranscriptMessage(messages[i]) {
+			return strings.TrimSpace(messages[i].Text)
+		}
+	}
+	return ""
+}
+
+func isClipboardTranscriptMessage(msg chatMessage) bool {
+	text := strings.TrimSpace(msg.Text)
+	if text == "" {
+		return false
+	}
+	if msg.Sender == "Igor" {
+		return true
+	}
+	if msg.Sender != "Aurelia" {
+		return false
+	}
+	return !strings.HasPrefix(text, "Connected to Aurelia daemon")
+}
+
+func systemCopyTextToClipboard(text string) error {
+	switch runtime.GOOS {
+	case "darwin":
+		return pipeClipboardText("pbcopy", nil, text)
+	case "linux":
+		if _, err := exec.LookPath("wl-copy"); err == nil {
+			return pipeClipboardText("wl-copy", nil, text)
+		}
+		if _, err := exec.LookPath("xclip"); err == nil {
+			return pipeClipboardText("xclip", []string{"-selection", "clipboard"}, text)
+		}
+		return fmt.Errorf("clipboard text copy not supported. Install wl-copy or xclip")
+	default:
+		return fmt.Errorf("clipboard text copy not supported on %s", runtime.GOOS)
+	}
+}
+
+func pipeClipboardText(name string, args []string, text string) error {
+	ctx, cancel := clipboardNewContext()
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return fmt.Errorf("open %s stdin: %w", name, err)
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start %s: %w", name, err)
+	}
+	_, writeErr := io.WriteString(stdin, text)
+	closeErr := stdin.Close()
+	waitErr := cmd.Wait()
+	if ctx.Err() != nil {
+		return fmt.Errorf("clipboard copy timed out after %v", clipboardTimeout)
+	}
+	if writeErr != nil {
+		return fmt.Errorf("write %s stdin: %w", name, writeErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close %s stdin: %w", name, closeErr)
+	}
+	if waitErr != nil {
+		return fmt.Errorf("%s failed: %w", name, waitErr)
+	}
+	return nil
 }
 
 // pasteFromClipboard reads an image from the system clipboard and returns
