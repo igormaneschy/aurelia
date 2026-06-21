@@ -25,16 +25,19 @@ const (
 	LayerUserGlobal  = "user_global"
 	LayerTopic       = "topic"
 	LayerCwdOverlay  = "cwd_overlay"
+	// LayerProjectTeam — deprecated (v0.31.0+): project_team layer removed.
+	// Aurelia is a personal assistant; ai-memory handles shared project knowledge.
 	LayerProjectTeam = "project_team"
 )
 
 // ValidLayers is the authoritative list of accepted layer names.
-var ValidLayers = []string{LayerUserGlobal, LayerTopic, LayerCwdOverlay, LayerProjectTeam}
+// project_team removed in v0.31.0.
+var ValidLayers = []string{LayerUserGlobal, LayerTopic, LayerCwdOverlay}
 
 // memoryUpdate describes one file to update during nudge extraction.
 // The model produces these as structured JSON (not via file tools).
 type memoryUpdate struct {
-	Layer    string   `json:"layer"`    // user_global, topic, cwd_overlay, project_team
+	Layer    string   `json:"layer"`    // user_global, topic, cwd_overlay
 	Filename string   `json:"filename"` // basename .md only
 	Title    string   `json:"title,omitempty"`
 	Facts    []string `json:"facts"`

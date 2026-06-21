@@ -167,10 +167,7 @@ func (bc *Service) InvalidateMemoryDirs(chatID int64, threadID int, userID int64
 		if overlayDir := bc.resolver.TopicCwdOverlayDir(chatID, threadID); overlayDir != "" {
 			bc.memoryCache.invalidate(overlayDir)
 		}
-		// Project team memory
-		if teamDir := bc.resolver.ProjectTeamMemoryDir(cwd); teamDir != "" {
-			bc.memoryCache.invalidate(teamDir)
-		}
+		// project_team: removed — redundant with cwd_overlay
 	}
 }
 

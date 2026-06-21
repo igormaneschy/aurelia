@@ -78,29 +78,23 @@ func TestBootstrapProject_CreatesLocalSkillsDirectory(t *testing.T) {
 	}
 }
 
-func TestBootstrapProjectMemory_CreatesDirectoriesAndIndex(t *testing.T) {
+func TestBootstrapProjectMemory_IsNoOpSinceV031(t *testing.T) {
 	root := t.TempDir()
 	r := &PathResolver{root: root}
 	cwd := "/home/user/myproject"
 
+	// BootstrapProjectMemory is a no-op since v0.31.0 (project_team removed).
 	if err := BootstrapProjectMemory(r, cwd); err != nil {
 		t.Fatalf("BootstrapProjectMemory() error: %v", err)
 	}
 
-	privateDir := r.ProjectTeamMemoryDir(cwd)
-
-	for _, dir := range []string{privateDir} {
-		info, err := os.Stat(dir)
-		if err != nil || !info.IsDir() {
-			t.Errorf("directory not created: %s (err=%v)", dir, err)
-		}
-		indexPath := filepath.Join(dir, "MEMORY.md")
-		if _, err := os.Stat(indexPath); err != nil {
-			t.Errorf("MEMORY.md not created in %s: %v", dir, err)
-		}
+	// Verify team dir is NOT created (project_team removed).
+	teamDir := r.ProjectTeamMemoryDir(cwd)
+	if _, err := os.Stat(teamDir); err == nil {
+		t.Errorf("team directory should NOT be created after v0.31.0, but exists: %s", teamDir)
 	}
 
-	// Idempotent: running again should not fail or overwrite
+	// Idempotent: running again should not fail
 	if err := BootstrapProjectMemory(r, cwd); err != nil {
 		t.Fatalf("second BootstrapProjectMemory() error: %v", err)
 	}
@@ -118,7 +112,7 @@ func TestBootstrapProjectMemory_EmptyCwd(t *testing.T) {
 	}
 }
 
-func TestBootstrapConversationProjectMemory_CreatesCwdOverlayAndTeamIndexes(t *testing.T) {
+func TestBootstrapConversationProjectMemory_CreatesCwdOverlayIndex(t *testing.T) {
 	root := t.TempDir()
 	r := &PathResolver{root: root}
 	cwd := "/home/user/myproject"
@@ -127,9 +121,9 @@ func TestBootstrapConversationProjectMemory_CreatesCwdOverlayAndTeamIndexes(t *t
 		t.Fatalf("BootstrapConversationProjectMemory() error: %v", err)
 	}
 
+	// Only cwd_overlay is created; project_team removed in v0.31.0.
 	dirs := []string{
 		r.TopicCwdOverlayDir(42, 99),
-		r.ProjectTeamMemoryDir(cwd),
 	}
 	for _, dir := range dirs {
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
@@ -138,6 +132,12 @@ func TestBootstrapConversationProjectMemory_CreatesCwdOverlayAndTeamIndexes(t *t
 		if _, err := os.Stat(filepath.Join(dir, "MEMORY.md")); err != nil {
 			t.Fatalf("MEMORY.md not created in %s: %v", dir, err)
 		}
+	}
+
+	// Verify team dir is NOT created (project_team removed).
+	teamDir := r.ProjectTeamMemoryDir(cwd)
+	if _, err := os.Stat(teamDir); err == nil {
+		t.Errorf("team directory should NOT be created after v0.31.0, but exists: %s", teamDir)
 	}
 }
 

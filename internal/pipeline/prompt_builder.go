@@ -361,8 +361,7 @@ func (bc *Service) buildProjectMemoryInstructions(chatID int64, threadID int, pr
 		topicAlias := fmt.Sprintf("topic://chat_%d/thread_%d", chatID, threadID)
 		sb.WriteString("| **Topic** | `" + topicAlias + "` | Facts specific to this forum topic — isolated from other topics |\n")
 	}
-	sb.WriteString("| **CWD Overlay** | `~/.aurelia/topics/chat_<id>/thread_<id>/cwd_overlay/` | Work context, session notes, decisions for project \"" + projectName + "\" in this topic |\n")
-	sb.WriteString("| **Project Team** | `~/.aurelia/projects/<slug>/team/` | Stack, conventions, architecture, known bugs — shared among team members on \"" + projectName + "\" |\n")
+	sb.WriteString("| **CWD Overlay** | `~/.aurelia/topics/chat_<id>/thread_<id>/cwd_overlay/` | Work context, session notes, decisions for project \"" + projectName + "\" in this topic — Aurelia is a personal assistant |\n")
 
 	sb.WriteString("\n### Saving memory\n")
 	sb.WriteString("When something meaningful happens, save it using the Write tool to the correct layer:\n")
@@ -468,12 +467,8 @@ func (bc *Service) loadMemoryContents(chatID int64, threadID int, userID int64, 
 		}
 	}
 
-	// Layer 4: Project team — only when /cwd is active
-	if hasProject {
-		projectName := filepath.Base(cwd)
-		header := fmt.Sprintf("#### Project: %s (team)\n\n", projectName)
-		appendLayer(header, bc.resolver.ProjectTeamMemoryDir(cwd))
-	}
+	// Layer 4 (formerly project_team): removed — redundant with cwd_overlay.
+	// Aurelia is a personal assistant; ai-memory handles shared project knowledge.
 
 	// Observability: log which memory layers were loaded and their sizes.
 	// This helps diagnose prompt budget issues and verify layer isolation.
@@ -487,7 +482,7 @@ func (bc *Service) loadMemoryContents(chatID int64, threadID int, userID int64, 
 func (bc *Service) logMemoryLayers(chatID int64, threadID int, userID int64, hasProject bool, totalChars int) {
 	layers := []string{"user_global", "topic"}
 	if hasProject {
-		layers = append(layers, "cwd_overlay", "project_team")
+		layers = append(layers, "cwd_overlay")
 	}
 	log.Printf("memory: loaded %d layers for chat=%d thread=%d user=%d: %v (%d chars total)",
 		len(layers), chatID, threadID, userID, layers, totalChars)

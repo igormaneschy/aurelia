@@ -24,7 +24,7 @@ type nudgeTemplateData struct {
 	GlobalDir     string
 	TopicDir      string
 	CwdOverlayDir string
-	TeamDir       string
+	TeamDir       string // deprecated (v0.31.0+): project_team removed, always empty
 }
 
 // AfterTurnNudge checks if enough turns have accumulated to trigger a nudge review.
@@ -360,7 +360,6 @@ func (d *Dreamer) buildNudgePrompt(cwd string, chatID int64, threadID int, userI
 
 	// Project context — use canonical paths
 	data.CwdOverlayDir = d.resolver.TopicCwdOverlayDir(chatID, threadID)
-	data.TeamDir = d.resolver.ProjectTeamMemoryDir(cwd)
 
 	tmpl := template.Must(template.New("nudge_project").ParseFS(nudgeTemplateFS, "prompts/nudge_project.tmpl"))
 	var buf strings.Builder

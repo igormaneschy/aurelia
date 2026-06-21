@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.31.1 - 2026-06-21
+
+### Removed
+- **project_team memory layer** — redundante para assistente pessoal. Escritas
+  redirecionadas para `cwd_overlay`. Conhecimento compartilhado fica com ai-memory.
+
 ## v0.31.0 - 2026-06-21
 
 ### Added

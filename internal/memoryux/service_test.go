@@ -30,15 +30,15 @@ func TestStatus_Layers(t *testing.T) {
 		t.Fatalf("Status(): %v", err)
 	}
 
-	if len(status.Layers) != 4 {
-		t.Fatalf("expected 4 layers, got %d: %+v", len(status.Layers), status.Layers)
+	if len(status.Layers) != 3 {
+		t.Fatalf("expected 3 layers (team removed in v0.31.0), got %d: %+v", len(status.Layers), status.Layers)
 	}
 
 	names := make([]string, len(status.Layers))
 	for i, l := range status.Layers {
 		names[i] = l.Name
 	}
-	if names[0] != "Global" || names[1] != "Topic" || names[2] != "CWD Overlay" || names[3] != "Team" {
+	if names[0] != "Global" || names[1] != "Topic" || names[2] != "CWD Overlay" {
 		t.Fatalf("unexpected layer order: %v", names)
 	}
 
@@ -73,11 +73,11 @@ func TestStatus_NoThread(t *testing.T) {
 		t.Fatalf("Status(): %v", err)
 	}
 
-	// Without thread: no topic layer
-	if len(status.Layers) != 3 {
-		t.Fatalf("expected 3 layers, got %d", len(status.Layers))
+	// Without thread: no topic layer, no team layer (v0.31.0+)
+	if len(status.Layers) != 2 {
+		t.Fatalf("expected 2 layers (team removed), got %d", len(status.Layers))
 	}
-	if status.Layers[0].Name != "Global" || status.Layers[1].Name != "CWD Overlay" || status.Layers[2].Name != "Team" {
+	if status.Layers[0].Name != "Global" || status.Layers[1].Name != "CWD Overlay" {
 		t.Fatalf("unexpected layers: %v", status.Layers)
 	}
 }

@@ -483,28 +483,30 @@ func TestSafeWriter_ProjectLayerWritesFiles(t *testing.T) {
 	}
 }
 
-func TestSafeWriter_TeamLayerWritesFiles(t *testing.T) {
+func TestSafeWriter_TeamLayerRedirectsToCwdOverlay(t *testing.T) {
 	dir := t.TempDir()
-	teamDir := filepath.Join(dir, "projects", "my-project", "project_team")
-	resolver := &testResolver{memoryDir: dir, teamDir: teamDir}
+	cwdOverlayDir := filepath.Join(dir, "topics", "chat_1", "thread_1", "cwd_overlay")
+	resolver := &testResolver{memoryDir: dir, cwdOverlayDir: cwdOverlayDir, root: dir}
 	w, err := newSafeMemoryWriter(dir, resolver)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	// project_team writes now redirect to cwd_overlay (v0.31.0+).
 	applied := w.applyUpdates([]memoryUpdate{
 		{Layer: "project_team", Filename: "conventions.md", Title: "Conventions", Facts: []string{"use tabs not spaces"}},
 	}, 1, 1, "/some/cwd")
 	if applied != 1 {
-		t.Fatalf("expected 1 applied update, got %d", applied)
+		t.Fatalf("expected 1 applied update (redirected to cwd_overlay), got %d", applied)
 	}
 
-	data, err := os.ReadFile(filepath.Join(teamDir, "conventions.md"))
+	// File should appear in cwd_overlay dir, not team dir.
+	data, err := os.ReadFile(filepath.Join(cwdOverlayDir, "conventions.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data), "- use tabs not spaces") {
-		t.Fatal("missing team fact")
+		t.Fatal("missing team fact (should be redirected to cwd_overlay)")
 	}
 }
 
@@ -536,29 +538,32 @@ func TestSafeWriter_ProjectLayerOutsideGlobalRoot(t *testing.T) {
 	}
 }
 
-// Regression: team layer writes succeed when team dir is outside global memory root.
-func TestSafeWriter_TeamLayerOutsideGlobalRoot(t *testing.T) {
+// Regression: team layer redirects to cwd_overlay when team dir is outside global memory root (v0.31.0+).
+func TestSafeWriter_TeamLayerRedirectsWhenOutsideGlobalRoot(t *testing.T) {
 	memoryDir := t.TempDir()
-	teamDir := t.TempDir() // unrelated temp dir, NOT under memoryDir
-	resolver := &testResolver{memoryDir: memoryDir, teamDir: teamDir}
+	cwdOverlayDir := t.TempDir() // unrelated temp dir, NOT under memoryDir
+	// cwd_overlay layer uses instance root as containment boundary.
+	resolver := &testResolver{memoryDir: memoryDir, cwdOverlayDir: cwdOverlayDir, root: "/"}
 	w, err := newSafeMemoryWriter(memoryDir, resolver)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	// project_team now redirects to cwd_overlay (v0.31.0+).
 	applied := w.applyUpdates([]memoryUpdate{
 		{Layer: "project_team", Filename: "team_notes.md", Title: "Team", Facts: []string{"team fact outside global root"}},
 	}, 42, 7, "/some/project")
 	if applied != 1 {
-		t.Fatalf("expected 1 applied update, got %d", applied)
+		t.Fatalf("expected 1 applied update (redirected), got %d", applied)
 	}
 
-	data, err := os.ReadFile(filepath.Join(teamDir, "team_notes.md"))
+	// File should appear in cwd_overlay dir.
+	data, err := os.ReadFile(filepath.Join(cwdOverlayDir, "team_notes.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(data), "- team fact outside global root") {
-		t.Fatal("missing team fact in outside-root team dir")
+		t.Fatal("missing fact (should be in cwd_overlay after redirection)")
 	}
 }
 
@@ -591,31 +596,32 @@ func TestSafeWriter_ProjectLayerRejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
-// Security: team layer rejects symlink escaping its layer root.
+// Security: team layer redirects to cwd_overlay and rejects symlink escaping cwd_overlay root (v0.31.0+).
 func TestSafeWriter_TeamLayerRejectsSymlinkEscape(t *testing.T) {
 	memoryDir := t.TempDir()
-	teamDir := t.TempDir()
+	cwdOverlayDir := t.TempDir()
 
 	outsideFile := filepath.Join(t.TempDir(), "outside.md")
 	if err := os.WriteFile(outsideFile, []byte("escape"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	escapeLink := filepath.Join(teamDir, "escape.md")
+	escapeLink := filepath.Join(cwdOverlayDir, "escape.md")
 	if err := os.Symlink(outsideFile, escapeLink); err != nil {
 		t.Fatal(err)
 	}
 
-	resolver := &testResolver{memoryDir: memoryDir, teamDir: teamDir}
+	resolver := &testResolver{memoryDir: memoryDir, cwdOverlayDir: cwdOverlayDir, root: cwdOverlayDir}
 	w, err := newSafeMemoryWriter(memoryDir, resolver)
 	if err != nil {
 		t.Fatal(err)
 	}
 
+	// project_team now redirects to cwd_overlay — symlink escape from cwd_overlay should be rejected.
 	applied := w.applyUpdates([]memoryUpdate{
 		{Layer: "project_team", Filename: "escape.md", Facts: []string{"should fail"}},
 	}, 42, 7, "/some/project")
 	if applied != 0 {
-		t.Fatal("expected team layer symlink escape to be rejected")
+		t.Fatal("expected team layer symlink escape to be rejected (redirected to cwd_overlay)")
 	}
 }
 
