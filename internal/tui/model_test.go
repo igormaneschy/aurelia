@@ -2332,3 +2332,111 @@ func TestModel_TurnStartClearedAfterStreamEnd(t *testing.T) {
 		t.Error("expected waiting=false after stream_end")
 	}
 }
+
+// ── T5.2.3 Help overlay tests ─────────────────────────────────────────────
+
+func TestModel_HelpOverlayToggleWithQuestionMark(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.height = 40
+	// textarea default is empty
+	if m.helpOverlayOpen {
+		t.Fatal("expected helpOverlayOpen=false initially")
+	}
+
+	// ? with empty input opens help
+	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m2 := updated.(Model)
+	if !m2.helpOverlayOpen {
+		t.Error("expected helpOverlayOpen=true after ?")
+	}
+
+	// ? again closes help
+	updated2, _ := m2.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m3 := updated2.(Model)
+	if m3.helpOverlayOpen {
+		t.Error("expected helpOverlayOpen=false after second ?")
+	}
+}
+
+func TestModel_HelpOverlayCloseWithEsc(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.helpOverlayOpen = true
+
+	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyEsc})
+	m2 := updated.(Model)
+	if m2.helpOverlayOpen {
+		t.Error("expected helpOverlayOpen=false after Esc")
+	}
+}
+
+func TestModel_HelpOverlayCloseWithEnter(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.helpOverlayOpen = true
+
+	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := updated.(Model)
+	if m2.helpOverlayOpen {
+		t.Error("expected helpOverlayOpen=false after Enter")
+	}
+}
+
+func TestModel_HelpOverlayNotOpenedWithNonEmptyInput(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.textarea.SetValue("hello")
+
+	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	m2 := updated.(Model)
+	if m2.helpOverlayOpen {
+		t.Error("expected helpOverlayOpen=false when textarea is not empty")
+	}
+	// ? should have been forwarded to the textarea (delegated)
+}
+
+func TestModel_HelpOverlayRenderContainsKeyBindings(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.height = 40
+
+	overlay := m.renderHelpOverlay()
+
+	for _, want := range []string{
+		"Keyboard Shortcuts",
+		"Esc",
+		"Ctrl+O",
+		"Ctrl+P",
+		"Ctrl+L",
+		"Commands",
+		"/help",
+		"/cwd",
+		"/img",
+	} {
+		if !strings.Contains(overlay, want) {
+			t.Errorf("expected help overlay to contain %q, got:\n%s", want, overlay)
+		}
+	}
+}
+
+func TestModel_HelpOverlayRendersScoped(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 80
+	m.height = 30
+	m.helpOverlayOpen = true
+
+	view := m.View()
+
+	// Should contain the full UI but the help overlay should be on top.
+	// The overlay shouldn't crash rendering on narrow/standard widths.
+	if !strings.Contains(stripANSIForTest(view), "Keyboard Shortcuts") {
+		t.Error("expected view to contain help overlay when open")
+	}
+}

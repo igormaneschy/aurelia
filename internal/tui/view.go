@@ -114,6 +114,13 @@ func (m Model) chatView() string {
 		return m.overlayPanel(full, panel)
 	}
 
+	// Overlay help when ? is pressed.
+	if m.helpOverlayOpen {
+		panel := m.renderHelpOverlay()
+		// Use a slightly wider panel for help to fit keybinding descriptions.
+		return m.overlayPanelWide(full, panel)
+	}
+
 	return full
 }
 
@@ -857,4 +864,125 @@ func safeSessionLabel(name string) string {
 		i++
 	}
 	return b.String()
+}
+
+// renderHelpOverlay renders the keyboard shortcuts and commands reference.
+func (m Model) renderHelpOverlay() string {
+	var b strings.Builder
+	b.WriteString(m.styles.HeaderTitleStyle.Render("Keyboard Shortcuts"))
+	b.WriteString("\n\n")
+
+	// Two-column layout: keybinding | description.
+	rows := [][2]string{
+		{"Esc", "Cancel current response"},
+		{"Enter", "Send message"},
+		{"Alt+Enter / Ctrl+J", "Insert newline"},
+		{"Ctrl+O", "Toggle mouse (scroll vs text selection)"},
+		{"Ctrl+P", "Toggle project state panel"},
+		{"Ctrl+S / F2", "Focus sidebar sessions"},
+		{"Ctrl+L", "Clear chat screen"},
+		{"Ctrl+Y", "Copy transcript to clipboard"},
+		{"Ctrl+R", "Copy last response to clipboard"},
+		{"Ctrl+X", "Clear pending images/docs"},
+		{"Ctrl+V", "Paste image from clipboard"},
+		{"Ctrl+C", "Quit"},
+		{"? / Esc / Enter", "Close this help"},
+		{"", ""},
+		{"↑↓", "Navigate input history"},
+		{"Tab", "Complete command or cycle sidebar"},
+	}
+
+	for _, row := range rows {
+		if row[0] == "" {
+			b.WriteString("\n")
+			continue
+		}
+		keyCol := m.styles.UserStyle.Width(22).Render(row[0])
+		descCol := m.styles.HeaderMetaStyle.Render(row[1])
+		b.WriteString(keyCol)
+		b.WriteString("  ")
+		b.WriteString(descCol)
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(m.styles.HeaderTitleStyle.Render("Commands"))
+	b.WriteString("\n\n")
+
+	cmds := [][2]string{
+		{"/help", "Show this help"},
+		{"/status", "Daemon, model, cwd, session status"},
+		{"/model", "List available models"},
+		{"/model <name>", "Switch model"},
+		{"/model auto", "Use automatic model selection"},
+		{"/model refresh", "Refresh model list"},
+		{"/cwd", "Show current project binding"},
+		{"/cwd <path>", "Set project working directory"},
+		{"/cwd clear", "Remove project binding"},
+		{"/img <path>", "Attach image (png, jpg, gif, webp)"},
+		{"/attach <path>", "Attach document (md, docx, pdf, etc.)"},
+	}
+
+	for _, row := range cmds {
+		keyCol := m.styles.UserStyle.Width(22).Render(row[0])
+		descCol := m.styles.HeaderMetaStyle.Render(row[1])
+		b.WriteString(keyCol)
+		b.WriteString("  ")
+		b.WriteString(descCol)
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(m.styles.HeaderMetaStyle.Render("Images: /img <path>, Ctrl+V paste, drag & drop"))
+	b.WriteString("\n")
+	b.WriteString(m.styles.HeaderMetaStyle.Render("Docs: /attach <path>, multiple allowed per message"))
+
+	return b.String()
+}
+
+// overlayPanelWide overlays a panel on the background using a wider panel
+// (70-80 columns) suitable for help content.
+func (m Model) overlayPanelWide(bg, panel string) string {
+	panelWidth := maxInt(50, minInt(m.width-4, 76))
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(m.styles.HeaderTitleStyle.GetForeground()).
+		Padding(1, 2).
+		Width(panelWidth).
+		Render(panel)
+
+	bgLines := strings.Split(bg, "\n")
+	panelLines := strings.Split(box, "\n")
+
+	startRow := (len(bgLines) - len(panelLines)) / 2
+	if startRow < 0 {
+		startRow = 0
+	}
+	boxWidth := lipgloss.Width(box)
+	startCol := (m.width - boxWidth) / 2
+	if startCol < 0 {
+		startCol = 0
+	}
+
+	var out []string
+	for i, line := range bgLines {
+		if i >= startRow && i-startRow < len(panelLines) {
+			pl := panelLines[i-startRow]
+			pw := lipgloss.Width(pl)
+			var sb strings.Builder
+			if startCol > 0 {
+				sb.WriteString(strings.Repeat(" ", startCol))
+			}
+			sb.WriteString(pl)
+			rightPad := m.width - startCol - pw
+			if rightPad > 0 {
+				sb.WriteString(strings.Repeat(" ", rightPad))
+			}
+			out = append(out, sb.String())
+		} else {
+			out = append(out, line)
+		}
+	}
+	return strings.Join(out, "\n")
 }

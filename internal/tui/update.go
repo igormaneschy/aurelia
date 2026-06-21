@@ -497,6 +497,17 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.refreshAutocomplete(), nil
 
+	// Help overlay: ? toggles it. esc, enter, or ? closes it.
+	case msg.String() == "?" && m.helpOverlayOpen:
+		m.helpOverlayOpen = false
+		return m, nil
+	case msg.String() == "?" && m.textarea.Value() == "":
+		m.helpOverlayOpen = true
+		return m, nil
+	case (msg.String() == "esc" || msg.String() == "enter") && m.helpOverlayOpen:
+		m.helpOverlayOpen = false
+		return m, nil
+
 	case isProjectPanelToggleKey(msg):
 		m.projectPanelOpen = !m.projectPanelOpen
 		if m.projectPanelOpen {

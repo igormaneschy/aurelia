@@ -129,6 +129,9 @@ type Model struct {
 	projectPanelOpen bool
 	projectState     *ipc.ProjectStatePayload
 
+	// Help overlay — toggled with ?.
+	helpOverlayOpen bool
+
 	// Style palette — owned by theme.go. Default is dark; T5.2.1 will
 	// select light vs dark based on terminal hints and --theme flag.
 	styles themeStyles
