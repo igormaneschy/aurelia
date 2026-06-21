@@ -22,14 +22,14 @@ func stripANSIForTest(s string) string {
 }
 
 func TestModel_InitialLoadingState(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	if m.state != stateLoading {
 		t.Errorf("expected stateLoading, got %v", m.state)
 	}
 }
 
 func TestModel_LoadingToErrorOnUnreachableDaemon(t *testing.T) {
-	m := NewModel("/nonexistent/socket.sock")
+	m := NewModel("/nonexistent/socket.sock", ThemeDark)
 
 	updated, _ := m.Update(daemonUnreachableMsg{err: errors.New("connection refused")})
 	m2 := updated.(Model)
@@ -43,7 +43,7 @@ func TestModel_LoadingToErrorOnUnreachableDaemon(t *testing.T) {
 }
 
 func TestModel_LoadingToChatOnReachableDaemon(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	updated, _ := m.Update(daemonReachableMsg{})
 	m2 := updated.(Model)
@@ -106,7 +106,7 @@ func TestModel_SubmitEmptyTextDoesNothing(t *testing.T) {
 	}
 }
 
-func TestModel_SubmitWhileWaitingIsNoop(t *testing.T) {
+func TestModel_SubmitWhileWaitingEnqueuesMessage(t *testing.T) {
 	ta := textarea.New()
 	ta.SetValue("hello")
 	m := Model{
@@ -120,10 +120,169 @@ func TestModel_SubmitWhileWaitingIsNoop(t *testing.T) {
 	m2 := updated.(Model)
 
 	if cmd != nil {
-		t.Error("expected nil command when already waiting")
+		t.Error("expected nil command when queuing during active stream")
 	}
-	if m2.textarea.Value() != "hello" {
-		t.Errorf("expected textarea unchanged, got %q", m2.textarea.Value())
+	if m2.textarea.Value() != "" {
+		t.Errorf("expected textarea reset after queueing, got %q", m2.textarea.Value())
+	}
+	if got := m2.pendingCount(); got != 1 {
+		t.Fatalf("expected 1 queued message, got %d", got)
+	}
+	if m2.pendingQueue[0].text != "hello" {
+		t.Errorf("queued text = %q, want hello", m2.pendingQueue[0].text)
+	}
+	if !m2.waiting {
+		t.Error("expected current stream to remain waiting")
+	}
+}
+
+func TestModel_StreamEndStartsNextQueuedMessage(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.waiting = true
+	m.streamID = 7
+	m.pendingQueue = []queuedMessage{{chatID: ipc.ReservedTUIChatID, text: "next"}}
+
+	updated, cmd := m.Update(streamEventMsg{streamID: 7, event: ipc.IPCEvent{Type: "stream_end"}})
+	m2 := updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected command to send queued message")
+	}
+	if !m2.waiting {
+		t.Fatal("expected waiting=true after starting queued message")
+	}
+	if got := m2.pendingCount(); got != 0 {
+		t.Fatalf("expected queue drained, got %d", got)
+	}
+}
+
+func TestModel_StaleStreamEndDoesNotStartQueue(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.waiting = false
+	m.streamID = 2
+	m.pendingQueue = []queuedMessage{{chatID: ipc.ReservedTUIChatID, text: "next"}}
+
+	updated, cmd := m.Update(streamDoneMsg{streamID: 1})
+	m2 := updated.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected stale stream end to be ignored")
+	}
+	if got := m2.pendingCount(); got != 1 {
+		t.Fatalf("expected queue preserved after stale stream end, got %d", got)
+	}
+}
+
+func TestModel_StreamErrorStartsNextQueuedMessage(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.waiting = true
+	m.pendingQueue = []queuedMessage{{text: "next"}}
+
+	updated, cmd := m.handleStreamEvent(ipc.IPCEvent{Type: "error", Error: "boom"})
+	m2 := updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected command to send queued message after error")
+	}
+	if !m2.waiting {
+		t.Fatal("expected waiting=true after starting queued message")
+	}
+	if got := m2.pendingCount(); got != 0 {
+		t.Fatalf("expected queue drained, got %d", got)
+	}
+}
+
+func TestModel_EscCancelsCurrentTurnKeepsQueue(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.waiting = true
+	m.streamID = 4
+	m.pendingQueue = []queuedMessage{{chatID: ipc.ReservedTUIChatID, text: "next"}}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m2 := updated.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected nil command for cancel")
+	}
+	if m2.waiting {
+		t.Fatal("expected waiting=false after cancel")
+	}
+	if got := m2.pendingCount(); got != 1 {
+		t.Fatalf("expected queue preserved after cancel, got %d", got)
+	}
+
+	updated, cmd = m2.Update(streamDoneMsg{streamID: 4})
+	m3 := updated.(Model)
+	if cmd != nil {
+		t.Fatal("expected late stream end after cancel to be ignored")
+	}
+	if got := m3.pendingCount(); got != 1 {
+		t.Fatalf("expected queue still preserved after late stream end, got %d", got)
+	}
+}
+
+func TestModel_QueuedMessageCapturesActiveSession(t *testing.T) {
+	const originalSession int64 = -9000002
+	ta := textarea.New()
+	ta.SetValue("queued")
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.textarea = ta
+	m.waiting = true
+	m.activeSession = originalSession
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m2 := updated.(Model)
+
+	m2.activeSession = -9000003
+	q, ok := (&m2).dequeueMessage()
+	if !ok {
+		t.Fatal("expected queued message")
+	}
+	if q.chatID != originalSession {
+		t.Fatalf("queued chatID = %d, want %d", q.chatID, originalSession)
+	}
+}
+
+func TestModel_CtrlCCleansQueuedTempImages(t *testing.T) {
+	tmp, err := os.CreateTemp(t.TempDir(), "queued-*.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.pendingQueue = []queuedMessage{{
+		chatID:         ipc.ReservedTUIChatID,
+		text:           "queued image",
+		tempImagePaths: []string{path},
+	}}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatal("expected quit command")
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("expected queued temp file removed, stat err=%v", err)
+	}
+}
+
+func TestModel_PendingQueueBadgeRendersCount(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.pendingQueue = []queuedMessage{{text: "one"}, {text: "two"}}
+
+	badge := stripANSIForTest(m.renderPendingQueueBadge())
+
+	if !strings.Contains(badge, "⏳ 2 pending") {
+		t.Fatalf("expected pending badge count, got %q", badge)
 	}
 }
 
@@ -225,7 +384,7 @@ func TestModel_CtrlLClearsMessages(t *testing.T) {
 }
 
 func TestModel_CtrlLShowsEmptyStateWhenViewportReady(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 80
 	m.height = 24
@@ -259,7 +418,7 @@ func TestModel_CtrlCQuits(t *testing.T) {
 }
 
 func TestModel_EscCancelsStreaming(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.ready = true
 	m.waiting = true
@@ -291,7 +450,7 @@ func TestModel_EscCancelsStreaming(t *testing.T) {
 }
 
 func TestModel_EscDoesNothingWhenNotWaiting(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.ready = true
 	m.waiting = false
@@ -309,7 +468,7 @@ func TestModel_EscDoesNothingWhenNotWaiting(t *testing.T) {
 }
 
 func TestModel_HealthCheckResultUpdatesDaemonLabel(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.daemonLabel = "ready"
 
@@ -340,7 +499,7 @@ func TestModel_HealthCheckResultUpdatesDaemonLabel(t *testing.T) {
 }
 
 func TestModel_HealthCheckTickTriggersPing(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 
 	updated, cmd := m.Update(healthCheckTickMsg{})
@@ -373,7 +532,7 @@ func TestHistoryFromEventsParsesHistoryPayload(t *testing.T) {
 }
 
 func TestModel_HistoryMsgErrorShowsWarning(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.messages = nil
 	m.switchingSession = true
@@ -399,7 +558,7 @@ func TestModel_HistoryMsgErrorShowsWarning(t *testing.T) {
 }
 
 func TestModel_HistoryMsgReplacesStartupMessage(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 80
 	m.height = 24
@@ -419,7 +578,7 @@ func TestModel_HistoryMsgReplacesStartupMessage(t *testing.T) {
 }
 
 func TestModel_LateHistoryDoesNotReplaceUserInteraction(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 80
 	m.height = 24
@@ -443,7 +602,7 @@ func TestModel_LateHistoryDoesNotReplaceUserInteraction(t *testing.T) {
 }
 
 func TestModel_PageUpScrollsViewport(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
 	m.height = 12
@@ -465,8 +624,9 @@ func TestModel_PageUpScrollsViewport(t *testing.T) {
 }
 
 func TestModel_MouseWheelScrollsViewport(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
+	m.mouseEnabled = true
 	m.width = 100
 	m.height = 12
 	m.viewport = viewportForSize(m.contentWidth(), m.height)
@@ -488,8 +648,77 @@ func TestModel_MouseWheelScrollsViewport(t *testing.T) {
 	}
 }
 
+func TestModel_MouseDisabledIgnoresMouseWheel(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.height = 12
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+	m.viewport.SetContent(strings.Repeat("line\n", 40))
+	m.viewport.GotoBottom()
+	bottomOffset := m.viewport.YOffset
+
+	//nolint:staticcheck // tea.MouseWheelUp deprecated but no replacement in v1.3.10
+	updated, cmd := m.Update(tea.MouseMsg{
+		Type:   tea.MouseWheelUp, //nolint:staticcheck // SA1019: deprecated but still functional
+		Button: tea.MouseButtonWheelUp,
+		Action: tea.MouseActionPress,
+	})
+	m2 := updated.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected nil command when mouse capture is disabled")
+	}
+	if m2.viewport.YOffset != bottomOffset {
+		t.Fatalf("expected disabled mouse to preserve viewport offset %d, got %d", bottomOffset, m2.viewport.YOffset)
+	}
+}
+
+func TestModel_CtrlOTogglesMouseCapture(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	m2 := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected enable mouse command")
+	}
+	if !m2.mouseEnabled {
+		t.Fatal("expected ctrl+o to enable mouse")
+	}
+
+	updated, cmd = m2.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	m3 := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected disable mouse command")
+	}
+	if m3.mouseEnabled {
+		t.Fatal("expected second ctrl+o to disable mouse")
+	}
+}
+
+func TestModel_CtrlOTogglesMouseCaptureWhenSidebarFocused(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.sidebarFocused = true
+	m.sessions = []tuiSessionInfo{{ChatID: ipc.ReservedTUIChatID, Name: "dm"}}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	m2 := updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected enable mouse command")
+	}
+	if !m2.mouseEnabled {
+		t.Fatal("expected ctrl+o to enable mouse even when sidebar is focused")
+	}
+	if !m2.sidebarFocused {
+		t.Fatal("expected sidebar focus to remain unchanged")
+	}
+}
+
 func TestModel_CtrlUDelegatesToTextarea(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.ready = true
 	m.textarea.SetValue("hello world")
@@ -504,7 +733,7 @@ func TestModel_CtrlUDelegatesToTextarea(t *testing.T) {
 }
 
 func TestModel_InputHistoryNavigatesUpAndDown(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.inputHistory = []string{"first prompt", "second prompt"}
 	m.inputHistoryIndex = len(m.inputHistory)
@@ -538,7 +767,7 @@ func TestModel_InputHistoryNavigatesUpAndDown(t *testing.T) {
 }
 
 func TestModel_InputHistoryDoesNotReplaceNonEmptyDraft(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.inputHistory = []string{"old prompt"}
 	m.inputHistoryIndex = len(m.inputHistory)
@@ -556,7 +785,7 @@ func TestModel_InputHistoryDoesNotReplaceNonEmptyDraft(t *testing.T) {
 }
 
 func TestModel_InputHistoryDoesNotReplaceEditedHistoryDraft(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.inputHistory = []string{"old prompt", "second prompt"}
 	m.inputHistoryIndex = len(m.inputHistory)
@@ -579,7 +808,7 @@ func TestModel_InputHistoryDoesNotReplaceEditedHistoryDraft(t *testing.T) {
 }
 
 func TestModel_RememberInputDedupesConsecutiveEntries(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := newModel("/tmp/test.sock", "", ThemeDark)
 	m.rememberInput("hello")
 	m.rememberInput("hello")
 	m.rememberInput("world")
@@ -618,7 +847,7 @@ func TestModel_TabTogglesSidebar(t *testing.T) {
 }
 
 func TestModel_TabRuneDoesNotWriteToInput(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.showSidebar = false
 
@@ -637,7 +866,7 @@ func TestModel_TabRuneDoesNotWriteToInput(t *testing.T) {
 }
 
 func TestModel_UnhandledAltShortcutDoesNotWriteToInput(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.ready = true
 	m.textarea.SetValue("hello")
@@ -654,7 +883,7 @@ func TestModel_UnhandledAltShortcutDoesNotWriteToInput(t *testing.T) {
 }
 
 func TestModel_TerminalColorReportDoesNotWriteToInput(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.ready = true
 
@@ -670,7 +899,7 @@ func TestModel_TerminalColorReportDoesNotWriteToInput(t *testing.T) {
 }
 
 func TestModel_PastedTerminalColorLikeTextWritesToInput(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.ready = true
 
@@ -684,7 +913,7 @@ func TestModel_PastedTerminalColorLikeTextWritesToInput(t *testing.T) {
 }
 
 func TestModel_TextareaAltShortcutDoesNotWriteLiteralRune(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.ready = true
 	m.textarea.SetValue("hello world")
@@ -1019,7 +1248,7 @@ func TestModel_DaemonErrorDoesNotPanic(t *testing.T) {
 }
 
 func TestModel_InputCharacterHandling(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.ready = true
 
@@ -1122,7 +1351,7 @@ func TestModel_AppendOrUpdateAureliaMessage(t *testing.T) {
 }
 
 func TestModel_WelcomeMessageOnConnect(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	updated, _ := m.Update(daemonReachableMsg{})
 	m2 := updated.(Model)
 
@@ -1211,7 +1440,7 @@ func TestModel_NewlineFallbackKeyConstant(t *testing.T) {
 // Regression: loading receives WindowSizeMsg, then daemonReachableMsg →
 // viewportSet=true and rendered content includes welcome/Aurelia text.
 func TestModel_ViewportInitializedFromLoadingWindowSizeMsg(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	// WindowSizeMsg arrives during loading.
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
@@ -1247,7 +1476,7 @@ func TestModel_ViewportInitializedFromLoadingWindowSizeMsg(t *testing.T) {
 // Regression: loading WindowSizeMsg, daemon reachable, user submits text,
 // then receives message → rendered content includes both user and assistant text.
 func TestModel_ViewportShowsIgorAndAureliaAfterFullFlow(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	// WindowSizeMsg during loading stores dimensions.
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
@@ -1313,7 +1542,7 @@ func TestModel_UpdateViewportNoopsWithoutDimensions(t *testing.T) {
 }
 
 func TestModel_DefaultChromeState(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	if !m.showSidebar {
 		t.Error("expected sidebar enabled by default")
@@ -1327,7 +1556,7 @@ func TestModel_DefaultChromeState(t *testing.T) {
 }
 
 func TestModel_TextareaPromptDisabledForCustomInputChrome(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	if m.textarea.Prompt != "" {
 		t.Fatalf("expected textarea internal prompt disabled, got %q", m.textarea.Prompt)
@@ -1335,7 +1564,7 @@ func TestModel_TextareaPromptDisabledForCustomInputChrome(t *testing.T) {
 }
 
 func TestModel_ChatViewStartsWithTopMargin(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
 	m.height = 40
@@ -1354,21 +1583,34 @@ func TestModel_ChatViewStartsWithTopMargin(t *testing.T) {
 }
 
 func TestModel_StatusBarUsesCompactShortcuts(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 175
 
 	status := stripANSIForTest(m.renderStatusBar())
 
-	for _, want := range []string{"↵ send", "alt+enter newline", "esc cancel", "⌃L clear", "⌃P project", "tab sidebar", "⌃C quit"} {
+	for _, want := range []string{"↵ send", "alt+enter newline", "✋ mouse", "esc cancel", "⌃L clear", "⌃P project", "tab sidebar"} {
 		if !strings.Contains(status, want) {
 			t.Errorf("expected status bar to contain %q, got %q", want, status)
 		}
 	}
 }
 
+func TestModel_StatusBarShowsMouseEnabled(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.mouseEnabled = true
+
+	status := stripANSIForTest(m.renderStatusBar())
+
+	if !strings.Contains(status, "🖱️ mouse") {
+		t.Fatalf("expected enabled mouse indicator, got %q", status)
+	}
+}
+
 func TestModel_StatusBarDropsItemsOnNarrowTerminal(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 50
 
@@ -1392,7 +1634,7 @@ func TestModel_StatusBarDropsItemsOnNarrowTerminal(t *testing.T) {
 
 func TestModel_StatusBarNeverWraps(t *testing.T) {
 	for _, width := range []int{40, 60, 80, 100, 120, 150, 175} {
-		m := NewModel("/tmp/test.sock")
+		m := NewModel("/tmp/test.sock", ThemeDark)
 		m.state = stateChat
 		m.width = width
 
@@ -1406,7 +1648,7 @@ func TestModel_StatusBarNeverWraps(t *testing.T) {
 }
 
 func TestModel_ChatHeaderShowsProjectAndDaemon(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
 	m.height = 40
@@ -1423,7 +1665,7 @@ func TestModel_ChatHeaderShowsProjectAndDaemon(t *testing.T) {
 }
 
 func TestModel_ChatHeaderShowsThinkingWhenWaiting(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
 	m.height = 40
@@ -1437,7 +1679,7 @@ func TestModel_ChatHeaderShowsThinkingWhenWaiting(t *testing.T) {
 }
 
 func TestModel_EmptyStateShowsWelcome(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 80
 	m.height = 24
@@ -1456,7 +1698,7 @@ func TestModel_EmptyStateShowsWelcome(t *testing.T) {
 }
 
 func TestModel_MessageRenderingUsesBlockFormat(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 80
 	m.height = 40
@@ -1487,7 +1729,7 @@ func TestModel_MessageRenderingUsesBlockFormat(t *testing.T) {
 }
 
 func TestModel_ViewportHeightAccountsForChatHeader(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.width = 100
 	m.height = 40
 
@@ -1501,7 +1743,7 @@ func TestModel_ViewportHeightAccountsForChatHeader(t *testing.T) {
 
 func TestModel_ViewportShrinksBelowMinimumOnVeryShortTerminal(t *testing.T) {
 	for _, height := range []int{12, 13} {
-		m := NewModel("/tmp/test.sock")
+		m := NewModel("/tmp/test.sock", ThemeDark)
 		m.width = minSidebarScreenWidth
 		m.height = height
 
@@ -1515,7 +1757,7 @@ func TestModel_ViewportShrinksBelowMinimumOnVeryShortTerminal(t *testing.T) {
 }
 
 func TestModel_TuiStatusUpdatesCWD(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 
 	updated, _ := m.Update(tuiStatusMsg{cwd: "/Users/igor/dev/aurelia"})
@@ -1527,7 +1769,7 @@ func TestModel_TuiStatusUpdatesCWD(t *testing.T) {
 }
 
 func TestModel_MessageEventUpdatesCWDForSidebar(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 
 	updated, _ := m.handleStreamEvent(ipc.IPCEvent{
@@ -1542,7 +1784,7 @@ func TestModel_MessageEventUpdatesCWDForSidebar(t *testing.T) {
 }
 
 func TestModel_SidebarHiddenOnNarrowTerminal(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.width = minSidebarScreenWidth - 1
 	m.height = minSidebarScreenHeight
 
@@ -1552,7 +1794,7 @@ func TestModel_SidebarHiddenOnNarrowTerminal(t *testing.T) {
 }
 
 func TestModel_SidebarHiddenOnShortTerminal(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.width = minSidebarScreenWidth
 	m.height = minSidebarScreenHeight - 1
 
@@ -1562,7 +1804,7 @@ func TestModel_SidebarHiddenOnShortTerminal(t *testing.T) {
 }
 
 func TestModel_ChatViewDoesNotExceedShortTerminalHeight(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = minSidebarScreenWidth
 	m.height = minSidebarScreenHeight - 1
@@ -1578,7 +1820,7 @@ func TestModel_ChatViewDoesNotExceedShortTerminalHeight(t *testing.T) {
 }
 
 func TestModel_ChatHeaderShowsChatModeWhenNoCWD(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
 	m.height = 40
@@ -1596,7 +1838,7 @@ func TestModel_ChatHeaderShowsChatModeWhenNoCWD(t *testing.T) {
 }
 
 func TestModel_SidebarShowsChatModeWhenNoCWD(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.daemonLabel = "ready"
 	m.sessions = []tuiSessionInfo{
@@ -1613,7 +1855,7 @@ func TestModel_SidebarShowsChatModeWhenNoCWD(t *testing.T) {
 }
 
 func TestModel_SidebarHidesChatModeWhenCWDSet(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.cwdPath = "/Users/igor/dev/aurelia"
 	m.daemonLabel = "ready"
@@ -1634,7 +1876,7 @@ func TestModel_SidebarHidesChatModeWhenCWDSet(t *testing.T) {
 
 func TestModel_ChatViewDoesNotExceedVeryShortTerminalHeight(t *testing.T) {
 	for _, height := range []int{12, 13} {
-		m := NewModel("/tmp/test.sock")
+		m := NewModel("/tmp/test.sock", ThemeDark)
 		m.state = stateChat
 		m.width = minSidebarScreenWidth
 		m.height = height

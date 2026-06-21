@@ -1,14 +1,14 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"os"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // themeStyles groups every lipgloss.Style used by the TUI view layer so the
 // whole UI can be repainted in a different palette by swapping the struct.
-//
-// The default (dark) palette preserves the look the TUI had before themes
-// existed. Light styles are placeholders for T5.2.1 and will be filled in
-// when theme auto-detection lands. Keeping both constructors side-by-side
-// makes the palette surface obvious and the eventual switch is a one-liner.
 type themeStyles struct {
 	// Chat messages.
 	UserStyle      lipgloss.Style
@@ -41,6 +41,90 @@ type themeStyles struct {
 	// Misc.
 	MessageSeparatorStyle lipgloss.Style
 	ChatModeStyle         lipgloss.Style
+}
+
+// Theme represents the TUI color theme.
+type Theme string
+
+const (
+	ThemeAuto  Theme = "auto"
+	ThemeLight Theme = "light"
+	ThemeDark  Theme = "dark"
+)
+
+// ParseTheme returns the Theme for the given string, defaulting to auto.
+func ParseTheme(s string) Theme {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "light":
+		return ThemeLight
+	case "dark":
+		return ThemeDark
+	default:
+		return ThemeAuto
+	}
+}
+
+// ResolveTheme resolves a theme to its effective value (light or dark) based
+// on terminal environment detection when ThemeAuto is selected.
+func ResolveTheme(t Theme) Theme {
+	if t == ThemeAuto {
+		if detectLightBackground() {
+			return ThemeLight
+		}
+		return ThemeDark
+	}
+	return t
+}
+
+// detectLightBackground attempts to infer whether the terminal has a light
+// background by checking well-known environment variables.
+//
+// - $TERM_PROGRAM: iTerm2, Warp, and Kitty expose background info via
+//   proprietary escape sequences, but few set env vars for it.
+// - $COLORFGBG: some terminals set this to "15;0" for light-on-dark and
+//   "0;15" for dark-on-light, but it is not universally reliable.
+// - macOS Terminal.app default is light background.
+//
+// Returns true when a light background is detected; defaults to dark.
+func detectLightBackground() bool {
+	// Check $COLORFGBG — format "<fg>;<bg>" where higher bg values (7-15)
+	// suggest a light background.
+	if fgbg := os.Getenv("COLORFGBG"); fgbg != "" {
+		parts := strings.Split(fgbg, ";")
+		if len(parts) >= 2 {
+			bg := strings.TrimSpace(parts[len(parts)-1])
+			// Common light bg values: 15 (white), 7 (light gray), 231-255
+			switch bg {
+			case "15", "7", "14", "11":
+				return true
+			}
+		}
+	}
+
+	// Terminal.app on macOS defaults to light background and doesn't set
+	// COLORFGBG. Apple_Terminal is the bundle identifier exposed via $TERM_PROGRAM.
+	if termProg := os.Getenv("TERM_PROGRAM"); termProg == "Apple_Terminal" {
+		return true
+	}
+
+	// Default: dark (most developer terminals use dark backgrounds).
+	return false
+}
+
+// GlamourStyle returns the glamour style name for the resolved light/dark theme.
+func (t Theme) GlamourStyle() string {
+	if ResolveTheme(t) == ThemeLight {
+		return "light"
+	}
+	return "dark"
+}
+
+// newStylesForTheme returns the appropriate themeStyles for the given Theme.
+func newStylesForTheme(t Theme) themeStyles {
+	if ResolveTheme(t) == ThemeLight {
+		return newLightStyles()
+	}
+	return newDarkStyles()
 }
 
 // newDarkStyles returns the default dark theme. The palette is identical to
@@ -121,9 +205,79 @@ func newDarkStyles() themeStyles {
 	}
 }
 
-// newLightStyles returns a light theme placeholder. The actual palette will be
-// tuned in T5.2.1 once theme auto-detection lands; for now it reuses the dark
-// styles so the code path is exercisable without a visible regression.
+// newLightStyles returns a light theme with high-contrast colors suitable for
+// terminals with white/light backgrounds.
 func newLightStyles() themeStyles {
-	return newDarkStyles()
+	return themeStyles{
+		UserStyle: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("25")), // blue
+
+		AssistantStyle: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("161")), // magenta-red
+
+		ErrorStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("160")), // strong red
+
+		InputPromptStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("25")),
+
+		InputBoxStyle: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("244")). // gray
+			Padding(0, 1),
+
+		InputWaitingStyle: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("125")). // magenta
+			Padding(0, 1),
+
+		StatusBarStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")). // dark gray text
+			Background(lipgloss.Color("254")). // near-white bg
+			Padding(0, 1),
+
+		StatusReadyStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("28")),  // green
+		StatusBusyStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("125")), // magenta
+		StatusErrorStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("160")), // red
+
+		SidebarStyle: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("244")).
+			Padding(0, 1).
+			Width(sidebarWidth),
+
+		SidebarTitleStyle: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("125")),
+
+		SidebarMutedStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("245")),
+
+		SidebarActiveStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("25")).
+			Bold(true),
+
+		SidebarCursorStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("130")). // dark yellow / amber
+			Bold(true),
+
+		HeaderTitleStyle: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("125")),
+
+		HeaderMetaStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")),
+
+		HeaderRuleStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("248")),
+
+		MessageSeparatorStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("248")),
+
+		ChatModeStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("130")). // amber
+			Italic(true),
+	}
 }

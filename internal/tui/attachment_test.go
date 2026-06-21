@@ -16,7 +16,7 @@ func testDocContent() []byte {
 }
 
 func TestAttachDocumentFromPath_ValidFile(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "spec.md")
@@ -37,7 +37,7 @@ func TestAttachDocumentFromPath_ValidFile(t *testing.T) {
 }
 
 func TestAttachDocumentFromPath_NotFound(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	errMsg := m.attachDocumentFromPath("/nonexistent/doc.md")
 	if errMsg == "" {
@@ -52,7 +52,7 @@ func TestAttachDocumentFromPath_NotFound(t *testing.T) {
 }
 
 func TestAttachDocumentFromPath_SymlinkRejected(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	target := filepath.Join(dir, "real.md")
@@ -77,7 +77,7 @@ func TestAttachDocumentFromPath_SymlinkRejected(t *testing.T) {
 }
 
 func TestAttachDocumentFromPath_Directory(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	subdir := filepath.Join(dir, "subdir")
@@ -98,7 +98,7 @@ func TestAttachDocumentFromPath_Directory(t *testing.T) {
 }
 
 func TestAttachDocumentFromPath_TooLarge(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "large.pdf")
@@ -205,7 +205,7 @@ func TestTryParseAsDocumentPath_Directory(t *testing.T) {
 }
 
 func TestClearPendingAttachments(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "doc.md")
@@ -225,7 +225,7 @@ func TestClearPendingAttachments(t *testing.T) {
 }
 
 func TestPendingAttachmentBadges_Empty(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	badges := m.pendingAttachmentBadges()
 	if badges != "" {
@@ -234,7 +234,7 @@ func TestPendingAttachmentBadges_Empty(t *testing.T) {
 }
 
 func TestPendingAttachmentBadges_WithAttachments(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path1 := filepath.Join(dir, "spec.md")
@@ -260,7 +260,7 @@ func TestPendingAttachmentBadges_WithAttachments(t *testing.T) {
 }
 
 func TestToIPCAttachments_Empty(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	result := m.toIPCAttachments()
 	if result != nil {
@@ -269,7 +269,7 @@ func TestToIPCAttachments_Empty(t *testing.T) {
 }
 
 func TestToIPCAttachments_WithPath(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "doc.pdf")
@@ -292,7 +292,7 @@ func TestToIPCAttachments_WithPath(t *testing.T) {
 }
 
 func TestToIPCAttachments_Multiple(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path1 := filepath.Join(dir, "doc1.md")
@@ -393,7 +393,7 @@ func TestLooksLikeFilePath_ImagePath(t *testing.T) {
 }
 
 func TestDelegateKeyToTextarea_DocumentPaste_AttachesNotInserts(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "spec.md")
@@ -437,7 +437,7 @@ func TestDelegateKeyToTextarea_DocumentPaste_AttachesNotInserts(t *testing.T) {
 }
 
 func TestDelegateKeyToTextarea_DocumentPaste_WithQuotes_AttachesNotInserts(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "My Doc.pdf")
@@ -469,7 +469,7 @@ func TestDelegateKeyToTextarea_DocumentPaste_WithQuotes_AttachesNotInserts(t *te
 }
 
 func TestDelegateKeyToTextarea_DocumentPaste_Tilde_AttachesNotInserts(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -509,7 +509,7 @@ func TestDelegateKeyToTextarea_DocumentPaste_Tilde_AttachesNotInserts(t *testing
 }
 
 func TestDelegateKeyToTextarea_DocumentPaste_FileURL_AttachesNotInserts(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "from-web.pdf")
@@ -539,7 +539,7 @@ func TestDelegateKeyToTextarea_DocumentPaste_FileURL_AttachesNotInserts(t *testi
 }
 
 func TestDelegateKeyToTextarea_InvalidDocumentPath_NotExists_ShowsError(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	// Paste a path that doesn't exist.
 	msg := tea.KeyMsg(tea.Key{
@@ -568,7 +568,7 @@ func TestDelegateKeyToTextarea_InvalidDocumentPath_NotExists_ShowsError(t *testi
 }
 
 func TestDelegateKeyToTextarea_InvalidDocumentPath_Symlink_ShowsError(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	target := filepath.Join(dir, "real.md")
@@ -604,7 +604,7 @@ func TestDelegateKeyToTextarea_InvalidDocumentPath_Symlink_ShowsError(t *testing
 }
 
 func TestDelegateKeyToTextarea_InvalidDocumentPath_Directory_ShowsError(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	subdir := filepath.Join(dir, "mydir")
@@ -636,7 +636,7 @@ func TestDelegateKeyToTextarea_InvalidDocumentPath_Directory_ShowsError(t *testi
 }
 
 func TestDelegateKeyToTextarea_NormalText_InsertsInTextarea(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	// Paste plain text (not a path).
 	msg := tea.KeyMsg(tea.Key{
@@ -657,7 +657,7 @@ func TestDelegateKeyToTextarea_NormalText_InsertsInTextarea(t *testing.T) {
 }
 
 func TestDelegateKeyToTextarea_TextMentioningPath_InsertsInTextarea(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	// Paste a sentence that mentions a path (not a pure path paste).
 	msg := tea.KeyMsg(tea.Key{
@@ -678,7 +678,7 @@ func TestDelegateKeyToTextarea_TextMentioningPath_InsertsInTextarea(t *testing.T
 }
 
 func TestDelegateKeyToTextarea_ImagePaste_StillHandledByImageFlow(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "photo.png")
@@ -707,7 +707,7 @@ func TestDelegateKeyToTextarea_ImagePaste_StillHandledByImageFlow(t *testing.T) 
 }
 
 func TestDelegateKeyToTextarea_DocumentPaste_WithQuotedEscapedSpaces_Attaches(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	// Create a file within a directory with spaces.

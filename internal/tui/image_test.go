@@ -32,7 +32,7 @@ func testJPEG() []byte {
 }
 
 func TestAttachImageFromPath_ValidPNG(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.png")
@@ -56,7 +56,7 @@ func TestAttachImageFromPath_ValidPNG(t *testing.T) {
 }
 
 func TestAttachImageFromPath_ValidJPEG(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "photo.jpg")
@@ -74,7 +74,7 @@ func TestAttachImageFromPath_ValidJPEG(t *testing.T) {
 }
 
 func TestAttachImageFromPath_EmptyPath(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	errMsg := m.attachImageFromPath("")
 	if errMsg != "Usage: /img <path-to-image>" {
@@ -86,7 +86,7 @@ func TestAttachImageFromPath_EmptyPath(t *testing.T) {
 }
 
 func TestAttachImageFromPath_NotFound(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	errMsg := m.attachImageFromPath("/nonexistent/image.png")
 	if errMsg == "" {
@@ -98,7 +98,7 @@ func TestAttachImageFromPath_NotFound(t *testing.T) {
 }
 
 func TestAttachImageFromPath_UnsupportedType(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "doc.txt")
@@ -116,7 +116,7 @@ func TestAttachImageFromPath_UnsupportedType(t *testing.T) {
 }
 
 func TestAttachImageFromPath_TooLarge(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "big.png")
@@ -137,7 +137,7 @@ func TestAttachImageFromPath_TooLarge(t *testing.T) {
 }
 
 func TestAttachImageFromPath_SymlinkRejected(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	target := filepath.Join(dir, "real.png")
@@ -159,7 +159,7 @@ func TestAttachImageFromPath_SymlinkRejected(t *testing.T) {
 }
 
 func TestAttachImageFromPath_FakePNGContentRejected(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "secret.png")
@@ -178,7 +178,7 @@ func TestAttachImageFromPath_FakePNGContentRejected(t *testing.T) {
 }
 
 func TestAttachImageFromPath_UppercaseExtension(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "photo.PNG")
@@ -224,7 +224,7 @@ func TestNormalizeImagePath_UpperCaseFileURLQuoted(t *testing.T) {
 }
 
 func TestAttachImagePathsFromText_EscapedPathWithSpaces(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	dir := filepath.Join(t.TempDir(), "GravaçãoTela")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -255,7 +255,7 @@ func TestAttachImagePathsFromText_EscapedPathWithSpaces(t *testing.T) {
 }
 
 func TestAttachImagePathsFromText_UnescapedPathWithSpaces(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	dir := filepath.Join(t.TempDir(), "GravaçãoTela")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
@@ -282,7 +282,7 @@ func TestAttachImagePathsFromText_UnescapedPathWithSpaces(t *testing.T) {
 }
 
 func TestAttachImagePathsFromText_QuotedPath(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	dir := t.TempDir()
 	path := filepath.Join(dir, "screen shot.png")
 	if err := os.WriteFile(path, testPNG(), 0o644); err != nil {
@@ -303,7 +303,7 @@ func TestAttachImagePathsFromText_QuotedPath(t *testing.T) {
 }
 
 func TestAttachImagePathsFromText_IgnoresHTTPURL(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 	input := "descreva https://example.com/image.png"
 
 	text, count, errMsg := m.attachImagePathsFromText(input)
@@ -323,7 +323,7 @@ func TestAttachImagePathsFromText_IgnoresHTTPURL(t *testing.T) {
 }
 
 func TestClearPendingImages(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.png")
@@ -343,7 +343,7 @@ func TestClearPendingImages(t *testing.T) {
 }
 
 func TestPendingImageBadges_Empty(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	badges := m.pendingImageBadges()
 	if badges != "" {
@@ -352,7 +352,7 @@ func TestPendingImageBadges_Empty(t *testing.T) {
 }
 
 func TestPendingImageBadges_WithImages(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path1 := filepath.Join(dir, "image1.png")
@@ -377,7 +377,7 @@ func TestPendingImageBadges_WithImages(t *testing.T) {
 }
 
 func TestToIPCImages_Empty(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	result := m.toIPCImages()
 	if result != nil {
@@ -386,7 +386,7 @@ func TestToIPCImages_Empty(t *testing.T) {
 }
 
 func TestToIPCImages_WithPath(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.png")
@@ -409,7 +409,7 @@ func TestToIPCImages_WithPath(t *testing.T) {
 }
 
 func TestAttachTempImage_CleanedOnValidationFail(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	// Create a temp file that fails validation (not an image).
@@ -432,7 +432,7 @@ func TestAttachTempImage_CleanedOnValidationFail(t *testing.T) {
 }
 
 func TestAttachTempImage_MarkedAsTemp(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "img.png")
@@ -453,7 +453,7 @@ func TestAttachTempImage_MarkedAsTemp(t *testing.T) {
 }
 
 func TestCleanupTempImages_OnlyRemovesTempFiles(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 
@@ -616,7 +616,7 @@ func TestStartsWithSyntacticImagePath_CommandWithPathArgument(t *testing.T) {
 func TestToIPCImages_MediaTypeFromContent(t *testing.T) {
 	// Test that toIPCImages uses content-detected MIME, not extension.
 	// A PNG file with a .jpg extension should get "image/png" MediaType.
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "photo.jpg") // .jpg extension but PNG content
@@ -642,7 +642,7 @@ func TestToIPCImages_MediaTypeFromContent(t *testing.T) {
 func TestToIPCImages_MediaTypeFromContent_NoExtension(t *testing.T) {
 	// Bare filename without extension — MIMEFromPath would return
 	// an empty or wrong type, but content detection should work.
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "photo") // no extension
@@ -665,7 +665,7 @@ func TestToIPCImages_MediaTypeFromContent_NoExtension(t *testing.T) {
 }
 
 func TestToIPCImages_MediaTypeFromContent_JPEGWithPNGExtension(t *testing.T) {
-	m := NewModel("/tmp/test.sock")
+	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	dir := t.TempDir()
 	path := filepath.Join(dir, "photo.png") // .png extension but JPEG content

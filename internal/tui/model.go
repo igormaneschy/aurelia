@@ -74,13 +74,23 @@ type Model struct {
 	// Textarea for multiline input
 	textarea textarea.Model
 
+	// Command autocomplete state.
+	autocompleteOptions []string
+	autocompleteIndex   int
+
 	// In-memory prompt/command history for ↑/↓ navigation.
 	inputHistory      []string
 	inputHistoryIndex int
+	historyPath       string
 
 	// Pending request tracking
 	requestID string
 	waiting   bool
+	streamID  int64
+
+	// Messages submitted while a stream is active. The daemon still processes
+	// one turn at a time; the TUI client sends the next item after stream_end.
+	pendingQueue []queuedMessage
 
 	// switchingSession is true while waiting for history after a session
 	// switch. It tells tuiHistoryMsg to replace messages even when the
@@ -97,6 +107,7 @@ type Model struct {
 	width          int
 	height         int
 	showSidebar    bool
+	mouseEnabled   bool
 	err            error
 	ready          bool
 	daemonLabel    string
@@ -121,10 +132,18 @@ type Model struct {
 	// Style palette — owned by theme.go. Default is dark; T5.2.1 will
 	// select light vs dark based on terminal hints and --theme flag.
 	styles themeStyles
+
+	// theme is the requested theme (auto, light, dark). The effective palette
+	// in styles is resolved from this value at startup.
+	theme Theme
 }
 
-// NewModel creates a new TUI model with the given socket path.
-func NewModel(socketPath string) Model {
+// NewModel creates a new TUI model with the given socket path and theme.
+func NewModel(socketPath string, theme Theme) Model {
+	return newModel(socketPath, defaultInputHistoryPath(), theme)
+}
+
+func newModel(socketPath, historyPath string, theme Theme) Model {
 	s := spinner.New()
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
@@ -138,6 +157,8 @@ func NewModel(socketPath string) Model {
 
 	ta.SetHeight(2)
 
+	inputHistory := loadInputHistory(historyPath)
+
 	return Model{
 		state:             stateLoading,
 		socketPath:        socketPath,
@@ -148,9 +169,12 @@ func NewModel(socketPath string) Model {
 		daemonLabel:       "connecting",
 		cwdPath:           "not set",
 		messages:          make([]chatMessage, 0),
-		inputHistoryIndex: 0,
+		inputHistory:      inputHistory,
+		inputHistoryIndex: len(inputHistory),
+		historyPath:       historyPath,
 		activeSession:     ipc.ReservedTUIChatID,
-		styles:            newDarkStyles(),
+		theme:             theme,
+		styles:            newStylesForTheme(theme),
 	}
 }
 
@@ -328,18 +352,22 @@ func historyFromEvents(events []ipc.IPCEvent) tuiHistoryMsg {
 
 // submitMessage sends a message to the daemon and returns a command.
 func (m Model) submitMessage(text string) tea.Cmd {
+	return m.submitMessageWithPayload(m.activeSession, text, m.toIPCImages(), m.toIPCAttachments(), m.streamID)
+}
+
+func (m Model) submitMessageWithPayload(chatID int64, text string, images []ipc.IPCImage, attachments []ipc.IPCAttachment, streamID int64) tea.Cmd {
 	m.requestID = fmt.Sprintf("tui-%d", time.Now().UnixNano())
 	m.waiting = true
 
 	userID := int64(os.Getuid())
 	msg := ipc.IPCMessage{
 		Type:        ipc.MsgTypeSend,
-		ChatID:      m.activeSession,
+		ChatID:      chatID,
 		ThreadID:    0,
 		UserID:      userID,
 		Text:        text,
-		Images:      m.toIPCImages(),
-		Attachments: m.toIPCAttachments(),
+		Images:      images,
+		Attachments: attachments,
 		RequestID:   m.requestID,
 	}
 
@@ -351,21 +379,25 @@ func (m Model) submitMessage(text string) tea.Cmd {
 		defer cancel()
 		reader, err := m.ipcClient.Send(ctx, msg)
 		if err != nil {
-			return daemonErrorMsg{err: err}
+			return daemonErrorMsg{err: err, streamID: streamID}
 		}
-		return &streamReaderMsg{reader: reader}
+		return &streamReaderMsg{reader: reader, streamID: streamID}
 	}
 }
 
 // sendCommand sends a command to the daemon.
 func (m Model) sendCommand(text string) tea.Cmd {
+	return m.sendCommandToSession(m.activeSession, text, m.streamID)
+}
+
+func (m Model) sendCommandToSession(chatID int64, text string, streamID int64) tea.Cmd {
 	m.requestID = fmt.Sprintf("tui-%d", time.Now().UnixNano())
 	m.waiting = true
 
 	userID := int64(os.Getuid())
 	msg := ipc.IPCMessage{
 		Type:      ipc.MsgTypeCommand,
-		ChatID:    m.activeSession,
+		ChatID:    chatID,
 		ThreadID:  0,
 		UserID:    userID,
 		Text:      text,
@@ -377,9 +409,9 @@ func (m Model) sendCommand(text string) tea.Cmd {
 		defer cancel()
 		reader, err := m.ipcClient.Send(ctx, msg)
 		if err != nil {
-			return daemonErrorMsg{err: err}
+			return daemonErrorMsg{err: err, streamID: streamID}
 		}
-		return &streamReaderMsg{reader: reader}
+		return &streamReaderMsg{reader: reader, streamID: streamID}
 	}
 }
 

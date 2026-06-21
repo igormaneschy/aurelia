@@ -162,6 +162,12 @@ func (m Model) renderInput() string {
 	if attachmentBadges != "" {
 		badgeLines = append(badgeLines, attachmentBadges)
 	}
+	if pendingBadge := m.renderPendingQueueBadge(); pendingBadge != "" {
+		badgeLines = append(badgeLines, pendingBadge)
+	}
+	if autocomplete := m.renderAutocomplete(); autocomplete != "" {
+		badgeLines = append(badgeLines, autocomplete)
+	}
 
 	promptText := "> "
 	if m.waiting {
@@ -181,6 +187,33 @@ func (m Model) renderInput() string {
 		content = strings.Join(badgeLines, "\n") + "\n" + content
 	}
 	return content
+}
+
+func (m Model) renderAutocomplete() string {
+	if len(m.autocompleteOptions) == 0 {
+		return ""
+	}
+	var parts []string
+	for i, option := range m.autocompleteOptions {
+		label := option
+		if i == m.autocompleteIndex {
+			label = "▶ " + label
+		}
+		parts = append(parts, label)
+	}
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("111")).
+		Render(strings.Join(parts, "  "))
+}
+
+func (m Model) renderPendingQueueBadge() string {
+	count := m.pendingCount()
+	if count == 0 {
+		return ""
+	}
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("214")).
+		Render(fmt.Sprintf("⏳ %d pending", count))
 }
 
 // renderPendingImageBadges renders a line of image badges above the input.
@@ -248,13 +281,14 @@ func (m Model) renderStatusBar() string {
 		{label: state, min: 0},
 		{label: "↵ send", min: 24},
 		{label: fmt.Sprintf("%s newline", newlineFallbackKey), min: 48},
-		{label: "pg scroll", min: 64},
-		{label: "esc cancel", min: 82},
-		{label: "⌃L clear", min: 98},
-		{label: "⌃P project", min: 114},
-		{label: "⌃S/f2 sessions", min: 136},
-		{label: "tab sidebar", min: 156},
-		{label: "⌃C quit", min: 172},
+		{label: m.mouseStatusLabel(), min: 64},
+		{label: "pg scroll", min: 82},
+		{label: "esc cancel", min: 100},
+		{label: "⌃L clear", min: 116},
+		{label: "⌃P project", min: 132},
+		{label: "⌃S/f2 sessions", min: 154},
+		{label: "tab sidebar", min: 174},
+		{label: "⌃C quit", min: 190},
 	}
 
 	parts := []string{}
@@ -265,6 +299,13 @@ func (m Model) renderStatusBar() string {
 	}
 
 	return m.styles.StatusBarStyle.Width(maxInt(20, m.width-2)).Render(strings.Join(parts, "   ·   "))
+}
+
+func (m Model) mouseStatusLabel() string {
+	if m.mouseEnabled {
+		return "🖱️ mouse"
+	}
+	return "✋ mouse"
 }
 
 type statusBarItem struct {
@@ -401,7 +442,7 @@ func (m *Model) getOrCreateRenderer(width int) (*glamour.TermRenderer, error) {
 		// Avoid auto background detection here: it can ask the terminal for
 		// OSC color reports, and some terminals echo the response back into
 		// Bubble Tea input as text (for example, "11;rgb:...").
-		glamour.WithStandardStyle("dark"),
+		glamour.WithStandardStyle(m.theme.GlamourStyle()),
 		glamour.WithWordWrap(contentWidth),
 	)
 	if err != nil {
