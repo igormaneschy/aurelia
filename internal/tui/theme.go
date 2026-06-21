@@ -128,8 +128,7 @@ func newStylesForTheme(t Theme) themeStyles {
 	return newDarkStyles()
 }
 
-// newDarkStyles returns the default dark theme. The palette is identical to
-// the global styles that lived in view.go before T5.1.0.
+// newDarkStyles returns the default dark theme.
 func newDarkStyles() themeStyles {
 	return themeStyles{
 		UserStyle: lipgloss.NewStyle().

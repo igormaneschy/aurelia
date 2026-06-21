@@ -277,6 +277,8 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateViewport()
 			return m, nil
 		}
+		// Clean up any queued images from the previous session.
+		m.cleanupQueuedTempImages()
 		// Switch to the newly created session.
 		m.activeSession = msg.session.ChatID
 		m.messages = []chatMessage{}
@@ -300,6 +302,8 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateViewport()
 			return m, nil
 		}
+		// Clean up any queued images from the previous session.
+		m.cleanupQueuedTempImages()
 		// Switch to the opened session.
 		m.activeSession = msg.session.ChatID
 		m.messages = []chatMessage{}
@@ -534,6 +538,11 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case (msg.String() == "esc" || msg.String() == "enter") && m.helpOverlayOpen:
 		m.helpOverlayOpen = false
+		// If a stream is active, also cancel it so the user doesn't
+		// need to press Esc twice.
+		if m.waiting {
+			return m.cancelStreaming()
+		}
 		return m, nil
 
 	case isProjectPanelToggleKey(msg):

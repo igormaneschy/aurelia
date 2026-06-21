@@ -155,24 +155,16 @@ func handleTUISessionCreate(ctx context.Context, a *app, msg ipc.IPCMessage, emi
 		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "session name is empty after sanitization", RequestID: msg.RequestID})
 	}
 
-	// Find the lowest (most negative) used ChatID and allocate the next one.
-	// Uses an atomic retry loop: if the calculated nextID is taken (race with
-	// a concurrent create), we try the next one below until we find a free slot
-	// or hit the floor.
-	sessions, err := a.tuiSessions.List(ctx)
+	// Query the current minimum ChatID from the database so we allocate
+	// below the most negative used ID. This avoids reusing deleted slots.
+	// The Create attempt is retried if a concurrent create races us for
+	// the same nextID (ErrSessionExists → try the next one below).
+	nextID, err := a.tuiSessions.NextChatID(ctx)
 	if err != nil {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: fmt.Sprintf("list sessions: %s", err), RequestID: msg.RequestID})
+		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: fmt.Sprintf("next chat id: %s", err), RequestID: msg.RequestID})
 	}
-
-	nextID := ipc.ReservedTUIChatID - 1
-	if len(sessions) > 0 {
-		minID := sessions[0].ChatID
-		for _, s := range sessions {
-			if s.ChatID < minID {
-				minID = s.ChatID
-			}
-		}
-		nextID = minID - 1
+	if nextID == -1 {
+		nextID = ipc.ReservedTUIChatID - 1 // first free slot below DM
 	}
 
 	for {

@@ -145,6 +145,22 @@ func (s *SQLiteStore) Delete(ctx context.Context, chatID int64) error {
 	return nil
 }
 
+// NextChatID returns the next available ChatID for a new session.
+// It queries MIN(chat_id) from the database and returns one below it.
+// Returns -1 when the table is empty (caller should use a default).
+func (s *SQLiteStore) NextChatID(ctx context.Context) (int64, error) {
+	var minID sql.NullInt64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT MIN(chat_id) FROM tui_sessions`).Scan(&minID)
+	if err != nil {
+		return 0, fmt.Errorf("next chat id query: %w", err)
+	}
+	if !minID.Valid {
+		return -1, nil
+	}
+	return minID.Int64 - 1, nil
+}
+
 func (s *SQLiteStore) Close() error {
 	if s == nil || s.db == nil {
 		return nil

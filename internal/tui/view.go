@@ -954,6 +954,8 @@ func (m Model) renderHelpOverlay() string {
 	b.WriteString(m.styles.HeaderMetaStyle.Render("Images: /img <path>, Ctrl+V paste, drag & drop"))
 	b.WriteString("\n")
 	b.WriteString(m.styles.HeaderMetaStyle.Render("Docs: /attach <path>, multiple allowed per message"))
+	b.WriteString("\n\n")
+	b.WriteString(m.styles.HeaderMetaStyle.Render("Theme: --theme auto|light|dark (use --theme light if auto-detection misses your light terminal)"))
 
 	return b.String()
 }

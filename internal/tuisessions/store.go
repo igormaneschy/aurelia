@@ -28,6 +28,10 @@ type Store interface {
 	Rename(ctx context.Context, chatID int64, name string) error
 	Touch(ctx context.Context, chatID int64) error
 	Delete(ctx context.Context, chatID int64) error
+	// NextChatID returns the next available ChatID for a new session.
+	// It queries MIN(chat_id)-1 atomically so concurrent callers
+	// always see the latest state.
+	NextChatID(ctx context.Context) (int64, error)
 	Close() error
 }
 
