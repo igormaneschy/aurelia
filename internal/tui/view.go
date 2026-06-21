@@ -96,7 +96,6 @@ func (m Model) chatView() string {
 
 	var body string
 	if m.shouldShowSidebar() {
-		m.syncSidebarRows()
 		sidebar := m.renderSidebarTable()
 		viewContent := m.renderMainPane(mainContentHeight, m.contentWidth())
 		body = lipgloss.JoinHorizontal(

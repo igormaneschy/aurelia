@@ -329,6 +329,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.switchingSession = true
 		m.updateViewport()
 		m.sidebarFocused = false
+				m.sidebarTable.Blur()
 		// Reload history + status for the new session.
 		return m, tea.Batch(
 			fetchTUIHistory(m.ipcClient, m.activeSession),
@@ -582,6 +583,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case isSidebarFocusKey(msg):
 		if m.showSidebar && len(m.sessions) > 0 {
 			m.sidebarFocused = true
+			m.sidebarTable.Focus()
+			m.syncSidebarRows()
+			m.sidebarTable.SetCursor(m.sidebarCursor)
 			// Set cursor to the active session if found.
 			for i, s := range m.sessions {
 				if s.ChatID == m.activeSession {
@@ -838,22 +842,11 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "tab", "ctrl+i", "\t":
 		// Exit sidebar focus — return to input.
 		m.sidebarFocused = false
+			m.sidebarTable.Blur()
 		if msg.String() == "tab" || msg.String() == "ctrl+i" || msg.String() == "\t" {
 			// Tab also toggles sidebar visibility.
 			m.showSidebar = !m.showSidebar
 			m.updateViewport()
-		}
-		return m, nil
-
-	case "up", "k":
-		if m.sidebarCursor > 0 {
-			m.sidebarCursor--
-		}
-		return m, nil
-
-	case "down", "j":
-		if m.sidebarCursor < len(m.sessions)-1 {
-			m.sidebarCursor++
 		}
 		return m, nil
 
@@ -865,6 +858,7 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if target.ChatID == m.activeSession {
 			// Already on this session — just unfocus.
 			m.sidebarFocused = false
+				m.sidebarTable.Blur()
 			return m, nil
 		}
 		return m, openTUISession(m.ipcClient, target.ChatID)
@@ -910,6 +904,7 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Enter rename mode: show the current name as placeholder, clear textarea.
 		m.renameTargetChatID = target.ChatID
 		m.sidebarFocused = false
+				m.sidebarTable.Blur()
 		m.textarea.Reset()
 		m.textarea.Placeholder = fmt.Sprintf("Rename '%s' to...", target.Name)
 		m.textarea.Focus()
