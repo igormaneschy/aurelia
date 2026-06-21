@@ -16,16 +16,18 @@ const sidebarColModel = 2
 // newSidebarTable creates a table.Model for the session sidebar.
 func newSidebarTable() table.Model {
 	cols := []table.Column{
-		{Title: "", Width: 3},   // icon
-		{Title: "Session", Width: 14},
-		{Title: "Model", Width: 0}, // flex
+		{Title: "", Width: 3},     // icon
+		{Title: "Session", Width: 15},
+		{Title: "Model", Width: 4}, // truncated model name
 	}
 
 	t := table.New(
 		table.WithColumns(cols),
 		table.WithFocused(false),
-		table.WithHeight(10),
+		table.WithHeight(12),
 	)
+
+	t.SetWidth(sidebarWidth)
 
 	s := table.DefaultStyles()
 	s.Header = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("243")).Bold(true)
@@ -66,6 +68,7 @@ func (m *Model) syncSidebarRows() {
 	}
 
 	m.sidebarTable.SetRows(rows)
+	m.sidebarTable.UpdateViewport()
 	if m.sidebarCursor >= 0 && m.sidebarCursor < len(rows) {
 		m.sidebarTable.SetCursor(m.sidebarCursor)
 	}
