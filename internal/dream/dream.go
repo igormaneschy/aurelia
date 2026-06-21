@@ -382,11 +382,10 @@ func (d *Dreamer) TopicCwdOverlayDir(chatID int64, threadID int) string {
 	return d.resolver.TopicCwdOverlayDir(chatID, threadID)
 }
 
+// TeamMemoryDir is deprecated (v0.31.0+). project_team layer removed.
+// Aurelia is a personal assistant; ai-memory handles shared project knowledge.
 func (d *Dreamer) TeamMemoryDir(cwd string) string {
-	if d.resolver == nil {
-		return ""
-	}
-	return d.resolver.ProjectTeamMemoryDir(cwd)
+	return "" // deprecated — no longer populated
 }
 
 // finishNudge releases the nudge guard for a specific session key.

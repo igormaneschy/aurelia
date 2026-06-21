@@ -15,6 +15,7 @@ var (
 		LayerUserGlobal:  true,
 		LayerTopic:       true,
 		LayerCwdOverlay:  true,
+		// LayerProjectTeam — deprecated (v0.31.0+): redirected to cwd_overlay
 		LayerProjectTeam: true,
 	}
 
@@ -88,14 +89,17 @@ func (w *safeMemoryWriter) resolveLayerTarget(layer string, chatID int64, thread
 		instanceRoot := w.resolver.Root()
 		return layerTarget{base: dir, root: instanceRoot, blocksPersonas: true}, nil
 	case "project_team":
+		// Deprecated — redirect to cwd_overlay (v0.31.0+).
+		// Aurelia is a personal assistant; ai-memory handles shared project knowledge.
 		if cwd == "" || w.resolver == nil {
-			return layerTarget{}, fmt.Errorf("project_team layer requires cwd")
+			return layerTarget{}, fmt.Errorf("project_team layer deprecated: requires cwd, redirecting to cwd_overlay")
 		}
-		dir := w.resolver.TeamMemoryDir(cwd)
+		dir := w.resolver.TopicCwdOverlayDir(chatID, threadID)
 		if dir == "" {
-			return layerTarget{}, fmt.Errorf("team memory directory not available (no project context)")
+			return layerTarget{}, fmt.Errorf("cwd_overlay directory not available (no /cwd or threadID <= 0)")
 		}
-		return layerTarget{base: dir, root: dir, blocksPersonas: false}, nil
+		instanceRoot := w.resolver.Root()
+		return layerTarget{base: dir, root: instanceRoot, blocksPersonas: true}, nil
 	default:
 		return layerTarget{}, errInvalidLayer
 	}

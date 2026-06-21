@@ -68,13 +68,6 @@ func (s *Service) cwdOverlayDir(chatID int64, threadID int) string {
 	return s.Resolver.TopicCwdOverlayDir(chatID, threadID)
 }
 
-func (s *Service) teamMemoryDir(cwd string) string {
-	if cwd == "" || s.Resolver == nil {
-		return ""
-	}
-	return s.Resolver.ProjectTeamMemoryDir(cwd)
-}
-
 // Status returns the current memory layer status without creating anything.
 func (s *Service) Status(chatID int64, threadID int, cwd string) (Status, error) {
 	var layers []LayerInfo
@@ -93,11 +86,8 @@ func (s *Service) Status(chatID int64, threadID int, cwd string) (Status, error)
 		layers = append(layers, s.layerInfo("CWD Overlay", "cwd_overlay", dir))
 	}
 
-	// Team: only when cwd is set
-	if cwd != "" && s.Resolver != nil {
-		dir := s.teamMemoryDir(cwd)
-		layers = append(layers, s.layerInfo("Team", "team", dir))
-	}
+	// Team: removed — redundant with cwd_overlay.
+	// Aurelia is a personal assistant; ai-memory handles shared project knowledge.
 
 	layer, _ := s.checkpointTarget(cwd, chatID, threadID)
 

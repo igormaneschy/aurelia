@@ -1145,12 +1145,13 @@ func TestBuildMemoryInstructions_NoAbsolutePathLeak(t *testing.T) {
 	if strings.Contains(got2, "/Users/janedoe") {
 		t.Fatal("system prompt with project leaks absolute home directory path (H-02)")
 	}
-	// Must use canonical layer names (not old project-private:// scheme)
+	// Must use canonical layer names
 	if !strings.Contains(got2, "CWD Overlay") {
 		t.Fatalf("expected CWD Overlay in prompt, got: %s", got2)
 	}
-	if !strings.Contains(got2, "Project Team") {
-		t.Fatalf("expected Project Team in prompt, got: %s", got2)
+	// Project Team layer removed in v0.31.0 — must NOT appear.
+	if strings.Contains(got2, "Project Team") {
+		t.Fatalf("Project Team should NOT appear in prompt after v0.31.0, got: %s", got2)
 	}
 }
 
@@ -1369,8 +1370,8 @@ func TestLoadMemoryContents_TwoUsersSameTopic(t *testing.T) {
 }
 
 // TestLoadMemoryContents_TwoUsersSameTopicWithCwd verifies that two users in the
-// same topic with /cwd share topic and project team memory, but have independent
-// user global and cwd_overlay (E9.3 with /cwd).
+// same topic with /cwd share topic and cwd_overlay memory, but have independent
+// user global. Team memory layer removed in v0.31.0.
 func TestLoadMemoryContents_TwoUsersSameTopicWithCwd(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("AURELIA_HOME", dir)
@@ -1407,7 +1408,7 @@ func TestLoadMemoryContents_TwoUsersSameTopicWithCwd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Team memory (shared)
+	// Team memory (still creates dir but should NOT be loaded)
 	teamDir := resolver.ProjectTeamMemoryDir(cwd)
 	if err := os.MkdirAll(teamDir, 0700); err != nil {
 		t.Fatal(err)
@@ -1436,15 +1437,16 @@ func TestLoadMemoryContents_TwoUsersSameTopicWithCwd(t *testing.T) {
 		if !strings.Contains(got, "use postgres") {
 			t.Fatal("both users should see shared topic memory")
 		}
-		if !strings.Contains(got, "use tabs for indentation") {
-			t.Fatal("both users should see shared team memory")
+	}
+
+	// Team memory layer removed in v0.31.0 — must NOT be loaded even if dir exists.
+	for _, got := range []string{gotA, gotB} {
+		if strings.Contains(got, "use tabs for indentation") {
+			t.Fatal("team memory should NOT be loaded after v0.31.0")
 		}
 	}
 
 	// cwd_overlay is shared by topic — both see Alice's auth note.
-	// This is intentional: cwd_overlay is scoped by (chat_id, thread_id),
-	// not by (user_id). Two users collaborating in the same topic with the
-	// same /cwd share the work context overlay. Only user_global is per-user.
 	if !strings.Contains(gotA, "Alice: implemented auth module") {
 		t.Fatal("user A should see cwd_overlay (auth module)")
 	}

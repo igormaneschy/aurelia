@@ -37,28 +37,15 @@ func Bootstrap(r *PathResolver) error {
 	return nil
 }
 
-// BootstrapProjectMemory ensures the per-project team memory directory exists
-// and creates an empty MEMORY.md index file if it doesn't exist yet.
+// BootstrapProjectMemory is a no-op since project team memory was removed (v0.31.0+).
+// Kept for API compatibility; returns nil.
 func BootstrapProjectMemory(r *PathResolver, cwd string) error {
-	if strings.TrimSpace(cwd) == "" {
-		return nil
-	}
-
-	dir := r.ProjectTeamMemoryDir(cwd)
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return fmt.Errorf("runtime: bootstrap project team memory %q: %w", dir, err)
-	}
-	indexPath := filepath.Join(dir, "MEMORY.md")
-	if _, err := os.Stat(indexPath); os.IsNotExist(err) {
-		if err := os.WriteFile(indexPath, nil, 0600); err != nil {
-			return fmt.Errorf("runtime: create team memory index %q: %w", indexPath, err)
-		}
-	}
 	return nil
 }
 
 // BootstrapConversationProjectMemory ensures context-scoped memory directories
-// exist for the bound project: cwd overlay (topic-scoped) and project team memory.
+// exist for the bound project: cwd overlay (topic-scoped) only.
+// Project team memory removed in v0.31.0 — redundant with cwd_overlay.
 func BootstrapConversationProjectMemory(r *PathResolver, cwd string, chatID int64, threadID int) error {
 	if strings.TrimSpace(cwd) == "" {
 		return nil
@@ -66,7 +53,6 @@ func BootstrapConversationProjectMemory(r *PathResolver, cwd string, chatID int6
 
 	dirs := []string{
 		r.TopicCwdOverlayDir(chatID, threadID),
-		r.ProjectTeamMemoryDir(cwd),
 	}
 	for _, dir := range dirs {
 		if dir == "" {
