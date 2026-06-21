@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.30.1 - 2026-06-21
+
+### Fixed
+- **TUI: horários de mensagens restauradas** — preserva timestamps reais do histórico PI e evita que mensagens antigas reapareçam com horários iguais ao recarregar a TUI.
+
 ## v0.30.0 - 2026-06-20
 
 ### Added
