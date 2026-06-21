@@ -132,6 +132,10 @@ type Model struct {
 	// Help overlay — toggled with ?.
 	helpOverlayOpen bool
 
+	// renameTargetChatID is non-zero when the user is renaming a session.
+	// The textarea shows the current name and Enter sends the rename.
+	renameTargetChatID int64
+
 	// Style palette — owned by theme.go. Default is dark; T5.2.1 will
 	// select light vs dark based on terminal hints and --theme flag.
 	styles themeStyles
@@ -512,6 +516,43 @@ func deleteTUISession(client *ipc.Client, chatID int64) tea.Cmd {
 		}
 		return tuiSessionDeletedMsg{chatID: chatID}
 	}
+}
+
+// renameTUISession asks the daemon to rename a session.
+func renameTUISession(client *ipc.Client, chatID int64, name string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := contextWithTimeout(3 * time.Second)
+		defer cancel()
+		events, err := client.SendAndWait(ctx, ipc.IPCMessage{
+			Type:      ipc.MsgTypeSessionRename,
+			ChatID:    chatID,
+			Text:      name,
+			RequestID: fmt.Sprintf("tui-session-rename-%d", time.Now().UnixNano()),
+		})
+		if err != nil {
+			return tuiSessionRenamedMsg{chatID: chatID, err: err}
+		}
+		return sessionRenamedFromEvents(events)
+	}
+}
+
+// sessionRenamedFromEvents parses a renamed session from IPC events.
+func sessionRenamedFromEvents(events []ipc.IPCEvent) tuiSessionRenamedMsg {
+	type sessionPayload struct {
+		ChatID int64  `json:"chat_id"`
+		Name   string `json:"name"`
+	}
+	for _, ev := range events {
+		if ev.Type != ipc.EventTypeSessionRenamed || ev.Body == "" {
+			continue
+		}
+		var s sessionPayload
+		if err := json.Unmarshal([]byte(ev.Body), &s); err != nil {
+			return tuiSessionRenamedMsg{err: fmt.Errorf("parse renamed session: %w", err)}
+		}
+		return tuiSessionRenamedMsg{chatID: s.ChatID, name: s.Name}
+	}
+	return tuiSessionRenamedMsg{}
 }
 
 // sessionsFromEvents parses the sessions list from IPC events.

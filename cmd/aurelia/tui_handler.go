@@ -15,11 +15,11 @@ import (
 	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/internal/memoryux"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
-	"github.com/igormaneschy/aurelia/pkg/images"
 	"github.com/igormaneschy/aurelia/internal/pipeline"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/transport"
+	"github.com/igormaneschy/aurelia/pkg/images"
 )
 
 // tuiOutput implements pipeline.Output by writing IPC events through an emit
@@ -185,6 +185,8 @@ func makeTUIHandler(a *app) func(context.Context, ipc.IPCMessage, func(ipc.IPCEv
 			return handleTUISessionOpen(ctx, a, msg, emit)
 		case ipc.MsgTypeSessionDelete:
 			return handleTUISessionDelete(ctx, a, msg, emit)
+		case ipc.MsgTypeSessionRename:
+			return handleTUISessionRename(ctx, a, msg, emit)
 		case ipc.MsgTypeProjectState:
 			forceTUIIDs(&msg)
 			return handleTUIProjectState(ctx, a, msg, emit)
@@ -265,8 +267,12 @@ Keyboard:
 - Ctrl+P — toggle project state panel
 - Ctrl+S or F2 — focus sidebar to navigate sessions
 - In sidebar: ↑↓ navigate, enter open, n new, d delete, esc exit
+- Tab or ? after / — show and cycle command suggestions
+- Ctrl+O — toggle mouse capture for wheel scroll vs native text selection
 - Esc — cancel the current response
 - Ctrl+L — clear the screen
+- Ctrl+Y — copy the current chat transcript to clipboard
+- Ctrl+R — copy the last Aurelia response to clipboard
 - Ctrl+X — clear pending images
 - Ctrl+V — paste image from clipboard
 - Ctrl+C — quit

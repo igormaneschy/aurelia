@@ -370,7 +370,7 @@ func (s *Server) handleConnection(conn net.Conn) {
 func validateMessage(msg IPCMessage) error {
 	switch msg.Type {
 	case MsgTypeSend, MsgTypeSubscribe, MsgTypeCommand, MsgTypeHistory,
-		MsgTypeSessions, MsgTypeSessionCreate, MsgTypeSessionOpen, MsgTypeSessionDelete,
+		MsgTypeSessions, MsgTypeSessionCreate, MsgTypeSessionOpen, MsgTypeSessionDelete, MsgTypeSessionRename,
 		MsgTypeProjectState:
 		// valid
 	default:

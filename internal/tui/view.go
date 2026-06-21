@@ -465,6 +465,7 @@ func (m Model) renderSidebar() string {
 			m.styles.SidebarMutedStyle.Render("↑↓ navigate"),
 			m.styles.SidebarMutedStyle.Render("enter open"),
 			m.styles.SidebarMutedStyle.Render("n new"),
+			m.styles.SidebarMutedStyle.Render("r rename"),
 			m.styles.SidebarMutedStyle.Render("d delete"),
 			m.styles.SidebarMutedStyle.Render("esc exit"),
 		)

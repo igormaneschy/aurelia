@@ -72,6 +72,8 @@ const (
 	MsgTypeSessionOpen = "session_open"
 	// MsgTypeSessionDelete removes a TUI local session.
 	MsgTypeSessionDelete = "session_delete"
+	// MsgTypeSessionRename renames a TUI local session.
+	MsgTypeSessionRename = "session_rename"
 	// MsgTypeProjectState requests a full project state snapshot for the panel.
 	MsgTypeProjectState = "project_state"
 )
@@ -98,6 +100,8 @@ const (
 	EventTypeSessionOpened = "session_opened"
 	// EventTypeSessionDeleted confirms a session was deleted.
 	EventTypeSessionDeleted = "session_deleted"
+	// EventTypeSessionRenamed confirms a session was renamed.
+	EventTypeSessionRenamed = "session_renamed"
 	// EventTypeProjectState returns the project state snapshot JSON in Body.
 	EventTypeProjectState = "project_state"
 )

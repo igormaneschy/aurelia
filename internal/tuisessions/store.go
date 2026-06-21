@@ -25,6 +25,7 @@ type Store interface {
 	List(ctx context.Context) ([]Session, error)
 	Get(ctx context.Context, chatID int64) (*Session, error)
 	Create(ctx context.Context, chatID int64, name string) (*Session, error)
+	Rename(ctx context.Context, chatID int64, name string) error
 	Touch(ctx context.Context, chatID int64) error
 	Delete(ctx context.Context, chatID int64) error
 	Close() error

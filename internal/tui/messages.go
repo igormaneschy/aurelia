@@ -97,6 +97,13 @@ type tuiSessionDeletedMsg struct {
 	err    error
 }
 
+// tuiSessionRenamedMsg confirms a session was renamed.
+type tuiSessionRenamedMsg struct {
+	chatID int64
+	name   string
+	err    error
+}
+
 // tuiSessionInfo is the TUI-side representation of a session.
 type tuiSessionInfo struct {
 	ChatID int64

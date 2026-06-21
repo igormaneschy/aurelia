@@ -337,6 +337,26 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, fetchTUISessions(m.ipcClient)
 
+	case tuiSessionRenamedMsg:
+		if msg.err != nil {
+			m.messages = append(m.messages, chatMessage{
+				Sender:    "⚠️",
+				Text:      fmt.Sprintf("Failed to rename session: %s", msg.err),
+				Timestamp: time.Now(),
+			})
+			m.updateViewport()
+			return m, nil
+		}
+		// Update the session name in the local list.
+		for i := range m.sessions {
+			if m.sessions[i].ChatID == msg.chatID {
+				m.sessions[i].Name = msg.name
+				break
+			}
+		}
+		m.updateViewport()
+		return m, fetchTUISessions(m.ipcClient)
+
 	case tuiProjectStateMsg:
 		if msg.err == nil && msg.state != nil {
 			m.projectState = msg.state
@@ -560,12 +580,35 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.delegateKeyToTextarea(msg)
 
 	case msg.String() == "esc":
+		if m.renameTargetChatID != 0 {
+			m.renameTargetChatID = 0
+			m.textarea.Reset()
+			m.textarea.Placeholder = "Type a message…"
+			return m, nil
+		}
 		if m.waiting {
 			return m.cancelStreaming()
 		}
 		return m, nil
 
 	case msg.String() == "enter":
+		// In rename mode, send the rename command.
+		if m.renameTargetChatID != 0 {
+			name := strings.TrimSpace(m.textarea.Value())
+			if name != "" {
+				cmd := renameTUISession(m.ipcClient, m.renameTargetChatID, name)
+				m.renameTargetChatID = 0
+				m.textarea.Reset()
+				m.textarea.Placeholder = "Type a message…"
+				return m, cmd
+			}
+			// Empty name — cancel rename.
+			m.renameTargetChatID = 0
+			m.textarea.Reset()
+			m.textarea.Placeholder = "Type a message…"
+			return m, nil
+		}
+
 		if m.hasAutocomplete() {
 			return m.applyAutocomplete(), nil
 		}
@@ -818,6 +861,29 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		return m, deleteTUISession(m.ipcClient, target.ChatID)
+
+	case "r":
+		// Rename the selected session (not the default DM).
+		if m.sidebarCursor < 0 || m.sidebarCursor >= len(m.sessions) {
+			return m, nil
+		}
+		target := m.sessions[m.sidebarCursor]
+		if target.ChatID == ipc.ReservedTUIChatID {
+			m.messages = append(m.messages, chatMessage{
+				Sender:    "⚠️",
+				Text:      "Cannot rename the default DM session.",
+				Timestamp: time.Now(),
+			})
+			m.updateViewport()
+			return m, nil
+		}
+		// Enter rename mode: set the textarea to the current name.
+		m.renameTargetChatID = target.ChatID
+		m.sidebarFocused = false
+		m.textarea.SetValue(target.Name)
+		m.textarea.Placeholder = ""
+		m.textarea.Focus()
+		return m, nil
 
 	default:
 		return m, nil
