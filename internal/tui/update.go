@@ -877,11 +877,11 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.updateViewport()
 			return m, nil
 		}
-		// Enter rename mode: set the textarea to the current name.
+		// Enter rename mode: show the current name as placeholder, clear textarea.
 		m.renameTargetChatID = target.ChatID
 		m.sidebarFocused = false
-		m.textarea.SetValue(target.Name)
-		m.textarea.Placeholder = ""
+		m.textarea.Reset()
+		m.textarea.Placeholder = fmt.Sprintf("Rename '%s' to...", target.Name)
 		m.textarea.Focus()
 		return m, nil
 
