@@ -159,8 +159,11 @@ func (g *tuiRunGuard) release() {
 // All TUI requests are forced into the local TUI namespace:
 // ChatID must be in [ReservedTUIChatIDFloor, ReservedTUIChatID]; any other
 // value (including Telegram IDs) is forced to the default DM.
-// ThreadID is always 0; UserID is always os.Getuid().
+// ThreadID is always 0; UserID resolves to the canonical persona ID when
+// configured (so TUI and Telegram share memory/dream/nudge), falling back
+// to os.Getuid() when no persona is configured.
 func makeTUIHandler(a *app) func(context.Context, ipc.IPCMessage, func(ipc.IPCEvent) error) error {
+	personaID := a.config.PersonaUserID()
 	return func(ctx context.Context, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
 		// Emit ack for all messages.
 		if err := emit(ipc.IPCEvent{Type: ipc.EventTypeAck, RequestID: msg.RequestID}); err != nil {
@@ -169,13 +172,13 @@ func makeTUIHandler(a *app) func(context.Context, ipc.IPCMessage, func(ipc.IPCEv
 
 		switch msg.Type {
 		case ipc.MsgTypeCommand:
-			forceTUIIDs(&msg)
+			forceTUIIDs(&msg, personaID)
 			return handleTUICommand(ctx, a, msg, emit)
 		case ipc.MsgTypeHistory:
-			forceTUIIDs(&msg)
+			forceTUIIDs(&msg, personaID)
 			return handleTUIHistory(ctx, a, msg, emit)
 		case ipc.MsgTypeSend:
-			forceTUIIDs(&msg)
+			forceTUIIDs(&msg, personaID)
 			return handleTUISend(ctx, a, msg, emit)
 		case ipc.MsgTypeSessions:
 			return handleTUISessions(ctx, a, msg, emit)
@@ -188,7 +191,7 @@ func makeTUIHandler(a *app) func(context.Context, ipc.IPCMessage, func(ipc.IPCEv
 		case ipc.MsgTypeSessionRename:
 			return handleTUISessionRename(ctx, a, msg, emit)
 		case ipc.MsgTypeProjectState:
-			forceTUIIDs(&msg)
+			forceTUIIDs(&msg, personaID)
 			return handleTUIProjectState(ctx, a, msg, emit)
 		case ipc.MsgTypeSubscribe:
 			// Terminal error: subscribe not supported.
@@ -202,13 +205,19 @@ func makeTUIHandler(a *app) func(context.Context, ipc.IPCMessage, func(ipc.IPCEv
 // forceTUIIDs clamps client-supplied IDs into the local TUI namespace.
 // A ChatID already in the reserved range is preserved (the client is
 // selecting a named session); anything else is forced to the default DM.
-// ThreadID is always 0; UserID is always the local OS user.
-func forceTUIIDs(msg *ipc.IPCMessage) {
+// ThreadID is always 0; UserID maps to the canonical persona ID when
+// configured (so TUI and Telegram share memory/dream/nudge), falling
+// back to os.Getuid() when no persona is configured.
+func forceTUIIDs(msg *ipc.IPCMessage, personaUserID int64) {
 	if !ipc.IsReservedTUIID(msg.ChatID) {
 		msg.ChatID = ipc.ReservedTUIChatID
 	}
 	msg.ThreadID = 0
-	msg.UserID = int64(os.Getuid())
+	if personaUserID != 0 {
+		msg.UserID = personaUserID
+	} else {
+		msg.UserID = int64(os.Getuid())
+	}
 }
 
 // handleTUICommand processes a TUI command (/cwd, /status, etc.).
