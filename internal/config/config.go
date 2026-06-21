@@ -189,6 +189,11 @@ type AppConfig struct {
 	// DefaultOwnerUserID is the fallback user ID when none is explicitly provided.
 	DefaultOwnerUserID int64 `json:"default_owner_user_id,omitempty"`
 
+	// DefaultPersonaUserID is the canonical user ID for the persona (the human behind all entry points).
+	// When set, TUI sessions (os.Getuid) map to this ID instead of creating a separate user.
+	// Falls back to DefaultOwnerUserIDOrFallback() when zero.
+	DefaultPersonaUserID int64 `json:"default_persona_user_id,omitempty"`
+
 	// SessionLifecycleConfig controls automatic session health management.
 	SessionLifecycle SessionLifecycleConfig `json:"session_lifecycle,omitempty"`
 }
@@ -204,6 +209,17 @@ func (c *AppConfig) DefaultOwnerUserIDOrFallback() int64 {
 		return c.TelegramAllowedUserIDs[0]
 	}
 	return 0
+}
+
+// PersonaUserID returns the canonical user ID for the persona (the human
+// behind all entry points — TUI, Telegram, etc.). When DefaultPersonaUserID
+// is set, it takes precedence. Otherwise falls back to
+// DefaultOwnerUserIDOrFallback(). Returns 0 only when neither is configured.
+func (c *AppConfig) PersonaUserID() int64 {
+	if c.DefaultPersonaUserID != 0 {
+		return c.DefaultPersonaUserID
+	}
+	return c.DefaultOwnerUserIDOrFallback()
 }
 
 // IsModelAuto returns true when Aurelia should let PI choose the default model.
