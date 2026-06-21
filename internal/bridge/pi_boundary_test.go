@@ -170,6 +170,18 @@ func TestBridgeHealthTimer_visibleToFinally(t *testing.T) {
 	}
 }
 
+func TestBridgeSessionHistory_normalizesNumericTimestamps(t *testing.T) {
+	if !activeCodeContains("function sessionMessageTimestampISO") {
+		t.Fatal("bridge session history must normalize PI message timestamps before returning TUI history")
+	}
+	if !activeCodeContains(`typeof raw === "number" && Number.isFinite(raw)`) {
+		t.Fatal("bridge session history must support PI numeric Unix-ms timestamps")
+	}
+	if activeCodeContains("history.push({ sender, text, timestamp: ts })") {
+		t.Fatal("bridge session history must not stamp restored messages with current time")
+	}
+}
+
 // TestBridgeSessionFile_emitted ensures the bridge emits session_file in
 // both system and result events so Aurelia can track session persistence.
 // This is the key mechanism for Aurelia's session management layer.
