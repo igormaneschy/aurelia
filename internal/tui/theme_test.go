@@ -21,7 +21,7 @@ func forceColorRenderer() *lipgloss.Renderer {
 // ensuring ANSI codes are present even in non-TTY test environments.
 func renderColored(st lipgloss.Style, text string) string {
 	r := forceColorRenderer()
-	s := st.Copy().Renderer(r)
+	s := st.Renderer(r) //nolint:staticcheck // Renderer is deprecated but functional for test
 	return s.Render(text)
 }
 
