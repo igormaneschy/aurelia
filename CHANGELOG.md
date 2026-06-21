@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.30.2 - 2026-06-21
+
+### Changed
+- **Docs: README atualizado** — reflete o estado atual do projeto, incluindo TUI local, anexos, imagens, comandos, build/deploy e versão corrente.
+
 ## v0.30.1 - 2026-06-21
 
 ### Fixed
