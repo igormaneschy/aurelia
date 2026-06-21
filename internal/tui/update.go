@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
@@ -90,14 +90,31 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.SetContent(m.renderMessages(m.messages, contentWidth))
 			m.viewport.GotoBottom()
 		} else {
-			m.viewport.Width = contentWidth
-			m.viewport.Height = viewportHeightForTerminal(msg.Height)
+			m.viewport.SetWidth(contentWidth)
+			m.viewport.SetHeight(viewportHeightForTerminal(msg.Height))
 			m.updateViewport()
 		}
 		return m, nil
 
 	case tea.KeyMsg:
 		return m.handleKeyMsg(msg)
+
+	case tea.PasteMsg:
+		text := strings.TrimSpace(msg.Content)
+		if isImagePath(text) {
+			errMsg := m.attachImageFromPath(text)
+			if errMsg != "" {
+				m.messages = append(m.messages, chatMessage{Sender: "⚠️", Text: errMsg})
+				m.updateViewport()
+			} else {
+				m.messages = append(m.messages, chatMessage{
+					Sender: "📎",
+					Text:   fmt.Sprintf("Image attached: %s", filepath.Base(text)),
+				})
+				m.updateViewport()
+			}
+		}
+		return m, nil
 
 	case tea.MouseMsg:
 		if !m.mouseEnabled {
@@ -799,10 +816,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) toggleMouseCapture() (tea.Model, tea.Cmd) {
 	m.mouseEnabled = !m.mouseEnabled
-	if m.mouseEnabled {
-		return m, tea.EnableMouseCellMotion
-	}
-	return m, tea.DisableMouse
+	return m, nil
 }
 
 // handleSidebarKey processes keys when the sidebar is focused.
@@ -908,9 +922,10 @@ func (m Model) delegateKeyToTextarea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Check if this is a paste event with an image path (drag-and-drop).
-	if msg.Paste && msg.Type == tea.KeyRunes {
-		text := string(msg.Runes)
-		text = strings.TrimSpace(text)
+	// In v2, paste is handled via tea.PasteMsg, but we check for printable
+	// multi-character text from KeyPressMsg as fallback.
+	if k := msg.Key(); len(k.Text) > 1 {
+		text := strings.TrimSpace(k.Text)
 		if isImagePath(text) {
 			// Treat as image attachment, not text input.
 			errMsg := m.attachImageFromPath(text)
@@ -1080,11 +1095,13 @@ func isViewportScrollKey(msg tea.KeyMsg) bool {
 }
 
 func isTerminalColorReportResidue(msg tea.KeyMsg) bool {
-	return msg.Type == tea.KeyRunes && !msg.Paste && terminalColorReportPattern.MatchString(string(msg.Runes))
+	k := msg.Key()
+	return k.Text != "" && terminalColorReportPattern.MatchString(k.Text)
 }
 
 func shouldDelegateKeyToTextarea(msg tea.KeyMsg, keyMap textarea.KeyMap) bool {
-	if !msg.Alt || msg.Type != tea.KeyRunes || msg.Paste {
+	k := msg.Key()
+	if k.Mod&tea.ModAlt == 0 || k.Text == "" {
 		return true
 	}
 	return key.Matches(msg,
@@ -1100,7 +1117,7 @@ func shouldDelegateKeyToTextarea(msg tea.KeyMsg, keyMap textarea.KeyMap) bool {
 }
 
 func isSidebarToggleKey(msg tea.KeyMsg) bool {
-	if msg.Type == tea.KeyTab {
+	if msg.Key().Code == tea.KeyTab {
 		return true
 	}
 	s := msg.String()
@@ -1241,9 +1258,9 @@ func (m *Model) ensureViewport() {
 // updateViewport refreshes the viewport content if initialized.
 func (m *Model) updateViewport() {
 	m.ensureViewport()
-	if m.viewportSet && m.viewport.Height > 0 {
+	if m.viewportSet && m.viewport.Height() > 0 {
 		contentWidth := m.contentWidth()
-		m.viewport.Width = contentWidth
+		m.viewport.SetWidth(contentWidth)
 		m.viewport.SetContent(m.renderMessages(m.messages, contentWidth))
 		m.viewport.GotoBottom()
 	}

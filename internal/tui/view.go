@@ -5,9 +5,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	"github.com/charmbracelet/glamour"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/glamour/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
@@ -36,16 +37,22 @@ const (
 // palette constructors (newDarkStyles, newLightStyles) own the actual colors.
 
 // View implements tea.Model.
-func (m Model) View() string {
+func (m Model) View() tea.View {
+	var content string
 	switch m.state {
 	case stateLoading:
-		return m.loadingView()
+		content = m.loadingView()
 	case stateChat:
-		return m.chatView()
+		content = m.chatView()
 	case stateError:
-		return m.errorView()
+		content = m.errorView()
 	}
-	return ""
+	v := tea.NewView(content)
+	v.AltScreen = true
+	if m.mouseEnabled {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
+	return v
 }
 
 func (m Model) loadingView() string {
@@ -151,7 +158,7 @@ func (m Model) renderMainPane(height, width int) string {
 }
 
 func (m Model) renderMainContent() string {
-	if !m.viewportSet || m.viewport.Height <= 0 {
+	if !m.viewportSet || m.viewport.Height() <= 0 {
 		return "Initializing..."
 	}
 	return m.viewport.View()
@@ -620,7 +627,10 @@ func (m Model) contentWidth() int {
 
 // viewportForSize creates a viewport with the given dimensions.
 func viewportForSize(width, height int) viewport.Model {
-	vp := viewport.New(width, viewportHeightForTerminal(height))
+	vp := viewport.New(
+		viewport.WithWidth(width),
+		viewport.WithHeight(viewportHeightForTerminal(height)),
+	)
 	vp.YPosition = topMarginHeight
 	vp.MouseWheelEnabled = true
 	vp.MouseWheelDelta = 3

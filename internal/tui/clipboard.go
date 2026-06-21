@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 // clipboardTimeout is the maximum time to wait for a clipboard subprocess.

@@ -10,7 +10,7 @@ import (
 	"log"
 	"os"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/igormaneschy/aurelia/internal/tui"
 )
@@ -41,7 +41,7 @@ func main() {
 	// Mouse capture is opt-in via Ctrl+O so native terminal text selection works
 	// by default.
 	m := tui.NewModel(socketPath, theme)
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	p := tea.NewProgram(m)
 
 	finalModel, err := p.Run()
 	if m, ok := finalModel.(tui.Model); ok {
