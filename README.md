@@ -4,9 +4,9 @@
 
 <img src="assets/aurelia_cover.png" alt="Aurelia cover" width="720" />
 
-**A personality and context layer for SDK-powered AI execution.**
+**A local-first personality and context layer for SDK-powered AI execution.**
 
-Telegram-native. PI-powered. Built to stay light.
+Telegram-native, terminal-friendly, PI-powered. Built to stay light.
 
 One persistent daemon, many projects, many prompt profiles.
 
@@ -36,7 +36,7 @@ Before installing, ensure you have:
 
 ## Why Aurelia OS
 
-Aurelia is a Telegram-native personality layer over AI execution SDKs. Talk naturally — Aurelia adds identity, memory, project context, guard-rails, and a selected prompt profile, then delegates reasoning and tool execution to the SDK harness.
+Aurelia is a local-first personality layer over AI execution SDKs. Talk naturally from Telegram or the terminal TUI — Aurelia adds identity, memory, project context, guard-rails, and a selected prompt profile, then delegates reasoning and tool execution to the SDK harness.
 
 It is built around a practical execution model:
 
@@ -52,17 +52,17 @@ It is built around a practical execution model:
 - Bridge recovery with automatic retry on crash
 
 The goal is not to reimplement what PI or future SDKs already do.
-The goal is to wrap them with personality and product context — adding persistence, memory, scheduling, multi-project support, guard-rails, and a natural Telegram interface on top.
+The goal is to wrap them with personality and product context — adding persistence, memory, scheduling, multi-project support, guard-rails, and natural Telegram/TUI interfaces on top.
 
 ### Architectural Thesis
 
 Aurelia is the **product layer** on top of the PI SDK engine:
 
 ```text
-Telegram / CLI / Cron / future interfaces
+Telegram / TUI / CLI / Cron / future interfaces
         ↓
 Aurelia Product Layer
-identity · persona · prompt profiles · Telegram UX · workflows · operational memory · policies · continuity
+identity · persona · prompt profiles · Telegram/TUI UX · workflows · operational memory · policies · continuity
         ↓
 PI SDK
 reasoning · tool execution · sessions · agent runtime · model/provider abstraction
@@ -74,15 +74,16 @@ The boundary is intentional:
 
 - **PI SDK owns** model/provider resolution, tool execution, session runtime, compaction, context-file loading, skills/extensions, MCP tools, and agentic execution primitives.
 - **PI + ai-memory MCP owns** transversal Wiki memory used by PI, PI Code/opencode, and other MCP-compatible clients.
-- **Aurelia owns** identity, personality, Prompt Profile selection/injection, Telegram-native UX, user/project scoping, operational memory, cron, workflows, audit, orchestration, and continuity.
+- **Aurelia owns** identity, personality, Prompt Profile selection/injection, Telegram/TUI UX, user/project scoping, operational memory, cron, workflows, audit, orchestration, and continuity.
 - When the PI SDK already owns a capability, Aurelia adapts or orchestrates it rather than reimplementing it.
 - When the capability is product-specific continuity, operational memory, policy, UX, or workflow state, Aurelia remains the source of truth.
 
-The long-term differentiator is the persistent Telegram product layer over PI. Transversal Wiki memory is delegated to PI through the existing `ai-memory` MCP rather than reimplemented as an Aurelia gateway.
+The long-term differentiator is the persistent local product layer over PI: Telegram for async/mobile work, the TUI for focused terminal work, and shared daemon state where it is safe. Transversal Wiki memory is delegated to PI through the existing `ai-memory` MCP rather than reimplemented as an Aurelia gateway.
 
 ## Core Capabilities
 
 - **Natural conversation** via Telegram with text, photos, voice, and documents
+- **Local terminal UI** via `aurelia-tui` with streaming markdown, isolated local sessions, sidebar navigation, and project state overlay
 - **Autonomous coding** — reads, writes, edits files, runs commands, searches code
 - **Multi-project** — work on different projects simultaneously with isolated contexts
 - **Persistent memory** — scoped memory system (global, user, project-private, project-team, topic) that survives across sessions
@@ -97,6 +98,8 @@ The long-term differentiator is the persistent Telegram product layer over PI. T
 - **Tool progress** — see what PI is doing in real-time (reading files, running commands...)
 - **Reply-to** — responses quote the original message for async conversation clarity
 - **Photo analysis** — images downloaded and passed to PI for visual analysis
+- **TUI image input** — `/img`, clipboard paste, and drag-and-drop route screenshots/images to vision-capable models
+- **TUI document attachments** — `/attach` and drag-and-drop copy files safely into `<cwd>/uploads/` for the agent to inspect
 - **Voice transcription** — Groq STT converts voice messages to text (Whisper)
 - **Vision fallback** — configure a separate vision model for image inputs
   while keeping a faster text-only model as default
@@ -171,8 +174,11 @@ flowchart LR
 
 ```text
 cmd/aurelia/              CLI entry point, onboarding, cron CLI, telegram CLI
+cmd/aurelia-tui/          Local terminal UI binary
 internal/bridge/          Go <> Bridge client (long-lived, multiplexed, bundle embedded via go:embed)
 internal/telegram/        Telegram I/O, async pipeline, progress, reactions, commands
+internal/tui/             Bubble Tea model/update/view, local sessions, attachments, images
+internal/tuisessions/     SQLite store for TUI-local named sessions
 internal/session/         Session file store, conversation CWD state, nudge buffer
 internal/agents/          Legacy prompt-profile registry (`~/.aurelia/agents/*.md`, `@profile` compatibility)
 internal/persona/         Persona loader (IDENTITY / SOUL / USER)
@@ -311,8 +317,10 @@ go build -o ./aurelia-tui ./cmd/aurelia-tui
 ./aurelia-tui
 ```
 
-The TUI supports streaming replies, markdown rendering, mouse/keyboard scroll,
-periodic daemon health checks, and a compact status/sidebar layout.
+The TUI supports streaming replies, markdown rendering, isolated named sessions,
+safe project bindings, image input, document attachments, queued messages,
+clipboard transcript copy, mouse/keyboard scroll, periodic daemon health checks,
+theme selection, help/project overlays, and a compact status/sidebar layout.
 
 | Command / shortcut | Description |
 |--------------------|-------------|
@@ -325,17 +333,30 @@ periodic daemon health checks, and a compact status/sidebar layout.
 | `/model <name>` | Switch model after validating against the PI catalog |
 | `/model auto` | Let PI choose the model automatically |
 | `/model refresh` | Refresh the PI model catalog and report model count |
+| `/img <path>` | Attach an image for vision analysis |
+| `/attach <path>` | Copy a document into `<cwd>/uploads/` and reference it in the prompt |
+| `Ctrl+S` / `F2` | Focus the session sidebar |
+| Sidebar `↑↓`, `Enter`, `n`, `r`, `d` | Navigate, open, create, rename, or delete TUI sessions |
 | `Esc` | Cancel the current streaming response |
 | `Ctrl+L` | Clear the visible chat history |
+| `Ctrl+O` | Toggle mouse capture for scroll vs native terminal text selection |
+| `Ctrl+P` | Toggle the project state overlay |
+| `?` | Toggle the help overlay |
+| `Ctrl+V` | Paste image from clipboard when supported |
+| `Ctrl+X` | Clear pending image/document attachments |
+| `Ctrl+Y` / `Ctrl+R` | Copy chat transcript / last Aurelia response to clipboard |
 | `Alt+Enter` / `Ctrl+J` | Insert a newline in the input |
-| `Tab` | Toggle the sidebar |
+| `Tab` | Cycle command suggestions while typing `/...` |
 | `PgUp` / `PgDown` / mouse wheel | Scroll chat history |
 
 ## CLI
 
 ```bash
-# Run the bot
+# Run the daemon
 go run ./cmd/aurelia/
+
+# Run the local TUI after the daemon is running
+go run ./cmd/aurelia-tui/
 
 # Interactive onboarding
 go run ./cmd/aurelia/ onboard
@@ -415,17 +436,18 @@ Main config lives in `~/.aurelia/config/app.json`:
 
 ```json
 {
-  "default_provider": "opencode-go",
-  "default_model": "deepseek-v4-flash",
+  "default_provider": "openrouter",
+  "default_model": "auto",
   "providers": {
+    "openrouter": { "api_key": "sk-or-..." },
     "opencode": { "api_key": "sk-..." },
     "groq": { "api_key": "gsk-..." }
   },
   "telegram_bot_token": "your-token",
   "telegram_allowed_user_ids": [123456789],
   "stt_provider": "groq",
-  "vision_model": "qwen3.5-plus",
-  "vision_provider": "opencode-go",
+  "vision_model": "auto",
+  "vision_provider": "openrouter",
   "max_iterations": 500,
   "max_session_tokens": 100000
 }
@@ -436,7 +458,8 @@ Provider auth uses API keys configured during onboarding. OpenRouter is recommen
 ### Release Build
 
 ```bash
-go build -trimpath -ldflags "-s -w" -o ./build/aurelia.exe ./cmd/aurelia
+go build -trimpath -ldflags "-s -w" -o ./build/aurelia ./cmd/aurelia
+go build -trimpath -ldflags "-s -w" -o ./build/aurelia-tui ./cmd/aurelia-tui
 ```
 
 ## Local Models
@@ -541,6 +564,12 @@ To rebuild the Bridge bundle after modifying `bridge/index.ts`:
 make bridge           # bundles + copies into internal/bridge/
 ```
 
+To build/install both daemon and TUI for local service validation:
+
+```bash
+make deploy           # atomic daemon + TUI build, then service restart/kick
+```
+
 ## Running as a Service
 
 ### macOS (launchd)
@@ -568,15 +597,17 @@ Full guide: [docs/OPERATIONS.md](docs/OPERATIONS.md).
 |---------|----------|
 | Daemon exits immediately | Run `go run ./cmd/aurelia/ onboard` first |
 | "Token is invalid" during onboard | Verify token with @BotFather, ensure bot is not already running elsewhere |
-| Bridge fails to build | Check `node --version` ≥ 18 and `npm --version` ≥ 8 |
+| Bridge fails to build | Check `node --version` ≥ 20.6 and `npm --version` ≥ 9 |
 | "Dependency missing" error | Install the missing tool and re-run onboarding |
+| TUI cannot connect | Start/install the daemon first, then run `aurelia-tui`; local IPC uses `~/.aurelia/aurelia.sock` |
+| TUI timestamps look wrong after reload | Update to `v0.30.1+`; restored history preserves PI message timestamps |
 
 ## Current State
 
-- **v0.20.x active development** — see [CHANGELOG.md](CHANGELOG.md)
+- **v0.30.1 active development** — see [CHANGELOG.md](CHANGELOG.md)
 - Canonical repository: `https://github.com/igormaneschy/aurelia`
 - Go module: `github.com/igormaneschy/aurelia`
 - Go test suite is green
 - TypeScript Bridge compiles clean
-- Cross-platform: macOS, Windows, and Linux
-- Current architectural track: close the PI SDK boundary hardening (✅), user isolation (✅), observability (✅), orchestration cycle (✅), context-scoped operational memory (Sprint E), Memory Boundary Realignment (✅ docs decision: PI + `ai-memory` MCP owns Wiki memory), Session/Profile Operability, Learning Nudge, Agent Comms, and Auto-Skills — see [.specs/project/ROADMAP.md](.specs/project/ROADMAP.md) for the full sequence
+- Runtime target: macOS/Linux local daemon; Windows support is not a current operational target
+- Current architectural track: PI SDK boundary hardening (✅), user isolation (✅), observability (✅), orchestration cycle (✅), context-scoped operational memory (✅), Memory Boundary Realignment (✅ docs decision: PI + `ai-memory` MCP owns Wiki memory), TUI local workflow (✅ phases 0–4.6, phase 5 polish/distribution in progress), Session/Profile Operability, Learning Nudge, Agent Comms, and Auto-Skills — see [.specs/project/ROADMAP.md](.specs/project/ROADMAP.md) and [docs/aurelia-tui-roadmap.md](docs/aurelia-tui-roadmap.md) for details
