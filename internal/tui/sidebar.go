@@ -17,8 +17,8 @@ const sidebarColModel = 2
 func newSidebarTable() table.Model {
 	cols := []table.Column{
 		{Title: "", Width: 3},     // icon
-		{Title: "Session", Width: 15},
-		{Title: "Model", Width: 4}, // truncated model name
+		{Title: "Session", Width: 16},
+		{Title: "Model", Width: 0}, // flex: fills remaining
 	}
 
 	t := table.New(
@@ -28,6 +28,7 @@ func newSidebarTable() table.Model {
 	)
 
 	t.SetWidth(sidebarWidth)
+	t.SetHeight(12)
 
 	s := table.DefaultStyles()
 	s.Header = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("243")).Bold(true)
@@ -99,8 +100,7 @@ func (m Model) renderSidebarTable() string {
 
 	// Build a styled container around the table
 	title := m.styles.SidebarTitleStyle.Render("Aurelia") + "\n" +
-		m.styles.SidebarMutedStyle.Render("local terminal") + "\n" +
-		m.styles.SidebarTitleStyle.Render("Sessions")
+		m.styles.SidebarMutedStyle.Render("local terminal")
 
 	tableContent := m.sidebarTable.View()
 
