@@ -24,6 +24,7 @@ type BridgeCronRuntime struct {
 	persona         PersonaBuilder
 	memoryDir       string
 	defaultProvider string
+	defaultModel    string
 	exePath         string // path to the aurelia binary for CLI instructions
 	userResolver    persona.UserPromptResolver
 }
@@ -47,6 +48,7 @@ func NewBridgeCronRuntime(
 	p PersonaBuilder,
 	memoryDir string,
 	defaultProvider string,
+	defaultModel string,
 ) *BridgeCronRuntime {
 	return &BridgeCronRuntime{
 		bridge:          b,
@@ -54,6 +56,7 @@ func NewBridgeCronRuntime(
 		persona:         p,
 		memoryDir:       memoryDir,
 		defaultProvider: defaultProvider,
+		defaultModel:    defaultModel,
 	}
 }
 
@@ -196,6 +199,13 @@ func (r *BridgeCronRuntime) ExecuteJob(ctx context.Context, job CronJob) (*Execu
 		opts.Cwd = agent.Cwd
 		opts.AllowedTools = agent.AllowedTools
 		opts.DisallowedTools = agent.DisallowedTools
+	}
+
+	// Fall back to the default model when no agent or agent model is configured.
+	// This ensures cron jobs use the user-specified default model (e.g. "big-pickle")
+	// instead of the PI SDK's internal default.
+	if opts.Model == "" && r.defaultModel != "" {
+		opts.Model = r.defaultModel
 	}
 
 	// Scrub auth keys before sending to bridge — the TS bridge redacts log output
