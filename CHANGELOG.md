@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.31.2 - 2026-06-23
+
+### Fixed
+- **cron runtime sem modelo definido** — cronjobs sem agent (ou com agent sem `.Model`)
+  usavam o default do PI SDK em vez do modelo configurado (`big-pickle`). Agora
+  `cfg.DefaultModel` é propagado para o `BridgeCronRuntime` e usado como fallback
+  quando `opts.Model` está vazio.
+
+### Added
+- **Testes de fallback de modelo** — `TestBridgeCronRuntime_DefaultModelFallback`
+  (sem agent) e `TestBridgeCronRuntime_DefaultModelFallback_AgentOverrides`
+  (agent model tem precedência).
+
 ## v0.31.1 - 2026-06-21
 
 ### Removed
