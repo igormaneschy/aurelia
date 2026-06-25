@@ -372,7 +372,7 @@ func bootstrapApp() (*app, error) {
 		}
 	})
 
-	scheduler, err := setupCronScheduler(cronStore, br, agentReg, personaSvc, bot, resolver.Memory(), cfg.DefaultProvider, exePath, users.NewResolver(resolver.Root()))
+	scheduler, err := setupCronScheduler(cronStore, br, agentReg, personaSvc, bot, resolver.Memory(), cfg.DefaultProvider, cfg.DefaultModel, exePath, users.NewResolver(resolver.Root()))
 	if err != nil {
 		if closeErr := onboardingStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close onboarding store: %v", closeErr)
@@ -498,6 +498,7 @@ func setupCronScheduler(
 	bot *telegram.BotController,
 	memoryDir string,
 	defaultProvider string,
+	defaultModel string,
 	exePath string,
 	userResolver *users.Resolver,
 ) (*cron.Scheduler, error) {
@@ -511,6 +512,7 @@ func setupCronScheduler(
 		personaSvc,
 		memoryDir,
 		defaultProvider,
+		defaultModel,
 	)
 	cronRuntime.SetExePath(exePath)
 	if userResolver != nil {
