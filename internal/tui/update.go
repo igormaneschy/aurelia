@@ -1042,76 +1042,6 @@ func isAutocompleteKey(msg tea.KeyMsg) bool {
 	return isSidebarToggleKey(msg)
 }
 
-const maxInputHistory = 1000
-
-func (m *Model) rememberInput(text string) {
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return
-	}
-	last := len(m.inputHistory) - 1
-	if last < 0 || m.inputHistory[last] != text {
-		m.inputHistory = append(m.inputHistory, text)
-		if len(m.inputHistory) > maxInputHistory {
-			m.inputHistory = m.inputHistory[len(m.inputHistory)-maxInputHistory:]
-		}
-	}
-	m.inputHistoryIndex = len(m.inputHistory)
-}
-
-func (m Model) canNavigateInputHistory(direction int) bool {
-	if m.waiting || len(m.inputHistory) == 0 {
-		return false
-	}
-	if m.isViewingInputHistory() {
-		return true
-	}
-	if direction < 0 {
-		return strings.TrimSpace(m.textarea.Value()) == ""
-	}
-	return false
-}
-
-func (m Model) isViewingInputHistory() bool {
-	if m.inputHistoryIndex < 0 || m.inputHistoryIndex >= len(m.inputHistory) {
-		return false
-	}
-	return m.textarea.Value() == m.inputHistory[m.inputHistoryIndex]
-}
-
-func (m Model) navigateInputHistory(direction int) Model {
-	if len(m.inputHistory) == 0 {
-		return m
-	}
-	if m.inputHistoryIndex < 0 || m.inputHistoryIndex > len(m.inputHistory) {
-		m.inputHistoryIndex = len(m.inputHistory)
-	}
-
-	if direction < 0 && m.inputHistoryIndex > 0 {
-		m.inputHistoryIndex--
-		m.textarea.SetValue(m.inputHistory[m.inputHistoryIndex])
-		m.textarea.CursorEnd()
-		return m
-	}
-	if direction > 0 && m.inputHistoryIndex < len(m.inputHistory) {
-		m.inputHistoryIndex++
-		if m.inputHistoryIndex == len(m.inputHistory) {
-			m.textarea.Reset()
-			return m
-		}
-		m.textarea.SetValue(m.inputHistory[m.inputHistoryIndex])
-		m.textarea.CursorEnd()
-	}
-	return m
-}
-
-func (m Model) canApplyStartupHistory() bool {
-	if m.waiting || m.reader != nil || len(m.messages) != 1 {
-		return false
-	}
-	return m.messages[0].Sender == "Aurelia" && strings.HasPrefix(m.messages[0].Text, "Connected to Aurelia daemon")
-}
-
 func (m Model) handleViewportMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !m.viewportSet {
 		return m, nil
@@ -1278,56 +1208,6 @@ func (m Model) readNextStreamEvent() tea.Cmd {
 			return streamErrMsg{err: err, streamID: streamID}
 		}
 		return streamEventMsg{event: event, streamID: streamID}
-	}
-}
-
-// appendOrUpdateAureliaMessage appends a new Aurelia message or updates the
-// last one if it's already an Aurelia message (for streaming).
-func (m *Model) appendOrUpdateAureliaMessage(text string) {
-	now := time.Now()
-	if len(m.messages) > 0 {
-		last := &m.messages[len(m.messages)-1]
-		if last.Sender == "Aurelia" {
-			last.Text = text
-			last.Timestamp = now
-			return
-		}
-	}
-	m.messages = append(m.messages, chatMessage{
-		Sender:    "Aurelia",
-		Text:      text,
-		Timestamp: now,
-	})
-}
-
-// ensureViewport lazily initializes the viewport if dimensions were stored
-// during loading but the viewport hasn't been created yet.
-func (m *Model) ensureViewport() {
-	if m.width > 0 && m.height > 0 && !m.viewportSet {
-		contentWidth := m.contentWidth()
-		m.viewport = viewportForSize(contentWidth, m.height)
-		m.viewportSet = true
-		m.viewport.SetContent(m.renderMessages(m.messages, contentWidth))
-		m.viewport.GotoBottom()
-	}
-}
-
-// updateViewport refreshes the viewport content if initialized.
-// Auto-scrolls to bottom only when the user is already at the bottom,
-// so streaming does not yank the viewport while reading earlier messages.
-func (m *Model) updateViewport() {
-	m.ensureViewport()
-	if m.viewportSet && m.viewport.Height() > 0 {
-		contentWidth := m.contentWidth()
-		followBottom := m.viewport.AtBottom()
-		prevOffset := m.viewport.YOffset()
-		m.viewport.SetWidth(contentWidth)
-		m.viewport.SetContent(m.renderMessages(m.messages, contentWidth))
-		if followBottom {
-			m.viewport.GotoBottom()
-		} else {
-			m.viewport.SetYOffset(prevOffset)
-		}
 	}
 }
 
