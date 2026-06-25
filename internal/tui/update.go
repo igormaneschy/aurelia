@@ -167,6 +167,9 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
+		if m.attachProgress.active {
+			(&m).tickAttachProgress()
+		}
 		return m, cmd
 
 	case stopwatch.TickMsg, stopwatch.StartStopMsg, stopwatch.ResetMsg:
@@ -246,6 +249,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.historyNav.resetToLastPage(len(m.messages))
 			m.updateViewport()
 		}
+		m.markSessionSeen(m.activeSession, len(m.messages))
 		m.switchingSession = false
 		return m, nil
 
@@ -260,6 +264,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.daemonLabel = "error"
 		m.waiting = false
+		m.resetAttachProgress()
 		m.resetStreamProgress()
 		m.streamBuf = ""
 		m.cleanupSubmittedTempImages()
@@ -281,8 +286,10 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			_ = msg.reader.Close()
 			return m, nil
 		}
+		m.resetAttachProgress()
 		m.reader = msg.reader
-		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
+		streamCmd := (&m).initStreamProgress()
+		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd(), streamCmd)
 
 	case streamEventMsg:
 		if msg.streamID != m.streamID {
@@ -296,6 +303,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Stream ended (EOF) without explicit terminal event.
 		m.waiting = false
+		m.resetAttachProgress()
 		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
@@ -317,6 +325,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Stream error.
 		m.waiting = false
+		m.resetAttachProgress()
 		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
@@ -339,14 +348,16 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tuiSessionsMsg:
 		if msg.err == nil {
 			m.sessions = msg.sessions
-			m.syncSidebarRows()
 			// Ensure the active session is in the list (the default DM
 			// always exists implicitly even if not in the store).
 			m.ensureDefaultSessionInList()
+			unreadCmd := m.applySessionsUnread(m.sessions)
+			m.syncSidebarRows()
 			// Clamp sidebar cursor to valid range.
 			if m.sidebarCursor >= len(m.sessions) {
 				m.sidebarCursor = maxInt(0, len(m.sessions)-1)
 			}
+			return m, unreadCmd
 		}
 		return m, nil
 
@@ -900,11 +911,13 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		m.waiting = true
 		m.streamID++
-		progressCmd := (&m).initStreamProgress()
+		if fileCount := len(m.pendingImages) + len(m.pendingAttachments); fileCount > 0 {
+			(&m).initAttachProgress(fileCount)
+		}
 		m.updateViewport()
 
 		if isCommand {
-			return m, tea.Batch(m.sendCommand(text), spinnerTickCmd(), progressCmd)
+			return m, tea.Batch(m.sendCommand(text), spinnerTickCmd())
 		}
 
 		// Capture pending images before clearing. Clipboard temp files must stay
@@ -915,7 +928,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.submittedTempImagePaths = append(m.submittedTempImagePaths, tempPaths...)
 		m.pendingImages = nil
 		m.pendingAttachments = nil
-		return m, tea.Batch(cmd, spinnerTickCmd(), progressCmd)
+		return m, tea.Batch(cmd, spinnerTickCmd())
 
 	case msg.String() == "alt+enter":
 		// alt+enter: insert newline.
@@ -1161,6 +1174,8 @@ func (m Model) handleViewportMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) cancelStreaming() (tea.Model, tea.Cmd) {
 	m.waiting = false
 	m.streamID++
+	m.resetAttachProgress()
+	m.resetStreamProgress()
 	m.cleanupSubmittedTempImages()
 	if m.reader != nil {
 		_ = m.reader.Close()
@@ -1260,6 +1275,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 		// Terminal event — stream complete.
 		animCmd := m.animations.onStreamEnd()
 		m.waiting = false
+		m.resetAttachProgress()
 		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
@@ -1267,13 +1283,15 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 			m.reader = nil
 		}
 		m.streamBuf = ""
+		m.markSessionSeen(m.activeSession, len(m.messages))
 		vpCmd := m.updateViewport()
 		next, queueCmd := m.continueWithNextQueuedMessage()
-		return next, tea.Batch(queueCmd, animCmd, vpCmd)
+		return next, tea.Batch(queueCmd, animCmd, vpCmd, fetchTUISessions(m.ipcClient))
 
 	case "error":
 		// Terminal event — error.
 		m.waiting = false
+		m.resetAttachProgress()
 		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {

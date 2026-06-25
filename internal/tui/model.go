@@ -494,8 +494,9 @@ func renameTUISession(client *ipc.Client, chatID int64, name string) tea.Cmd {
 // sessionRenamedFromEvents parses a renamed session from IPC events.
 func sessionRenamedFromEvents(events []ipc.IPCEvent) tuiSessionRenamedMsg {
 	type sessionPayload struct {
-		ChatID int64  `json:"chat_id"`
-		Name   string `json:"name"`
+		ChatID       int64  `json:"chat_id"`
+		Name         string `json:"name"`
+		MessageCount int    `json:"message_count"`
 	}
 	for _, ev := range events {
 		if ev.Type != ipc.EventTypeSessionRenamed || ev.Body == "" {
@@ -513,8 +514,9 @@ func sessionRenamedFromEvents(events []ipc.IPCEvent) tuiSessionRenamedMsg {
 // sessionsFromEvents parses the sessions list from IPC events.
 func sessionsFromEvents(events []ipc.IPCEvent) tuiSessionsMsg {
 	type sessionPayload struct {
-		ChatID int64  `json:"chat_id"`
-		Name   string `json:"name"`
+		ChatID       int64  `json:"chat_id"`
+		Name         string `json:"name"`
+		MessageCount int    `json:"message_count"`
 	}
 	for _, ev := range events {
 		if ev.Type != ipc.EventTypeSessions || ev.Body == "" {
@@ -536,8 +538,9 @@ func sessionsFromEvents(events []ipc.IPCEvent) tuiSessionsMsg {
 // sessionCreatedFromEvents parses a created session from IPC events.
 func sessionCreatedFromEvents(events []ipc.IPCEvent) tuiSessionCreatedMsg {
 	type sessionPayload struct {
-		ChatID int64  `json:"chat_id"`
-		Name   string `json:"name"`
+		ChatID       int64  `json:"chat_id"`
+		Name         string `json:"name"`
+		MessageCount int    `json:"message_count"`
 	}
 	for _, ev := range events {
 		if ev.Type != ipc.EventTypeSessionCreated || ev.Body == "" {
@@ -555,8 +558,9 @@ func sessionCreatedFromEvents(events []ipc.IPCEvent) tuiSessionCreatedMsg {
 // sessionOpenedFromEvents parses an opened session from IPC events.
 func sessionOpenedFromEvents(events []ipc.IPCEvent) tuiSessionOpenedMsg {
 	type sessionPayload struct {
-		ChatID int64  `json:"chat_id"`
-		Name   string `json:"name"`
+		ChatID       int64  `json:"chat_id"`
+		Name         string `json:"name"`
+		MessageCount int    `json:"message_count"`
 	}
 	for _, ev := range events {
 		if ev.Type != ipc.EventTypeSessionOpened || ev.Body == "" {

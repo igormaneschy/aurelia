@@ -19,8 +19,10 @@ type chromeModel struct {
 	showSidebar     bool
 	sidebarFocused  bool
 	sidebarTable    table.Model
-	sessions        []tuiSessionInfo
-	sidebarCursor   int
+	sessions         []tuiSessionInfo
+	sessionUnread    map[int64]int
+	sessionSeenCount map[int64]int
+	sidebarCursor    int
 	sidebarHoverRow int // hovered session row from mouse motion; -1 = none
 
 	spinner spinner.Model
@@ -41,6 +43,7 @@ type chromeModel struct {
 	noMouse           bool
 	sessionFlashUntil time.Time
 	streamProgress    streamProgress
+	attachProgress    attachProgress
 	animations        animState
 
 	styles themeStyles

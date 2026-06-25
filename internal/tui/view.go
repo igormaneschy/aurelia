@@ -106,10 +106,7 @@ func (m Model) chatView() string {
 // renderChatBaseLayout builds the chat screen without overlays (used for mouse hit tests).
 func (m Model) renderChatBaseLayout() string {
 	inputBar := m.renderInput()
-	progressBar := ""
-	if m.showStreamProgress() {
-		progressBar = m.renderStreamProgress(m.width)
-	}
+	progressBar := m.footerProgressBar()
 	statusBar := m.renderStatusBar()
 
 	contentH := m.chatBodyHeight()

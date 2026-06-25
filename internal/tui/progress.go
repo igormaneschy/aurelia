@@ -27,6 +27,13 @@ type streamProgress struct {
 	recentLengths []int
 }
 
+type attachProgress struct {
+	bar    progress.Model
+	active bool
+	total  int
+	pct    float64
+}
+
 func newStreamProgressBar(styles themeStyles) progress.Model {
 	return progress.New(
 		progress.WithWidth(40),
@@ -109,6 +116,57 @@ func (m Model) updateStreamProgressMsgs(msg tea.Msg) (Model, tea.Cmd) {
 		m.streamProgress.stopwatch, cmd = m.streamProgress.stopwatch.Update(msg)
 	}
 	return m, cmd
+}
+
+func (m *Model) initAttachProgress(fileCount int) {
+	if fileCount <= 0 {
+		return
+	}
+	m.attachProgress.active = true
+	m.attachProgress.total = fileCount
+	m.attachProgress.pct = 0.05
+	m.attachProgress.bar = newStreamProgressBar(m.styles)
+}
+
+func (m Model) showAttachProgress() bool {
+	return m.attachProgress.active && m.waiting && m.reader == nil
+}
+
+func (m *Model) tickAttachProgress() {
+	if !m.attachProgress.active || m.attachProgress.pct >= 0.9 {
+		return
+	}
+	m.attachProgress.pct += 0.06
+	if m.attachProgress.pct > 0.9 {
+		m.attachProgress.pct = 0.9
+	}
+}
+
+func (m Model) footerProgressBar() string {
+	if m.showAttachProgress() {
+		return m.renderAttachProgress(m.width)
+	}
+	if m.showStreamProgress() {
+		return m.renderStreamProgress(m.width)
+	}
+	return ""
+}
+
+func (m Model) renderAttachProgress(width int) string {
+	if !m.showAttachProgress() {
+		return ""
+	}
+	label := fmt.Sprintf("📎 Sending %d file(s)...", m.attachProgress.total)
+	bar := m.attachProgress.bar
+	bar.SetWidth(maxInt(10, width-lipgloss.Width(label)-4))
+	barView := m.styles.ProgressBarStyle.Render(bar.ViewAs(m.attachProgress.pct))
+	return m.styles.ProgressBarStyle.Width(width).Render(label + " " + barView)
+}
+
+func (m *Model) resetAttachProgress() {
+	m.attachProgress.active = false
+	m.attachProgress.total = 0
+	m.attachProgress.pct = 0
 }
 
 func formatElapsed(d time.Duration) string {

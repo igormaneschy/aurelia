@@ -109,6 +109,9 @@ func (m *Model) syncSidebarRows() {
 		if s.ChatID == ipc.ReservedTUIChatID {
 			label = "DM"
 		}
+		if badge := m.sessionUnreadBadge(s.ChatID); badge != "" {
+			label = truncateMiddle(label, 11) + " " + m.styles.SidebarUnreadStyle.Render(badge)
+		}
 
 		icon := "○"
 		if s.ChatID == m.activeSession {

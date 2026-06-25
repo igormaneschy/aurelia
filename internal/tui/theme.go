@@ -34,6 +34,7 @@ type themeStyles struct {
 	SidebarMutedStyle  lipgloss.Style
 	SidebarActiveStyle lipgloss.Style
 	SidebarCursorStyle lipgloss.Style
+	SidebarUnreadStyle lipgloss.Style
 
 	// Chat header.
 	HeaderTitleStyle lipgloss.Style
@@ -205,6 +206,10 @@ func newDarkStyles() themeStyles {
 			Foreground(lipgloss.Color("226")).
 			Bold(true),
 
+		SidebarUnreadStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("214")).
+			Bold(true),
+
 		HeaderTitleStyle: lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("205")),
@@ -289,6 +294,10 @@ func newLightStyles() themeStyles {
 
 		SidebarCursorStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("130")). // dark yellow / amber
+			Bold(true),
+
+		SidebarUnreadStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("130")).
 			Bold(true),
 
 		HeaderTitleStyle: lipgloss.NewStyle().

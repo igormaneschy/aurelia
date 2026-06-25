@@ -113,8 +113,9 @@ type tuiSessionRenamedMsg struct {
 
 // tuiSessionInfo is the TUI-side representation of a session.
 type tuiSessionInfo struct {
-	ChatID int64
-	Name   string
+	ChatID       int64
+	Name         string
+	MessageCount int `json:"message_count"`
 }
 
 // tuiProjectStateMsg carries the project state panel data from the daemon.

@@ -53,12 +53,15 @@ func (m Model) startQueuedMessage() (Model, tea.Cmd) {
 	}
 	m.waiting = true
 	m.streamID++
-	progressCmd := (&m).initStreamProgress()
+	fileCount := len(q.images) + len(q.attachments)
+	if fileCount > 0 {
+		(&m).initAttachProgress(fileCount)
+	}
 	m.submittedTempImagePaths = append(m.submittedTempImagePaths, q.tempImagePaths...)
 	if q.isCommand {
-		return m, tea.Batch(m.sendCommandToSession(q.chatID, q.text, m.streamID), spinnerTickCmd(), progressCmd)
+		return m, tea.Batch(m.sendCommandToSession(q.chatID, q.text, m.streamID), spinnerTickCmd())
 	}
-	return m, tea.Batch(m.submitMessageWithPayload(q.chatID, q.text, q.images, q.attachments, m.streamID), spinnerTickCmd(), progressCmd)
+	return m, tea.Batch(m.submitMessageWithPayload(q.chatID, q.text, q.images, q.attachments, m.streamID), spinnerTickCmd())
 }
 
 func (m Model) continueWithNextQueuedMessage() (Model, tea.Cmd) {

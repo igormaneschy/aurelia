@@ -5,10 +5,8 @@ import "strings"
 // footerLineCount returns rendered footer rows (input badges, progress, status bar).
 func (m Model) footerLineCount() int {
 	n := strings.Count(m.renderInput(), "\n") + 1
-	if m.showStreamProgress() {
-		if pb := m.renderStreamProgress(m.width); pb != "" {
-			n += strings.Count(pb, "\n") + 1
-		}
+	if pb := m.footerProgressBar(); pb != "" {
+		n += strings.Count(pb, "\n") + 1
 	}
 	n += strings.Count(m.renderStatusBar(), "\n") + 1
 	return n

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/igormaneschy/aurelia/internal/ipc"
@@ -106,8 +107,9 @@ func stripAnsiOrOsc(s string) string {
 
 // sessionJSON is the wire format for a TUI session in IPC events.
 type sessionJSON struct {
-	ChatID int64  `json:"chat_id"`
-	Name   string `json:"name"`
+	ChatID       int64  `json:"chat_id"`
+	Name         string `json:"name"`
+	MessageCount int    `json:"message_count"`
 }
 
 // handleTUISessions lists all TUI local sessions.
@@ -121,9 +123,18 @@ func handleTUISessions(ctx context.Context, a *app, msg ipc.IPCMessage, emit fun
 		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: fmt.Sprintf("list sessions: %s", err), RequestID: msg.RequestID})
 	}
 
+	userID := int64(os.Getuid())
 	payload := make([]sessionJSON, 0, len(sessions))
 	for _, s := range sessions {
-		payload = append(payload, sessionJSON{ChatID: s.ChatID, Name: s.Name})
+		count := 0
+		if hist, err := loadTUIHistory(ctx, a, s.ChatID, 0, userID); err == nil {
+			count = len(hist)
+		}
+		payload = append(payload, sessionJSON{
+			ChatID:       s.ChatID,
+			Name:         s.Name,
+			MessageCount: count,
+		})
 	}
 
 	body, err := json.Marshal(payload)
