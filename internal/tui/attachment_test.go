@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
 
@@ -402,11 +401,7 @@ func TestDelegateKeyToTextarea_DocumentPaste_AttachesNotInserts(t *testing.T) {
 	}
 
 	// Simulate paste of an absolute document path.
-	msg := tea.KeyMsg(tea.Key{
-		Type:  tea.KeyRunes,
-		Runes: []rune(path),
-		Paste: true,
-	})
+	msg := keyText(path)
 	result, _ := m.delegateKeyToTextarea(msg)
 	m2 := result.(Model)
 
@@ -447,11 +442,7 @@ func TestDelegateKeyToTextarea_DocumentPaste_WithQuotes_AttachesNotInserts(t *te
 
 	// Simulate paste of a quoted path (common from Finder drag-drop on macOS).
 	quoted := fmt.Sprintf(`"%s"`, path)
-	msg := tea.KeyMsg(tea.Key{
-		Type:  tea.KeyRunes,
-		Runes: []rune(quoted),
-		Paste: true,
-	})
+	msg := keyText(quoted)
 	result, _ := m.delegateKeyToTextarea(msg)
 	m2 := result.(Model)
 
@@ -489,11 +480,7 @@ func TestDelegateKeyToTextarea_DocumentPaste_Tilde_AttachesNotInserts(t *testing
 
 	// Paste a ~/ path.
 	tildePath := "~/Documents/tilde-test.md"
-	msg := tea.KeyMsg(tea.Key{
-		Type:  tea.KeyRunes,
-		Runes: []rune(tildePath),
-		Paste: true,
-	})
+	msg := keyText(tildePath)
 	result, _ := m.delegateKeyToTextarea(msg)
 	m2 := result.(Model)
 
@@ -519,11 +506,7 @@ func TestDelegateKeyToTextarea_DocumentPaste_FileURL_AttachesNotInserts(t *testi
 
 	// Paste a file:// URL.
 	fileURL := "file://" + path
-	msg := tea.KeyMsg(tea.Key{
-		Type:  tea.KeyRunes,
-		Runes: []rune(fileURL),
-		Paste: true,
-	})
+	msg := keyText(fileURL)
 	result, _ := m.delegateKeyToTextarea(msg)
 	m2 := result.(Model)
 
@@ -542,11 +525,7 @@ func TestDelegateKeyToTextarea_InvalidDocumentPath_NotExists_ShowsError(t *testi
 	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	// Paste a path that doesn't exist.
-	msg := tea.KeyMsg(tea.Key{
-		Type:  tea.KeyRunes,
-		Runes: []rune("/nonexistent/doc.md"),
-		Paste: true,
-	})
+	msg := keyText("/nonexistent/doc.md")
 	result, _ := m.delegateKeyToTextarea(msg)
 	m2 := result.(Model)
 
@@ -580,11 +559,7 @@ func TestDelegateKeyToTextarea_InvalidDocumentPath_Symlink_ShowsError(t *testing
 		t.Fatal(err)
 	}
 
-	msg := tea.KeyMsg(tea.Key{
-		Type:  tea.KeyRunes,
-		Runes: []rune(link),
-		Paste: true,
-	})
+	msg := keyText(link)
 	result, _ := m.delegateKeyToTextarea(msg)
 	m2 := result.(Model)
 
@@ -612,11 +587,7 @@ func TestDelegateKeyToTextarea_InvalidDocumentPath_Directory_ShowsError(t *testi
 		t.Fatal(err)
 	}
 
-	msg := tea.KeyMsg(tea.Key{
-		Type:  tea.KeyRunes,
-		Runes: []rune(subdir),
-		Paste: true,
-	})
+	msg := keyText(subdir)
 	result, _ := m.delegateKeyToTextarea(msg)
 	m2 := result.(Model)
 
@@ -639,11 +610,7 @@ func TestDelegateKeyToTextarea_NormalText_InsertsInTextarea(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	// Paste plain text (not a path).
-	msg := tea.KeyMsg(tea.Key{
-		Type:  tea.KeyRunes,
-		Runes: []rune("hello world"),
-		Paste: true,
-	})
+	msg := keyText("hello world")
 	result, _ := m.delegateKeyToTextarea(msg)
 	m2 := result.(Model)
 
@@ -660,11 +627,7 @@ func TestDelegateKeyToTextarea_TextMentioningPath_InsertsInTextarea(t *testing.T
 	m := NewModel("/tmp/test.sock", ThemeDark)
 
 	// Paste a sentence that mentions a path (not a pure path paste).
-	msg := tea.KeyMsg(tea.Key{
-		Type:  tea.KeyRunes,
-		Runes: []rune("veja /etc/passwd para referência"),
-		Paste: true,
-	})
+	msg := keyText("veja /etc/passwd para referência")
 	result, _ := m.delegateKeyToTextarea(msg)
 	m2 := result.(Model)
 
@@ -686,11 +649,7 @@ func TestDelegateKeyToTextarea_ImagePaste_StillHandledByImageFlow(t *testing.T) 
 		t.Fatal(err)
 	}
 
-	msg := tea.KeyMsg(tea.Key{
-		Type:  tea.KeyRunes,
-		Runes: []rune(path),
-		Paste: true,
-	})
+	msg := keyText(path)
 	result, _ := m.delegateKeyToTextarea(msg)
 	m2 := result.(Model)
 
@@ -722,11 +681,7 @@ func TestDelegateKeyToTextarea_DocumentPaste_WithQuotedEscapedSpaces_Attaches(t 
 
 	// The original text has escaped spaces (as macOS Finder would present it).
 	escapedPath := strings.ReplaceAll(path, " ", "\\ ")
-	msg := tea.KeyMsg(tea.Key{
-		Type:  tea.KeyRunes,
-		Runes: []rune(escapedPath),
-		Paste: true,
-	})
+	msg := keyText(escapedPath)
 	result, _ := m.delegateKeyToTextarea(msg)
 	m2 := result.(Model)
 

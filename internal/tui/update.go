@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/spinner"
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/key"
+	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
@@ -90,14 +90,55 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.SetContent(m.renderMessages(m.messages, contentWidth))
 			m.viewport.GotoBottom()
 		} else {
-			m.viewport.Width = contentWidth
-			m.viewport.Height = viewportHeightForTerminal(msg.Height)
+			m.viewport.SetWidth(contentWidth)
+			m.viewport.SetHeight(viewportHeightForTerminal(msg.Height))
 			m.updateViewport()
 		}
+		m.resizeSidebarTable()
 		return m, nil
 
 	case tea.KeyMsg:
 		return m.handleKeyMsg(msg)
+
+	case tea.PasteMsg:
+		text := strings.TrimSpace(msg.Content)
+		if isImagePath(text) {
+			errMsg := m.attachImageFromPath(text)
+			if errMsg != "" {
+				m.messages = append(m.messages, chatMessage{Sender: "⚠️", Text: errMsg})
+				m.updateViewport()
+			} else {
+				m.messages = append(m.messages, chatMessage{
+					Sender: "📎",
+					Text:   fmt.Sprintf("Image attached: %s", filepath.Base(text)),
+				})
+				m.updateViewport()
+			}
+			return m, nil
+		}
+		if looksLikeFilePath(text) {
+			normalized := normalizeImagePath(text)
+			errMsg := m.attachDocumentFromPath(normalized)
+			if errMsg != "" {
+				m.messages = append(m.messages, chatMessage{Sender: "⚠️", Text: errMsg})
+			} else {
+				name := filepath.Base(normalized)
+				if len(m.pendingAttachments) > 0 {
+					name = m.pendingAttachments[len(m.pendingAttachments)-1].name
+				}
+				m.messages = append(m.messages, chatMessage{
+					Sender: "📎",
+					Text:   fmt.Sprintf("Document attached: %s", name),
+				})
+			}
+			m.updateViewport()
+			return m, nil
+		}
+		if msg.Content != "" {
+			m.textarea.InsertString(msg.Content)
+			m.clearAutocomplete()
+		}
+		return m, nil
 
 	case tea.MouseMsg:
 		if !m.mouseEnabled {
@@ -150,6 +191,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cwdPath = "not set"
 			}
 			m.activeModel = msg.model
+			m.syncSidebarRows()
 		}
 		return m, nil
 
@@ -257,6 +299,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tuiSessionsMsg:
 		if msg.err == nil {
 			m.sessions = msg.sessions
+			m.syncSidebarRows()
 			// Ensure the active session is in the list (the default DM
 			// always exists implicitly even if not in the store).
 			m.ensureDefaultSessionInList()
@@ -284,6 +327,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.messages = []chatMessage{}
 		m.viewportSet = false
 		m.switchingSession = true
+		m.syncSidebarRows()
 		m.updateViewport()
 		// Reload sessions list + history for the new session.
 		return m, tea.Batch(
@@ -309,8 +353,10 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.messages = []chatMessage{}
 		m.viewportSet = false
 		m.switchingSession = true
+		m.syncSidebarRows()
 		m.updateViewport()
 		m.sidebarFocused = false
+		m.sidebarTable.Blur()
 		// Reload history + status for the new session.
 		return m, tea.Batch(
 			fetchTUIHistory(m.ipcClient, m.activeSession),
@@ -465,6 +511,7 @@ func (m *Model) ensureDefaultSessionInList() {
 	m.sessions = append([]tuiSessionInfo{
 		{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
 	}, m.sessions...)
+	m.syncSidebarRows()
 }
 
 // handleKeyMsg processes keyboard input.
@@ -563,6 +610,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case isSidebarFocusKey(msg):
 		if m.showSidebar && len(m.sessions) > 0 {
 			m.sidebarFocused = true
+			m.sidebarTable.Focus()
+			m.syncSidebarRows()
+			m.sidebarTable.SetCursor(m.sidebarCursor)
 			// Set cursor to the active session if found.
 			for i, s := range m.sessions {
 				if s.ChatID == m.activeSession {
@@ -799,14 +849,29 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) toggleMouseCapture() (tea.Model, tea.Cmd) {
 	m.mouseEnabled = !m.mouseEnabled
-	if m.mouseEnabled {
-		return m, tea.EnableMouseCellMotion
-	}
-	return m, tea.DisableMouse
+	return m, nil
 }
 
 // handleSidebarKey processes keys when the sidebar is focused.
 func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	var tableCmd tea.Cmd
+	switch msg.String() {
+	case "up", "k":
+		if m.sidebarCursor > 0 {
+			m.sidebarCursor--
+		}
+	case "down", "j":
+		if m.sidebarCursor < len(m.sessions)-1 {
+			m.sidebarCursor++
+		}
+	default:
+		updatedTable, cmd := m.sidebarTable.Update(msg)
+		m.sidebarTable = updatedTable
+		tableCmd = cmd
+		m.sidebarCursor = m.sidebarTable.Cursor()
+	}
+	m.syncSidebarRows()
+
 	switch msg.String() {
 	case "ctrl+c":
 		m.cleanupTempImages()
@@ -817,22 +882,11 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "tab", "ctrl+i", "\t":
 		// Exit sidebar focus — return to input.
 		m.sidebarFocused = false
+		m.sidebarTable.Blur()
 		if msg.String() == "tab" || msg.String() == "ctrl+i" || msg.String() == "\t" {
 			// Tab also toggles sidebar visibility.
 			m.showSidebar = !m.showSidebar
 			m.updateViewport()
-		}
-		return m, nil
-
-	case "up", "k":
-		if m.sidebarCursor > 0 {
-			m.sidebarCursor--
-		}
-		return m, nil
-
-	case "down", "j":
-		if m.sidebarCursor < len(m.sessions)-1 {
-			m.sidebarCursor++
 		}
 		return m, nil
 
@@ -844,6 +898,7 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if target.ChatID == m.activeSession {
 			// Already on this session — just unfocus.
 			m.sidebarFocused = false
+			m.sidebarTable.Blur()
 			return m, nil
 		}
 		return m, openTUISession(m.ipcClient, target.ChatID)
@@ -889,13 +944,14 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Enter rename mode: show the current name as placeholder, clear textarea.
 		m.renameTargetChatID = target.ChatID
 		m.sidebarFocused = false
+		m.sidebarTable.Blur()
 		m.textarea.Reset()
 		m.textarea.Placeholder = fmt.Sprintf("Rename '%s' to...", target.Name)
 		m.textarea.Focus()
 		return m, nil
 
 	default:
-		return m, nil
+		return m, tableCmd
 	}
 }
 
@@ -908,9 +964,10 @@ func (m Model) delegateKeyToTextarea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Check if this is a paste event with an image path (drag-and-drop).
-	if msg.Paste && msg.Type == tea.KeyRunes {
-		text := string(msg.Runes)
-		text = strings.TrimSpace(text)
+	// In v2, paste is handled via tea.PasteMsg, but we check for printable
+	// multi-character text from KeyPressMsg as fallback.
+	if k := msg.Key(); len(k.Text) > 1 {
+		text := strings.TrimSpace(k.Text)
 		if isImagePath(text) {
 			// Treat as image attachment, not text input.
 			errMsg := m.attachImageFromPath(text)
@@ -1080,11 +1137,13 @@ func isViewportScrollKey(msg tea.KeyMsg) bool {
 }
 
 func isTerminalColorReportResidue(msg tea.KeyMsg) bool {
-	return msg.Type == tea.KeyRunes && !msg.Paste && terminalColorReportPattern.MatchString(string(msg.Runes))
+	k := msg.Key()
+	return k.Text != "" && terminalColorReportPattern.MatchString(k.Text)
 }
 
 func shouldDelegateKeyToTextarea(msg tea.KeyMsg, keyMap textarea.KeyMap) bool {
-	if !msg.Alt || msg.Type != tea.KeyRunes || msg.Paste {
+	k := msg.Key()
+	if k.Mod&tea.ModAlt == 0 || k.Text == "" {
 		return true
 	}
 	return key.Matches(msg,
@@ -1100,7 +1159,7 @@ func shouldDelegateKeyToTextarea(msg tea.KeyMsg, keyMap textarea.KeyMap) bool {
 }
 
 func isSidebarToggleKey(msg tea.KeyMsg) bool {
-	if msg.Type == tea.KeyTab {
+	if msg.Key().Code == tea.KeyTab {
 		return true
 	}
 	s := msg.String()
@@ -1241,9 +1300,9 @@ func (m *Model) ensureViewport() {
 // updateViewport refreshes the viewport content if initialized.
 func (m *Model) updateViewport() {
 	m.ensureViewport()
-	if m.viewportSet && m.viewport.Height > 0 {
+	if m.viewportSet && m.viewport.Height() > 0 {
 		contentWidth := m.contentWidth()
-		m.viewport.Width = contentWidth
+		m.viewport.SetWidth(contentWidth)
 		m.viewport.SetContent(m.renderMessages(m.messages, contentWidth))
 		m.viewport.GotoBottom()
 	}

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
@@ -68,7 +68,7 @@ func TestModel_SubmitNonEmptyTextCreatesSendMessage(t *testing.T) {
 		socketPath: "/tmp/test.sock",
 	}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
 
 	if cmd == nil {
@@ -95,7 +95,7 @@ func TestModel_SubmitEmptyTextDoesNothing(t *testing.T) {
 		waiting:  false,
 	}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
 
 	if cmd != nil {
@@ -116,7 +116,7 @@ func TestModel_SubmitWhileWaitingEnqueuesMessage(t *testing.T) {
 		waiting:  true,
 	}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
 
 	if cmd != nil {
@@ -202,7 +202,7 @@ func TestModel_EscCancelsCurrentTurnKeepsQueue(t *testing.T) {
 	m.streamID = 4
 	m.pendingQueue = []queuedMessage{{chatID: ipc.ReservedTUIChatID, text: "next"}}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd := m.Update(keyPress(tea.KeyEsc))
 	m2 := updated.(Model)
 
 	if cmd != nil {
@@ -235,7 +235,7 @@ func TestModel_QueuedMessageCapturesActiveSession(t *testing.T) {
 	m.waiting = true
 	m.activeSession = originalSession
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
 
 	m2.activeSession = -9000003
@@ -266,7 +266,7 @@ func TestModel_CtrlCCleansQueuedTempImages(t *testing.T) {
 		tempImagePaths: []string{path},
 	}}
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, cmd := m.Update(keyCtrl('c'))
 	if cmd == nil {
 		t.Fatal("expected quit command")
 	}
@@ -372,7 +372,7 @@ func TestModel_CtrlLClearsMessages(t *testing.T) {
 		messages: []chatMessage{{Sender: "Igor", Text: "hello"}},
 	}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	updated, cmd := m.Update(keyCtrl('l'))
 	m2 := updated.(Model)
 
 	if cmd != nil {
@@ -393,7 +393,7 @@ func TestModel_CtrlLShowsEmptyStateWhenViewportReady(t *testing.T) {
 	m.messages = []chatMessage{{Sender: "Igor", Text: "hello"}}
 	m.updateViewport()
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlL})
+	updated, _ := m.Update(keyCtrl('l'))
 	m2 := updated.(Model)
 
 	if len(m2.messages) != 0 {
@@ -411,7 +411,7 @@ func TestModel_CtrlCQuits(t *testing.T) {
 		ready: true,
 	}
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, cmd := m.Update(keyCtrl('c'))
 	if cmd == nil {
 		t.Fatal("expected quit command for ctrl+c")
 	}
@@ -425,7 +425,7 @@ func TestModel_EscCancelsStreaming(t *testing.T) {
 	m.streamBuf = "partial response"
 	m.messages = []chatMessage{{Sender: "Igor", Text: "hello"}}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd := m.Update(keyPress(tea.KeyEsc))
 	m2 := updated.(Model)
 
 	if cmd != nil {
@@ -456,7 +456,7 @@ func TestModel_EscDoesNothingWhenNotWaiting(t *testing.T) {
 	m.waiting = false
 	m.textarea.SetValue("hello")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, cmd := m.Update(keyPress(tea.KeyEsc))
 	m2 := updated.(Model)
 
 	if cmd != nil {
@@ -616,16 +616,16 @@ func TestModel_PageUpScrollsViewport(t *testing.T) {
 	m.viewportSet = true
 	m.viewport.SetContent(strings.Repeat("line\n", 40))
 	m.viewport.GotoBottom()
-	bottomOffset := m.viewport.YOffset
+	bottomOffset := m.viewport.YOffset()
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyPgUp})
+	updated, cmd := m.Update(keyPress(tea.KeyPgUp))
 	m2 := updated.(Model)
 
 	if cmd != nil {
 		t.Fatal("expected nil command for viewport scroll")
 	}
-	if m2.viewport.YOffset >= bottomOffset {
-		t.Fatalf("expected page up to reduce viewport offset from %d, got %d", bottomOffset, m2.viewport.YOffset)
+	if m2.viewport.YOffset() >= bottomOffset {
+		t.Fatalf("expected page up to reduce viewport offset from %d, got %d", bottomOffset, m2.viewport.YOffset())
 	}
 }
 
@@ -639,18 +639,13 @@ func TestModel_MouseWheelScrollsViewport(t *testing.T) {
 	m.viewportSet = true
 	m.viewport.SetContent(strings.Repeat("line\n", 40))
 	m.viewport.GotoBottom()
-	bottomOffset := m.viewport.YOffset
+	bottomOffset := m.viewport.YOffset()
 
-	//nolint:staticcheck // tea.MouseWheelUp deprecated but no replacement in v1.3.10
-	updated, _ := m.Update(tea.MouseMsg{
-		Type:   tea.MouseWheelUp, //nolint:staticcheck // SA1019: deprecated but still functional
-		Button: tea.MouseButtonWheelUp,
-		Action: tea.MouseActionPress,
-	})
+	updated, _ := m.Update(tea.MouseWheelMsg{X: 0, Y: 0, Button: tea.MouseWheelUp})
 	m2 := updated.(Model)
 
-	if m2.viewport.YOffset >= bottomOffset {
-		t.Fatalf("expected mouse wheel up to reduce viewport offset from %d, got %d", bottomOffset, m2.viewport.YOffset)
+	if m2.viewport.YOffset() >= bottomOffset {
+		t.Fatalf("expected mouse wheel up to reduce viewport offset from %d, got %d", bottomOffset, m2.viewport.YOffset())
 	}
 }
 
@@ -663,21 +658,16 @@ func TestModel_MouseDisabledIgnoresMouseWheel(t *testing.T) {
 	m.viewportSet = true
 	m.viewport.SetContent(strings.Repeat("line\n", 40))
 	m.viewport.GotoBottom()
-	bottomOffset := m.viewport.YOffset
+	bottomOffset := m.viewport.YOffset()
 
-	//nolint:staticcheck // tea.MouseWheelUp deprecated but no replacement in v1.3.10
-	updated, cmd := m.Update(tea.MouseMsg{
-		Type:   tea.MouseWheelUp, //nolint:staticcheck // SA1019: deprecated but still functional
-		Button: tea.MouseButtonWheelUp,
-		Action: tea.MouseActionPress,
-	})
+	updated, cmd := m.Update(tea.MouseWheelMsg{X: 0, Y: 0, Button: tea.MouseWheelUp})
 	m2 := updated.(Model)
 
 	if cmd != nil {
 		t.Fatal("expected nil command when mouse capture is disabled")
 	}
-	if m2.viewport.YOffset != bottomOffset {
-		t.Fatalf("expected disabled mouse to preserve viewport offset %d, got %d", bottomOffset, m2.viewport.YOffset)
+	if m2.viewport.YOffset() != bottomOffset {
+		t.Fatalf("expected disabled mouse to preserve viewport offset %d, got %d", bottomOffset, m2.viewport.YOffset())
 	}
 }
 
@@ -685,20 +675,14 @@ func TestModel_CtrlOTogglesMouseCapture(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	updated, _ := m.Update(keyCtrl('o'))
 	m2 := updated.(Model)
-	if cmd == nil {
-		t.Fatal("expected enable mouse command")
-	}
 	if !m2.mouseEnabled {
 		t.Fatal("expected ctrl+o to enable mouse")
 	}
 
-	updated, cmd = m2.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	updated, _ = m2.Update(keyCtrl('o'))
 	m3 := updated.(Model)
-	if cmd == nil {
-		t.Fatal("expected disable mouse command")
-	}
 	if m3.mouseEnabled {
 		t.Fatal("expected second ctrl+o to disable mouse")
 	}
@@ -710,11 +694,8 @@ func TestModel_CtrlOTogglesMouseCaptureWhenSidebarFocused(t *testing.T) {
 	m.sidebarFocused = true
 	m.sessions = []tuiSessionInfo{{ChatID: ipc.ReservedTUIChatID, Name: "dm"}}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	updated, _ := m.Update(keyCtrl('o'))
 	m2 := updated.(Model)
-	if cmd == nil {
-		t.Fatal("expected enable mouse command")
-	}
 	if !m2.mouseEnabled {
 		t.Fatal("expected ctrl+o to enable mouse even when sidebar is focused")
 	}
@@ -730,7 +711,7 @@ func TestModel_CtrlUDelegatesToTextarea(t *testing.T) {
 	m.textarea.SetValue("hello world")
 	m.textarea.CursorEnd()
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlU})
+	updated, _ := m.Update(keyCtrl('u'))
 	m2 := updated.(Model)
 
 	if m2.textarea.Value() == "hello world" {
@@ -744,7 +725,7 @@ func TestModel_InputHistoryNavigatesUpAndDown(t *testing.T) {
 	m.inputHistory = []string{"first prompt", "second prompt"}
 	m.inputHistoryIndex = len(m.inputHistory)
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated, cmd := m.Update(keyPress(tea.KeyUp))
 	m2 := updated.(Model)
 	if cmd != nil {
 		t.Fatal("expected nil command for history up")
@@ -753,19 +734,19 @@ func TestModel_InputHistoryNavigatesUpAndDown(t *testing.T) {
 		t.Fatalf("expected latest history entry, got %q", m2.textarea.Value())
 	}
 
-	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated, _ = m2.Update(keyPress(tea.KeyUp))
 	m3 := updated.(Model)
 	if m3.textarea.Value() != "first prompt" {
 		t.Fatalf("expected previous history entry, got %q", m3.textarea.Value())
 	}
 
-	updated, _ = m3.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = m3.Update(keyPress(tea.KeyDown))
 	m4 := updated.(Model)
 	if m4.textarea.Value() != "second prompt" {
 		t.Fatalf("expected next history entry, got %q", m4.textarea.Value())
 	}
 
-	updated, _ = m4.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = m4.Update(keyPress(tea.KeyDown))
 	m5 := updated.(Model)
 	if m5.textarea.Value() != "" {
 		t.Fatalf("expected down past latest to clear input, got %q", m5.textarea.Value())
@@ -779,7 +760,7 @@ func TestModel_InputHistoryDoesNotReplaceNonEmptyDraft(t *testing.T) {
 	m.inputHistoryIndex = len(m.inputHistory)
 	m.textarea.SetValue("draft")
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated, _ := m.Update(keyPress(tea.KeyUp))
 	m2 := updated.(Model)
 
 	if m2.textarea.Value() != "draft" {
@@ -796,17 +777,17 @@ func TestModel_InputHistoryDoesNotReplaceEditedHistoryDraft(t *testing.T) {
 	m.inputHistory = []string{"old prompt", "second prompt"}
 	m.inputHistoryIndex = len(m.inputHistory)
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated, _ := m.Update(keyPress(tea.KeyUp))
 	m2 := updated.(Model)
 	m2.textarea.SetValue("second prompt edited")
 
-	updated, _ = m2.Update(tea.KeyMsg{Type: tea.KeyUp})
+	updated, _ = m2.Update(keyPress(tea.KeyUp))
 	m3 := updated.(Model)
 	if m3.textarea.Value() != "second prompt edited" {
 		t.Fatalf("expected edited history draft preserved on up, got %q", m3.textarea.Value())
 	}
 
-	updated, _ = m3.Update(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ = m3.Update(keyPress(tea.KeyDown))
 	m4 := updated.(Model)
 	if m4.textarea.Value() != "second prompt edited" {
 		t.Fatalf("expected edited history draft preserved on down, got %q", m4.textarea.Value())
@@ -837,14 +818,14 @@ func TestModel_TabTogglesSidebar(t *testing.T) {
 		showSidebar: false,
 	}
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, _ := m.Update(keyPress(tea.KeyTab))
 	m2 := updated.(Model)
 
 	if !m2.showSidebar {
 		t.Error("expected showSidebar=true after tab")
 	}
 
-	updated2, _ := m2.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated2, _ := m2.Update(keyPress(tea.KeyTab))
 	m3 := updated2.(Model)
 
 	if m3.showSidebar {
@@ -857,7 +838,7 @@ func TestModel_TabRuneDoesNotWriteToInput(t *testing.T) {
 	m.state = stateChat
 	m.showSidebar = false
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'\t'}})
+	updated, cmd := m.Update(keyText("\t"))
 	m2 := updated.(Model)
 
 	if cmd != nil {
@@ -877,7 +858,7 @@ func TestModel_UnhandledAltShortcutDoesNotWriteToInput(t *testing.T) {
 	m.ready = true
 	m.textarea.SetValue("hello")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}, Alt: true})
+	updated, cmd := m.Update(keyAlt('s'))
 	m2 := updated.(Model)
 
 	if cmd != nil {
@@ -893,7 +874,7 @@ func TestModel_TerminalColorReportDoesNotWriteToInput(t *testing.T) {
 	m.state = stateChat
 	m.ready = true
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("1;rgb:158e/193a/1e75")})
+	updated, cmd := m.Update(keyText("1;rgb:158e/193a/1e75"))
 	m2 := updated.(Model)
 
 	if cmd != nil {
@@ -910,7 +891,7 @@ func TestModel_PastedTerminalColorLikeTextWritesToInput(t *testing.T) {
 	m.ready = true
 
 	text := "1;rgb:158e/193a/1e75"
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text), Paste: true})
+	updated, _ := m.Update(tea.PasteMsg{Content: text})
 	m2 := updated.(Model)
 
 	if m2.textarea.Value() != text {
@@ -925,7 +906,7 @@ func TestModel_TextareaAltShortcutDoesNotWriteLiteralRune(t *testing.T) {
 	m.textarea.SetValue("hello world")
 	m.textarea.CursorStart()
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'f'}, Alt: true})
+	updated, _ := m.Update(keyAlt('f'))
 	m2 := updated.(Model)
 
 	if m2.textarea.Value() != "hello world" {
@@ -945,10 +926,7 @@ func TestModel_AltEnterInsertsNewline(t *testing.T) {
 		waiting:  false,
 	}
 
-	updated, cmd := m.Update(tea.KeyMsg{
-		Type: tea.KeyEnter,
-		Alt:  true,
-	})
+	updated, cmd := m.Update(keyAltEnter())
 	m2 := updated.(Model)
 
 	if cmd != nil {
@@ -968,7 +946,7 @@ func TestModel_CtrlJInsertsNewline(t *testing.T) {
 		waiting:  false,
 	}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	updated, cmd := m.Update(keyCtrl('j'))
 	m2 := updated.(Model)
 
 	if cmd != nil {
@@ -1023,7 +1001,7 @@ func TestModel_SubmitWithPendingImagesClearsThem(t *testing.T) {
 		t.Fatalf("expected 1 pending image before submit, got %d", len(m.pendingImages))
 	}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
 
 	if cmd == nil {
@@ -1060,7 +1038,7 @@ func TestModel_SubmitImageOnlyWithoutText(t *testing.T) {
 		t.Fatalf("expected empty textarea, got %q", m.textarea.Value())
 	}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
 
 	if cmd == nil {
@@ -1091,7 +1069,7 @@ func TestModel_SubmitTempImageDefersCleanupUntilStreamEnd(t *testing.T) {
 		t.Fatalf("unexpected attach error: %s", errMsg)
 	}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
 
 	if cmd == nil {
@@ -1129,7 +1107,7 @@ func TestModel_SidebarQuitCleansSubmittedTempImages(t *testing.T) {
 		submittedTempImagePaths: []string{path},
 	}
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, cmd := m.Update(keyCtrl('c'))
 
 	if cmd == nil {
 		t.Fatal("expected quit command")
@@ -1160,7 +1138,7 @@ func TestModel_SubmitAutoAttachesImagePathFromText(t *testing.T) {
 		socketPath: "/tmp/test.sock",
 	}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
 
 	if cmd == nil {
@@ -1194,7 +1172,7 @@ func TestModel_SendCommandForSlashText(t *testing.T) {
 		socketPath: "/tmp/test.sock",
 	}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
 
 	if cmd == nil {
@@ -1222,7 +1200,7 @@ func TestModel_SlashCommandDoesNotAutoAttachImageArgument(t *testing.T) {
 		socketPath: "/tmp/test.sock",
 	}
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
 
 	if cmd == nil {
@@ -1259,12 +1237,12 @@ func TestModel_InputCharacterHandling(t *testing.T) {
 	m.ready = true
 
 	// Simulate typing "hello" via textarea updates.
-	chars := []tea.KeyMsg{
-		{Type: tea.KeyRunes, Runes: []rune{'h'}},
-		{Type: tea.KeyRunes, Runes: []rune{'e'}},
-		{Type: tea.KeyRunes, Runes: []rune{'l'}},
-		{Type: tea.KeyRunes, Runes: []rune{'l'}},
-		{Type: tea.KeyRunes, Runes: []rune{'o'}},
+	chars := []tea.KeyPressMsg{
+		keyText("h"),
+		keyText("e"),
+		keyText("l"),
+		keyText("l"),
+		keyText("o"),
 	}
 	for _, k := range chars {
 		var cmd tea.Cmd
@@ -1280,7 +1258,7 @@ func TestModel_InputCharacterHandling(t *testing.T) {
 	}
 
 	// Backspace should remove last char via textarea.
-	m2, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	m2, _ := m.Update(keyBackspace())
 	m = m2.(Model)
 	if m.textarea.Value() != "hell" {
 		t.Errorf("expected textarea 'hell', got %q", m.textarea.Value())
@@ -1294,13 +1272,13 @@ func TestModel_ErrorStateKeys(t *testing.T) {
 	}
 
 	// Ctrl+C in error state quits.
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	_, cmd := m.Update(keyCtrl('c'))
 	if cmd == nil {
 		t.Error("expected quit command in error state")
 	}
 
 	// Enter in error state retries (goes to loading).
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
 	if m2.state != stateLoading {
 		t.Errorf("expected stateLoading after enter in error, got %v", m2.state)
@@ -1502,7 +1480,7 @@ func TestModel_ViewportShowsIgorAndAureliaAfterFullFlow(t *testing.T) {
 	m3.textarea = ta
 	m3.waiting = false
 
-	updated, cmd := m3.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m3.Update(keyPress(tea.KeyEnter))
 	m4 := updated.(Model)
 
 	if cmd == nil {
@@ -1542,8 +1520,8 @@ func TestModel_UpdateViewportNoopsWithoutDimensions(t *testing.T) {
 	if m.viewportSet {
 		t.Error("expected viewportSet to remain false")
 	}
-	if m.viewport.Height != 0 {
-		t.Errorf("expected viewport height 0, got %d", m.viewport.Height)
+	if m.viewport.Height() != 0 {
+		t.Errorf("expected viewport height 0, got %d", m.viewport.Height())
 	}
 }
 
@@ -1577,7 +1555,7 @@ func TestModel_ChatViewStartsWithTopMargin(t *testing.T) {
 	m.viewport = viewportForSize(m.contentWidth(), m.height)
 	m.viewportSet = true
 
-	view := m.View()
+	view := m.View().Content
 	firstLine, _, _ := strings.Cut(view, "\n")
 
 	if len(firstLine) != m.width {
@@ -1742,8 +1720,8 @@ func TestModel_ViewportHeightAccountsForChatHeader(t *testing.T) {
 	vp := viewportForSize(m.contentWidth(), m.height)
 	want := m.height - inputHeight - statusBarHeight - topMarginHeight - chatHeaderHeight
 
-	if vp.Height != want {
-		t.Fatalf("expected viewport height %d, got %d", want, vp.Height)
+	if vp.Height() != want {
+		t.Fatalf("expected viewport height %d, got %d", want, vp.Height())
 	}
 }
 
@@ -1756,8 +1734,8 @@ func TestModel_ViewportShrinksBelowMinimumOnVeryShortTerminal(t *testing.T) {
 		vp := viewportForSize(m.contentWidth(), m.height)
 		want := height - inputHeight - statusBarHeight - topMarginHeight - chatHeaderHeight
 
-		if vp.Height != want {
-			t.Fatalf("height %d: expected viewport height %d, got %d", height, want, vp.Height)
+		if vp.Height() != want {
+			t.Fatalf("height %d: expected viewport height %d, got %d", height, want, vp.Height())
 		}
 	}
 }
@@ -1817,7 +1795,7 @@ func TestModel_ChatViewDoesNotExceedShortTerminalHeight(t *testing.T) {
 	m.viewport = viewportForSize(m.contentWidth(), m.height)
 	m.viewportSet = true
 
-	view := m.View()
+	view := m.View().Content
 	lineCount := strings.Count(view, "\n") + 1
 
 	if lineCount > m.height {
@@ -1852,7 +1830,7 @@ func TestModel_SidebarShowsChatModeWhenNoCWD(t *testing.T) {
 	}
 	// cwdPath is "not set" by default
 
-	sidebar := m.renderSidebar()
+	sidebar := sidebarViewForTest(m)
 	plain := stripANSIForTest(sidebar)
 
 	if !strings.Contains(plain, "chat mode") {
@@ -1869,7 +1847,7 @@ func TestModel_SidebarHidesChatModeWhenCWDSet(t *testing.T) {
 		{ChatID: -9000001, Name: "dm"},
 	}
 
-	sidebar := m.renderSidebar()
+	sidebar := sidebarViewForTest(m)
 	plain := stripANSIForTest(sidebar)
 
 	if strings.Contains(plain, "chat mode") {
@@ -1889,7 +1867,7 @@ func TestModel_ChatViewDoesNotExceedVeryShortTerminalHeight(t *testing.T) {
 		m.viewport = viewportForSize(m.contentWidth(), m.height)
 		m.viewportSet = true
 
-		view := m.View()
+		view := m.View().Content
 		lineCount := strings.Count(view, "\n") + 1
 
 		if lineCount > m.height {
@@ -1908,7 +1886,7 @@ func TestModel_CtrlPTogglesProjectPanel(t *testing.T) {
 	}
 
 	// Toggle on.
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	updated, cmd := m.Update(keyCtrl('p'))
 	m2 := updated.(Model)
 
 	if !m2.projectPanelOpen {
@@ -1919,7 +1897,7 @@ func TestModel_CtrlPTogglesProjectPanel(t *testing.T) {
 	}
 
 	// Toggle off.
-	updated, cmd = m2.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	updated, cmd = m2.Update(keyCtrl('p'))
 	m3 := updated.(Model)
 
 	if m3.projectPanelOpen {
@@ -2352,14 +2330,14 @@ func TestModel_HelpOverlayToggleWithQuestionMark(t *testing.T) {
 	}
 
 	// ? with empty input opens help
-	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	updated, _ := m.handleKeyMsg(keyText("?"))
 	m2 := updated.(Model)
 	if !m2.helpOverlayOpen {
 		t.Error("expected helpOverlayOpen=true after ?")
 	}
 
 	// ? again closes help
-	updated2, _ := m2.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	updated2, _ := m2.handleKeyMsg(keyText("?"))
 	m3 := updated2.(Model)
 	if m3.helpOverlayOpen {
 		t.Error("expected helpOverlayOpen=false after second ?")
@@ -2372,7 +2350,7 @@ func TestModel_HelpOverlayCloseWithEsc(t *testing.T) {
 	m.width = 100
 	m.helpOverlayOpen = true
 
-	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ := m.handleKeyMsg(keyPress(tea.KeyEsc))
 	m2 := updated.(Model)
 	if m2.helpOverlayOpen {
 		t.Error("expected helpOverlayOpen=false after Esc")
@@ -2385,7 +2363,7 @@ func TestModel_HelpOverlayCloseWithEnter(t *testing.T) {
 	m.width = 100
 	m.helpOverlayOpen = true
 
-	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, _ := m.handleKeyMsg(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
 	if m2.helpOverlayOpen {
 		t.Error("expected helpOverlayOpen=false after Enter")
@@ -2398,7 +2376,7 @@ func TestModel_HelpOverlayNotOpenedWithNonEmptyInput(t *testing.T) {
 	m.width = 100
 	m.textarea.SetValue("hello")
 
-	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
+	updated, _ := m.handleKeyMsg(keyText("?"))
 	m2 := updated.(Model)
 	if m2.helpOverlayOpen {
 		t.Error("expected helpOverlayOpen=false when textarea is not empty")
@@ -2438,7 +2416,7 @@ func TestModel_HelpOverlayRendersScoped(t *testing.T) {
 	m.height = 30
 	m.helpOverlayOpen = true
 
-	view := m.View()
+	view := m.View().Content
 
 	// Should contain the full UI but the help overlay should be on top.
 	// The overlay shouldn't crash rendering on narrow/standard widths.
