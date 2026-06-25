@@ -127,6 +127,11 @@ func (m Model) chatView() string {
 		return m.overlayPanelWide(full, panel)
 	}
 
+	// Overlay interactive huh form (e.g. /model picker).
+	if m.formOpen {
+		return m.renderFormOverlay(full)
+	}
+
 	return full
 }
 

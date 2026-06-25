@@ -25,7 +25,10 @@ type chromeModel struct {
 
 	spinner spinner.Model
 
-	helpModel help.Model
+	helpModel  help.Model
+	activeForm *huhForm
+	formOpen   bool
+
 	projectPanelOpen bool
 	projectState     *ipc.ProjectStatePayload
 
