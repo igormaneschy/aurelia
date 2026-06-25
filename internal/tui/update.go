@@ -10,6 +10,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/stopwatch"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 
@@ -157,6 +158,9 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 
+	case stopwatch.TickMsg, stopwatch.StartStopMsg, stopwatch.ResetMsg:
+		return m.updateStreamProgressMsgs(msg)
+
 	case daemonReachableMsg:
 		m.daemonLabel = "ready"
 		m.connectLatency = msg.latency
@@ -224,7 +228,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.daemonLabel = "error"
 		m.waiting = false
-		m.turnStart = time.Time{}
+		m.resetStreamProgress()
 		m.streamBuf = ""
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
@@ -260,7 +264,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Stream ended (EOF) without explicit terminal event.
 		m.waiting = false
-		m.turnStart = time.Time{}
+		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
 			_ = m.reader.Close()
@@ -281,7 +285,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Stream error.
 		m.waiting = false
-		m.turnStart = time.Time{}
+		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
 			_ = m.reader.Close()
@@ -823,10 +827,11 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		m.waiting = true
 		m.streamID++
+		progressCmd := (&m).initStreamProgress()
 		m.updateViewport()
 
 		if isCommand {
-			return m, tea.Batch(m.sendCommand(text), spinnerTickCmd())
+			return m, tea.Batch(m.sendCommand(text), spinnerTickCmd(), progressCmd)
 		}
 
 		// Capture pending images before clearing. Clipboard temp files must stay
@@ -837,7 +842,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.submittedTempImagePaths = append(m.submittedTempImagePaths, tempPaths...)
 		m.pendingImages = nil
 		m.pendingAttachments = nil
-		return m, tea.Batch(cmd, spinnerTickCmd())
+		return m, tea.Batch(cmd, spinnerTickCmd(), progressCmd)
 
 	case msg.String() == "alt+enter":
 		// alt+enter: insert newline.
@@ -1159,6 +1164,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 
 	case "stream_chunk":
 		m.streamBuf += event.Body
+		m.updateStreamProgress(len(event.Body))
 		m.appendOrUpdateAureliaMessage(m.streamBuf)
 		m.updateViewport()
 		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
@@ -1176,7 +1182,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 	case "stream_end":
 		// Terminal event — stream complete.
 		m.waiting = false
-		m.turnStart = time.Time{}
+		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
 			_ = m.reader.Close()
@@ -1189,7 +1195,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 	case "error":
 		// Terminal event — error.
 		m.waiting = false
-		m.turnStart = time.Time{}
+		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
 			_ = m.reader.Close()
