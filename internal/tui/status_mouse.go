@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 type statusBarHitKind int
@@ -13,98 +14,110 @@ const (
 	statusBarHitModel
 )
 
-func (m Model) statusBarY() int {
-	if m.height <= 0 {
-		return -1
+func (m Model) layoutLines() []string {
+	layout := m.renderChatBaseLayout()
+	if layout == "" {
+		return nil
 	}
-	return m.height - 1
+	return strings.Split(layout, "\n")
 }
 
-func (m Model) statusBarHit(x int) statusBarHitKind {
-	if x < 0 || m.width <= 0 {
+func (m Model) isStatusBarLine(line string) bool {
+	plain := stripANSI(line)
+	if strings.Contains(plain, "●") {
+		return true
+	}
+	if model := m.activeModelLabel(); model != "" && strings.Contains(plain, model) {
+		return true
+	}
+	return false
+}
+
+func (m Model) statusBarY() int {
+	lines := m.layoutLines()
+	for i := len(lines) - 1; i >= 0; i-- {
+		if m.isStatusBarLine(lines[i]) {
+			return i
+		}
+	}
+	if m.height > 0 {
+		return m.height - 1
+	}
+	return -1
+}
+
+func (m Model) statusBarPlainLine() string {
+	lines := m.layoutLines()
+	y := m.statusBarY()
+	if y >= 0 && y < len(lines) {
+		return stripANSI(lines[y])
+	}
+	return stripANSI(m.renderStatusBar())
+}
+
+func (m Model) statusBarHitAt(y, x int) statusBarHitKind {
+	model := m.activeModelLabel()
+	if model == "" || x < 0 || y < 0 {
 		return statusBarHitNone
 	}
-	regions := m.statusBarRegions()
-	for _, r := range regions {
-		if x >= r.start && x < r.end {
-			return r.kind
-		}
+	lines := m.layoutLines()
+	if y >= len(lines) || !m.isStatusBarLine(lines[y]) {
+		return statusBarHitNone
+	}
+	plain := stripANSI(lines[y])
+	idx := strings.Index(plain, model)
+	if idx < 0 {
+		return statusBarHitNone
+	}
+	if x >= idx && x < idx+len(model) {
+		return statusBarHitModel
 	}
 	return statusBarHitNone
 }
 
-type statusBarRegion struct {
-	kind  statusBarHitKind
-	start int
-	end   int
+func (m Model) statusBarHit(x int) statusBarHitKind {
+	return m.statusBarHitAt(m.statusBarY(), x)
 }
 
-func (m Model) statusBarRegions() []statusBarRegion {
-	var regions []statusBarRegion
-	pos := 0
-	sep := "   ·   "
+func (m Model) mainPaneStartX() int {
+	if !m.shouldShowSidebar() {
+		return 0
+	}
+	sidebar := m.styles.SidebarStyle.Render(m.renderSidebarTable())
+	firstLine := sidebar
+	if idx := strings.Index(sidebar, "\n"); idx >= 0 {
+		firstLine = sidebar[:idx]
+	}
+	return lipgloss.Width(firstLine)
+}
 
-	addPart := func(label string, kind statusBarHitKind, clickable bool) {
-		if label == "" {
-			return
-		}
-		if pos > 0 {
-			pos += len(sep)
-		}
-		start := pos
-		pos += len(stripANSI(label))
-		if clickable && kind != statusBarHitNone {
-			regions = append(regions, statusBarRegion{kind: kind, start: start, end: pos})
+func (m Model) chatHeaderY() int {
+	return topMarginHeight
+}
+
+func (m Model) sidebarRenderedLines() []string {
+	if !m.shouldShowSidebar() {
+		return nil
+	}
+	return strings.Split(m.styles.SidebarStyle.Render(m.renderSidebarTable()), "\n")
+}
+
+func (m Model) sidebarLineY(needle string) int {
+	for i, line := range m.sidebarRenderedLines() {
+		if strings.Contains(stripANSI(line), needle) {
+			return topMarginHeight + i
 		}
 	}
-
-	// Mirror renderStatusBar priority filtering.
-	var state string
-	switch m.chromeState() {
-	case "connecting":
-		state = "● connecting"
-	case "waiting":
-		state = "● waiting"
-	case "error":
-		state = "● error"
-	case "offline":
-		state = "● offline"
-	default:
-		state = "● ready"
-	}
-
-	allParts := []struct {
-		label       string
-		min         int
-		kind        statusBarHitKind
-		clickable   bool
-	}{
-		{state, 0, statusBarHitNone, false},
-		{m.activeModelLabel(), 14, statusBarHitModel, true},
-		{m.pendingCountLabel(), 24, statusBarHitNone, false},
-		{m.historyNav.pageLabel(), 28, statusBarHitNone, false},
-		{m.elapsedLabel(), 34, statusBarHitNone, false},
-		{"↵ send", 44, statusBarHitNone, false},
-		{newlineFallbackKey + " newline", 62, statusBarHitNone, false},
-		{m.mouseStatusLabel(), 80, statusBarHitNone, false},
-	}
-
-	for _, item := range allParts {
-		if item.label == "" {
-			continue
-		}
-		if m.width >= item.min {
-			addPart(item.label, item.kind, item.clickable)
-		}
-	}
-	return regions
+	return -1
 }
 
 func (m Model) headerProjectHit(x, y int) bool {
-	if y != topMarginHeight+1 || m.isChatMode() {
+	if y != m.chatHeaderY() || m.isChatMode() {
 		return false
 	}
-	// Title line: "Aurelia / Session  project Foo   ·   ..."
+	if x < m.mainPaneStartX() {
+		return false
+	}
 	header := m.renderChatHeader()
 	lines := strings.Split(header, "\n")
 	if len(lines) == 0 {
@@ -115,12 +128,8 @@ func (m Model) headerProjectHit(x, y int) bool {
 	if idx < 0 {
 		return false
 	}
-	// Rough hit: click anywhere on project segment (after "project ").
-	start := idx
-	if x < start || x >= len(plain) {
-		return false
-	}
-	return true
+	relX := x - m.mainPaneStartX()
+	return relX >= idx && relX < len(plain)
 }
 
 func (m Model) sidebarNewSessionHit(x, y int) bool {
@@ -130,13 +139,8 @@ func (m Model) sidebarNewSessionHit(x, y int) bool {
 	if !sidebarMouseHitX(x) {
 		return false
 	}
-	// "+ New session (click)" is the last hint row below the table.
-	offset := 8 // blank, project block, daemon block
-	if m.isChatMode() {
-		offset++
-	}
-	hintY := sidebarTableFirstRowY() + m.sidebarTable.Height() + offset
-	return y == hintY || y == hintY+1
+	hintY := m.sidebarLineY("+ New session")
+	return hintY >= 0 && y >= hintY && y <= hintY+1
 }
 
 func (m Model) sidebarProjectHit(x, y int) bool {
@@ -146,9 +150,12 @@ func (m Model) sidebarProjectHit(x, y int) bool {
 	if !sidebarMouseHitX(x) {
 		return false
 	}
-	// Project path line in sidebar hints (below "Project" title).
-	pathY := sidebarTableFirstRowY() + m.sidebarTable.Height() + sidebarTitleLines + 1
-	return y == pathY
+	path := truncateMiddle(m.cwdPath, sidebarWidth-4)
+	if path == "" {
+		return false
+	}
+	hintY := m.sidebarLineY(path)
+	return hintY >= 0 && y == hintY
 }
 
 func (m Model) handleChatMouse(msg tea.MouseMsg) (handled bool, model tea.Model, cmd tea.Cmd) {
@@ -160,12 +167,10 @@ func (m Model) handleChatMouse(msg tea.MouseMsg) (handled bool, model tea.Model,
 		if msg.Button != tea.MouseLeft {
 			return false, m, nil
 		}
-		if msg.Y == m.statusBarY() {
-			switch m.statusBarHit(msg.X) {
-			case statusBarHitModel:
-				next, c := m.openModelSelect()
-				return true, next, c
-			}
+		switch m.statusBarHitAt(msg.Y, msg.X) {
+		case statusBarHitModel:
+			next, c := m.openModelSelect()
+			return true, next, c
 		}
 		if m.headerProjectHit(msg.X, msg.Y) {
 			next, c := m.openCwdForm()

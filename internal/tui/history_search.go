@@ -103,6 +103,48 @@ func (m *Model) jumpToSearchMatch(cursor int) {
 	m.historyNav.paginator.Page = page
 	m.historyNav.hasNewBelow = page < m.historyNav.paginator.TotalPages-1
 	m.updateViewportToPage()
+	m.scrollViewportToSearchMatch(cursor)
+}
+
+func messageHasSearchMatch(msgIndex int, matches []searchMatch) bool {
+	for _, match := range matches {
+		if match.messageIndex == msgIndex {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Model) scrollViewportToSearchMatch(cursor int) {
+	if cursor < 0 || cursor >= len(m.historySearch.matches) || !m.viewportSet {
+		return
+	}
+	match := m.historySearch.matches[cursor]
+	pageStart, _ := m.historyNav.paginator.GetSliceBounds(len(m.messages))
+	localIdx := match.messageIndex - pageStart
+	if localIdx < 0 {
+		return
+	}
+
+	contentWidth := m.contentWidth()
+	pageMsgs := m.historyNav.pageSlice(m.messages)
+	content := m.renderMessages(pageMsgs, contentWidth)
+	lineOffset := lineOffsetBeforeMessage(content, localIdx)
+
+	if localIdx < len(pageMsgs) {
+		msgText := pageMsgs[localIdx].Text
+		start := match.start
+		if start > len(msgText) {
+			start = len(msgText)
+		}
+		lineOffset += strings.Count(msgText[:start], "\n")
+	}
+
+	maxOffset := maxInt(0, m.viewport.TotalLineCount()-m.viewport.Height())
+	if lineOffset > maxOffset {
+		lineOffset = maxOffset
+	}
+	m.viewport.SetYOffset(lineOffset)
 }
 
 func (m Model) handleHistorySearchKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -157,10 +199,15 @@ func formatSearchPos(cur, total int) string {
 	return "(" + strconv.Itoa(cur) + "/" + strconv.Itoa(total) + ")"
 }
 
+func activeSearchStyle(style lipgloss.Style) lipgloss.Style {
+	return style.Copy().Bold(true).Reverse(true)
+}
+
 func highlightSearchText(text string, msgIndex int, activeCursor int, matches []searchMatch, style lipgloss.Style) string {
 	if len(matches) == 0 {
 		return text
 	}
+	activeStyle := activeSearchStyle(style)
 	var parts []string
 	last := 0
 	for i, match := range matches {
@@ -177,7 +224,7 @@ func highlightSearchText(text string, msgIndex int, activeCursor int, matches []
 		parts = append(parts, text[last:match.start])
 		chunk := text[match.start:end]
 		if i == activeCursor {
-			parts = append(parts, style.Copy().Bold(true).Render(chunk))
+			parts = append(parts, activeStyle.Render(chunk))
 		} else {
 			parts = append(parts, style.Render(chunk))
 		}
@@ -190,4 +237,20 @@ func highlightSearchText(text string, msgIndex int, activeCursor int, matches []
 		return text
 	}
 	return strings.Join(parts, "")
+}
+
+func lineOffsetBeforeMessage(content string, messageIndex int) int {
+	if messageIndex <= 0 || content == "" {
+		return 0
+	}
+	sep := "\n\n"
+	pos := 0
+	for i := 0; i < messageIndex; i++ {
+		idx := strings.Index(content[pos:], sep)
+		if idx < 0 {
+			return strings.Count(content, "\n")
+		}
+		pos += idx + len(sep)
+	}
+	return strings.Count(content[:pos], "\n")
 }

@@ -171,21 +171,25 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 			}
 			b.WriteString(style.Render(header))
 			b.WriteString("\n")
-			source := msg.Text
-			if m.historySearch.active && m.historySearch.query != "" {
-				source = stripANSI(highlightSearchText(msg.Text, globalIndex, activeMatch, m.historySearch.matches, m.styles.SearchHighlightStyle))
-			}
-			rendered, err := renderer.Render(source)
-			if err != nil || rendered == "" {
+			searching := m.historySearch.active && m.historySearch.query != "" &&
+				messageHasSearchMatch(globalIndex, m.historySearch.matches)
+			if searching {
+				// Plain highlighted text so matches stay visible (glamour strips ANSI).
 				b.WriteString(bodyText)
+				b.WriteString("\n")
 			} else {
-				out := strings.TrimSpace(rendered)
-				if i == len(messages)-1 && m.waiting && m.animations.enabled {
-					out = fadeStyle(m.styles.AssistantStyle, m.animations.ResponseOpacity()).Render(out)
+				rendered, err := renderer.Render(msg.Text)
+				if err != nil || rendered == "" {
+					b.WriteString(bodyText)
+				} else {
+					out := strings.TrimSpace(rendered)
+					if i == len(messages)-1 && m.waiting && m.animations.enabled {
+						out = fadeStyle(m.styles.AssistantStyle, m.animations.ResponseOpacity()).Render(out)
+					}
+					b.WriteString(out)
 				}
-				b.WriteString(out)
+				b.WriteString("\n")
 			}
-			b.WriteString("\n")
 		default:
 			header := formatMessageHeader(msg.Sender, timestamp)
 			b.WriteString(m.styles.ErrorStyle.Render(header))

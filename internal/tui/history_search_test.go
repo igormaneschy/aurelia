@@ -65,4 +65,35 @@ func TestHighlightSearchText_ActiveMatchBold(t *testing.T) {
 	if !strings.Contains(got, "wo") {
 		t.Fatalf("expected match text preserved, got %q", got)
 	}
+	if got == stripANSIForTest(got) {
+		t.Fatal("expected active match styling")
+	}
+}
+
+func TestScrollViewportToSearchMatch_JumpsWithinPage(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.height = 30
+	m.messages = make([]chatMessage, 55)
+	for i := range m.messages {
+		m.messages[i] = chatMessage{Sender: "Igor", Text: strings.Repeat("line\n", 20) + "TARGET here"}
+	}
+	m.messages[54] = chatMessage{Sender: "Igor", Text: "needle at end"}
+
+	m.historyNav.resetToLastPage(len(m.messages))
+	m.ensureViewport()
+
+	m.historySearch.active = true
+	m.historySearch.query = "needle"
+	m.historySearch.matches = findSearchMatches(m.messages, "needle")
+	m.historySearch.matchCursor = 0
+	m.jumpToSearchMatch(0)
+
+	if m.historyNav.paginator.Page != 1 {
+		t.Fatalf("expected page 1, got %d", m.historyNav.paginator.Page)
+	}
+	if m.viewport.YOffset() == 0 {
+		t.Fatal("expected viewport scrolled toward match")
+	}
 }

@@ -2,6 +2,9 @@ package tui
 
 import (
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
+	"github.com/igormaneschy/aurelia/internal/ipc"
 )
 
 func TestStatusBarHit_ModelLabel(t *testing.T) {
@@ -11,24 +14,34 @@ func TestStatusBarHit_ModelLabel(t *testing.T) {
 	m.height = 24
 	m.activeModel = "claude-sonnet"
 
-	regions := m.statusBarRegions()
-	var modelRegion *statusBarRegion
-	for i := range regions {
-		if regions[i].kind == statusBarHitModel {
-			modelRegion = &regions[i]
-			break
-		}
-	}
-	if modelRegion == nil {
-		t.Fatal("expected clickable model region")
+	line := m.statusBarPlainLine()
+	idx := indexOf(line, "claude-sonnet")
+	if idx < 0 {
+		t.Fatalf("model not found in status line %q", line)
 	}
 
-	mid := modelRegion.start + (modelRegion.end-modelRegion.start)/2
+	mid := idx + len("claude-sonnet")/2
 	if m.statusBarHit(mid) != statusBarHitModel {
-		t.Fatalf("expected model hit at x=%d", mid)
+		t.Fatalf("expected model hit at x=%d in %q", mid, line)
 	}
 	if m.statusBarHit(0) == statusBarHitModel {
 		t.Fatal("expected state label at x=0 not to be model hit")
+	}
+}
+
+func TestStatusBarY_AccountsForSearchBar(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 120
+	m.height = 30
+	m.activeModel = "claude-sonnet"
+
+	baseY := m.statusBarY()
+	m.historySearch.active = true
+	m.historySearch.query = "test"
+	withSearchY := m.statusBarY()
+	if withSearchY <= baseY {
+		t.Fatalf("expected status bar lower on screen with search bar: base=%d search=%d", baseY, withSearchY)
 	}
 }
 
@@ -39,11 +52,12 @@ func TestHeaderProjectHit_WhenProjectSet(t *testing.T) {
 	m.height = 30
 	m.cwdPath = "/Users/igor/myproject"
 
-	y := topMarginHeight + 1
-	if !m.headerProjectHit(40, y) {
+	y := m.chatHeaderY()
+	x := m.mainPaneStartX() + 40
+	if !m.headerProjectHit(x, y) {
 		t.Fatal("expected project segment click in header")
 	}
-	if m.headerProjectHit(40, y+5) {
+	if m.headerProjectHit(x, y+5) {
 		t.Fatal("expected miss below header line")
 	}
 }
@@ -55,8 +69,76 @@ func TestHeaderProjectHit_ChatModeMiss(t *testing.T) {
 	m.height = 30
 	m.cwdPath = "not set"
 
-	y := topMarginHeight + 1
-	if m.headerProjectHit(40, y) {
+	y := m.chatHeaderY()
+	if m.headerProjectHit(m.mainPaneStartX()+40, y) {
 		t.Fatal("expected no project hit in chat mode")
 	}
+}
+
+func TestHandleSidebarMouse_ClickBelowTablePassesThrough(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.sessions = []tuiSessionInfo{{ChatID: ipc.ReservedTUIChatID, Name: "dm"}}
+	prepSidebarMouseTest(&m)
+
+	hintY := m.sidebarLineY("+ New session")
+	if hintY < 0 {
+		t.Fatal("expected + New session hint line")
+	}
+
+	handled, _, _ := m.handleSidebarMouse(tea.MouseClickMsg{X: 2, Y: hintY, Button: tea.MouseLeft})
+	if handled {
+		t.Fatal("expected sidebar handler to pass through click on hint row")
+	}
+}
+
+func TestHandleChatMouse_NewSessionOpensForm(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.sessions = []tuiSessionInfo{{ChatID: ipc.ReservedTUIChatID, Name: "dm"}}
+	prepSidebarMouseTest(&m)
+
+	hintY := m.sidebarLineY("+ New session")
+	if hintY < 0 {
+		t.Fatal("expected + New session hint line")
+	}
+
+	handled, model, _ := m.handleChatMouse(tea.MouseClickMsg{X: 2, Y: hintY, Button: tea.MouseLeft})
+	if !handled {
+		t.Fatal("expected chat mouse handler to open new session form")
+	}
+	if !model.(Model).formOpen {
+		t.Fatal("expected formOpen after clicking + New session")
+	}
+}
+
+func TestHandleChatMouse_ModelInStatusBar(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 120
+	m.height = 30
+	m.activeModel = "claude-sonnet"
+
+	line := m.statusBarPlainLine()
+	idx := indexOf(line, "claude-sonnet")
+	if idx < 0 {
+		t.Fatalf("model not in status line %q", line)
+	}
+
+	handled, model, _ := m.handleChatMouse(tea.MouseClickMsg{
+		X: idx + 2, Y: m.statusBarY(), Button: tea.MouseLeft,
+	})
+	if !handled {
+		t.Fatal("expected model click to open form")
+	}
+	if !model.(Model).formOpen {
+		t.Fatal("expected model picker form open")
+	}
+}
+
+func indexOf(s, sub string) int {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return i
+		}
+	}
+	return -1
 }

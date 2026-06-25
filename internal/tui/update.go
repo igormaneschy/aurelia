@@ -946,7 +946,7 @@ func (m Model) handleSidebarMouse(msg tea.MouseMsg) (handled bool, model tea.Mod
 	case tea.MouseClickMsg:
 		if msg.Button != tea.MouseLeft || !sidebarMouseHitX(msg.X) { return false, m, nil }
 		row := m.sidebarRowAt(msg.Y)
-		if row < 0 { return true, m, nil }
+		if row < 0 { return false, m, nil }
 		model, cmd := m.openSidebarSessionAt(row)
 		return true, model, cmd
 	case tea.MouseMotionMsg:

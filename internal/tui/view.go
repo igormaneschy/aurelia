@@ -80,39 +80,7 @@ func (m Model) chatView() string {
 		return "Loading..."
 	}
 
-	inputBar := m.renderInput()
-	progressBar := ""
-	if m.showStreamProgress() { progressBar = m.renderStreamProgress(m.width) }
-	statusBar := m.renderStatusBar()
-
-	viewHeight := m.height
-	inputH := inputHeight
-	statusH := statusBarHeight
-	contentH := viewHeight - topMarginHeight - inputH - statusH
-
-	if contentH < 1 {
-		contentH = 1
-	}
-
-	mainContentHeight := contentH
-
-	var body string
-	if m.shouldShowSidebar() {
-		sidebar := m.renderSidebarTable()
-		viewContent := m.renderMainPane(mainContentHeight, m.contentWidth())
-		body = lipgloss.JoinHorizontal(
-			lipgloss.Top,
-			m.styles.SidebarStyle.Render(sidebar),
-			viewContent,
-		)
-	} else {
-		body = m.renderMainPane(mainContentHeight, m.width)
-	}
-
-	chatFooter := []string{inputBar}
-	if progressBar != "" { chatFooter = append(chatFooter, progressBar) }
-	chatFooter = append(chatFooter, statusBar)
-	full := lipgloss.JoinVertical(lipgloss.Left, m.renderTopMargin(), body, strings.Join(chatFooter, "\n"))
+	full := m.renderChatBaseLayout()
 
 	// Overlay project panel when open.
 	if m.projectPanelOpen {
@@ -133,6 +101,41 @@ func (m Model) chatView() string {
 	}
 
 	return full
+}
+
+// renderChatBaseLayout builds the chat screen without overlays (used for mouse hit tests).
+func (m Model) renderChatBaseLayout() string {
+	inputBar := m.renderInput()
+	progressBar := ""
+	if m.showStreamProgress() {
+		progressBar = m.renderStreamProgress(m.width)
+	}
+	statusBar := m.renderStatusBar()
+
+	contentH := m.height - topMarginHeight - inputHeight - statusBarHeight
+	if contentH < 1 {
+		contentH = 1
+	}
+
+	var body string
+	if m.shouldShowSidebar() {
+		sidebar := m.renderSidebarTable()
+		viewContent := m.renderMainPane(contentH, m.contentWidth())
+		body = lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			m.styles.SidebarStyle.Render(sidebar),
+			viewContent,
+		)
+	} else {
+		body = m.renderMainPane(contentH, m.width)
+	}
+
+	chatFooter := []string{inputBar}
+	if progressBar != "" {
+		chatFooter = append(chatFooter, progressBar)
+	}
+	chatFooter = append(chatFooter, statusBar)
+	return lipgloss.JoinVertical(lipgloss.Left, m.renderTopMargin(), body, strings.Join(chatFooter, "\n"))
 }
 
 func (m Model) renderTopMargin() string {
