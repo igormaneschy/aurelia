@@ -53,10 +53,13 @@ Este sprint **não repete** rich components; **refina** superfície visual e int
 
 ### Fase C — Interacção premium
 
-- [ ] **Command palette** (`Ctrl+P`) — fuzzy: sessões, comandos, cwd, model
+- [ ] **Command palette** (`Ctrl+K`) — fuzzy: sessões, comandos, cwd, model (`Ctrl+P` mantém project panel)
 - [ ] **`@` file references** — fuzzy paths do cwd no composer
-- [ ] **Temas nomeados** (`/theme` ou flag) — além de auto/light/dark
-- [ ] **Attention** opcional — notificação/som quando resposta completa e TUI sem foco
+- [ ] **Attention** — notificação/som quando resposta completa e TUI sem foco (**default ligado**, `--no-attention` para desligar)
+
+### Stretch (pós-MVP — temas nomeados adiados)
+
+- [ ] **Temas nomeados** (`warm`, `high-contrast`) — reavaliar após v0.34.0
 
 ---
 
@@ -136,14 +139,27 @@ Este sprint **não repete** rich components; **refina** superfície visual e int
 ### C.1 Command palette
 
 **Como** utilizador power,  
-**quero** `Ctrl+P` para aceder a sessões e comandos por fuzzy search,  
-**para** não memorizar slash commands.
+**quero** `Ctrl+K` para aceder a sessões e comandos por fuzzy search,  
+**para** não memorizar slash commands sem perder `Ctrl+P` para o project panel.
 
 **Acceptance criteria:**
 
-1. WHEN pressiono `Ctrl+P` THEN abre modal palette com input fuzzy.
-2. WHEN selecciono item THEN executa acção (trocar sessão, abrir form, enviar comando).
-3. WHEN `Esc` THEN fecha sem efeitos colaterais.
+1. WHEN pressiono `Ctrl+K` THEN abre modal palette com input fuzzy.
+2. WHEN pressiono `Ctrl+P` THEN continua a abrir/fechar o project panel (sem regressão).
+3. WHEN selecciono item na palette THEN executa acção (trocar sessão, abrir form, enviar comando).
+4. WHEN `Esc` THEN fecha palette sem efeitos colaterais.
+
+### C.2 Attention
+
+**Como** utilizador,  
+**quero** ser notificado quando a resposta termina e não estou a olhar para o terminal,  
+**para** não ficar à espera sem perceber.
+
+**Acceptance criteria:**
+
+1. WHEN `stream_end` e TUI sem foco THEN bell ou notificação desktop (best-effort).
+2. WHEN arranco com `--no-attention` THEN sem som/notificação.
+3. WHEN default THEN attention ligado.
 
 ---
 

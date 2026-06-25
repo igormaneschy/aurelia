@@ -187,12 +187,12 @@ Em vez de `▶ /help  /status` na linha acima do input:
 - Overlay modal reutilizando `renderModalOverlay`.
 - `bubbles/textinput` ou textarea single-line + fuzzy (`sahilm/fuzzy` já no ecossistema charm ou match simples).
 - Entradas: sessões, `/help`, `/cwd`, `/model`, `/new`, `/status`, “Toggle mouse”, “Search history”.
-- Atalho: `Ctrl+P` (project panel migra para item da palette **ou** mantém `Ctrl+P` e palette em `Ctrl+Shift+P` — **decisão pendente Igor**; default proposto: palette `Ctrl+P`, project panel só via `/status` e chip header).
+- Atalho: **`Ctrl+K`** (command palette). **`Ctrl+P` mantém-se** para project panel (`/status`, chip header, status bar).
 
-### Attention (Fase C, opcional)
+### Attention (Fase C — aprovado)
 
 - Quando `stream_end` e terminal blurred (detecção best-effort: focus events se disponíveis), emitir bell `\a` ou OSC notification.
-- Flag `--attention` / config `tui.attention.enabled` (default false).
+- Flag `--no-attention` para desligar; **default: ligado** (`attention.enabled = true` em config TUI).
 
 ---
 
@@ -238,12 +238,14 @@ Screenshots golden opcionais: guardar em `internal/tui/testdata/` apenas se est�
 
 ---
 
-## Decisões em aberto (para Igor)
+## Decisões registadas (Igor — Jun 2026)
 
-1. **Ctrl+P:** command palette vs project panel — qual prevalece?
-2. **User bubbles à direita:** activar em todos os terminais ou só `width >= 80`?
-3. **Temas nomeados:** quantos presets no MVP (`warm`, `high-contrast`)?
-4. **Attention:** incluir na Fase C ou adiar?
+| # | Pergunta | Decisão |
+|---|----------|---------|
+| 1 | `Ctrl+P` vs command palette | **Manter `Ctrl+P` = project panel.** Palette em **`Ctrl+K`**. |
+| 2 | User bubbles à direita | **Sim, só quando `width >= 80`.** Em terminais estreitos, alinhamento à esquerda. |
+| 3 | Temas nomeados no MVP | **Indeciso — adiar.** Fase C entrega só `auto` / `light` / `dark` existentes; presets (`warm`, `high-contrast`) ficam stretch pós-v0.34.0. |
+| 4 | Attention | **Sim, incluir na Fase C.** Default **ligado**; opt-out via `--no-attention`. |
 
 ---
 

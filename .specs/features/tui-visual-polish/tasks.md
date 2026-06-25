@@ -109,7 +109,7 @@
 **Objetivo:** Transcript estilo conversa, não log.
 
 - [ ] `renderMessageBubble()` em `transcript.go`.
-- [ ] User bubble: borda `accent-user`; align right se `width >= 80`.
+- [ ] User bubble: borda `accent-user`; **align right só se `width >= 80`** (decisão Igor); esquerda em narrow.
 - [ ] Assistant bubble: fundo `surface-1`, glamour interior.
 - [ ] Sistema: manter linha simples.
 - [ ] Integrar search highlight (plain text path preservado).
@@ -163,15 +163,17 @@
 
 ## Fase C — Interacção premium (opcional / stretch)
 
-### T-C.1 — Command palette (`Ctrl+P`)
+### T-C.1 — Command palette (`Ctrl+K`)
 
 - [ ] `palette.go` + estado `paletteOpen` no chrome.
 - [ ] Fuzzy sobre sessões e comandos.
 - [ ] Modal overlay; Esc fecha.
-- [ ] Decidir conflito com project panel (ver design.md).
-- [ ] Testes + deploy.
+- [ ] Atalho **`Ctrl+K`**; **`Ctrl+P` inalterado** (project panel).
+- [ ] Registar `Ctrl+K` no help overlay e status bar expandida.
+- [ ] Testes: `Ctrl+P` ainda abre project panel; `Ctrl+K` abre palette.
+- [ ] Deploy.
 
-**Critério de saída:** `Ctrl+P` abre palette; selecionar `/cwd` abre form.
+**Critério de saída:** `Ctrl+K` abre palette; `/cwd` na palette abre form; `Ctrl+P` sem regressão.
 
 ---
 
@@ -186,29 +188,29 @@
 
 ---
 
-### T-C.3 — Temas nomeados
+### T-C.3 — Temas nomeados (STRETCH — adiado)
+
+> Igor: indeciso no MVP. Não bloqueia v0.34.0. Reabrir após validação visual das Fases A+B.
 
 - [ ] `ParseTheme` aceita `warm`, `high-contrast`.
 - [ ] `/theme` ou flag `--theme warm`.
 - [ ] Documentar em help overlay.
-- [ ] Testes parse + render.
-- [ ] Deploy.
-
-**Critério de saída:** três presets seleccionáveis.
 
 ---
 
-### T-C.4 — Attention (opcional)
+### T-C.4 — Attention (aprovado — default on)
 
-- [ ] Config `attention.enabled`; bell em `stream_end` se blurred.
-- [ ] Teste unitário do gating; sem spam.
-- [ ] Deploy off por defeito.
+- [ ] Config `attention.enabled` default **true**; flag `--no-attention`.
+- [ ] Bell / OSC notification em `stream_end` quando TUI sem foco (best-effort).
+- [ ] Teste unitário do gating; sem spam em foco activo.
+- [ ] Documentar em help overlay e `CHANGELOG`.
+- [ ] Deploy + validação live (blur terminal, esperar resposta).
 
 ---
 
 ## Release checklist
 
-- [ ] Todas as tasks da Fase A + B completas (C conforme Igor).
+- [ ] Todas as tasks da Fase A + B completas; Fase C sem T-C.3 (temas adiados).
 - [ ] `go test ./internal/tui/... -short` verde.
 - [ ] `golangci-lint run ./...` verde.
 - [ ] `make deploy` + validação Telegram/TUI live.
