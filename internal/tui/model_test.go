@@ -656,6 +656,66 @@ func TestModel_LateHistoryDoesNotReplaceUserInteraction(t *testing.T) {
 	}
 }
 
+func TestModel_UpdateViewportPreservesScrollWhenNotAtBottom(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.height = 12
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+	for i := 0; i < 40; i++ {
+		m.messages = append(m.messages, chatMessage{
+			Sender:    "Igor",
+			Text:      "line",
+			Timestamp: time.Now(),
+		})
+	}
+	m.updateViewport()
+	m.viewport.GotoBottom()
+	m.viewport.ScrollUp(5)
+	offset := m.viewport.YOffset()
+
+	m.messages = append(m.messages, chatMessage{
+		Sender:    "Aurelia",
+		Text:      "chunk",
+		Timestamp: time.Now(),
+	})
+	m.updateViewport()
+
+	if m.viewport.YOffset() != offset {
+		t.Fatalf("expected scroll offset %d preserved, got %d", offset, m.viewport.YOffset())
+	}
+}
+
+func TestModel_UpdateViewportFollowsBottomWhenAlreadyAtBottom(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.height = 12
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+	for i := 0; i < 40; i++ {
+		m.messages = append(m.messages, chatMessage{
+			Sender:    "Igor",
+			Text:      "line",
+			Timestamp: time.Now(),
+		})
+	}
+	m.updateViewport()
+	m.viewport.GotoBottom()
+
+	m.messages = append(m.messages, chatMessage{
+		Sender:    "Aurelia",
+		Text:      "chunk",
+		Timestamp: time.Now(),
+	})
+	m.updateViewport()
+
+	if !m.viewport.AtBottom() {
+		t.Fatal("expected viewport to follow bottom when user was already at bottom")
+	}
+}
+
 func TestModel_PageUpScrollsViewport(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat

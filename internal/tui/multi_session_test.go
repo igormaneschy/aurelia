@@ -2,6 +2,7 @@ package tui
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -327,6 +328,34 @@ func TestHandleSidebarKey_EscExitsFocus(t *testing.T) {
 
 	if m2.sidebarFocused {
 		t.Error("expected sidebarFocused=false after esc")
+	}
+}
+
+func TestHandleSidebarKey_BlocksSessionOpenWhileStreaming(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.waiting = true
+	m.sidebarFocused = true
+	m.sidebarCursor = 1
+	m.activeSession = ipc.ReservedTUIChatID
+	m.sessions = []tuiSessionInfo{
+		{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
+		{ChatID: -9000002, Name: "work"},
+	}
+	prepSidebarTest(&m)
+
+	updated, cmd := m.handleKeyMsg(keyPress(tea.KeyEnter))
+	m2 := updated.(Model)
+
+	if cmd != nil {
+		t.Fatal("expected nil command when session open blocked during stream")
+	}
+	if m2.activeSession != ipc.ReservedTUIChatID {
+		t.Errorf("activeSession = %d, want unchanged DM", m2.activeSession)
+	}
+	last := m2.messages[len(m2.messages)-1]
+	if !strings.Contains(last.Text, "Wait for the current response") {
+		t.Errorf("expected warning message, got %q", last.Text)
 	}
 }
 
