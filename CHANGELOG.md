@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.32.3 - 2026-06-25
+
+### Changed
+- **TUI component decomposition** — `Model` dividido em `transcriptModel`, `inputModel`, `chromeModel` (embedded) para preparar rich components
+
 ## v0.32.2 - 2026-06-25
 
 ### Fixed
