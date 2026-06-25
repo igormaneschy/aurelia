@@ -45,7 +45,8 @@ type themeStyles struct {
 	ProgressEmptyColor string
 
 	MessageSeparatorStyle lipgloss.Style
-	ChatModeStyle lipgloss.Style
+	ChatModeStyle         lipgloss.Style
+	SearchHighlightStyle  lipgloss.Style
 }
 
 // Theme represents the TUI color theme.
@@ -219,6 +220,9 @@ func newDarkStyles() themeStyles {
 
 		// ChatModeStyle highlights that file system tools are disabled.
 		ChatModeStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Italic(true),
+		SearchHighlightStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("226")).
+			Background(lipgloss.Color("236")),
 		ProgressBarStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
 		ProgressFullColor: "244", ProgressEmptyColor: "238",
 	}
@@ -301,6 +305,9 @@ func newLightStyles() themeStyles {
 			Foreground(lipgloss.Color("248")),
 
 		ChatModeStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("130")).Italic(true),
+		SearchHighlightStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("130")).
+			Background(lipgloss.Color("254")),
 		ProgressBarStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
 		ProgressFullColor: "245", ProgressEmptyColor: "250",
 	}

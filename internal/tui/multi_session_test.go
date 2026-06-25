@@ -467,7 +467,19 @@ func TestHandleSidebarKey_DOnDMShowsMessage(t *testing.T) {
 	}
 }
 
-func TestCtrlS_FocusesSidebar(t *testing.T) {
+func TestCtrlS_OpensHistorySearch(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+
+	updated, _ := m.handleKeyMsg(keyCtrl('s'))
+	m2 := updated.(Model)
+
+	if !m2.historySearch.active {
+		t.Error("expected historySearch.active=true after ctrl+s")
+	}
+}
+
+func TestF2_FocusesSidebar(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.showSidebar = true
@@ -476,32 +488,23 @@ func TestCtrlS_FocusesSidebar(t *testing.T) {
 	}
 	m.activeSession = -9000001
 
-	// ctrl+s
-	updated, _ := m.handleKeyMsg(keyCtrl('s'))
+	updated, _ := m.handleKeyMsg(keyPress(tea.KeyF2))
 	m2 := updated.(Model)
 
 	if !m2.sidebarFocused {
-		t.Error("expected sidebarFocused=true after ctrl+s")
+		t.Error("expected sidebarFocused=true after f2")
 	}
 	if m2.sidebarCursor != 0 {
 		t.Errorf("sidebarCursor = %d, want 0 (active session)", m2.sidebarCursor)
 	}
-
-	// f2 (fallback for terminals that intercept ctrl+s)
-	updated2, _ := m.handleKeyMsg(keyPress(tea.KeyF2))
-	m3 := updated2.(Model)
-
-	if !m3.sidebarFocused {
-		t.Error("expected sidebarFocused=true after f2")
-	}
 }
 
-func TestCtrlS_NoopWhenSidebarHidden(t *testing.T) {
+func TestF2_NoopWhenSidebarHidden(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.showSidebar = false
 
-	updated, _ := m.handleKeyMsg(keyCtrl('s'))
+	updated, _ := m.handleKeyMsg(keyPress(tea.KeyF2))
 	m2 := updated.(Model)
 
 	if m2.sidebarFocused {

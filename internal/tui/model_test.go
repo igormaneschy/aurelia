@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -15,10 +14,8 @@ import (
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
 
-var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
-
 func stripANSIForTest(s string) string {
-	return ansiEscapePattern.ReplaceAllString(s, "")
+	return stripANSI(s)
 }
 
 func TestModel_InitialLoadingState(t *testing.T) {

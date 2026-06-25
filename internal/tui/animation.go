@@ -5,6 +5,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/harmonica"
 )
 
@@ -103,11 +104,46 @@ func (a *animState) step() tea.Cmd {
 	a.spinnerPos, a.spinnerVel = a.spinnerSpring.Update(a.spinnerPos, a.spinnerVel, a.spinnerTarget)
 	a.responsePos, a.responseVel = a.responseSpring.Update(a.responsePos, a.responseVel, a.responseTarget)
 	a.badgePos, a.badgeVel = a.badgeSpring.Update(a.badgePos, a.badgeVel, a.badgeTarget)
+	if a.badgeTarget > 1.15 && near(a.badgePos, a.badgeTarget) {
+		a.badgeTarget = 1
+	}
 	if a.settled() {
 		a.ticking = false
 		return nil
 	}
 	return a.tickCmd()
+}
+
+// onStreamStart fades in the streaming response text.
+func (a *animState) onStreamStart() tea.Cmd {
+	if !a.enabled {
+		return nil
+	}
+	a.spinnerTarget = 1
+	a.spinnerPos = 1
+	a.responseTarget = 1
+	a.responsePos = 0
+	return a.beginTick()
+}
+
+// onStreamEnd fades out the thinking spinner.
+func (a *animState) onStreamEnd() tea.Cmd {
+	if !a.enabled {
+		return nil
+	}
+	a.spinnerTarget = 0
+	a.responseTarget = 1
+	return a.beginTick()
+}
+
+// pulseNewMessages animates the new-messages indicator.
+func (a *animState) pulseNewMessages() tea.Cmd {
+	if !a.enabled {
+		return nil
+	}
+	a.badgeTarget = 1.3
+	a.badgePos = 1
+	return a.beginTick()
 }
 
 func (a animState) settled() bool {
@@ -146,6 +182,16 @@ func (a animState) BadgeScale() float64 {
 		return 1
 	}
 	return clampFloat(a.badgePos, 1, 1.35)
+}
+
+func fadeStyle(base lipgloss.Style, opacity float64) lipgloss.Style {
+	if opacity >= 0.95 {
+		return base
+	}
+	if opacity < 0.4 {
+		return base.Faint(true)
+	}
+	return base
 }
 
 func clampFloat(v, lo, hi float64) float64 {

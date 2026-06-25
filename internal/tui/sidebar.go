@@ -187,6 +187,7 @@ func (m Model) renderSidebarTable() string {
 		if m.isChatMode() {
 			hints += "\n" + m.styles.ChatModeStyle.Render("(chat mode)")
 		}
+		hints += "\n" + m.styles.SidebarMutedStyle.Render("+ New session (click)")
 	}
 
 	return title + "\n" + tableContent + hints

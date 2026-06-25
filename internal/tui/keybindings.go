@@ -28,6 +28,7 @@ type keyMap struct {
 	HistoryDown  key.Binding
 	HistoryNext  key.Binding
 	HistoryPrev  key.Binding
+	HistorySearch key.Binding
 	Tab          key.Binding
 
 	CmdHelp         key.Binding
@@ -67,8 +68,12 @@ func defaultKeyMap() keyMap {
 			key.WithHelp("Tab", "Complete command or cycle sidebar"),
 		),
 		SidebarFocus: key.NewBinding(
-			key.WithKeys("ctrl+s", "f2"),
-			key.WithHelp("Ctrl+S / F2", "Focus sidebar sessions"),
+			key.WithKeys("f2"),
+			key.WithHelp("F2", "Focus sidebar sessions"),
+		),
+		HistorySearch: key.NewBinding(
+			key.WithKeys("ctrl+s"),
+			key.WithHelp("Ctrl+S", "Search chat history"),
 		),
 		Help: key.NewBinding(
 			key.WithKeys("?"),
@@ -159,6 +164,7 @@ func (k keyMap) ShortHelp() []key.Binding {
 		k.Submit,
 		k.Help,
 		k.SidebarFocus,
+		k.HistorySearch,
 		k.ProjectPanel,
 		k.Quit,
 	}
@@ -174,6 +180,7 @@ func (k keyMap) FullHelp() [][]key.Binding {
 			k.MouseToggle,
 			k.ProjectPanel,
 			k.SidebarFocus,
+			k.HistorySearch,
 			k.Clear,
 			k.CopyTranscript,
 			k.CopyResponse,

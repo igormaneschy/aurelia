@@ -162,6 +162,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.shouldShowSidebar() {
 			if handled, model, cmd := m.handleSidebarMouse(msg); handled { return model, cmd }
 		}
+		if handled, model, cmd := m.handleChatMouse(msg); handled { return model, cmd }
 		return m.handleViewportMsg(msg)
 
 	case spinner.TickMsg:
@@ -250,7 +251,8 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case animTickMsg:
-		return m, m.animations.step()
+		vpCmd := m.updateViewport()
+		return m, tea.Batch(m.animations.step(), vpCmd)
 
 	case daemonErrorMsg:
 		if msg.streamID != 0 && msg.streamID != m.streamID {
@@ -578,6 +580,10 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleSidebarKey(msg)
 	}
 
+	if m.historySearch.active && m.state == stateChat {
+		return m.handleHistorySearchKey(msg)
+	}
+
 	switch {
 	case msg.String() == "ctrl+c":
 		m.cleanupTempImages()
@@ -663,6 +669,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.showSidebar = !m.showSidebar
 		m.updateViewport()
 		return m, nil
+
+	case msg.String() == "ctrl+s":
+		return m.openHistorySearch()
 
 	case isSidebarFocusKey(msg):
 		if m.showSidebar && len(m.sessions) > 0 {
@@ -1193,12 +1202,10 @@ func isSidebarToggleKey(msg tea.KeyMsg) bool {
 	return s == "tab" || s == "ctrl+i" || s == "\t"
 }
 
-// isSidebarFocusKey returns true for ctrl+s or f2, which focus the
-// sidebar for session navigation. ctrl+s is the primary; f2 is the
-// fallback for terminals that intercept ctrl+s as XOFF flow control.
+// isSidebarFocusKey returns true for f2, which focuses the sidebar for
+// session navigation. Ctrl+S is reserved for history search.
 func isSidebarFocusKey(msg tea.KeyMsg) bool {
-	s := msg.String()
-	return s == "ctrl+s" || s == "f2"
+	return msg.String() == "f2"
 }
 
 // isProjectPanelToggleKey returns true for ctrl+p, which toggles the
@@ -1217,11 +1224,15 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
 
 	case "stream_chunk":
+		var animCmd tea.Cmd
+		if m.streamBuf == "" && event.Body != "" {
+			animCmd = m.animations.onStreamStart()
+		}
 		m.streamBuf += event.Body
 		m.updateStreamProgress(len(event.Body))
 		m.appendOrUpdateAureliaMessage(m.streamBuf)
-		m.updateViewport()
-		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
+		vpCmd := m.updateViewport()
+		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd(), animCmd, vpCmd)
 
 	case "message":
 		// Replace accumulated text with the final message to avoid duplication.
@@ -1235,6 +1246,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 
 	case "stream_end":
 		// Terminal event — stream complete.
+		animCmd := m.animations.onStreamEnd()
 		m.waiting = false
 		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
@@ -1243,8 +1255,9 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 			m.reader = nil
 		}
 		m.streamBuf = ""
-		m.updateViewport()
-		return m.continueWithNextQueuedMessage()
+		vpCmd := m.updateViewport()
+		next, queueCmd := m.continueWithNextQueuedMessage()
+		return next, tea.Batch(queueCmd, animCmd, vpCmd)
 
 	case "error":
 		// Terminal event — error.

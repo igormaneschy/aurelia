@@ -31,7 +31,8 @@ func TestDefaultKeyMap_MainShortcuts(t *testing.T) {
 		{keyCtrl('l'), km.Clear},
 		{keyCtrl('o'), km.MouseToggle},
 		{keyCtrl('p'), km.ProjectPanel},
-		{keyCtrl('s'), km.SidebarFocus},
+		{keyCtrl('s'), km.HistorySearch},
+		{keyPress(tea.KeyF2), km.SidebarFocus},
 		{keyPress(tea.KeyPgUp), km.PageUp},
 		{keyPress(tea.KeyPgDown), km.PageDown},
 	}

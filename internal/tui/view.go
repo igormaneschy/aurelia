@@ -167,7 +167,11 @@ func (m Model) renderMainContent() string {
 	}
 	content := m.viewport.View()
 	if m.historyNav.hasNewBelow {
-		banner := m.styles.SidebarMutedStyle.Render("↓ New messages")
+		style := m.styles.SidebarMutedStyle
+		if m.animations.enabled && m.animations.BadgeScale() > 1.05 {
+			style = style.Bold(true)
+		}
+		banner := style.Render("↓ New messages")
 		content = banner + "\n" + content
 	}
 	return content
@@ -191,6 +195,9 @@ func (m Model) renderInput() string {
 	}
 	if autocomplete := m.renderAutocomplete(); autocomplete != "" {
 		badgeLines = append(badgeLines, autocomplete)
+	}
+	if searchBar := m.renderSearchBar(); searchBar != "" {
+		badgeLines = append(badgeLines, searchBar)
 	}
 
 	promptText := "> "
@@ -374,7 +381,11 @@ type statusBarItem struct {
 func (m Model) renderChatHeader() string {
 	stateLabel := m.chromeState()
 	if m.waiting {
-		stateLabel = m.spinner.View() + " thinking"
+		spinnerView := m.spinner.View()
+		if m.animations.enabled && m.animations.SpinnerOpacity() < 0.95 {
+			spinnerView = fadeStyle(m.styles.HeaderMetaStyle, m.animations.SpinnerOpacity()).Render(strings.TrimSpace(spinnerView))
+		}
+		stateLabel = spinnerView + " thinking"
 	}
 
 	// Session name in the header. Use the safe label to protect against
