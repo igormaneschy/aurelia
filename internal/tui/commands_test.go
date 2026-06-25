@@ -50,11 +50,21 @@ func TestAdvanceModelWizard_ProviderAutoSubmits(t *testing.T) {
 	}
 }
 
+func TestModelProviderForm_BindsSelectionPointer(t *testing.T) {
+	catalog := catalogFromDaemonText("openai:\n  `gpt-5.1`\nanthropic:\n  `claude-sonnet-4-6`\n")
+	hf := newModelProviderForm(catalog, "auto")
+	hf.selected = "anthropic"
+	if hf.chosenModel() != "anthropic" {
+		t.Fatalf("expected bound selection anthropic, got %q", hf.chosenModel())
+	}
+}
+
 func TestAdvanceModelWizard_ProviderOpensModelStep(t *testing.T) {
 	m := testChatModel()
 	m.formOpen = true
 	catalog := catalogFromDaemonText("openai:\n  `gpt-5.1`\nanthropic:\n  `claude-sonnet-4-6`\n")
-	hf := &huhForm{kind: formKindModelProvider, selected: "openai", catalog: catalog}
+	hf := newModelProviderForm(catalog, "auto")
+	hf.selected = "openai"
 	next, cmd := m.advanceModelWizard(hf)
 	if !next.formOpen || next.activeForm == nil {
 		t.Fatal("expected model step form")

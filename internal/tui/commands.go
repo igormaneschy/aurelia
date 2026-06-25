@@ -247,56 +247,55 @@ func (c modelCatalog) providerForModel(model string) string {
 }
 
 func newModelProviderForm(catalog modelCatalog, currentModel string) *huhForm {
-	selected := "auto"
-	if provider := catalog.providerForModel(currentModel); provider != "" {
-		selected = provider
+	hf := &huhForm{
+		kind:    formKindModelProvider,
+		catalog: catalog,
 	}
-	form := huh.NewForm(
+	if provider := catalog.providerForModel(currentModel); provider != "" {
+		hf.selected = provider
+	} else {
+		hf.selected = "auto"
+	}
+	hf.form = huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("Select provider").
 				Description("Pick a provider, then choose a model in the next step").
 				Options(catalog.providerOptions()...).
-				Value(&selected),
+				Value(&hf.selected),
 		),
 	).WithShowHelp(true).WithWidth(60)
-	return &huhForm{
-		kind:     formKindModelProvider,
-		form:     form,
-		selected: selected,
-		catalog:  catalog,
-	}
+	return hf
 }
 
 func newModelNameForm(catalog modelCatalog, provider, currentModel string) *huhForm {
 	models := catalog.byProvider[provider]
-	selected := currentModel
-	if selected == "" || !containsString(models, selected) {
+	hf := &huhForm{
+		kind:     formKindModelName,
+		catalog:  catalog,
+		provider: provider,
+	}
+	hf.selected = currentModel
+	if hf.selected == "" || !containsString(models, hf.selected) {
 		if len(models) > 0 {
-			selected = models[0]
+			hf.selected = models[0]
 		}
 	}
 	options := catalog.modelOptions(provider)
 	if len(options) == 0 {
 		options = []huh.Option[string]{huh.NewOption("auto", "auto")}
-		selected = "auto"
+		hf.selected = "auto"
 	}
-	form := huh.NewForm(
+	hf.form = huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title(fmt.Sprintf("Select model (%s)", provider)).
 				Description("Choose a model for this session").
 				Options(options...).
-				Value(&selected),
+				Value(&hf.selected),
 		),
 	).WithShowHelp(true).WithWidth(60)
-	return &huhForm{
-		kind:     formKindModelName,
-		form:     form,
-		selected: selected,
-		catalog:  catalog,
-		provider: provider,
-	}
+	return hf
 }
 
 func containsString(items []string, want string) bool {
