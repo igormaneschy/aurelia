@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.32.1 - 2026-06-25
+
+### Fixed
+- **TUI health check no boot** — polling periódico do daemon arranca após connect inicial
+- **Fila pós-Esc** — mensagens enfileiradas drenam automaticamente após cancelar stream
+- **Ordem da fila** — novos submits com fila pendente respeitam FIFO
+- **Histórico vazio em troca de sessão** — transcript limpo quando sessão não tem histórico
+- **Redacção de erros no TUI** — `SendError` usa `RedactSecrets` antes de mostrar no chat
+
 ## v0.32.0 - 2026-06-25
 
 ### Changed
