@@ -403,7 +403,7 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 	pipeErr := pipeSvc.Process(chatID, threadID, 0, enrichedText, attachments, userID, true)
 	if pipeErr != nil {
 		log.Printf("tui: pipeline process error: %s", pipeline.RedactSecrets(pipeErr.Error()))
-		_ = output.SendError(chatID, threadID, pipeErr.Error())
+		_ = output.SendError(chatID, threadID, pipeline.RedactSecrets(pipeErr.Error()))
 	}
 
 	// Wait for pipeline completion or context cancellation (client

@@ -177,6 +177,24 @@ func TestTUIHistoryMsg_AppliedOnSessionSwitch(t *testing.T) {
 	}
 }
 
+func TestTUIHistoryMsg_EmptyHistoryOnSessionSwitchClearsMessages(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.activeSession = -9000002
+	m.messages = []chatMessage{{Sender: "Igor", Text: "stale transcript"}}
+	m.switchingSession = true
+
+	updated, _ := m.Update(tuiHistoryMsg{messages: nil})
+	m2 := updated.(Model)
+
+	if len(m2.messages) != 0 {
+		t.Fatalf("expected empty transcript after empty history on switch, got %d messages", len(m2.messages))
+	}
+	if m2.switchingSession {
+		t.Error("expected switchingSession=false after history applied")
+	}
+}
+
 func TestTUIHistoryMsg_NotAppliedWhenNotSwitchingAndNoStartupMessage(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat

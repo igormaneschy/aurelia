@@ -66,7 +66,12 @@ func (m Model) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Timestamp: time.Now(),
 		})
 		m.ensureViewport()
-		return m, tea.Batch(fetchTUIStatus(m.ipcClient, m.activeSession), fetchTUIHistory(m.ipcClient, m.activeSession), fetchTUISessions(m.ipcClient))
+		return m, tea.Batch(
+			fetchTUIStatus(m.ipcClient, m.activeSession),
+			fetchTUIHistory(m.ipcClient, m.activeSession),
+			fetchTUISessions(m.ipcClient),
+			scheduleHealthCheck(),
+		)
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
@@ -205,11 +210,9 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.switchingSession = false
 			return m, nil
 		}
-		if len(msg.messages) > 0 {
-			if m.switchingSession || m.canApplyStartupHistory() {
-				m.messages = msg.messages
-				m.updateViewport()
-			}
+		if m.switchingSession || m.canApplyStartupHistory() {
+			m.messages = msg.messages
+			m.updateViewport()
 		}
 		m.switchingSession = false
 		return m, nil
@@ -800,7 +803,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			tempImagePaths: m.tempImagePaths(),
 			isCommand:      isCommand,
 		}
-		if m.waiting {
+		if m.waiting || m.pendingCount() > 0 {
 			if err := m.enqueueMessage(queued); err != nil {
 				m.messages = append(m.messages, chatMessage{
 					Sender:    "⚠️",
@@ -811,6 +814,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pendingImages = nil
 			m.pendingAttachments = nil
 			m.updateViewport()
+			if !m.waiting && m.pendingCount() > 0 {
+				return m.startQueuedMessage()
+			}
 			return m, nil
 		}
 
@@ -1125,7 +1131,7 @@ func (m Model) cancelStreaming() (tea.Model, tea.Cmd) {
 		Timestamp: time.Now(),
 	})
 	m.updateViewport()
-	return m, nil
+	return m.continueWithNextQueuedMessage()
 }
 
 func isViewportScrollKey(msg tea.KeyMsg) bool {
