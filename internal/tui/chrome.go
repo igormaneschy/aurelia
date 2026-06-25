@@ -37,9 +37,11 @@ type chromeModel struct {
 	connectLatency time.Duration
 	activeModel    string
 	turnStart      time.Time
-	mouseEnabled   bool
-	streamProgress streamProgress
-	animations     animState
+	mouseEnabled      bool
+	noMouse           bool
+	sessionFlashUntil time.Time
+	streamProgress    streamProgress
+	animations        animState
 
 	styles themeStyles
 	theme  Theme

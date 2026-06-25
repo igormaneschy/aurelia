@@ -35,6 +35,7 @@ type animState struct {
 // ModelOptions configures optional TUI behavior at startup.
 type ModelOptions struct {
 	NoAnimations bool
+	NoMouse      bool
 }
 
 func animationsEnabledForTerm(term string, noAnimations bool) bool {

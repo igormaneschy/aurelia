@@ -18,6 +18,7 @@ import (
 func main() {
 	themeFlag := flag.String("theme", "auto", "TUI theme: auto, light, or dark")
 	noAnimations := flag.Bool("no-animations", false, "Disable TUI animations")
+	noMouse := flag.Bool("no-mouse", false, "Disable mouse interaction (Ctrl+O has no effect)")
 	flag.Parse()
 
 	theme := tui.ParseTheme(*themeFlag)
@@ -43,6 +44,7 @@ func main() {
 	// by default.
 	m := tui.NewModelWithOptions(socketPath, theme, tui.ModelOptions{
 		NoAnimations: *noAnimations,
+		NoMouse:      *noMouse,
 	})
 	p := tea.NewProgram(m)
 

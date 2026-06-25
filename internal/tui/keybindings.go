@@ -29,6 +29,7 @@ type keyMap struct {
 	HistoryNext  key.Binding
 	HistoryPrev  key.Binding
 	HistorySearch key.Binding
+	NewSession   key.Binding
 	Tab          key.Binding
 
 	CmdHelp         key.Binding
@@ -42,6 +43,29 @@ type keyMap struct {
 	CmdCwdClear     key.Binding
 	CmdImg          key.Binding
 	CmdAttach       key.Binding
+}
+
+// uiContext identifies which TUI mode is active for contextual help.
+type uiContext int
+
+const (
+	uiContextChat uiContext = iota
+	uiContextSidebar
+	uiContextSearch
+	uiContextForm
+)
+
+func (m Model) uiContext() uiContext {
+	switch {
+	case m.formOpen:
+		return uiContextForm
+	case m.historySearch.active:
+		return uiContextSearch
+	case m.sidebarFocused:
+		return uiContextSidebar
+	default:
+		return uiContextChat
+	}
 }
 
 // fullKeyMap returns the active keymap for the current model state.
@@ -74,6 +98,10 @@ func defaultKeyMap() keyMap {
 		HistorySearch: key.NewBinding(
 			key.WithKeys("ctrl+s"),
 			key.WithHelp("Ctrl+S", "Search chat history"),
+		),
+		NewSession: key.NewBinding(
+			key.WithKeys("ctrl+n"),
+			key.WithHelp("Ctrl+N", "New session (form)"),
 		),
 		Help: key.NewBinding(
 			key.WithKeys("?"),
@@ -229,4 +257,80 @@ func helpOnlyBinding(keyLabel, desc string) key.Binding {
 		key.WithKeys("cmd:"+keyLabel),
 		key.WithHelp(keyLabel, desc),
 	)
+}
+
+func (m Model) helpPanelTitle() string {
+	switch m.uiContext() {
+	case uiContextSidebar:
+		return "Sidebar Shortcuts"
+	case uiContextSearch:
+		return "Search Shortcuts"
+	case uiContextForm:
+		return "Form Shortcuts"
+	default:
+		return "Keyboard Shortcuts"
+	}
+}
+
+// helpPanelGroups returns contextual help sections for the overlay.
+func (m Model) helpPanelGroups() [][]key.Binding {
+	km := m.fullKeyMap()
+	switch m.uiContext() {
+	case uiContextSidebar:
+		return [][]key.Binding{sidebarContextBindings(), chatContextBindings(km)}
+	case uiContextSearch:
+		return [][]key.Binding{searchContextBindings(), chatContextBindings(km)}
+	case uiContextForm:
+		return [][]key.Binding{formContextBindings()}
+	default:
+		return km.FullHelp()
+	}
+}
+
+func sidebarContextBindings() []key.Binding {
+	return []key.Binding{
+		helpOnlyBinding("↑↓ / j k", "Navigate sessions"),
+		helpOnlyBinding("enter", "Open session"),
+		helpOnlyBinding("n", "Quick new session"),
+		helpOnlyBinding("r", "Rename session"),
+		helpOnlyBinding("d", "Delete session"),
+		helpOnlyBinding("esc / tab", "Exit sidebar focus"),
+		helpOnlyBinding("click row", "Open session (mouse)"),
+		helpOnlyBinding("+ New session", "Click hint to open form"),
+	}
+}
+
+func searchContextBindings() []key.Binding {
+	return []key.Binding{
+		helpOnlyBinding("type", "Filter matches"),
+		helpOnlyBinding("enter / ctrl+s", "Next match"),
+		helpOnlyBinding("backspace", "Delete character"),
+		helpOnlyBinding("esc", "Close search"),
+	}
+}
+
+func formContextBindings() []key.Binding {
+	return []key.Binding{
+		helpOnlyBinding("↑↓", "Navigate fields"),
+		helpOnlyBinding("enter", "Confirm / submit"),
+		helpOnlyBinding("esc", "Cancel form"),
+	}
+}
+
+func chatContextBindings(km keyMap) []key.Binding {
+	return []key.Binding{
+		km.Cancel,
+		km.Submit,
+		km.Newline,
+		km.MouseToggle,
+		km.SidebarFocus,
+		km.HistorySearch,
+		km.NewSession,
+		km.HistoryNext,
+		km.HistoryPrev,
+		km.ProjectPanel,
+		km.Clear,
+		km.Quit,
+		km.HelpClose,
+	}
 }

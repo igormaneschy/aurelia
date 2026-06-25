@@ -127,6 +127,7 @@ func newModel(socketPath, historyPath string, theme Theme, opts ModelOptions) Mo
 			theme:           theme,
 			sidebarTable:    newSidebarTable(styles),
 			helpModel:       newHelpModel(styles, theme),
+			noMouse:         opts.NoMouse,
 			animations:      newAnimState(animationsEnabledForTerm(os.Getenv("TERM"), opts.NoAnimations)),
 		},
 		inputModel: inputModel{

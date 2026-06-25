@@ -251,6 +251,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case animTickMsg:
 		vpCmd := m.updateViewport()
+		m.syncSidebarRows()
 		return m, tea.Batch(m.animations.step(), vpCmd)
 
 	case daemonErrorMsg:
@@ -370,10 +371,12 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.switchingSession = true
 		m.syncSidebarRows()
 		m.updateViewport()
+		m.sessionFlashUntil = time.Now().Add(500 * time.Millisecond)
 		cmds := []tea.Cmd{
 			fetchTUISessions(m.ipcClient),
 			fetchTUIHistory(m.ipcClient, m.activeSession),
 			fetchTUIStatus(m.ipcClient, m.activeSession),
+			m.animations.pulseNewMessages(),
 		}
 		if model := strings.TrimSpace(m.pendingSessionModel); model != "" && model != "auto" {
 			m.pendingSessionModel = ""
@@ -407,10 +410,12 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateViewport()
 		m.sidebarFocused = false
 		m.sidebarTable.Blur()
+		m.sessionFlashUntil = time.Now().Add(500 * time.Millisecond)
 		// Reload history + status for the new session.
 		return m, tea.Batch(
 			fetchTUIHistory(m.ipcClient, m.activeSession),
 			fetchTUIStatus(m.ipcClient, m.activeSession),
+			m.animations.pulseNewMessages(),
 		)
 
 	case tuiSessionDeletedMsg:
@@ -672,6 +677,12 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case msg.String() == "ctrl+s":
 		return m.openHistorySearch()
 
+	case msg.String() == "ctrl+n":
+		if m.warnSessionChangeWhileStreaming() {
+			return m, nil
+		}
+		return m.openNewSessionForm()
+
 	case isSidebarFocusKey(msg):
 		if m.showSidebar && len(m.sessions) > 0 {
 			m.sidebarFocused = true
@@ -922,10 +933,12 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) toggleMouseCapture() (tea.Model, tea.Cmd) {
+	if m.noMouse {
+		return m, nil
+	}
 	m.mouseEnabled = !m.mouseEnabled
 	return m, nil
 }
-
 
 func (m Model) openSidebarSessionAt(row int) (tea.Model, tea.Cmd) {
 	if row < 0 || row >= len(m.sessions) { return m, nil }

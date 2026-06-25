@@ -1582,7 +1582,7 @@ func TestModel_StatusBarUsesCompactShortcuts(t *testing.T) {
 
 	status := stripANSIForTest(m.renderStatusBar())
 
-	for _, want := range []string{"↵ send", "alt+enter newline", "✋ mouse", "esc cancel", "⌃L clear", "⌃P project", "tab sidebar"} {
+	for _, want := range []string{"↵ send", "alt+enter newline", "✋ mouse", "esc cancel", "⌃L clear", "⌃P project", "⌃S · f2 · ⌃N"} {
 		if !strings.Contains(status, want) {
 			t.Errorf("expected status bar to contain %q, got %q", want, status)
 		}
@@ -1613,8 +1613,8 @@ func TestModel_StatusBarDropsItemsOnNarrowTerminal(t *testing.T) {
 	if strings.Contains(status, "⌃C quit") {
 		t.Errorf("expected '⌃C quit' to be dropped on width=50, got %q", status)
 	}
-	if strings.Contains(status, "tab sidebar") {
-		t.Errorf("expected 'tab sidebar' to be dropped on width=50, got %q", status)
+	if strings.Contains(status, "⌃S · f2 · ⌃N") {
+		t.Errorf("expected search shortcut hint to be dropped on width=50, got %q", status)
 	}
 	if strings.Contains(status, "⌃P project") {
 		t.Errorf("expected '⌃P project' to be dropped on width=50, got %q", status)

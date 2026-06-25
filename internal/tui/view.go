@@ -343,9 +343,8 @@ func (m Model) renderStatusBar() string {
 		{label: "esc cancel", min: 106},
 		{label: "⌃L clear", min: 118},
 		{label: "⌃P project", min: 130},
-		{label: "⌃S/f2 sessions", min: 146},
-		{label: "tab sidebar", min: 162},
-		{label: "⌃C quit", min: 178},
+		{label: "⌃S · f2 · ⌃N", min: 146},
+		{label: "⌃C quit", min: 162},
 	}
 
 	parts := []string{}
@@ -398,7 +397,7 @@ func (m Model) renderChatHeader() string {
 		if m.animations.enabled && m.animations.SpinnerOpacity() < 0.95 {
 			spinnerView = fadeStyle(m.styles.HeaderMetaStyle, m.animations.SpinnerOpacity()).Render(strings.TrimSpace(spinnerView))
 		}
-		stateLabel = spinnerView + " thinking"
+		stateLabel = spinnerView + " thinking" + thinkingDots()
 	}
 
 	// Session name in the header. Use the safe label to protect against
@@ -805,35 +804,56 @@ func safeSessionLabel(name string) string {
 	return b.String()
 }
 
+// thinkingDots returns an animated ellipsis while the daemon is processing.
+func thinkingDots() string {
+	switch int(time.Now().UnixMilli()/450) % 4 {
+	case 1:
+		return "."
+	case 2:
+		return ".."
+	case 3:
+		return "..."
+	default:
+		return ""
+	}
+}
+
 // renderHelpPanel renders the bubbles/help keymap overlay with section headers.
 func (m Model) renderHelpPanel() string {
-	km := m.fullKeyMap()
 	panelWidth := maxInt(46, minInt(m.width-8, 72))
 
 	hm := m.helpModel
 	hm.ShowAll = true
 	hm.SetWidth(panelWidth)
 
-	groups := km.FullHelp()
+	groups := m.helpPanelGroups()
 	var b strings.Builder
-	b.WriteString(m.styles.HeaderTitleStyle.Render("Keyboard Shortcuts"))
+	b.WriteString(m.styles.HeaderTitleStyle.Render(m.helpPanelTitle()))
 	b.WriteString("\n\n")
 	if len(groups) > 0 {
 		b.WriteString(hm.FullHelpView([][]key.Binding{groups[0]}))
 	}
 	if len(groups) > 1 {
 		b.WriteString("\n\n")
-		b.WriteString(m.styles.HeaderTitleStyle.Render("Commands"))
+		title := "General"
+		if m.uiContext() != uiContextChat {
+			title = "Chat & Global"
+		} else {
+			title = "Commands"
+		}
+		b.WriteString(m.styles.HeaderTitleStyle.Render(title))
 		b.WriteString("\n\n")
 		b.WriteString(hm.FullHelpView([][]key.Binding{groups[1]}))
 	}
 
 	b.WriteString("\n\n")
-	b.WriteString(m.styles.HeaderMetaStyle.Render("Images: /img <path>, Ctrl+V paste, drag & drop"))
+	b.WriteString(m.styles.HeaderMetaStyle.Render("Mouse: Ctrl+O toggle · click session/model/project/+ New"))
 	b.WriteString("\n")
-	b.WriteString(m.styles.HeaderMetaStyle.Render("Docs: /attach <path>, multiple allowed per message"))
-	b.WriteString("\n\n")
-	b.WriteString(m.styles.HeaderMetaStyle.Render("Theme: --theme auto|light|dark (use --theme light if auto-detection misses your light terminal)"))
+	b.WriteString(m.styles.HeaderMetaStyle.Render("Images: /img <path>, Ctrl+V paste · Docs: /attach <path>"))
+	if m.uiContext() == uiContextChat {
+		b.WriteString("\n\n")
+		b.WriteString(m.styles.HeaderMetaStyle.Render("Theme: --theme auto|light|dark · --no-mouse · --no-animations"))
+	}
 
 	return b.String()
 }

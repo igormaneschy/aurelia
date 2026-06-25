@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"time"
 
 	"charm.land/bubbles/v2/table"
 	"charm.land/lipgloss/v2"
@@ -112,6 +113,10 @@ func (m *Model) syncSidebarRows() {
 		icon := "○"
 		if s.ChatID == m.activeSession {
 			icon = "●"
+			if !m.sessionFlashUntil.IsZero() && time.Now().Before(m.sessionFlashUntil) &&
+				m.animations.enabled && m.animations.BadgeScale() > 1.05 {
+				icon = m.styles.SidebarActiveStyle.Bold(true).Render("●")
+			}
 		}
 		if m.sidebarFocused && i == m.sidebarCursor {
 			icon = "▶"
