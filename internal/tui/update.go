@@ -231,15 +231,8 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tuiModelsMsg:
-		if m.formOpen && m.activeForm != nil {
-			switch {
-			case m.activeForm.isModelForm():
-				m = m.applyWizardCatalog(msg)
-			case m.activeForm.kind == formKindNewSession:
-				m = m.applyNewSessionCatalog(msg)
-			default:
-				return m, nil
-			}
+		if m.formOpen && m.activeForm != nil && m.activeForm.isModelForm() {
+			m = m.applyWizardCatalog(msg)
 			return m, m.initActiveForm()
 		}
 		return m, nil
