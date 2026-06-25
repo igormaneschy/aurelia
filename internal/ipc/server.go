@@ -371,7 +371,7 @@ func validateMessage(msg IPCMessage) error {
 	switch msg.Type {
 	case MsgTypeSend, MsgTypeSubscribe, MsgTypeCommand, MsgTypeHistory,
 		MsgTypeSessions, MsgTypeSessionCreate, MsgTypeSessionOpen, MsgTypeSessionDelete, MsgTypeSessionRename,
-		MsgTypeProjectState:
+		MsgTypeProjectState, MsgTypeModels:
 		// valid
 	default:
 		return fmt.Errorf("unknown message type %q", msg.Type)

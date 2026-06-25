@@ -218,21 +218,8 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tuiModelsMsg:
 		if m.formOpen && m.activeForm != nil {
-			catalog := msg.catalog
-			if catalog.providerCount() == 0 || msg.err != nil {
-				catalog = catalogFromModels(modelFallbackList(m.activeModel))
-			}
-			// Do not reset the wizard if the user already advanced to model pick.
-			if m.activeForm.kind == formKindModelName {
-				m.activeForm.catalog = catalog
-				if len(catalog.byProvider[m.activeForm.provider]) > 0 {
-					m.activeForm = newModelNameForm(catalog, m.activeForm.provider, m.activeForm.chosenModel())
-					return m, m.activeForm.init()
-				}
-				return m, nil
-			}
-			m = m.refreshModelSelectForm(tuiModelsMsg{catalog: catalog})
-			return m, m.activeForm.init()
+			m = m.applyWizardCatalog(msg)
+			return m, m.initActiveForm()
 		}
 		return m, nil
 

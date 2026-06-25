@@ -947,7 +947,9 @@ func modelProviderDisplayRank(provider, currentProvider string) int {
 
 func isLocalModelProvider(provider string) bool {
 	normalized := strings.ToLower(provider)
-	return strings.Contains(normalized, "ollama") || strings.Contains(normalized, "lm-studio")
+	return strings.Contains(normalized, "ollama") ||
+		strings.Contains(normalized, "lm-studio") ||
+		strings.Contains(normalized, "llamacpp")
 }
 
 func (bc *BotController) cmdRefreshModels() (string, error) {

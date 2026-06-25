@@ -193,6 +193,9 @@ func makeTUIHandler(a *app) func(context.Context, ipc.IPCMessage, func(ipc.IPCEv
 		case ipc.MsgTypeProjectState:
 			forceTUIIDs(&msg, personaID)
 			return handleTUIProjectState(ctx, a, msg, emit)
+		case ipc.MsgTypeModels:
+			forceTUIIDs(&msg, personaID)
+			return handleTUIModels(ctx, a, msg, emit)
 		case ipc.MsgTypeSubscribe:
 			// Terminal error: subscribe not supported.
 			return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "subscribe not supported", RequestID: msg.RequestID})

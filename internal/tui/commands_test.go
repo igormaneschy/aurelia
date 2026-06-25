@@ -5,11 +5,36 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/igormaneschy/aurelia/internal/ipc"
 )
+
+type assertErr string
+
+func (e assertErr) Error() string { return string(e) }
 
 func TestIsBareModelCommand(t *testing.T) {
 	if !isBareModelCommand("/model") || isBareModelCommand("/model gpt-4") {
 		t.Fatal("bad")
+	}
+}
+
+func TestCatalogFromIPCModels_IncludesLateLocalProvider(t *testing.T) {
+	events := []ipc.IPCEvent{{
+		Type: ipc.EventTypeModels,
+		Body: `[{"provider":"openai","id":"gpt-5.1"},{"provider":"llamacpp-tailscale","id":"qwen3"}]`,
+	}}
+	catalog := catalogFromIPCModels(events)
+	if !containsString(catalog.byProvider["llamacpp-tailscale"], "qwen3") {
+		t.Fatalf("missing llamacpp-tailscale model: %#v", catalog.byProvider)
+	}
+}
+
+func TestCatalogFromDaemonText_HeaderWithoutModelsOmitsProvider(t *testing.T) {
+	body := "openai:\n  `gpt-5.1`\nllamacpp-tailscale:\n"
+	catalog := catalogFromDaemonText(body)
+	if containsString(catalog.providers, "llamacpp-tailscale") {
+		t.Fatalf("provider header without model lines must not appear in catalog: %#v", catalog.byProvider)
 	}
 }
 
@@ -145,6 +170,61 @@ func TestHandleModelWizardKey_BackReturnsToProvider(t *testing.T) {
 	}
 	if next.activeForm.selected != "openai" {
 		t.Fatalf("provider selection = %q", next.activeForm.selected)
+	}
+}
+
+func TestRefreshModelSelectForm_PreservesProviderSelection(t *testing.T) {
+	initial := catalogFromDaemonText("openai:\n  `gpt-5.1`\n")
+	m := testChatModel()
+	m.formOpen = true
+	m.activeForm = newModelProviderForm(initial, "auto")
+	m.activeForm.selected = "openai"
+
+	updated := catalogFromDaemonText("openai:\n  `gpt-5.1`\nanthropic:\n  `claude-sonnet-4-6`\n")
+	next := m.refreshModelSelectForm(updated)
+
+	if next.activeForm.selected != "openai" {
+		t.Fatalf("selected = %q, want openai", next.activeForm.selected)
+	}
+	if next.activeForm.catalog.providerCount() != 2 {
+		t.Fatalf("expected 2 providers after refresh, got %d", next.activeForm.catalog.providerCount())
+	}
+}
+
+func TestApplyWizardCatalog_FailedReloadKeepsExistingCatalog(t *testing.T) {
+	catalog := catalogFromDaemonText("openai:\n  `gpt-5.1`\nanthropic:\n  `claude-sonnet-4-6`\n")
+	m := testChatModel()
+	m.formOpen = true
+	m.activeForm = newModelProviderForm(catalog, "auto")
+	m.activeForm.selected = "anthropic"
+
+	next := m.applyWizardCatalog(tuiModelsMsg{reloaded: true, err: assertErr("timeout")})
+
+	if next.activeForm.catalog.providerCount() != 2 {
+		t.Fatalf("expected existing catalog preserved, got %d providers", next.activeForm.catalog.providerCount())
+	}
+	if next.activeForm.selected != "anthropic" {
+		t.Fatalf("selected = %q, want anthropic", next.activeForm.selected)
+	}
+}
+
+func TestRefreshModelSelectForm_ModelStepKeepsSelection(t *testing.T) {
+	catalog := catalogFromDaemonText("openai:\n  `gpt-5.1`\nanthropic:\n  `claude-sonnet-4-6`\n")
+	m := testChatModel()
+	m.formOpen = true
+	m.activeForm = newModelNameForm(catalog, "openai", "gpt-5.1")
+
+	updated := catalogFromDaemonText("openai:\n  `gpt-5.1`\n  `gpt-5.2`\nanthropic:\n  `claude-sonnet-4-6`\n")
+	next := m.refreshModelSelectForm(updated)
+
+	if next.activeForm.kind != formKindModelName {
+		t.Fatalf("expected model step, got %v", next.activeForm.kind)
+	}
+	if next.activeForm.chosenModel() != "gpt-5.1" {
+		t.Fatalf("selected model = %q, want gpt-5.1", next.activeForm.chosenModel())
+	}
+	if !containsString(next.activeForm.catalog.byProvider["openai"], "gpt-5.2") {
+		t.Fatalf("expected refreshed openai models, got %#v", next.activeForm.catalog.byProvider["openai"])
 	}
 }
 
