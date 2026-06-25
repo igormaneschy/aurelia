@@ -154,6 +154,15 @@ func (m Model) sidebarNewSessionHit(x, y int) bool {
 	return hintY >= 0 && y >= hintY && y <= hintY+1
 }
 
+func (m Model) sidebarProjectBlockYRange() (start, end int) {
+	start = m.sidebarLineY("Project")
+	if start < 0 {
+		return -1, -1
+	}
+	// Title, project name, and full cwd path lines.
+	return start, start + 2
+}
+
 func (m Model) sidebarProjectHit(x, y int) bool {
 	if !m.shouldShowSidebar() || m.sidebarFocused || m.isChatMode() {
 		return false
@@ -161,12 +170,11 @@ func (m Model) sidebarProjectHit(x, y int) bool {
 	if !sidebarMouseHitX(x) {
 		return false
 	}
-	path := truncateMiddle(m.cwdPath, sidebarWidth-4)
-	if path == "" {
+	start, end := m.sidebarProjectBlockYRange()
+	if start < 0 {
 		return false
 	}
-	hintY := m.sidebarLineY(path)
-	return hintY >= 0 && y == hintY
+	return y >= start && y <= end
 }
 
 func (m Model) handleChatMouse(msg tea.MouseMsg) (handled bool, model tea.Model, cmd tea.Cmd) {

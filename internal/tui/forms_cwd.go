@@ -30,14 +30,26 @@ func cwdPickerStartDir(cwdPath string) string {
 	return "/"
 }
 
-func newCwdForm(startDir string) *huhForm {
+func cwdFormDescription(cwdPath string) string {
+	cwdPath = strings.TrimSpace(cwdPath)
+	if cwdPath == "" || cwdPath == "not set" {
+		return "No project set\n" + cwdFormHints
+	}
+	return "Current: " + cwdPath + "\n" + cwdFormHints
+}
+
+func newCwdForm(cwdPath string) *huhForm {
 	hf := &huhForm{kind: formKindCwd}
+	cwdPath = strings.TrimSpace(cwdPath)
+	if cwdPath != "" && cwdPath != "not set" {
+		hf.selected = cwdPath
+	}
 	hf.form = huh.NewForm(
 		huh.NewGroup(
 			huh.NewFilePicker().
 				Title("Select project directory").
-				Description(cwdFormHints).
-				CurrentDirectory(startDir).
+				Description(cwdFormDescription(cwdPath)).
+				CurrentDirectory(cwdPickerStartDir(cwdPath)).
 				DirAllowed(true).
 				FileAllowed(false).
 				Value(&hf.selected),
@@ -48,7 +60,7 @@ func newCwdForm(startDir string) *huhForm {
 
 func (m Model) openCwdForm() (Model, tea.Cmd) {
 	m.formOpen = true
-	m.activeForm = newCwdForm(cwdPickerStartDir(m.cwdPath))
+	m.activeForm = newCwdForm(m.cwdPath)
 	return m, m.initActiveForm()
 }
 

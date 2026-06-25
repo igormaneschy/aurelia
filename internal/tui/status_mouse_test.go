@@ -92,6 +92,30 @@ func TestHandleSidebarMouse_ClickBelowTablePassesThrough(t *testing.T) {
 	}
 }
 
+func TestHandleChatMouse_ProjectTitleOpensCwdForm(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.sessions = []tuiSessionInfo{{ChatID: ipc.ReservedTUIChatID, Name: "dm"}}
+	m.cwdPath = "/Users/igor/dev/aurelia"
+	prepSidebarMouseTest(&m)
+
+	titleY := m.sidebarLineY("Project")
+	if titleY < 0 {
+		t.Fatal("expected Project title line in sidebar")
+	}
+
+	handled, model, _ := m.handleChatMouse(tea.MouseClickMsg{X: 2, Y: titleY, Button: tea.MouseLeft})
+	if !handled {
+		t.Fatal("expected click on Project title to open cwd form")
+	}
+	next := model.(Model)
+	if !next.formOpen || next.activeForm == nil || next.activeForm.kind != formKindCwd {
+		t.Fatalf("expected cwd form, got %#v", next.activeForm)
+	}
+	if next.activeForm.selected != m.cwdPath {
+		t.Fatalf("selected = %q, want %q", next.activeForm.selected, m.cwdPath)
+	}
+}
+
 func TestHandleChatMouse_NewSessionOpensForm(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.sessions = []tuiSessionInfo{{ChatID: ipc.ReservedTUIChatID, Name: "dm"}}

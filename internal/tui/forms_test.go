@@ -39,6 +39,19 @@ func TestOpenCwdForm_OpensOverlay(t *testing.T) {
 	}
 }
 
+func TestOpenCwdForm_ShowsCurrentPath(t *testing.T) {
+	m := testChatModel()
+	m.cwdPath = "/Users/igor/dev/aurelia"
+	next, _ := m.openCwdForm()
+	if next.activeForm.selected != m.cwdPath {
+		t.Fatalf("selected = %q, want %q", next.activeForm.selected, m.cwdPath)
+	}
+	view := initModelFormView(next.activeForm)
+	if !strings.Contains(view, m.cwdPath) {
+		t.Fatalf("form view should show current path, got:\n%s", view)
+	}
+}
+
 func TestOpenNewSessionForm_OpensOverlayAndFetchesModels(t *testing.T) {
 	m := testChatModel()
 	m.sessions = []tuiSessionInfo{{ChatID: ipc.ReservedTUIChatID, Name: "DM"}}
