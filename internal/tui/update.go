@@ -102,13 +102,12 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textarea.SetWidth(inputTextareaWidth(msg.Width))
 		contentWidth := m.contentWidth()
 		if !m.viewportSet {
-			m.viewport = viewportForSize(contentWidth, msg.Height)
+			m.viewport = m.newViewport(contentWidth)
 			m.viewportSet = true
 			m.viewport.SetContent(m.renderMessages(m.messages, contentWidth))
 			m.viewport.GotoBottom()
 		} else {
-			m.viewport.SetWidth(contentWidth)
-			m.viewport.SetHeight(viewportHeightForTerminal(msg.Height))
+			m.syncViewportDimensions()
 			m.updateViewport()
 		}
 		m.resizeSidebarTable()

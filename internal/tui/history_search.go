@@ -52,6 +52,7 @@ func findSearchMatches(messages []chatMessage, query string) []searchMatch {
 
 func (m Model) openHistorySearch() (Model, tea.Cmd) {
 	m.historySearch.active = true
+	m.syncViewportDimensions()
 	if m.historySearch.query == "" {
 		m.historySearch.matches = nil
 		m.historySearch.matchCursor = 0
@@ -64,6 +65,7 @@ func (m Model) closeHistorySearch() Model {
 	m.historySearch.active = false
 	m.historySearch.matches = nil
 	m.historySearch.matchCursor = 0
+	m.syncViewportDimensions()
 	return m
 }
 
@@ -72,8 +74,9 @@ func (m Model) refreshSearchMatches() (Model, tea.Cmd) {
 	m.historySearch.matchCursor = 0
 	if len(m.historySearch.matches) > 0 {
 		m.jumpToSearchMatch(0)
+	} else {
+		m.updateViewport()
 	}
-	m.updateViewport()
 	return m, nil
 }
 
@@ -83,7 +86,6 @@ func (m Model) nextSearchMatch() (Model, tea.Cmd) {
 	}
 	m.historySearch.matchCursor = (m.historySearch.matchCursor + 1) % len(m.historySearch.matches)
 	m.jumpToSearchMatch(m.historySearch.matchCursor)
-	m.updateViewport()
 	return m, nil
 }
 
@@ -199,44 +201,29 @@ func formatSearchPos(cur, total int) string {
 	return "(" + strconv.Itoa(cur) + "/" + strconv.Itoa(total) + ")"
 }
 
-func activeSearchStyle(style lipgloss.Style) lipgloss.Style {
-	return style.Copy().Bold(true).Reverse(true)
+func activeSearchStyle() lipgloss.Style {
+	// High-contrast marker without Reverse (reverse paints whole cells in tables).
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color("229")).
+		Background(lipgloss.Color("166")).
+		Bold(true).
+		Underline(true)
 }
 
-func highlightSearchText(text string, msgIndex int, activeCursor int, matches []searchMatch, style lipgloss.Style) string {
-	if len(matches) == 0 {
+// highlightSearchText marks only the active match on the current message.
+func highlightSearchText(text string, msgIndex int, activeCursor int, matches []searchMatch, _ lipgloss.Style) string {
+	if len(matches) == 0 || activeCursor < 0 || activeCursor >= len(matches) {
 		return text
 	}
-	activeStyle := activeSearchStyle(style)
-	var parts []string
-	last := 0
-	for i, match := range matches {
-		if match.messageIndex != msgIndex {
-			continue
-		}
-		if match.start < last || match.start > len(text) {
-			continue
-		}
-		end := match.end
-		if end > len(text) {
-			end = len(text)
-		}
-		parts = append(parts, text[last:match.start])
-		chunk := text[match.start:end]
-		if i == activeCursor {
-			parts = append(parts, activeStyle.Render(chunk))
-		} else {
-			parts = append(parts, style.Render(chunk))
-		}
-		last = end
-	}
-	if last < len(text) {
-		parts = append(parts, text[last:])
-	}
-	if len(parts) == 0 {
+	match := matches[activeCursor]
+	if match.messageIndex != msgIndex || match.start < 0 || match.start > len(text) {
 		return text
 	}
-	return strings.Join(parts, "")
+	end := match.end
+	if end > len(text) {
+		end = len(text)
+	}
+	return text[:match.start] + activeSearchStyle().Render(text[match.start:end]) + text[end:]
 }
 
 func lineOffsetBeforeMessage(content string, messageIndex int) int {

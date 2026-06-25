@@ -112,10 +112,7 @@ func (m Model) renderChatBaseLayout() string {
 	}
 	statusBar := m.renderStatusBar()
 
-	contentH := m.height - topMarginHeight - inputHeight - statusBarHeight
-	if contentH < 1 {
-		contentH = 1
-	}
+	contentH := m.chatBodyHeight()
 
 	var body string
 	if m.shouldShowSidebar() {
@@ -169,6 +166,7 @@ func (m Model) renderMainContent() string {
 		return "Initializing..."
 	}
 	content := m.viewport.View()
+	content = clipLines(content, m.viewportHeight())
 	if m.historyNav.hasNewBelow {
 		style := m.styles.SidebarMutedStyle
 		if m.animations.enabled && m.animations.BadgeScale() > 1.05 {
@@ -176,8 +174,20 @@ func (m Model) renderMainContent() string {
 		}
 		banner := style.Render("↓ New messages")
 		content = banner + "\n" + content
+		content = clipLines(content, m.viewportHeight()+1)
 	}
 	return content
+}
+
+func clipLines(s string, maxLines int) string {
+	if maxLines < 1 || s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= maxLines {
+		return s
+	}
+	return strings.Join(lines[:maxLines], "\n")
 }
 
 func (m Model) renderInput() string {
@@ -498,6 +508,17 @@ func viewportForSize(width, height int) viewport.Model {
 	vp := viewport.New(
 		viewport.WithWidth(width),
 		viewport.WithHeight(viewportHeightForTerminal(height)),
+	)
+	vp.YPosition = topMarginHeight
+	vp.MouseWheelEnabled = true
+	vp.MouseWheelDelta = 3
+	return vp
+}
+
+func (m Model) newViewport(width int) viewport.Model {
+	vp := viewport.New(
+		viewport.WithWidth(width),
+		viewport.WithHeight(m.viewportHeight()),
 	)
 	vp.YPosition = topMarginHeight
 	vp.MouseWheelEnabled = true

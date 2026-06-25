@@ -142,7 +142,7 @@ func (m Model) updateActiveForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		contentWidth := m.contentWidth()
 		if m.viewportSet {
 			m.viewport.SetWidth(contentWidth)
-			m.viewport.SetHeight(viewportHeightForTerminal(msg.Height))
+			m.syncViewportDimensions()
 			m.updateViewport()
 		}
 		m.resizeSidebarTable()

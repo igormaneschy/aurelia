@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -29,7 +30,7 @@ func TestStatusBarHit_ModelLabel(t *testing.T) {
 	}
 }
 
-func TestStatusBarY_AccountsForSearchBar(t *testing.T) {
+func TestStatusBarY_StaysAtBottomWithSearchBar(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 120
@@ -40,8 +41,8 @@ func TestStatusBarY_AccountsForSearchBar(t *testing.T) {
 	m.historySearch.active = true
 	m.historySearch.query = "test"
 	withSearchY := m.statusBarY()
-	if withSearchY <= baseY {
-		t.Fatalf("expected status bar lower on screen with search bar: base=%d search=%d", baseY, withSearchY)
+	if withSearchY != baseY || withSearchY != m.height-1 {
+		t.Fatalf("expected status bar pinned to bottom: base=%d search=%d height=%d", baseY, withSearchY, m.height)
 	}
 }
 
@@ -123,8 +124,15 @@ func TestHandleChatMouse_ModelInStatusBar(t *testing.T) {
 		t.Fatalf("model not in status line %q", line)
 	}
 
+	clickY := m.statusBarFooterStartY()
+	for y := m.statusBarFooterStartY(); y < len(m.layoutLines()); y++ {
+		if strings.Contains(stripANSIForTest(m.layoutLines()[y]), "claude-sonnet") {
+			clickY = y
+			break
+		}
+	}
 	handled, model, _ := m.handleChatMouse(tea.MouseClickMsg{
-		X: idx + 2, Y: m.statusBarY(), Button: tea.MouseLeft,
+		X: idx + 2, Y: clickY, Button: tea.MouseLeft,
 	})
 	if !handled {
 		t.Fatal("expected model click to open form")

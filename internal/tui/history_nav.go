@@ -143,6 +143,7 @@ func (m Model) scrollViewportPage(direction int) (Model, tea.Cmd) {
 }
 
 func (m *Model) updateViewportToPage() {
+	m.syncViewportDimensions()
 	m.ensureViewport()
 	if !m.viewportSet || m.viewport.Height() <= 0 {
 		return

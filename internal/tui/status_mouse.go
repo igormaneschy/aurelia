@@ -34,34 +34,40 @@ func (m Model) isStatusBarLine(line string) bool {
 }
 
 func (m Model) statusBarY() int {
-	lines := m.layoutLines()
-	for i := len(lines) - 1; i >= 0; i-- {
-		if m.isStatusBarLine(lines[i]) {
-			return i
-		}
+	if m.height <= 0 {
+		return -1
 	}
-	if m.height > 0 {
-		return m.height - 1
-	}
-	return -1
+	// Footer is pinned to the terminal bottom once layout heights are synced.
+	return m.height - 1
 }
 
 func (m Model) statusBarPlainLine() string {
-	lines := m.layoutLines()
-	y := m.statusBarY()
-	if y >= 0 && y < len(lines) {
-		return stripANSI(lines[y])
+	model := m.activeModelLabel()
+	for _, line := range m.layoutLines() {
+		plain := stripANSI(line)
+		if model != "" && strings.Contains(plain, model) {
+			return plain
+		}
+	}
+	for i := len(m.layoutLines()) - 1; i >= 0; i-- {
+		if m.isStatusBarLine(m.layoutLines()[i]) {
+			return stripANSI(m.layoutLines()[i])
+		}
 	}
 	return stripANSI(m.renderStatusBar())
 }
 
+func (m Model) statusBarFooterStartY() int {
+	return topMarginHeight + m.chatBodyHeight()
+}
+
 func (m Model) statusBarHitAt(y, x int) statusBarHitKind {
 	model := m.activeModelLabel()
-	if model == "" || x < 0 || y < 0 {
+	if model == "" || x < 0 || y < 0 || y < m.statusBarFooterStartY() {
 		return statusBarHitNone
 	}
 	lines := m.layoutLines()
-	if y >= len(lines) || !m.isStatusBarLine(lines[y]) {
+	if y >= len(lines) {
 		return statusBarHitNone
 	}
 	plain := stripANSI(lines[y])
@@ -76,7 +82,12 @@ func (m Model) statusBarHitAt(y, x int) statusBarHitKind {
 }
 
 func (m Model) statusBarHit(x int) statusBarHitKind {
-	return m.statusBarHitAt(m.statusBarY(), x)
+	for y := m.statusBarFooterStartY(); y < len(m.layoutLines()); y++ {
+		if kind := m.statusBarHitAt(y, x); kind != statusBarHitNone {
+			return kind
+		}
+	}
+	return statusBarHitNone
 }
 
 func (m Model) mainPaneStartX() int {

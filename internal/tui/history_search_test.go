@@ -55,18 +55,20 @@ func TestHistorySearch_TypeAndNavigate(t *testing.T) {
 	}
 }
 
-func TestHighlightSearchText_ActiveMatchBold(t *testing.T) {
-	matches := []searchMatch{{messageIndex: 0, start: 6, end: 8}}
+func TestHighlightSearchText_OnlyActiveMatch(t *testing.T) {
+	matches := []searchMatch{
+		{messageIndex: 0, start: 0, end: 5},
+		{messageIndex: 0, start: 6, end: 8},
+	}
 	style := newStylesForTheme(ThemeDark).SearchHighlightStyle
-	got := highlightSearchText("hello world", 0, 0, matches, style)
-	if got == "hello world" {
-		t.Fatal("expected highlighted output")
+	got := highlightSearchText("hello world", 0, 1, matches, style)
+	plain := stripANSIForTest(got)
+	if strings.Count(plain, "hello") != 1 || !strings.Contains(plain, "wo") {
+		t.Fatalf("expected only second match highlighted, got %q", plain)
 	}
-	if !strings.Contains(got, "wo") {
-		t.Fatalf("expected match text preserved, got %q", got)
-	}
-	if got == stripANSIForTest(got) {
-		t.Fatal("expected active match styling")
+	otherMsg := highlightSearchText("hello world", 1, 1, matches, style)
+	if otherMsg != "hello world" {
+		t.Fatalf("expected no highlight on other message, got %q", otherMsg)
 	}
 }
 

@@ -51,7 +51,7 @@ func (m *Model) appendOrUpdateAureliaMessage(text string) {
 func (m *Model) ensureViewport() {
 	if m.width > 0 && m.height > 0 && !m.viewportSet {
 		contentWidth := m.contentWidth()
-		m.viewport = viewportForSize(contentWidth, m.height)
+		m.viewport = m.newViewport(contentWidth)
 		m.viewportSet = true
 		pageMsgs := m.historyNav.pageSlice(m.messages)
 		m.viewport.SetContent(m.renderMessages(pageMsgs, contentWidth))
@@ -67,6 +67,7 @@ func (m *Model) ensureViewport() {
 // Auto-scrolls to bottom only on the last history page when the user is
 // already at the bottom, so streaming does not yank the viewport on older pages.
 func (m *Model) updateViewport() tea.Cmd {
+	m.syncViewportDimensions()
 	prevNew := m.historyNav.hasNewBelow
 	m.historyNav.syncMessageCount(len(m.messages))
 	var pulse tea.Cmd
