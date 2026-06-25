@@ -115,6 +115,52 @@ func TestCtrlOTogglesMouseWhileFormOpen(t *testing.T) {
 	}
 }
 
+func TestHandleModelWizardKey_EscClosesForm(t *testing.T) {
+	m := testChatModel()
+	m.formOpen = true
+	m.activeForm = newModelProviderForm(modelCatalog{}, "auto")
+	next, cmd, handled := m.handleModelWizardKey(keyPress(tea.KeyEsc))
+	if !handled || cmd != nil {
+		t.Fatalf("handled=%v cmd=%v", handled, cmd)
+	}
+	if next.formOpen || next.activeForm != nil {
+		t.Fatal("expected form closed")
+	}
+}
+
+func TestHandleModelWizardKey_BackReturnsToProvider(t *testing.T) {
+	m := testChatModel()
+	catalog := catalogFromDaemonText("openai:\n  `gpt-5.1`\nanthropic:\n  `claude-sonnet-4-6`\n")
+	m.formOpen = true
+	m.activeForm = newModelNameForm(catalog, "openai", "gpt-5.1")
+	next, cmd, handled := m.handleModelWizardKey(keyText("b"))
+	if !handled || cmd == nil {
+		t.Fatalf("handled=%v cmd=%v", handled, cmd)
+	}
+	if !next.formOpen || next.activeForm == nil {
+		t.Fatal("expected form still open")
+	}
+	if next.activeForm.kind != formKindModelProvider {
+		t.Fatalf("expected provider step, got %v", next.activeForm.kind)
+	}
+	if next.activeForm.selected != "openai" {
+		t.Fatalf("provider selection = %q", next.activeForm.selected)
+	}
+}
+
+func TestHandleModelWizardKey_ReloadFetchesModels(t *testing.T) {
+	m := testChatModel()
+	m.formOpen = true
+	m.activeForm = newModelProviderForm(modelCatalog{}, "auto")
+	next, cmd, handled := m.handleModelWizardKey(keyText("r"))
+	if !handled || cmd == nil {
+		t.Fatalf("handled=%v cmd=%v", handled, cmd)
+	}
+	if !next.formOpen || next.activeForm == nil {
+		t.Fatal("expected form still open during reload")
+	}
+}
+
 func TestRenderFormOverlay_UsesPanel(t *testing.T) {
 	m := testChatModel()
 	m.width = 60

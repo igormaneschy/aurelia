@@ -34,8 +34,9 @@ type tuiStatusMsg struct {
 
 // tuiModelsMsg carries models grouped by provider from a daemon /model response.
 type tuiModelsMsg struct {
-	catalog modelCatalog
-	err     error
+	catalog  modelCatalog
+	err      error
+	reloaded bool // true when triggered by /model refresh inside the wizard
 }
 
 // tuiHistoryMsg carries recent user/assistant transcript messages loaded from

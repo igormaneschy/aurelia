@@ -22,6 +22,11 @@ const (
 	formKindModelName
 )
 
+const (
+	modelWizardProviderHints = "↑↓ navigate · enter select · r refresh · esc cancel"
+	modelWizardModelHints    = "↑↓ navigate · enter select · b back · r refresh · esc cancel"
+)
+
 type modelCatalog struct {
 	byProvider map[string][]string
 	providers  []string
@@ -189,35 +194,86 @@ func modelsFromDaemonText(body string) []string {
 	return uniqueSortedModels(append([]string{"auto"}, ids...))
 }
 
+func catalogFromIPCEvents(events []ipc.IPCEvent) modelCatalog {
+	for _, ev := range events {
+		if ev.Type != ipc.EventTypeMessage || ev.Body == "" {
+			continue
+		}
+		catalog := catalogFromDaemonText(ev.Body)
+		if catalog.providerCount() > 0 {
+			return catalog
+		}
+		models := modelsFromDaemonText(ev.Body)
+		if len(models) > 0 {
+			return catalogFromModels(models)
+		}
+	}
+	return modelCatalog{}
+}
+
+func fetchTUIModelCatalog(client *ipc.Client, chatID int64, command string) (modelCatalog, error) {
+	ctx, cancel := contextWithTimeout(30 * time.Second)
+	defer cancel()
+	events, err := client.SendAndWait(ctx, ipc.IPCMessage{
+		Type:      ipc.MsgTypeCommand,
+		ChatID:    chatID,
+		ThreadID:  0,
+		UserID:    int64(os.Getuid()),
+		Text:      command,
+		RequestID: fmt.Sprintf("tui-models-%d", time.Now().UnixNano()),
+	})
+	if err != nil {
+		return modelCatalog{}, err
+	}
+	return catalogFromIPCEvents(events), nil
+}
+
 func fetchTUIModels(client *ipc.Client, chatID int64) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := contextWithTimeout(30 * time.Second)
+		catalog, err := fetchTUIModelCatalog(client, chatID, "/model")
+		if err != nil {
+			return tuiModelsMsg{err: err}
+		}
+		if catalog.providerCount() > 0 {
+			return tuiModelsMsg{catalog: catalog}
+		}
+		return tuiModelsMsg{}
+	}
+}
+
+func refreshAndFetchTUIModels(client *ipc.Client, chatID int64) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := contextWithTimeout(60 * time.Second)
 		defer cancel()
+		userID := int64(os.Getuid())
+		baseID := fmt.Sprintf("tui-models-refresh-%d", time.Now().UnixNano())
+		_, err := client.SendAndWait(ctx, ipc.IPCMessage{
+			Type:      ipc.MsgTypeCommand,
+			ChatID:    chatID,
+			ThreadID:  0,
+			UserID:    userID,
+			Text:      "/model refresh",
+			RequestID: baseID + "-refresh",
+		})
+		if err != nil {
+			return tuiModelsMsg{err: err, reloaded: true}
+		}
 		events, err := client.SendAndWait(ctx, ipc.IPCMessage{
 			Type:      ipc.MsgTypeCommand,
 			ChatID:    chatID,
 			ThreadID:  0,
-			UserID:    int64(os.Getuid()),
+			UserID:    userID,
 			Text:      "/model",
-			RequestID: fmt.Sprintf("tui-models-%d", time.Now().UnixNano()),
+			RequestID: baseID + "-list",
 		})
 		if err != nil {
-			return tuiModelsMsg{err: err}
+			return tuiModelsMsg{err: err, reloaded: true}
 		}
-		for _, ev := range events {
-			if ev.Type != ipc.EventTypeMessage || ev.Body == "" {
-				continue
-			}
-			catalog := catalogFromDaemonText(ev.Body)
-			if catalog.providerCount() > 0 {
-				return tuiModelsMsg{catalog: catalog}
-			}
-			models := modelsFromDaemonText(ev.Body)
-			if len(models) > 0 {
-				return tuiModelsMsg{catalog: catalogFromModels(models)}
-			}
+		catalog := catalogFromIPCEvents(events)
+		if catalog.providerCount() > 0 {
+			return tuiModelsMsg{catalog: catalog, reloaded: true}
 		}
-		return tuiModelsMsg{}
+		return tuiModelsMsg{reloaded: true}
 	}
 }
 
@@ -260,7 +316,7 @@ func newModelProviderForm(catalog modelCatalog, currentModel string) *huhForm {
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title("Select provider").
-				Description("Pick a provider, then choose a model in the next step").
+				Description(modelWizardProviderHints).
 				Options(catalog.providerOptions()...).
 				Value(&hf.selected),
 		),
@@ -290,7 +346,7 @@ func newModelNameForm(catalog modelCatalog, provider, currentModel string) *huhF
 		huh.NewGroup(
 			huh.NewSelect[string]().
 				Title(fmt.Sprintf("Select model (%s)", provider)).
-				Description("Choose a model for this session").
+				Description(modelWizardModelHints).
 				Options(options...).
 				Value(&hf.selected),
 		),
@@ -387,6 +443,42 @@ func (m Model) closeForm() Model {
 	return m
 }
 
+func (m Model) backToModelProviderForm() (Model, tea.Cmd) {
+	if m.activeForm == nil || m.activeForm.kind != formKindModelName {
+		return m, nil
+	}
+	provider := m.activeForm.provider
+	catalog := m.activeForm.catalog
+	m.activeForm = newModelProviderForm(catalog, provider)
+	m.activeForm.selected = provider
+	return m, m.activeForm.init()
+}
+
+func (m Model) reloadModelWizard() (Model, tea.Cmd) {
+	if !m.formOpen {
+		return m, nil
+	}
+	return m, refreshAndFetchTUIModels(m.ipcClient, m.activeSession)
+}
+
+// handleModelWizardKey handles wizard-only shortcuts before huh sees the key.
+// Returns handled=true when the key was consumed.
+func (m Model) handleModelWizardKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	switch msg.String() {
+	case "esc":
+		return m.closeForm(), nil, true
+	case "r":
+		next, cmd := m.reloadModelWizard()
+		return next, cmd, true
+	case "b":
+		if m.activeForm != nil && m.activeForm.kind == formKindModelName {
+			next, cmd := m.backToModelProviderForm()
+			return next, cmd, true
+		}
+	}
+	return m, nil, false
+}
+
 func (m Model) submitModelSelection(model string) (Model, tea.Cmd) {
 	model = strings.TrimSpace(model)
 	if model == "" {
@@ -432,10 +524,12 @@ func (m Model) updateActiveForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.resizeSidebarTable()
 	case formInternalMsg:
-	default:
-		if _, ok := msg.(tea.KeyMsg); !ok {
-			return m, nil
+	case tea.KeyMsg:
+		if next, cmd, handled := m.handleModelWizardKey(msg); handled {
+			return next, cmd
 		}
+	default:
+		return m, nil
 	}
 	cmd := m.activeForm.update(msg)
 	if m.activeForm.completed() {
