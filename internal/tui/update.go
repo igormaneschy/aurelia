@@ -217,7 +217,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tuiModelsMsg:
-		if m.formOpen && m.activeForm != nil {
+		if m.formOpen && m.activeForm != nil && m.activeForm.isModelForm() {
 			m = m.applyWizardCatalog(msg)
 			return m, m.initActiveForm()
 		}
@@ -779,9 +779,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		if isBareModelCommand(text) {
-			m.textarea.Reset()
-			return m.openModelSelect()
+		if next, cmd, handled := m.openFormForCommand(text); handled {
+			next.textarea.Reset()
+			return next, cmd
 		}
 
 		if m.waiting && len(m.pendingQueue) >= maxPendingQueue {
