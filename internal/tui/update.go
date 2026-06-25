@@ -84,6 +84,10 @@ func (m Model) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.String() == "ctrl+o" {
+		return m.toggleMouseCapture()
+	}
+
 	if m.formOpen {
 		switch msg.(type) {
 		case tea.KeyMsg, tea.WindowSizeMsg, formInternalMsg:
@@ -214,11 +218,11 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tuiModelsMsg:
 		if m.formOpen {
-			models := msg.models
-			if len(models) == 0 || msg.err != nil {
-				models = modelFallbackList(m.activeModel)
+			catalog := msg.catalog
+			if catalog.providerCount() == 0 || msg.err != nil {
+				catalog = catalogFromModels(modelFallbackList(m.activeModel))
 			}
-			m = m.refreshModelSelectForm(models)
+			m = m.refreshModelSelectForm(tuiModelsMsg{catalog: catalog})
 			return m, m.activeForm.init()
 		}
 		return m, nil

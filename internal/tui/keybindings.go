@@ -86,7 +86,7 @@ func defaultKeyMap() keyMap {
 		),
 		MouseToggle: key.NewBinding(
 			key.WithKeys("ctrl+o"),
-			key.WithHelp("Ctrl+O", "Toggle mouse (scroll vs text selection)"),
+			key.WithHelp("Ctrl+O", "Toggle mouse on/off (sidebar click + scroll)"),
 		),
 		ProjectPanel: key.NewBinding(
 			key.WithKeys("ctrl+p"),

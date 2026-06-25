@@ -15,9 +15,24 @@ import (
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
 
+type huhFormKind int
+
+const (
+	formKindModelProvider huhFormKind = iota
+	formKindModelName
+)
+
+type modelCatalog struct {
+	byProvider map[string][]string
+	providers  []string
+}
+
 type huhForm struct {
+	kind     huhFormKind
 	form     *huh.Form
 	selected string
+	catalog  modelCatalog
+	provider string
 }
 
 type formInternalMsg struct {
@@ -64,18 +79,112 @@ func uniqueSortedModels(models []string) []string {
 }
 
 var modelIDPattern = regexp.MustCompile("`([^`]+)`")
+var providerHeaderPattern = regexp.MustCompile(`^([a-zA-Z0-9_.-]+):$`)
 
-func modelsFromDaemonText(body string) []string {
-	matches := modelIDPattern.FindAllStringSubmatch(body, -1)
-	if len(matches) == 0 {
-		return nil
-	}
-	ids := make([]string, 0, len(matches))
-	for _, match := range matches {
-		if len(match) < 2 {
+func catalogFromModels(models []string) modelCatalog {
+	catalog := modelCatalog{byProvider: make(map[string][]string)}
+	for _, model := range uniqueSortedModels(models) {
+		if model == "auto" {
 			continue
 		}
-		ids = append(ids, match[1])
+		provider, id := splitProviderModel(model)
+		catalog.byProvider[provider] = append(catalog.byProvider[provider], id)
+	}
+	catalog.finalize()
+	return catalog
+}
+
+func catalogFromDaemonText(body string) modelCatalog {
+	catalog := modelCatalog{byProvider: make(map[string][]string)}
+	currentProvider := ""
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if m := providerHeaderPattern.FindStringSubmatch(trimmed); len(m) == 2 {
+			currentProvider = m[1]
+			continue
+		}
+		matches := modelIDPattern.FindStringSubmatch(trimmed)
+		if len(matches) < 2 {
+			continue
+		}
+		id := strings.TrimSpace(matches[1])
+		if id == "" {
+			continue
+		}
+		provider := currentProvider
+		if provider == "" {
+			provider, id = splitProviderModel(id)
+		}
+		catalog.byProvider[provider] = append(catalog.byProvider[provider], id)
+	}
+	catalog.finalize()
+	return catalog
+}
+
+func splitProviderModel(model string) (provider, id string) {
+	model = strings.TrimSpace(model)
+	if before, after, ok := strings.Cut(model, "/"); ok && before != "" && after != "" {
+		return before, after
+	}
+	return "other", model
+}
+
+func (c *modelCatalog) finalize() {
+	if len(c.byProvider) == 0 {
+		return
+	}
+	c.providers = make([]string, 0, len(c.byProvider))
+	for provider := range c.byProvider {
+		c.providers = append(c.providers, provider)
+	}
+	sort.Strings(c.providers)
+	for provider := range c.byProvider {
+		c.byProvider[provider] = uniqueSortedModels(c.byProvider[provider])
+	}
+}
+
+func (c modelCatalog) providerCount() int {
+	if len(c.providers) > 0 {
+		return len(c.providers)
+	}
+	return 0
+}
+
+func (c modelCatalog) providerOptions() []huh.Option[string] {
+	opts := []huh.Option[string]{huh.NewOption("PI default (auto)", "auto")}
+	for _, provider := range c.providers {
+		count := len(c.byProvider[provider])
+		label := provider
+		if count > 0 {
+			label = fmt.Sprintf("%s (%d)", provider, count)
+		}
+		opts = append(opts, huh.NewOption(label, provider))
+	}
+	return opts
+}
+
+func (c modelCatalog) modelOptions(provider string) []huh.Option[string] {
+	models := c.byProvider[provider]
+	opts := make([]huh.Option[string], 0, len(models))
+	for _, model := range models {
+		opts = append(opts, huh.NewOption(model, model))
+	}
+	return opts
+}
+
+func modelsFromDaemonText(body string) []string {
+	catalog := catalogFromDaemonText(body)
+	if catalog.providerCount() == 0 {
+		return nil
+	}
+	var ids []string
+	for _, provider := range catalog.providers {
+		for _, model := range catalog.byProvider[provider] {
+			ids = append(ids, model)
+		}
 	}
 	return uniqueSortedModels(append([]string{"auto"}, ids...))
 }
@@ -99,9 +208,13 @@ func fetchTUIModels(client *ipc.Client, chatID int64) tea.Cmd {
 			if ev.Type != ipc.EventTypeMessage || ev.Body == "" {
 				continue
 			}
+			catalog := catalogFromDaemonText(ev.Body)
+			if catalog.providerCount() > 0 {
+				return tuiModelsMsg{catalog: catalog}
+			}
 			models := modelsFromDaemonText(ev.Body)
 			if len(models) > 0 {
-				return tuiModelsMsg{models: models}
+				return tuiModelsMsg{catalog: catalogFromModels(models)}
 			}
 		}
 		return tuiModelsMsg{}
@@ -115,27 +228,84 @@ func currentModelSelection(activeModel string) string {
 	return activeModel
 }
 
-func newModelSelectForm(models []string, current string, onSubmit func(string) tea.Cmd) *huhForm {
-	_ = onSubmit
-	models = uniqueSortedModels(models)
-	if len(models) == 0 {
-		models = modelFallbackList(current)
+func (c modelCatalog) providerForModel(model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" || model == "auto" {
+		return ""
 	}
-	selected := currentModelSelection(current)
-	options := make([]huh.Option[string], 0, len(models))
-	for _, model := range models {
-		options = append(options, huh.NewOption(model, model))
+	if provider, id := splitProviderModel(model); provider != "other" {
+		if containsString(c.byProvider[provider], id) {
+			return provider
+		}
+	}
+	for _, provider := range c.providers {
+		if containsString(c.byProvider[provider], model) {
+			return provider
+		}
+	}
+	return ""
+}
+
+func newModelProviderForm(catalog modelCatalog, currentModel string) *huhForm {
+	selected := "auto"
+	if provider := catalog.providerForModel(currentModel); provider != "" {
+		selected = provider
 	}
 	form := huh.NewForm(
 		huh.NewGroup(
 			huh.NewSelect[string]().
-				Title("Select model").
+				Title("Select provider").
+				Description("Pick a provider, then choose a model in the next step").
+				Options(catalog.providerOptions()...).
+				Value(&selected),
+		),
+	).WithShowHelp(true).WithWidth(60)
+	return &huhForm{
+		kind:     formKindModelProvider,
+		form:     form,
+		selected: selected,
+		catalog:  catalog,
+	}
+}
+
+func newModelNameForm(catalog modelCatalog, provider, currentModel string) *huhForm {
+	models := catalog.byProvider[provider]
+	selected := currentModel
+	if selected == "" || !containsString(models, selected) {
+		if len(models) > 0 {
+			selected = models[0]
+		}
+	}
+	options := catalog.modelOptions(provider)
+	if len(options) == 0 {
+		options = []huh.Option[string]{huh.NewOption("auto", "auto")}
+		selected = "auto"
+	}
+	form := huh.NewForm(
+		huh.NewGroup(
+			huh.NewSelect[string]().
+				Title(fmt.Sprintf("Select model (%s)", provider)).
 				Description("Choose a model for this session").
 				Options(options...).
 				Value(&selected),
 		),
 	).WithShowHelp(true).WithWidth(60)
-	return &huhForm{form: form, selected: selected}
+	return &huhForm{
+		kind:     formKindModelName,
+		form:     form,
+		selected: selected,
+		catalog:  catalog,
+		provider: provider,
+	}
+}
+
+func containsString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (hf *huhForm) view() string {
@@ -176,28 +346,39 @@ func (hf *huhForm) chosenModel() string {
 	if hf == nil {
 		return ""
 	}
-	if strings.TrimSpace(hf.selected) != "" {
-		return hf.selected
-	}
-	return "auto"
+	return strings.TrimSpace(hf.selected)
 }
 
 func (m Model) openModelSelect() (Model, tea.Cmd) {
-	models := modelFallbackList(m.activeModel)
+	catalog := catalogFromModels(modelFallbackList(m.activeModel))
 	m.formOpen = true
-	m.activeForm = newModelSelectForm(models, m.activeModel, nil)
+	m.activeForm = newModelProviderForm(catalog, m.activeModel)
 	return m, tea.Batch(m.activeForm.init(), fetchTUIModels(m.ipcClient, m.activeSession))
 }
 
-func (m Model) refreshModelSelectForm(models []string) Model {
+func (m Model) refreshModelSelectForm(msg tuiModelsMsg) Model {
 	if !m.formOpen || m.activeForm == nil {
 		return m
 	}
-	current := m.activeForm.chosenModel()
-	if current == "" {
-		current = currentModelSelection(m.activeModel)
+	catalog := msg.catalog
+	if catalog.providerCount() == 0 {
+		catalog = catalogFromModels(modelFallbackList(m.activeModel))
 	}
-	m.activeForm = newModelSelectForm(models, current, nil)
+	switch m.activeForm.kind {
+	case formKindModelProvider:
+		current := m.activeForm.chosenModel()
+		if current == "" {
+			current = currentModelSelection(m.activeModel)
+		}
+		m.activeForm = newModelProviderForm(catalog, current)
+	case formKindModelName:
+		provider := m.activeForm.provider
+		current := m.activeForm.chosenModel()
+		if current == "" {
+			current = currentModelSelection(m.activeModel)
+		}
+		m.activeForm = newModelNameForm(catalog, provider, current)
+	}
 	return m
 }
 
@@ -216,6 +397,23 @@ func (m Model) submitModelSelection(model string) (Model, tea.Cmd) {
 	m.waiting = true
 	m.streamID++
 	return m, tea.Batch(m.sendCommand("/model "+model), spinnerTickCmd())
+}
+
+func (m Model) advanceModelWizard(hf *huhForm) (Model, tea.Cmd) {
+	choice := hf.chosenModel()
+	switch hf.kind {
+	case formKindModelProvider:
+		if choice == "" || choice == "auto" {
+			return m.submitModelSelection("auto")
+		}
+		m.formOpen = true
+		m.activeForm = newModelNameForm(hf.catalog, choice, m.activeModel)
+		return m, m.activeForm.init()
+	case formKindModelName:
+		return m.submitModelSelection(choice)
+	default:
+		return m.submitModelSelection(choice)
+	}
 }
 
 func (m Model) updateActiveForm(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -242,7 +440,7 @@ func (m Model) updateActiveForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	cmd := m.activeForm.update(msg)
 	if m.activeForm.completed() {
-		return m.submitModelSelection(m.activeForm.chosenModel())
+		return m.advanceModelWizard(m.activeForm)
 	}
 	if m.activeForm.aborted() {
 		m = m.closeForm()
@@ -328,4 +526,5 @@ var v1KeyByName = map[string]tea1.KeyMsg{
 var v1CtrlKeys = map[string]tea1.KeyMsg{
 	"n": {Type: tea1.KeyCtrlN}, "p": {Type: tea1.KeyCtrlP},
 	"j": {Type: tea1.KeyCtrlJ}, "m": {Type: tea1.KeyCtrlM},
+	"o": {Type: tea1.KeyCtrlO},
 }

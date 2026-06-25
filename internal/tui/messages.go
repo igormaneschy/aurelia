@@ -32,10 +32,10 @@ type tuiStatusMsg struct {
 	err   error
 }
 
-// tuiModelsMsg carries model IDs parsed from a daemon /model response.
+// tuiModelsMsg carries models grouped by provider from a daemon /model response.
 type tuiModelsMsg struct {
-	models []string
-	err    error
+	catalog modelCatalog
+	err     error
 }
 
 // tuiHistoryMsg carries recent user/assistant transcript messages loaded from
