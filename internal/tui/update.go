@@ -83,6 +83,13 @@ func (m Model) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.formOpen {
+		switch msg.(type) {
+		case tea.KeyMsg, tea.WindowSizeMsg, formInternalMsg:
+			return m.updateActiveForm(msg)
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -197,6 +204,17 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.activeModel = msg.model
 			m.syncSidebarRows()
+		}
+		return m, nil
+
+	case tuiModelsMsg:
+		if m.formOpen {
+			models := msg.models
+			if len(models) == 0 || msg.err != nil {
+				models = modelFallbackList(m.activeModel)
+			}
+			m = m.refreshModelSelectForm(models)
+			return m, m.activeForm.init()
 		}
 		return m, nil
 
@@ -754,6 +772,11 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 			}
+		}
+
+		if isBareModelCommand(text) {
+			m.textarea.Reset()
+			return m.openModelSelect()
 		}
 
 		if m.waiting && len(m.pendingQueue) >= maxPendingQueue {
