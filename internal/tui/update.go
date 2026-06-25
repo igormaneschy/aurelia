@@ -25,6 +25,7 @@ var terminalColorReportPattern = regexp.MustCompile(`^\d{1,2};rgb:[0-9a-fA-F]{1,
 
 // Update implements tea.Model.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.textarea.Placeholder = m.composerPlaceholder()
 	switch m.state {
 	case stateLoading:
 		return m.updateLoading(msg)

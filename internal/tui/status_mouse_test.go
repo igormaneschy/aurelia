@@ -46,33 +46,43 @@ func TestStatusBarY_StaysAtBottomWithSearchBar(t *testing.T) {
 	}
 }
 
-func TestHeaderProjectHit_WhenProjectSet(t *testing.T) {
+func TestHeaderModelHit_WhenModelSet(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 120
 	m.height = 30
-	m.cwdPath = "/Users/igor/myproject"
+	m.activeModel = "claude-sonnet"
 
 	y := m.chatHeaderY()
-	x := m.mainPaneStartX() + 40
-	if !m.headerProjectHit(x, y) {
-		t.Fatal("expected project segment click in header")
+	plain := stripANSIForTest(strings.Split(m.renderChatHeader(), "\n")[0])
+	idx := strings.Index(plain, "claude-sonnet")
+	if idx < 0 {
+		t.Fatalf("model not in header %q", plain)
 	}
-	if m.headerProjectHit(x, y+5) {
+	x := m.mainPaneStartX() + idx + 2
+	if !m.headerModelHit(x, y) {
+		t.Fatal("expected model chip click in header")
+	}
+	if m.headerModelHit(x, y+5) {
 		t.Fatal("expected miss below header line")
 	}
 }
 
-func TestHeaderProjectHit_ChatModeMiss(t *testing.T) {
+func TestHeaderModelHit_PlaceholderWhenEmpty(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 120
 	m.height = 30
-	m.cwdPath = "not set"
 
 	y := m.chatHeaderY()
-	if m.headerProjectHit(m.mainPaneStartX()+40, y) {
-		t.Fatal("expected no project hit in chat mode")
+	plain := stripANSIForTest(strings.Split(m.renderChatHeader(), "\n")[0])
+	idx := strings.Index(plain, sidebarModelPlaceholder)
+	if idx < 0 {
+		t.Fatalf("placeholder not in header %q", plain)
+	}
+	x := m.mainPaneStartX() + idx
+	if !m.headerModelHit(x, y) {
+		t.Fatal("expected placeholder model chip click in header")
 	}
 }
 

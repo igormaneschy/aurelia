@@ -329,8 +329,8 @@ func newLightStyles() themeStyles {
 			Padding(0, 1),
 
 		StatusBarStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240")). // dark gray text
-			Background(lipgloss.Color("254")). // near-white bg
+			Foreground(lipgloss.Color("240")).
+			Background(lipgloss.Color("254")).
 			Padding(0, 1),
 
 		StatusReadyStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("28")),  // green

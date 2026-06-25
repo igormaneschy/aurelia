@@ -225,22 +225,16 @@ func (m Model) renderSidebarContextPanel() string {
 }
 
 func (m Model) renderSidebarHealthChip() string {
-	var icon string
-	switch m.chromeState() {
-	case "ready":
-		icon = "🟢"
-	case "waiting":
-		icon = "🟡"
-	case "offline", "error":
-		icon = "🔴"
-	default:
-		icon = "🟡"
-	}
 	state := m.chromeState()
-	if m.isChatMode() {
-		return fmt.Sprintf("%s %s · %s", icon, state, m.styles.ChatModeStyle.Render("chat mode"))
+	label := fmt.Sprintf("%s %s", m.healthChipIcon(), state)
+	switch state {
+	case "offline", "error":
+		return m.styles.StatusErrorStyle.Render(label)
+	case "waiting", "connecting":
+		return m.styles.StatusBusyStyle.Render(label)
+	default:
+		return m.styles.StatusReadyStyle.Render(label)
 	}
-	return fmt.Sprintf("%s %s", icon, state)
 }
 
 func (m Model) renderSidebarActionsPanel() string {

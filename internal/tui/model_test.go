@@ -1582,7 +1582,7 @@ func TestModel_StatusBarUsesCompactShortcuts(t *testing.T) {
 
 	status := stripANSIForTest(m.renderStatusBar())
 
-	for _, want := range []string{"F1 help", "↵ send", "alt+enter newline", "✋ mouse", "esc cancel", "⌃L clear", "⌃P project", "⌃S · f2 · ⌃N"} {
+	for _, want := range []string{"F1 help", "↵ send", "alt+enter newline", "✋ mouse", "esc cancel", "⌃L clear", "⌃P project", "⌃S · f2 · ⌃N", "│"} {
 		if !strings.Contains(status, want) {
 			t.Errorf("expected status bar to contain %q, got %q", want, status)
 		}
@@ -1619,9 +1619,12 @@ func TestModel_StatusBarDropsItemsOnNarrowTerminal(t *testing.T) {
 	if strings.Contains(status, "⌃P project") {
 		t.Errorf("expected '⌃P project' to be dropped on width=50, got %q", status)
 	}
-	// High-priority items should remain.
-	if !strings.Contains(status, "↵ send") {
-		t.Errorf("expected '↵ send' to remain on width=50, got %q", status)
+	// Compact essentials should remain.
+	if !strings.Contains(status, "F1 help") {
+		t.Errorf("expected 'F1 help' to remain on width=50, got %q", status)
+	}
+	if !strings.Contains(status, "ready") {
+		t.Errorf("expected health chip on width=50, got %q", status)
 	}
 }
 
@@ -1632,10 +1635,12 @@ func TestModel_StatusBarNeverWraps(t *testing.T) {
 		m.width = width
 
 		status := stripANSIForTest(m.renderStatusBar())
-		lineCount := strings.Count(status, "\n") + 1
-
-		if lineCount > 1 {
-			t.Fatalf("width %d: expected status bar to be 1 line, got %d: %q", width, lineCount, status)
+		lines := strings.Split(status, "\n")
+		if len(lines) != 2 {
+			t.Fatalf("width %d: expected status bar border + content (2 lines), got %d: %q", width, len(lines), status)
+		}
+		if strings.Count(lines[1], "\n") > 0 {
+			t.Fatalf("width %d: content line wrapped: %q", width, lines[1])
 		}
 	}
 }
@@ -1647,13 +1652,17 @@ func TestModel_ChatHeaderShowsProjectAndDaemon(t *testing.T) {
 	m.height = 40
 	m.cwdPath = "/Users/igor/dev/aurelia"
 	m.daemonLabel = "ready"
+	m.activeModel = "gpt-5"
 
 	header := stripANSIForTest(m.renderChatHeader())
 
-	for _, want := range []string{"Aurelia / DM", "project aurelia", "daemon ready"} {
+	for _, want := range []string{"Aurelia / DM", "gpt-5", "ready"} {
 		if !strings.Contains(header, want) {
 			t.Errorf("expected header to contain %q, got %q", want, header)
 		}
+	}
+	if strings.Contains(header, "daemon") {
+		t.Errorf("expected no daemon label in header, got %q", header)
 	}
 }
 
@@ -1842,8 +1851,11 @@ func TestModel_SidebarShowsChatModeWhenNoCWD(t *testing.T) {
 	sidebar := sidebarViewForTest(m)
 	plain := stripANSIForTest(sidebar)
 
-	if !strings.Contains(plain, "chat mode") {
-		t.Errorf("expected sidebar to show '(chat mode)' when no cwd, got: %q", plain)
+	if strings.Contains(plain, "chat mode") {
+		t.Errorf("expected chat mode only in header, not sidebar: %q", plain)
+	}
+	if !strings.Contains(plain, "ready") {
+		t.Errorf("expected health chip in sidebar, got: %q", plain)
 	}
 }
 
@@ -2446,8 +2458,11 @@ func TestModel_ChatHeaderHighlightsOfflineDaemon(t *testing.T) {
 
 	header := stripANSIForTest(m.renderChatHeader())
 
-	if !strings.Contains(header, "daemon offline") {
-		t.Errorf("expected header to contain 'daemon offline', got %q", header)
+	if !strings.Contains(header, "offline") {
+		t.Errorf("expected header to contain 'offline', got %q", header)
+	}
+	if strings.Contains(header, "daemon") {
+		t.Errorf("expected no daemon label, got %q", header)
 	}
 }
 
@@ -2461,8 +2476,11 @@ func TestModel_ChatHeaderNormalDaemon(t *testing.T) {
 
 	header := stripANSIForTest(m.renderChatHeader())
 
-	if !strings.Contains(header, "daemon ready") {
-		t.Errorf("expected header to contain 'daemon ready', got %q", header)
+	if !strings.Contains(header, "ready") {
+		t.Errorf("expected header to contain health ready, got %q", header)
+	}
+	if strings.Contains(header, "daemon") {
+		t.Errorf("expected no daemon label, got %q", header)
 	}
 }
 

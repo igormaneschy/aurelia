@@ -96,11 +96,16 @@ func TestHandleSidebarMouse_MotionSetsHoverRow(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.sessions = []tuiSessionInfo{{ChatID: ipc.ReservedTUIChatID, Name: "dm"}, {ChatID: -9000002, Name: "work"}}
 	prepSidebarMouseTest(&m)
+	base := sidebarViewForTest(m)
 	updated, _ := m.Update(tea.MouseMotionMsg{X: 2, Y: sidebarTableFirstRowY() + 1})
 	if updated.(Model).sidebarHoverRow != 1 {
 		t.Fatal("expected hover row 1")
 	}
-	if !strings.Contains(sidebarViewForTest(updated.(Model)), "work") {
+	hovered := sidebarViewForTest(updated.(Model))
+	if hovered == base {
+		t.Fatal("expected hover to change sidebar render")
+	}
+	if !strings.Contains(hovered, "work") {
 		t.Fatal("expected work in view")
 	}
 }
