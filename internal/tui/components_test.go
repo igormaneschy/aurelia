@@ -15,13 +15,13 @@ func TestModel_ComponentEmbeddingPromotesFields(t *testing.T) {
 	m.width = 100
 	m.showSidebar = false
 
-	if len(m.transcriptModel.messages) != 1 {
-		t.Fatalf("expected transcript messages on embedded struct, got %d", len(m.transcriptModel.messages))
+	if len(m.messages) != 1 {
+		t.Fatalf("expected transcript messages on embedded struct, got %d", len(m.messages))
 	}
-	if m.inputModel.textarea.Value() != "hello" {
-		t.Fatalf("expected input textarea on embedded struct, got %q", m.inputModel.textarea.Value())
+	if m.textarea.Value() != "hello" {
+		t.Fatalf("expected input textarea on embedded struct, got %q", m.textarea.Value())
 	}
-	if m.chromeModel.width != 100 {
-		t.Fatalf("expected chrome width on embedded struct, got %d", m.chromeModel.width)
+	if m.width != 100 {
+		t.Fatalf("expected chrome width on embedded struct, got %d", m.width)
 	}
 }

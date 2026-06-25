@@ -222,40 +222,6 @@ func (c modelCatalog) modelOptions(provider string) []huh.Option[string] {
 	return opts
 }
 
-func modelsFromDaemonText(body string) []string {
-	catalog := catalogFromDaemonText(body)
-	if catalog.providerCount() == 0 {
-		return nil
-	}
-	var ids []string
-	for _, provider := range catalog.providers {
-		for _, model := range catalog.byProvider[provider] {
-			ids = append(ids, model)
-		}
-	}
-	return uniqueSortedModels(append([]string{"auto"}, ids...))
-}
-
-func catalogFromIPCEvents(events []ipc.IPCEvent) modelCatalog {
-	if catalog := catalogFromIPCModels(events); catalog.providerCount() > 0 {
-		return catalog
-	}
-	for _, ev := range events {
-		if ev.Type != ipc.EventTypeMessage || ev.Body == "" {
-			continue
-		}
-		catalog := catalogFromDaemonText(ev.Body)
-		if catalog.providerCount() > 0 {
-			return catalog
-		}
-		models := modelsFromDaemonText(ev.Body)
-		if len(models) > 0 {
-			return catalogFromModels(models)
-		}
-	}
-	return modelCatalog{}
-}
-
 func catalogFromIPCModels(events []ipc.IPCEvent) modelCatalog {
 	for _, ev := range events {
 		if ev.Type != ipc.EventTypeModels || ev.Body == "" {

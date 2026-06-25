@@ -445,73 +445,6 @@ func (m Model) renderChatHeader() string {
 	return lipgloss.NewStyle().Width(m.contentWidth()).Render(header)
 }
 
-func (m Model) renderSidebar() string {
-	lines := []string{
-		m.styles.SidebarTitleStyle.Render("Aurelia"),
-		m.styles.SidebarMutedStyle.Render("local terminal"),
-		"",
-		m.styles.SidebarTitleStyle.Render("Sessions"),
-	}
-
-	if len(m.sessions) == 0 {
-		lines = append(lines, m.styles.SidebarMutedStyle.Render("  (no sessions)"))
-	} else {
-		for i, s := range m.sessions {
-			label := safeSessionLabel(s.Name)
-			if s.ChatID == ipc.ReservedTUIChatID {
-				label = "DM"
-			}
-
-			// Determine display style.
-			isActive := s.ChatID == m.activeSession
-			isCursor := m.sidebarFocused && i == m.sidebarCursor
-
-			var prefix string
-			switch {
-			case isActive && isCursor:
-				prefix = "▶ ●"
-				lines = append(lines, m.styles.SidebarActiveStyle.Render(prefix+" "+label))
-			case isActive:
-				prefix = "●"
-				lines = append(lines, m.styles.SidebarActiveStyle.Render(prefix+" "+label))
-			case isCursor:
-				prefix = "▶"
-				lines = append(lines, m.styles.SidebarCursorStyle.Render(prefix+" "+label))
-			default:
-				prefix = "○"
-				lines = append(lines, m.styles.SidebarMutedStyle.Render(prefix+" "+label))
-			}
-		}
-	}
-
-	// Sidebar navigation hints when focused.
-	if m.sidebarFocused {
-		lines = append(lines, "",
-			m.styles.SidebarMutedStyle.Render("↑↓ navigate"),
-			m.styles.SidebarMutedStyle.Render("enter open"),
-			m.styles.SidebarMutedStyle.Render("n new"),
-			m.styles.SidebarMutedStyle.Render("r rename"),
-			m.styles.SidebarMutedStyle.Render("d delete"),
-			m.styles.SidebarMutedStyle.Render("esc exit"),
-		)
-	} else {
-		lines = append(lines, "",
-			m.styles.SidebarTitleStyle.Render("Project"),
-			truncateMiddle(projectName(m.cwdPath), sidebarWidth-4),
-			m.styles.SidebarMutedStyle.Render(truncateMiddle(m.cwdPath, sidebarWidth-4)),
-		)
-		if m.isChatMode() {
-			lines = append(lines, m.styles.ChatModeStyle.Render("(chat mode)"))
-		}
-		lines = append(lines, "",
-			m.styles.SidebarTitleStyle.Render("Daemon"),
-			m.daemonLabel,
-		)
-	}
-
-	return strings.Join(lines, "\n")
-}
-
 // viewportForSize creates a viewport with the given dimensions.
 func viewportForSize(width, height int) viewport.Model {
 	vp := viewport.New(
@@ -845,7 +778,7 @@ func (m Model) renderHelpPanel() string {
 	}
 	if len(groups) > 1 {
 		b.WriteString("\n\n")
-		title := "General"
+		var title string
 		if m.uiContext() != uiContextChat {
 			title = "Chat & Global"
 		} else {
@@ -866,42 +799,6 @@ func (m Model) renderHelpPanel() string {
 	}
 
 	return b.String()
-}
-
-// overlayPanelWide overlays a panel on the background using a wider panel
-// (70-80 columns) suitable for help content.
-func (m Model) overlayPanelWide(bg, panel string) string {
-	panelWidth := maxInt(50, minInt(m.width-4, 76))
-
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(m.styles.HeaderTitleStyle.GetForeground()).
-		Padding(1, 2).
-		Width(panelWidth).
-		Render(panel)
-
-	bgLines := strings.Split(bg, "\n")
-	panelLines := strings.Split(box, "\n")
-
-	startRow := (len(bgLines) - len(panelLines)) / 2
-	if startRow < 0 {
-		startRow = 0
-	}
-	boxWidth := lipgloss.Width(box)
-	startCol := (m.width - boxWidth) / 2
-	if startCol < 0 {
-		startCol = 0
-	}
-
-	var out []string
-	for i, line := range bgLines {
-		if i >= startRow && i-startRow < len(panelLines) {
-			out = append(out, compositeOverlayRow(line, panelLines[i-startRow], startCol, m.width))
-		} else {
-			out = append(out, line)
-		}
-	}
-	return strings.Join(out, "\n")
 }
 
 // formatMessageTime formats the message timestamp for display.

@@ -160,7 +160,7 @@ func TestOpenFormForCommand_RoutesBareCommands(t *testing.T) {
 	if !handled || cmd != nil || !next.helpVisible() {
 		t.Fatalf("/help handled=%v helpVisible=%v cmd=%v", handled, next.helpVisible(), cmd)
 	}
-	next = next.closeHelpOverlay()
+	m = next.closeHelpOverlay()
 
 	next, cmd, handled = m.openFormForCommand("/status")
 	if !handled || cmd == nil || !next.projectPanelOpen {

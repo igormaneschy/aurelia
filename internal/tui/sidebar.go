@@ -10,10 +10,6 @@ import (
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
 
-const sidebarColIcon = 0
-const sidebarColName = 1
-const sidebarColModel = 2
-
 const (
 	sidebarTitleLines       = 2
 	sidebarTableHeaderLines = 1
@@ -73,9 +69,9 @@ func newSidebarTable(styles themeStyles) table.Model {
 
 func sidebarTableStyles(styles themeStyles) table.Styles {
 	s := table.DefaultStyles()
-	s.Header = styles.SidebarMutedStyle.Copy().Bold(true).Padding(0, 1)
-	s.Cell = styles.SidebarMutedStyle.Copy().Padding(0, 1)
-	s.Selected = styles.SidebarActiveStyle.Copy().Padding(0, 1)
+	s.Header = styles.SidebarMutedStyle.Bold(true).Padding(0, 1)
+	s.Cell = styles.SidebarMutedStyle.Padding(0, 1)
+	s.Selected = styles.SidebarActiveStyle.Padding(0, 1)
 	return s
 }
 
@@ -142,14 +138,6 @@ func (m *Model) syncSidebarRows() {
 	tableCursor := m.sidebarCursor
 	if m.sidebarHoverRow >= 0 && !m.sidebarFocused { tableCursor = m.sidebarHoverRow }
 	if tableCursor >= 0 && tableCursor < len(rows) { m.sidebarTable.SetCursor(tableCursor) }
-}
-
-// sidebarTableWidth returns the width of the sidebar table for layout.
-func sidebarTableWidth(terminalWidth int) int {
-	if terminalWidth < minSidebarScreenWidth {
-		return 0
-	}
-	return sidebarWidth
 }
 
 // shouldShowSidebarTable returns true when sidebar table is visible.
