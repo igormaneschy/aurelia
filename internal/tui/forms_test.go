@@ -54,7 +54,7 @@ func TestOpenCwdForm_ShowsCurrentPath(t *testing.T) {
 	}
 }
 
-func TestOpenNewSessionForm_OpensOverlayAndFetchesModels(t *testing.T) {
+func TestOpenNewSessionForm_OpensNameOnlyOverlay(t *testing.T) {
 	m := testChatModel()
 	m.sessions = []tuiSessionInfo{{ChatID: ipc.ReservedTUIChatID, Name: "DM"}}
 	next, cmd := m.openNewSessionForm()
@@ -65,7 +65,11 @@ func TestOpenNewSessionForm_OpensOverlayAndFetchesModels(t *testing.T) {
 		t.Fatalf("name = %q", next.activeForm.sessionName)
 	}
 	if cmd == nil {
-		t.Fatal("expected batch command")
+		t.Fatal("expected init command")
+	}
+	view := initModelFormView(next.activeForm)
+	if strings.Contains(view, "Model") {
+		t.Fatalf("new session form should not include model picker, got:\n%s", view)
 	}
 }
 
@@ -126,11 +130,10 @@ func TestAdvanceConfirmForm_DeleteSession(t *testing.T) {
 func TestAdvanceNewSessionForm_QueuesCreate(t *testing.T) {
 	m := testChatModel()
 	m.formOpen = true
-	hf := newNewSessionForm(modelCatalog{}, "research")
+	hf := newNewSessionForm("research")
 	hf.sessionName = "research"
-	hf.selected = "openai/gpt-5.1"
 	next, cmd := m.advanceNewSessionForm(hf)
-	if next.formOpen || next.pendingSessionModel != "openai/gpt-5.1" || cmd == nil {
+	if next.formOpen || next.pendingSessionModel != "" || cmd == nil {
 		t.Fatalf("formOpen=%v pending=%q cmd=%v", next.formOpen, next.pendingSessionModel, cmd)
 	}
 }
@@ -138,7 +141,7 @@ func TestAdvanceNewSessionForm_QueuesCreate(t *testing.T) {
 func TestAdvanceNewSessionForm_EmptyNameStaysOpen(t *testing.T) {
 	m := testChatModel()
 	m.formOpen = true
-	hf := newNewSessionForm(modelCatalog{}, "")
+	hf := newNewSessionForm("")
 	hf.sessionName = "   "
 	next, cmd := m.advanceNewSessionForm(hf)
 	if !next.formOpen || cmd != nil {
@@ -178,13 +181,3 @@ func TestHandleCwdFormKey_EscCloses(t *testing.T) {
 	}
 }
 
-func TestCatalogAllModelOptions_IncludesProviders(t *testing.T) {
-	catalog := catalogFromIPCModels([]ipc.IPCEvent{{
-		Type: ipc.EventTypeModels,
-		Body: `[{"provider":"openai","id":"gpt-5.1"}]`,
-	}})
-	opts := catalog.allModelOptions()
-	if len(opts) < 2 {
-		t.Fatalf("options = %d", len(opts))
-	}
-}

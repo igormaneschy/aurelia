@@ -2,20 +2,18 @@ package tui
 
 import "strings"
 
-// sidebarChromeLineCount is non-table sidebar chrome (title, hints, table header).
+// sidebarChromeLineCount is non-table sidebar chrome (title, sections, hints).
 func (m Model) sidebarChromeLineCount() int {
 	if len(m.sessions) == 0 {
-		return 4
+		return sidebarEmptyLines
 	}
-	n := sidebarTitleLines + sidebarTableHeaderLines
+	n := sidebarTitleLines + sidebarSectionRuleLines + sidebarSectionHeader + sidebarTableHeaderLines
 	if m.sidebarFocused {
-		return n + 7
+		return n + sidebarFocusedHintLines
 	}
-	n += 7 // project block + daemon label
-	if m.isChatMode() {
-		n++
-	}
-	n++ // "+ New session" hint
+	// Context + actions panels (each preceded by a section rule).
+	n += sidebarSectionRuleLines + sidebarSectionHeader + sidebarContextLines
+	n += sidebarSectionRuleLines + sidebarSectionHeader + sidebarActionsLines
 	return n
 }
 

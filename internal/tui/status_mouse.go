@@ -11,7 +11,6 @@ type statusBarHitKind int
 
 const (
 	statusBarHitNone statusBarHitKind = iota
-	statusBarHitModel
 	statusBarHitHelp
 )
 
@@ -25,16 +24,10 @@ func (m Model) layoutLines() []string {
 
 func (m Model) isStatusBarLine(line string) bool {
 	plain := stripANSI(line)
-	if strings.Contains(plain, "●") {
-		return true
-	}
-	if strings.Contains(plain, statusBarHelpToken) {
-		return true
-	}
-	if model := m.activeModelLabel(); model != "" && strings.Contains(plain, model) {
-		return true
-	}
-	return false
+	return strings.Contains(plain, statusBarHelpToken) ||
+		strings.Contains(plain, "🖱️ mouse") ||
+		strings.Contains(plain, "✋ mouse") ||
+		strings.Contains(plain, "↵ send")
 }
 
 func (m Model) statusBarY() int {
@@ -46,16 +39,16 @@ func (m Model) statusBarY() int {
 }
 
 func (m Model) statusBarPlainLine() string {
-	model := m.activeModelLabel()
-	for _, line := range m.layoutLines() {
-		plain := stripANSI(line)
-		if model != "" && strings.Contains(plain, model) {
-			return plain
+	lines := m.layoutLines()
+	for y := len(lines) - 1; y >= m.statusBarFooterStartY(); y-- {
+		if m.isStatusBarLine(lines[y]) {
+			return stripANSI(lines[y])
 		}
 	}
-	for i := len(m.layoutLines()) - 1; i >= 0; i-- {
-		if m.isStatusBarLine(m.layoutLines()[i]) {
-			return stripANSI(m.layoutLines()[i])
+	rendered := strings.Split(m.renderStatusBar(), "\n")
+	for i := len(rendered) - 1; i >= 0; i-- {
+		if m.isStatusBarLine(rendered[i]) {
+			return stripANSI(rendered[i])
 		}
 	}
 	return stripANSI(m.renderStatusBar())
@@ -73,12 +66,12 @@ func (m Model) statusBarHitAt(y, x int) statusBarHitKind {
 	if y >= len(lines) {
 		return statusBarHitNone
 	}
+	if !m.isStatusBarLine(lines[y]) {
+		return statusBarHitNone
+	}
 	plain := stripANSI(lines[y])
 	if statusBarSegmentHit(plain, statusBarHelpToken, x) {
 		return statusBarHitHelp
-	}
-	if model := m.activeModelLabel(); statusBarSegmentHit(plain, model, x) {
-		return statusBarHitModel
 	}
 	return statusBarHitNone
 }
@@ -135,12 +128,16 @@ func (m Model) sidebarLineY(needle string) int {
 	return -1
 }
 
-func (m Model) headerProjectHit(x, y int) bool {
-	if y != m.chatHeaderY() || m.isChatMode() {
+func (m Model) headerModelHit(x, y int) bool {
+	if y != m.chatHeaderY() {
 		return false
 	}
 	if x < m.mainPaneStartX() {
 		return false
+	}
+	model := m.activeModelLabel()
+	if model == "" {
+		model = sidebarModelPlaceholder
 	}
 	header := m.renderChatHeader()
 	lines := strings.Split(header, "\n")
@@ -148,12 +145,12 @@ func (m Model) headerProjectHit(x, y int) bool {
 		return false
 	}
 	plain := stripANSI(lines[0])
-	idx := strings.Index(plain, "project ")
+	idx := strings.Index(plain, model)
 	if idx < 0 {
 		return false
 	}
 	relX := x - m.mainPaneStartX()
-	return relX >= idx && relX < len(plain)
+	return relX >= idx && relX < idx+len(model)
 }
 
 func (m Model) sidebarNewSessionHit(x, y int) bool {
@@ -167,27 +164,30 @@ func (m Model) sidebarNewSessionHit(x, y int) bool {
 	return hintY >= 0 && y >= hintY && y <= hintY+1
 }
 
-func (m Model) sidebarProjectBlockYRange() (start, end int) {
-	start = m.sidebarLineY("Project")
-	if start < 0 {
-		return -1, -1
-	}
-	// Title, project name, and full cwd path lines.
-	return start, start + 2
-}
-
-func (m Model) sidebarProjectHit(x, y int) bool {
-	if !m.shouldShowSidebar() || m.sidebarFocused || m.isChatMode() {
+func (m Model) sidebarCwdHit(x, y int) bool {
+	if !m.shouldShowSidebar() || m.sidebarFocused {
 		return false
 	}
 	if !sidebarMouseHitX(x) {
 		return false
 	}
-	start, end := m.sidebarProjectBlockYRange()
-	if start < 0 {
+	lineY := m.sidebarLineY("📂")
+	return lineY >= 0 && y == lineY
+}
+
+func (m Model) sidebarModelHit(x, y int) bool {
+	if !m.shouldShowSidebar() || m.sidebarFocused {
 		return false
 	}
-	return y >= start && y <= end
+	if !sidebarMouseHitX(x) {
+		return false
+	}
+	lineY := m.sidebarLineY("🤖")
+	return lineY >= 0 && y == lineY
+}
+
+func (m Model) sidebarProjectHit(x, y int) bool {
+	return m.sidebarCwdHit(x, y)
 }
 
 func (m Model) handleChatMouse(msg tea.MouseMsg) (handled bool, model tea.Model, cmd tea.Cmd) {
@@ -208,16 +208,17 @@ func (m Model) handleChatMouse(msg tea.MouseMsg) (handled bool, model tea.Model,
 				next = next.openHelpOverlay()
 			}
 			return true, next, nil
-		case statusBarHitModel:
-			next, c := m.openModelSelect()
-			return true, next, c
 		}
-		if m.headerProjectHit(msg.X, msg.Y) {
-			next, c := m.openCwdForm()
+		if m.headerModelHit(msg.X, msg.Y) {
+			next, c := m.openModelSelect()
 			return true, next, c
 		}
 		if m.sidebarProjectHit(msg.X, msg.Y) {
 			next, c := m.openCwdForm()
+			return true, next, c
+		}
+		if m.sidebarModelHit(msg.X, msg.Y) {
+			next, c := m.openModelSelect()
 			return true, next, c
 		}
 		if m.sidebarNewSessionHit(msg.X, msg.Y) {
@@ -225,7 +226,12 @@ func (m Model) handleChatMouse(msg tea.MouseMsg) (handled bool, model tea.Model,
 			return true, next, c
 		}
 	case tea.MouseMotionMsg:
-		// no-op for now
+		hover := m.statusBarHitAt(msg.Y, msg.X)
+		if hover != m.statusBarHover {
+			next := m
+			next.statusBarHover = hover
+			return true, next, nil
+		}
 	}
 	return false, m, nil
 }

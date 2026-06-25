@@ -24,6 +24,7 @@ type chromeModel struct {
 	sessionSeenCount map[int64]int
 	sidebarCursor    int
 	sidebarHoverRow int // hovered session row from mouse motion; -1 = none
+	statusBarHover  statusBarHitKind
 
 	spinner spinner.Model
 

@@ -8,28 +8,6 @@ import (
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
 
-func TestStatusBarHit_ModelLabel(t *testing.T) {
-	m := NewModel("/tmp/test.sock", ThemeDark)
-	m.state = stateChat
-	m.width = 120
-	m.height = 24
-	m.activeModel = "claude-sonnet"
-
-	line := m.statusBarPlainLine()
-	idx := indexOf(line, "claude-sonnet")
-	if idx < 0 {
-		t.Fatalf("model not found in status line %q", line)
-	}
-
-	mid := idx + len("claude-sonnet")/2
-	if m.statusBarHit(mid) != statusBarHitModel {
-		t.Fatalf("expected model hit at x=%d in %q", mid, line)
-	}
-	if m.statusBarHit(0) == statusBarHitModel {
-		t.Fatal("expected state label at x=0 not to be model hit")
-	}
-}
-
 func TestStatusBarY_StaysAtBottomWithSearchBar(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
@@ -46,33 +24,43 @@ func TestStatusBarY_StaysAtBottomWithSearchBar(t *testing.T) {
 	}
 }
 
-func TestHeaderProjectHit_WhenProjectSet(t *testing.T) {
+func TestHeaderModelHit_WhenModelSet(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 120
 	m.height = 30
-	m.cwdPath = "/Users/igor/myproject"
+	m.activeModel = "claude-sonnet"
 
 	y := m.chatHeaderY()
-	x := m.mainPaneStartX() + 40
-	if !m.headerProjectHit(x, y) {
-		t.Fatal("expected project segment click in header")
+	plain := stripANSIForTest(strings.Split(m.renderChatHeader(), "\n")[0])
+	idx := strings.Index(plain, "claude-sonnet")
+	if idx < 0 {
+		t.Fatalf("model not in header %q", plain)
 	}
-	if m.headerProjectHit(x, y+5) {
+	x := m.mainPaneStartX() + idx + 2
+	if !m.headerModelHit(x, y) {
+		t.Fatal("expected model chip click in header")
+	}
+	if m.headerModelHit(x, y+5) {
 		t.Fatal("expected miss below header line")
 	}
 }
 
-func TestHeaderProjectHit_ChatModeMiss(t *testing.T) {
+func TestHeaderModelHit_PlaceholderWhenEmpty(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 120
 	m.height = 30
-	m.cwdPath = "not set"
 
 	y := m.chatHeaderY()
-	if m.headerProjectHit(m.mainPaneStartX()+40, y) {
-		t.Fatal("expected no project hit in chat mode")
+	plain := stripANSIForTest(strings.Split(m.renderChatHeader(), "\n")[0])
+	idx := strings.Index(plain, sidebarModelPlaceholder)
+	if idx < 0 {
+		t.Fatalf("placeholder not in header %q", plain)
+	}
+	x := m.mainPaneStartX() + idx
+	if !m.headerModelHit(x, y) {
+		t.Fatal("expected placeholder model chip click in header")
 	}
 }
 
@@ -98,12 +86,12 @@ func TestHandleChatMouse_ProjectTitleOpensCwdForm(t *testing.T) {
 	m.cwdPath = "/Users/igor/dev/aurelia"
 	prepSidebarMouseTest(&m)
 
-	titleY := m.sidebarLineY("Project")
-	if titleY < 0 {
-		t.Fatal("expected Project title line in sidebar")
+	cwdY := m.sidebarLineY("📂")
+	if cwdY < 0 {
+		t.Fatal("expected cwd line in sidebar context panel")
 	}
 
-	handled, model, _ := m.handleChatMouse(tea.MouseClickMsg{X: 2, Y: titleY, Button: tea.MouseLeft})
+	handled, model, _ := m.handleChatMouse(tea.MouseClickMsg{X: 2, Y: cwdY, Button: tea.MouseLeft})
 	if !handled {
 		t.Fatal("expected click on Project title to open cwd form")
 	}
@@ -180,37 +168,6 @@ func TestHandleChatMouse_HelpInStatusBar(t *testing.T) {
 	}
 	if !model.(Model).helpVisible() {
 		t.Fatal("expected help overlay open")
-	}
-}
-
-func TestHandleChatMouse_ModelInStatusBar(t *testing.T) {
-	m := NewModel("/tmp/test.sock", ThemeDark)
-	m.state = stateChat
-	m.width = 120
-	m.height = 30
-	m.activeModel = "claude-sonnet"
-
-	line := m.statusBarPlainLine()
-	idx := indexOf(line, "claude-sonnet")
-	if idx < 0 {
-		t.Fatalf("model not in status line %q", line)
-	}
-
-	clickY := m.statusBarFooterStartY()
-	for y := m.statusBarFooterStartY(); y < len(m.layoutLines()); y++ {
-		if strings.Contains(stripANSIForTest(m.layoutLines()[y]), "claude-sonnet") {
-			clickY = y
-			break
-		}
-	}
-	handled, model, _ := m.handleChatMouse(tea.MouseClickMsg{
-		X: idx + 2, Y: clickY, Button: tea.MouseLeft,
-	})
-	if !handled {
-		t.Fatal("expected model click to open form")
-	}
-	if !model.(Model).formOpen {
-		t.Fatal("expected model picker form open")
 	}
 }
 

@@ -18,9 +18,63 @@ func prepSidebarMouseTest(m *Model) {
 }
 
 func TestSidebarTableFirstRowY(t *testing.T) {
-	want := topMarginHeight + sidebarBorderLines + sidebarTitleLines + sidebarTableHeaderLines
+	want := topMarginHeight + sidebarBorderLines + sidebarTitleLines + sidebarSectionRuleLines + sidebarSectionHeader + sidebarTableHeaderLines
 	if got := sidebarTableFirstRowY(); got != want {
 		t.Fatalf("got %d want %d", got, want)
+	}
+}
+
+func TestHandleSidebarMouse_ClickDMRow(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.activeSession = -9000002
+	m.sessions = []tuiSessionInfo{
+		{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
+		{ChatID: -9000002, Name: "Trade"},
+	}
+	prepSidebarMouseTest(&m)
+
+	updated, cmd := m.Update(tea.MouseClickMsg{X: 2, Y: sidebarTableFirstRowY(), Button: tea.MouseLeft})
+	if cmd == nil {
+		t.Fatal("expected cmd to open DM session")
+	}
+	if updated.(Model).sidebarCursor != 0 {
+		t.Fatalf("expected cursor on DM row 0, got %d", updated.(Model).sidebarCursor)
+	}
+}
+
+func TestRenderSidebarPanels_IncludesSections(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.sessions = []tuiSessionInfo{{ChatID: ipc.ReservedTUIChatID, Name: "dm"}, {ChatID: -2, Name: "work"}}
+	m.width = 100
+	m.height = 30
+	m.showSidebar = true
+	m.cwdPath = "not set"
+	prepSidebarTest(&m)
+
+	view := stripANSIForTest(m.renderSidebarTable())
+	for _, want := range []string{"Sessions", "Context", "Actions", "+ New session", "📂", "🤖"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected sidebar to contain %q, got:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "(click)") {
+		t.Fatal("expected no (click) hint in sidebar")
+	}
+}
+
+func TestSessionModelLabel_NeverEmpty(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.sessions = []tuiSessionInfo{{ChatID: -2, Name: "work"}}
+	m.activeSession = ipc.ReservedTUIChatID
+	label := stripANSIForTest(m.sessionModelLabel(m.sessions[0]))
+	if label != sidebarModelPlaceholder {
+		t.Fatalf("expected %q, got %q", sidebarModelPlaceholder, label)
+	}
+	m.activeModel = "gpt-5.1"
+	m.activeSession = -2
+	label = stripANSIForTest(m.sessionModelLabel(m.sessions[0]))
+	if label == "" || label == sidebarModelPlaceholder {
+		t.Fatalf("expected active model label, got %q", label)
 	}
 }
 
@@ -60,11 +114,16 @@ func TestHandleSidebarMouse_MotionSetsHoverRow(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.sessions = []tuiSessionInfo{{ChatID: ipc.ReservedTUIChatID, Name: "dm"}, {ChatID: -9000002, Name: "work"}}
 	prepSidebarMouseTest(&m)
+	base := sidebarViewForTest(m)
 	updated, _ := m.Update(tea.MouseMotionMsg{X: 2, Y: sidebarTableFirstRowY() + 1})
 	if updated.(Model).sidebarHoverRow != 1 {
 		t.Fatal("expected hover row 1")
 	}
-	if !strings.Contains(sidebarViewForTest(updated.(Model)), "work") {
+	hovered := sidebarViewForTest(updated.(Model))
+	if hovered == base {
+		t.Fatal("expected hover to change sidebar render")
+	}
+	if !strings.Contains(hovered, "work") {
 		t.Fatal("expected work in view")
 	}
 }
