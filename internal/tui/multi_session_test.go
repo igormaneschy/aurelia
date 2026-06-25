@@ -434,10 +434,16 @@ func TestHandleSidebarKey_DDeletesSession(t *testing.T) {
 	prepSidebarTest(&m)
 
 	updated, cmd := m.handleKeyMsg(keyText("d"))
-	_ = updated.(Model)
+	m2 := updated.(Model)
 
 	if cmd == nil {
 		t.Fatal("expected non-nil command after pressing d on non-DM session")
+	}
+	if !m2.formOpen || m2.activeForm == nil || m2.activeForm.kind != formKindConfirm {
+		t.Fatalf("expected delete confirm form, got %#v", m2.activeForm)
+	}
+	if m2.activeForm.deleteChatID != -9000002 {
+		t.Fatalf("deleteChatID = %d, want -9000002", m2.activeForm.deleteChatID)
 	}
 }
 

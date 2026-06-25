@@ -66,6 +66,9 @@ type Model struct {
 	// "Connected to Aurelia daemon" startup message is not present.
 	switchingSession bool
 
+	// pendingSessionModel is sent via /model after session_create completes.
+	pendingSessionModel string
+
 	// Pending request tracking
 	requestID string
 	waiting   bool

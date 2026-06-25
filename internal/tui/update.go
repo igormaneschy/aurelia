@@ -217,8 +217,15 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tuiModelsMsg:
-		if m.formOpen && m.activeForm != nil && m.activeForm.isModelForm() {
-			m = m.applyWizardCatalog(msg)
+		if m.formOpen && m.activeForm != nil {
+			switch {
+			case m.activeForm.isModelForm():
+				m = m.applyWizardCatalog(msg)
+			case m.activeForm.kind == formKindNewSession:
+				m = m.applyNewSessionCatalog(msg)
+			default:
+				return m, nil
+			}
 			return m, m.initActiveForm()
 		}
 		return m, nil
@@ -338,6 +345,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tuiSessionCreatedMsg:
 		if msg.err != nil {
+			m.pendingSessionModel = ""
 			m.messages = append(m.messages, chatMessage{
 				Sender:    "⚠️",
 				Text:      fmt.Sprintf("Failed to create session: %s", msg.err),
@@ -355,12 +363,20 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.switchingSession = true
 		m.syncSidebarRows()
 		m.updateViewport()
-		// Reload sessions list + history for the new session.
-		return m, tea.Batch(
+		cmds := []tea.Cmd{
 			fetchTUISessions(m.ipcClient),
 			fetchTUIHistory(m.ipcClient, m.activeSession),
 			fetchTUIStatus(m.ipcClient, m.activeSession),
-		)
+		}
+		if model := strings.TrimSpace(m.pendingSessionModel); model != "" && model != "auto" {
+			m.pendingSessionModel = ""
+			m.waiting = true
+			m.streamID++
+			cmds = append(cmds, m.sendCommandToSession(m.activeSession, "/model "+model, m.streamID), spinnerTickCmd())
+		} else {
+			m.pendingSessionModel = ""
+		}
+		return m, tea.Batch(cmds...)
 
 	case tuiSessionOpenedMsg:
 		if msg.err != nil {
@@ -990,7 +1006,7 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.updateViewport()
 			return m, nil
 		}
-		return m, deleteTUISession(m.ipcClient, target.ChatID)
+		return m.openDeleteSessionConfirm(target.ChatID, target.Name)
 
 	case "r":
 		// Rename the selected session (not the default DM).

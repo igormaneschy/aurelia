@@ -24,6 +24,13 @@ type huhForm struct {
 	selected string
 	catalog  modelCatalog
 	provider string
+
+	confirmAction confirmAction
+	confirmed     bool
+
+	sessionName string
+
+	deleteChatID int64
 }
 
 type formInternalMsg struct {

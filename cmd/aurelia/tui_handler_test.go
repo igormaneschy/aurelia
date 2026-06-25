@@ -401,6 +401,35 @@ func TestTUIHandler_CwdValidPath(t *testing.T) {
 	}
 }
 
+func TestTUIHandler_ResetClearsSession(t *testing.T) {
+	a, ctx, cleanup := testApp(t)
+	defer cleanup()
+
+	userID := int64(os.Getuid())
+	a.sessions.SetSession(ipc.ReservedTUIChatID, 0, userID, "/tmp/test-session.jsonl")
+
+	handler := makeTUIHandler(a)
+	te := &testEmit{}
+
+	err := handler(ctx, ipc.IPCMessage{
+		Type: "command",
+		Text: "/reset",
+	}, te.emit)
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if te.count() < 2 {
+		t.Fatalf("expected at least 2 events, got %d", te.count())
+	}
+	body := te.events[1].Body
+	if !strings.Contains(body, "reset") {
+		t.Errorf("expected reset confirmation in response, got %q", body)
+	}
+	if got := a.sessions.GetSession(ipc.ReservedTUIChatID, 0, userID); got != "" {
+		t.Fatalf("session should be cleared, got %q", got)
+	}
+}
+
 func TestTUIHandler_CwdInvalidPath(t *testing.T) {
 	a, ctx, cleanup := testApp(t)
 	defer cleanup()
