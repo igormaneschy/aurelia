@@ -4,6 +4,32 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.33.0 - 2026-06-25
+
+### Added
+- **TUI rich components** — sprint completo de componentes interactivos no terminal
+- **Formulários huh** — `/model` (wizard por provider), `/cwd`, `/new`, `/clear`, `/reset` e confirmação de delete de sessão
+- **Help overlay** — atalho F1, comando `/help`, painel contextual (chat, sidebar, search, form)
+- **Painel de projeto** — `/status` e Ctrl+P abrem modal com cwd, agent, model, bridge, memory e último run
+- **Histórico paginado** — Ctrl+B/Ctrl+F navegam páginas; Ctrl+S pesquisa inline no chat
+- **Progresso de streaming** — barra e timer durante resposta do daemon; barra de upload para anexos
+- **Badges de sessão** — contador de mensagens não lidas na sidebar (IPC `message_count`)
+- **Mouse no TUI** — clique em sessões, model na status bar, project/cwd, + New session, F1 help
+- **Animações** — typing dots, spinner e badges com `--no-animations` para desligar
+- **Flags CLI** — `--no-mouse` e `--no-animations`
+
+### Changed
+- **Modais unificados** — help, project panel e forms com fundo escurecido e input bloqueado
+- **Atalho de help** — `?` removido (conflito com autocomplete); F1 e `/help` abrem o overlay
+- **Status bar dinâmica** — mantém-se visível com search, autocomplete, sidebar expandida ou badges
+- **Cwd picker** — mostra caminho actual (`Current: …`) e pré-selecção no form
+
+### Fixed
+- **Wizard /model** — catálogo via IPC JSON; reload (`r`), back (`b`) e auto-submit
+- **Scroll durante stream** — Ctrl+F no último página faz scroll do viewport
+- **Status bar durante search** — não desaparece com barra de pesquisa activa
+- **Ctrl+O** — toggle mouse funciona mesmo com form aberto
+
 ## v0.32.3 - 2026-06-25
 
 ### Changed

@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 
+	"charm.land/bubbles/v2/help"
 	"charm.land/lipgloss/v2"
 )
 
@@ -33,15 +34,20 @@ type themeStyles struct {
 	SidebarMutedStyle  lipgloss.Style
 	SidebarActiveStyle lipgloss.Style
 	SidebarCursorStyle lipgloss.Style
+	SidebarUnreadStyle lipgloss.Style
 
 	// Chat header.
 	HeaderTitleStyle lipgloss.Style
 	HeaderMetaStyle  lipgloss.Style
 	HeaderRuleStyle  lipgloss.Style
 
-	// Misc.
+	ProgressBarStyle lipgloss.Style
+	ProgressFullColor string
+	ProgressEmptyColor string
+
 	MessageSeparatorStyle lipgloss.Style
 	ChatModeStyle         lipgloss.Style
+	SearchHighlightStyle  lipgloss.Style
 }
 
 // Theme represents the TUI color theme.
@@ -120,6 +126,16 @@ func (t Theme) GlamourStyle() string {
 	return "dark"
 }
 
+// helpStylesForTheme returns bubbles/help styles aligned with the TUI palette.
+func helpStylesForTheme(s themeStyles, theme Theme) help.Styles {
+	h := help.DefaultStyles(ResolveTheme(theme) == ThemeDark)
+	h.ShortKey = s.UserStyle
+	h.FullKey = s.UserStyle
+	h.ShortDesc = s.HeaderMetaStyle
+	h.FullDesc = s.HeaderMetaStyle
+	return h
+}
+
 // newStylesForTheme returns the appropriate themeStyles for the given Theme.
 func newStylesForTheme(t Theme) themeStyles {
 	if ResolveTheme(t) == ThemeLight {
@@ -190,6 +206,10 @@ func newDarkStyles() themeStyles {
 			Foreground(lipgloss.Color("226")).
 			Bold(true),
 
+		SidebarUnreadStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("214")).
+			Bold(true),
+
 		HeaderTitleStyle: lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("205")),
@@ -204,9 +224,12 @@ func newDarkStyles() themeStyles {
 			Foreground(lipgloss.Color("238")),
 
 		// ChatModeStyle highlights that file system tools are disabled.
-		ChatModeStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("214")). // amber
-			Italic(true),
+		ChatModeStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Italic(true),
+		SearchHighlightStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("226")).
+			Background(lipgloss.Color("236")),
+		ProgressBarStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
+		ProgressFullColor: "244", ProgressEmptyColor: "238",
 	}
 }
 
@@ -273,6 +296,10 @@ func newLightStyles() themeStyles {
 			Foreground(lipgloss.Color("130")). // dark yellow / amber
 			Bold(true),
 
+		SidebarUnreadStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("130")).
+			Bold(true),
+
 		HeaderTitleStyle: lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("125")),
@@ -286,8 +313,11 @@ func newLightStyles() themeStyles {
 		MessageSeparatorStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("248")),
 
-		ChatModeStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("130")). // amber
-			Italic(true),
+		ChatModeStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("130")).Italic(true),
+		SearchHighlightStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("130")).
+			Background(lipgloss.Color("254")),
+		ProgressBarStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
+		ProgressFullColor: "245", ProgressEmptyColor: "250",
 	}
 }

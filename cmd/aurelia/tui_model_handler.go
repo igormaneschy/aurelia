@@ -5,13 +5,96 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
+	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 )
+
+func handleTUIModels(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
+	if a == nil || a.bridge == nil {
+		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "bridge unavailable", RequestID: msg.RequestID})
+	}
+	models, err := listTUIModels(ctx, a)
+	if err != nil {
+		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: err.Error(), RequestID: msg.RequestID})
+	}
+	body, err := json.Marshal(supplementModelsFromRegistry(bridgeModelsToIPCEntries(models)))
+	if err != nil {
+		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: fmt.Sprintf("marshal models: %s", err), RequestID: msg.RequestID})
+	}
+	if err := emit(ipc.IPCEvent{Type: ipc.EventTypeModels, Body: string(body), RequestID: msg.RequestID}); err != nil {
+		return err
+	}
+	return emit(ipc.IPCEvent{Type: ipc.EventTypeStreamEnd, Done: true, RequestID: msg.RequestID})
+}
+
+type piRegistryModelsFile struct {
+	Providers map[string]piRegistryProvider `json:"providers"`
+}
+
+type piRegistryProvider struct {
+	Models []struct {
+		ID string `json:"id"`
+	} `json:"models"`
+}
+
+func supplementModelsFromRegistry(entries []ipc.TUIModelEntry) []ipc.TUIModelEntry {
+	path := piModelsJSONPath()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return entries
+	}
+	var raw piRegistryModelsFile
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return entries
+	}
+	have := make(map[string]struct{}, len(entries))
+	for _, entry := range entries {
+		have[entry.Provider+"/"+entry.ID] = struct{}{}
+	}
+	for provider, cfg := range raw.Providers {
+		for _, model := range cfg.Models {
+			id := strings.TrimSpace(model.ID)
+			if id == "" {
+				continue
+			}
+			key := provider + "/" + id
+			if _, ok := have[key]; ok {
+				continue
+			}
+			entries = append(entries, ipc.TUIModelEntry{Provider: provider, ID: id})
+			have[key] = struct{}{}
+		}
+	}
+	return entries
+}
+
+func piModelsJSONPath() string {
+	if dir := strings.TrimSpace(os.Getenv("PI_CODING_AGENT_DIR")); dir != "" {
+		return filepath.Join(dir, "models.json")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".pi", "agent", "models.json")
+}
+
+func bridgeModelsToIPCEntries(models []bridge.ModelInfo) []ipc.TUIModelEntry {
+	entries := make([]ipc.TUIModelEntry, 0, len(models))
+	for _, m := range models {
+		if m.Provider == "" || m.ID == "" {
+			continue
+		}
+		entries = append(entries, ipc.TUIModelEntry{Provider: m.Provider, ID: m.ID})
+	}
+	return entries
+}
 
 // handleTUIModel processes /model commands from the TUI.
 func handleTUIModel(ctx context.Context, a *app, chatID int64, threadID int, userID int64, text string) string {
@@ -38,7 +121,11 @@ func buildTUIModelList(ctx context.Context, a *app) string {
 	if err != nil {
 		return currentLine + fmt.Sprintf("\n\nModel list unavailable: %v", err)
 	}
-	return formatTUIModelList(currentLine, models)
+	currentProvider := ""
+	if a.config != nil {
+		currentProvider = a.config.DefaultProvider
+	}
+	return formatTUIModelList(currentLine, models, currentProvider)
 }
 
 func refreshTUIModels(ctx context.Context, a *app) string {
@@ -76,7 +163,7 @@ func listTUIModels(ctx context.Context, a *app) ([]bridge.ModelInfo, error) {
 	return a.bridge.ListModels(modelCtx, true)
 }
 
-func formatTUIModelList(currentLine string, models []bridge.ModelInfo) string {
+func formatTUIModelList(currentLine string, models []bridge.ModelInfo, currentProvider string) string {
 	var lines []string
 	lines = append(lines, currentLine)
 	lines = append(lines, "\n\n**Available models:**")
@@ -93,7 +180,7 @@ func formatTUIModelList(currentLine string, models []bridge.ModelInfo) string {
 		}
 		grouped[m.Provider] = append(grouped[m.Provider], display)
 	}
-	sort.Strings(providerOrder)
+	sortTUIModelProviderOrder(providerOrder, currentProvider)
 
 	displayed := 0
 	const maxTUIModelDisplay = 50
@@ -192,4 +279,32 @@ func currentTUIModelLine(a *app) string {
 
 func isTUIAutoModelName(name string) bool {
 	return strings.EqualFold(strings.TrimSpace(name), "auto")
+}
+
+func sortTUIModelProviderOrder(providers []string, currentProvider string) {
+	sort.SliceStable(providers, func(i, j int) bool {
+		leftRank := tuiModelProviderDisplayRank(providers[i], currentProvider)
+		rightRank := tuiModelProviderDisplayRank(providers[j], currentProvider)
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
+		return strings.ToLower(providers[i]) < strings.ToLower(providers[j])
+	})
+}
+
+func tuiModelProviderDisplayRank(provider, currentProvider string) int {
+	if currentProvider != "" && provider == currentProvider {
+		return 0
+	}
+	if isTUILocalModelProvider(provider) {
+		return 1
+	}
+	return 2
+}
+
+func isTUILocalModelProvider(provider string) bool {
+	normalized := strings.ToLower(provider)
+	return strings.Contains(normalized, "ollama") ||
+		strings.Contains(normalized, "lm-studio") ||
+		strings.Contains(normalized, "llamacpp")
 }

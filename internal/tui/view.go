@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -79,56 +80,56 @@ func (m Model) chatView() string {
 		return "Loading..."
 	}
 
-	inputBar := m.renderInput()
+	full := m.renderChatBaseLayout()
 
-	statusBar := m.renderStatusBar()
-
-	viewHeight := m.height
-	inputH := inputHeight
-	statusH := statusBarHeight
-	contentH := viewHeight - topMarginHeight - inputH - statusH
-
-	if contentH < 1 {
-		contentH = 1
+	if m.modalOpen() {
+		var panel string
+		wide := false
+		switch {
+		case m.projectPanelOpen:
+			panel = m.renderProjectPanel()
+		case m.helpVisible():
+			panel = m.renderHelpPanel()
+			wide = true
+		case m.formOpen && m.activeForm != nil:
+			panel = m.activeForm.view()
+		default:
+			return full
+		}
+		return m.renderModalOverlay(full, panel, wide)
 	}
 
-	mainContentHeight := contentH
+	return full
+}
+
+// renderChatBaseLayout builds the chat screen without overlays (used for mouse hit tests).
+func (m Model) renderChatBaseLayout() string {
+	inputBar := m.renderInput()
+	progressBar := m.footerProgressBar()
+	statusBar := m.renderStatusBar()
+
+	contentH := m.chatBodyHeight()
 
 	var body string
 	if m.shouldShowSidebar() {
 		sidebar := m.renderSidebarTable()
-		viewContent := m.renderMainPane(mainContentHeight, m.contentWidth())
+		viewContent := m.renderMainPane(contentH, m.contentWidth())
 		body = lipgloss.JoinHorizontal(
 			lipgloss.Top,
 			m.styles.SidebarStyle.Render(sidebar),
 			viewContent,
 		)
 	} else {
-		body = m.renderMainPane(mainContentHeight, m.width)
+		body = m.renderMainPane(contentH, m.width)
 	}
+	body = clipLines(body, contentH)
 
-	full := lipgloss.JoinVertical(
-		lipgloss.Left,
-		m.renderTopMargin(),
-		body,
-		inputBar,
-		statusBar,
-	)
-
-	// Overlay project panel when open.
-	if m.projectPanelOpen {
-		panel := m.renderProjectPanel()
-		return m.overlayPanel(full, panel)
+	chatFooter := []string{inputBar}
+	if progressBar != "" {
+		chatFooter = append(chatFooter, progressBar)
 	}
-
-	// Overlay help when ? is pressed.
-	if m.helpOverlayOpen {
-		panel := m.renderHelpOverlay()
-		// Use a slightly wider panel for help to fit keybinding descriptions.
-		return m.overlayPanelWide(full, panel)
-	}
-
-	return full
+	chatFooter = append(chatFooter, statusBar)
+	return lipgloss.JoinVertical(lipgloss.Left, m.renderTopMargin(), body, strings.Join(chatFooter, "\n"))
 }
 
 func (m Model) renderTopMargin() string {
@@ -161,7 +162,29 @@ func (m Model) renderMainContent() string {
 	if !m.viewportSet || m.viewport.Height() <= 0 {
 		return "Initializing..."
 	}
-	return m.viewport.View()
+	content := m.viewport.View()
+	content = clipLines(content, m.viewportHeight())
+	if m.historyNav.hasNewBelow {
+		style := m.styles.SidebarMutedStyle
+		if m.animations.enabled && m.animations.BadgeScale() > 1.05 {
+			style = style.Bold(true)
+		}
+		banner := style.Render("↓ New messages")
+		content = banner + "\n" + content
+		content = clipLines(content, m.viewportHeight()+1)
+	}
+	return content
+}
+
+func clipLines(s string, maxLines int) string {
+	if maxLines < 1 || s == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) <= maxLines {
+		return s
+	}
+	return strings.Join(lines[:maxLines], "\n")
 }
 
 func (m Model) renderInput() string {
@@ -182,6 +205,9 @@ func (m Model) renderInput() string {
 	}
 	if autocomplete := m.renderAutocomplete(); autocomplete != "" {
 		badgeLines = append(badgeLines, autocomplete)
+	}
+	if searchBar := m.renderSearchBar(); searchBar != "" {
+		badgeLines = append(badgeLines, searchBar)
 	}
 
 	promptText := "> "
@@ -298,8 +324,14 @@ func (m Model) renderStatusBar() string {
 		// Active model — shown when known.
 		{label: m.activeModelLabel(), min: 14},
 
+		// Help — clickable (opens help modal).
+		{label: m.helpStatusLabel(), min: 20},
+
 		// Pending count — shown when > 0.
 		{label: m.pendingCountLabel(), min: 24},
+
+		// History page — shown when paginated.
+		{label: m.historyNav.pageLabel(), min: 28},
 
 		// Elapsed time — shown when waiting.
 		{label: m.elapsedLabel(), min: 34},
@@ -308,12 +340,11 @@ func (m Model) renderStatusBar() string {
 		{label: fmt.Sprintf("%s newline", newlineFallbackKey), min: 62},
 		{label: m.mouseStatusLabel(), min: 80},
 		{label: "pg scroll", min: 94},
-		{label: "esc cancel", min: 106},
-		{label: "⌃L clear", min: 118},
-		{label: "⌃P project", min: 130},
-		{label: "⌃S/f2 sessions", min: 146},
-		{label: "tab sidebar", min: 162},
-		{label: "⌃C quit", min: 178},
+		{label: "esc cancel", min: 124},
+		{label: "⌃L clear", min: 138},
+		{label: "⌃P project", min: 152},
+		{label: "⌃S · f2 · ⌃N", min: 168},
+		{label: "⌃C quit", min: 182},
 	}
 
 	parts := []string{}
@@ -329,6 +360,16 @@ func (m Model) renderStatusBar() string {
 	return m.styles.StatusBarStyle.Width(maxInt(20, m.width-2)).Render(strings.Join(parts, "   ·   "))
 }
 
+const statusBarHelpToken = "F1 help"
+
+// helpStatusLabel returns the clickable help hint for the status bar.
+func (m Model) helpStatusLabel() string {
+	if !m.mouseEnabled {
+		return statusBarHelpToken
+	}
+	return m.styles.HeaderMetaStyle.Underline(true).Render(statusBarHelpToken)
+}
+
 // pendingCountLabel returns the pending count badge for the status bar.
 // Returns empty string when there are no pending messages.
 func (m Model) pendingCountLabel() string {
@@ -342,11 +383,16 @@ func (m Model) pendingCountLabel() string {
 // elapsedLabel returns the elapsed time label for the status bar.
 // Returns empty string when no turn is active.
 func (m Model) elapsedLabel() string {
-	if m.turnStart.IsZero() {
+	var elapsed time.Duration
+	switch {
+	case m.streamProgress.active && m.streamProgress.stopwatch.Running():
+		elapsed = m.streamProgress.stopwatch.Elapsed()
+	case !m.turnStart.IsZero():
+		elapsed = time.Since(m.turnStart)
+	default:
 		return ""
 	}
-	elapsed := time.Since(m.turnStart)
-	return elapsed.Truncate(time.Second).String()
+	return "⏱ " + formatElapsed(elapsed)
 }
 
 type statusBarItem struct {
@@ -357,7 +403,11 @@ type statusBarItem struct {
 func (m Model) renderChatHeader() string {
 	stateLabel := m.chromeState()
 	if m.waiting {
-		stateLabel = m.spinner.View() + " thinking"
+		spinnerView := m.spinner.View()
+		if m.animations.enabled && m.animations.SpinnerOpacity() < 0.95 {
+			spinnerView = fadeStyle(m.styles.HeaderMetaStyle, m.animations.SpinnerOpacity()).Render(strings.TrimSpace(spinnerView))
+		}
+		stateLabel = spinnerView + " thinking" + thinkingDots()
 	}
 
 	// Session name in the header. Use the safe label to protect against
@@ -395,78 +445,22 @@ func (m Model) renderChatHeader() string {
 	return lipgloss.NewStyle().Width(m.contentWidth()).Render(header)
 }
 
-func (m Model) renderSidebar() string {
-	lines := []string{
-		m.styles.SidebarTitleStyle.Render("Aurelia"),
-		m.styles.SidebarMutedStyle.Render("local terminal"),
-		"",
-		m.styles.SidebarTitleStyle.Render("Sessions"),
-	}
-
-	if len(m.sessions) == 0 {
-		lines = append(lines, m.styles.SidebarMutedStyle.Render("  (no sessions)"))
-	} else {
-		for i, s := range m.sessions {
-			label := safeSessionLabel(s.Name)
-			if s.ChatID == ipc.ReservedTUIChatID {
-				label = "DM"
-			}
-
-			// Determine display style.
-			isActive := s.ChatID == m.activeSession
-			isCursor := m.sidebarFocused && i == m.sidebarCursor
-
-			var prefix string
-			switch {
-			case isActive && isCursor:
-				prefix = "▶ ●"
-				lines = append(lines, m.styles.SidebarActiveStyle.Render(prefix+" "+label))
-			case isActive:
-				prefix = "●"
-				lines = append(lines, m.styles.SidebarActiveStyle.Render(prefix+" "+label))
-			case isCursor:
-				prefix = "▶"
-				lines = append(lines, m.styles.SidebarCursorStyle.Render(prefix+" "+label))
-			default:
-				prefix = "○"
-				lines = append(lines, m.styles.SidebarMutedStyle.Render(prefix+" "+label))
-			}
-		}
-	}
-
-	// Sidebar navigation hints when focused.
-	if m.sidebarFocused {
-		lines = append(lines, "",
-			m.styles.SidebarMutedStyle.Render("↑↓ navigate"),
-			m.styles.SidebarMutedStyle.Render("enter open"),
-			m.styles.SidebarMutedStyle.Render("n new"),
-			m.styles.SidebarMutedStyle.Render("r rename"),
-			m.styles.SidebarMutedStyle.Render("d delete"),
-			m.styles.SidebarMutedStyle.Render("esc exit"),
-		)
-	} else {
-		lines = append(lines, "",
-			m.styles.SidebarTitleStyle.Render("Project"),
-			truncateMiddle(projectName(m.cwdPath), sidebarWidth-4),
-			m.styles.SidebarMutedStyle.Render(truncateMiddle(m.cwdPath, sidebarWidth-4)),
-		)
-		if m.isChatMode() {
-			lines = append(lines, m.styles.ChatModeStyle.Render("(chat mode)"))
-		}
-		lines = append(lines, "",
-			m.styles.SidebarTitleStyle.Render("Daemon"),
-			m.daemonLabel,
-		)
-	}
-
-	return strings.Join(lines, "\n")
-}
-
 // viewportForSize creates a viewport with the given dimensions.
 func viewportForSize(width, height int) viewport.Model {
 	vp := viewport.New(
 		viewport.WithWidth(width),
 		viewport.WithHeight(viewportHeightForTerminal(height)),
+	)
+	vp.YPosition = topMarginHeight
+	vp.MouseWheelEnabled = true
+	vp.MouseWheelDelta = 3
+	return vp
+}
+
+func (m Model) newViewport(width int) viewport.Model {
+	vp := viewport.New(
+		viewport.WithWidth(width),
+		viewport.WithHeight(m.viewportHeight()),
 	)
 	vp.YPosition = topMarginHeight
 	vp.MouseWheelEnabled = true
@@ -753,116 +747,58 @@ func safeSessionLabel(name string) string {
 	return b.String()
 }
 
-// renderHelpOverlay renders the keyboard shortcuts and commands reference.
-func (m Model) renderHelpOverlay() string {
-	var b strings.Builder
-	b.WriteString(m.styles.HeaderTitleStyle.Render("Keyboard Shortcuts"))
-	b.WriteString("\n\n")
-
-	// Two-column layout: keybinding | description.
-	rows := [][2]string{
-		{"Esc", "Cancel current response"},
-		{"Enter", "Send message"},
-		{"Alt+Enter / Ctrl+J", "Insert newline"},
-		{"Ctrl+O", "Toggle mouse (scroll vs text selection)"},
-		{"Ctrl+P", "Toggle project state panel"},
-		{"Ctrl+S / F2", "Focus sidebar sessions"},
-		{"Ctrl+L", "Clear chat screen"},
-		{"Ctrl+Y", "Copy transcript to clipboard"},
-		{"Ctrl+R", "Copy last response to clipboard"},
-		{"Ctrl+X", "Clear pending images/docs"},
-		{"Ctrl+V", "Paste image from clipboard"},
-		{"Ctrl+C", "Quit"},
-		{"? / Esc / Enter", "Close this help"},
-		{"", ""},
-		{"↑↓", "Navigate input history"},
-		{"Tab", "Complete command or cycle sidebar"},
+// thinkingDots returns an animated ellipsis while the daemon is processing.
+func thinkingDots() string {
+	switch int(time.Now().UnixMilli()/450) % 4 {
+	case 1:
+		return "."
+	case 2:
+		return ".."
+	case 3:
+		return "..."
+	default:
+		return ""
 	}
-
-	for _, row := range rows {
-		if row[0] == "" {
-			b.WriteString("\n")
-			continue
-		}
-		keyCol := m.styles.UserStyle.Width(22).Render(row[0])
-		descCol := m.styles.HeaderMetaStyle.Render(row[1])
-		b.WriteString(keyCol)
-		b.WriteString("  ")
-		b.WriteString(descCol)
-		b.WriteString("\n")
-	}
-
-	b.WriteString("\n")
-	b.WriteString(m.styles.HeaderTitleStyle.Render("Commands"))
-	b.WriteString("\n\n")
-
-	cmds := [][2]string{
-		{"/help", "Show this help"},
-		{"/status", "Daemon, model, cwd, session status"},
-		{"/model", "List available models"},
-		{"/model <name>", "Switch model"},
-		{"/model auto", "Use automatic model selection"},
-		{"/model refresh", "Refresh model list"},
-		{"/cwd", "Show current project binding"},
-		{"/cwd <path>", "Set project working directory"},
-		{"/cwd clear", "Remove project binding"},
-		{"/img <path>", "Attach image (png, jpg, gif, webp)"},
-		{"/attach <path>", "Attach document (md, docx, pdf, etc.)"},
-	}
-
-	for _, row := range cmds {
-		keyCol := m.styles.UserStyle.Width(22).Render(row[0])
-		descCol := m.styles.HeaderMetaStyle.Render(row[1])
-		b.WriteString(keyCol)
-		b.WriteString("  ")
-		b.WriteString(descCol)
-		b.WriteString("\n")
-	}
-
-	b.WriteString("\n")
-	b.WriteString(m.styles.HeaderMetaStyle.Render("Images: /img <path>, Ctrl+V paste, drag & drop"))
-	b.WriteString("\n")
-	b.WriteString(m.styles.HeaderMetaStyle.Render("Docs: /attach <path>, multiple allowed per message"))
-	b.WriteString("\n\n")
-	b.WriteString(m.styles.HeaderMetaStyle.Render("Theme: --theme auto|light|dark (use --theme light if auto-detection misses your light terminal)"))
-
-	return b.String()
 }
 
-// overlayPanelWide overlays a panel on the background using a wider panel
-// (70-80 columns) suitable for help content.
-func (m Model) overlayPanelWide(bg, panel string) string {
-	panelWidth := maxInt(50, minInt(m.width-4, 76))
+// renderHelpPanel renders the bubbles/help keymap overlay with section headers.
+func (m Model) renderHelpPanel() string {
+	panelWidth := maxInt(46, minInt(m.width-8, 72))
 
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(m.styles.HeaderTitleStyle.GetForeground()).
-		Padding(1, 2).
-		Width(panelWidth).
-		Render(panel)
+	hm := m.helpModel
+	hm.ShowAll = true
+	hm.SetWidth(panelWidth)
 
-	bgLines := strings.Split(bg, "\n")
-	panelLines := strings.Split(box, "\n")
-
-	startRow := (len(bgLines) - len(panelLines)) / 2
-	if startRow < 0 {
-		startRow = 0
+	groups := m.helpPanelGroups()
+	var b strings.Builder
+	b.WriteString(m.styles.HeaderTitleStyle.Render(m.helpPanelTitle()))
+	b.WriteString("\n\n")
+	if len(groups) > 0 {
+		b.WriteString(hm.FullHelpView([][]key.Binding{groups[0]}))
 	}
-	boxWidth := lipgloss.Width(box)
-	startCol := (m.width - boxWidth) / 2
-	if startCol < 0 {
-		startCol = 0
-	}
-
-	var out []string
-	for i, line := range bgLines {
-		if i >= startRow && i-startRow < len(panelLines) {
-			out = append(out, compositeOverlayRow(line, panelLines[i-startRow], startCol, m.width))
+	if len(groups) > 1 {
+		b.WriteString("\n\n")
+		var title string
+		if m.uiContext() != uiContextChat {
+			title = "Chat & Global"
 		} else {
-			out = append(out, line)
+			title = "Commands"
 		}
+		b.WriteString(m.styles.HeaderTitleStyle.Render(title))
+		b.WriteString("\n\n")
+		b.WriteString(hm.FullHelpView([][]key.Binding{groups[1]}))
 	}
-	return strings.Join(out, "\n")
+
+	b.WriteString("\n\n")
+	b.WriteString(m.styles.HeaderMetaStyle.Render("Mouse: Ctrl+O toggle · click session/model/project/+ New"))
+	b.WriteString("\n")
+	b.WriteString(m.styles.HeaderMetaStyle.Render("Images: /img <path>, Ctrl+V paste · Docs: /attach <path>"))
+	if m.uiContext() == uiContextChat {
+		b.WriteString("\n\n")
+		b.WriteString(m.styles.HeaderMetaStyle.Render("Theme: --theme auto|light|dark · --no-mouse · --no-animations"))
+	}
+
+	return b.String()
 }
 
 // formatMessageTime formats the message timestamp for display.

@@ -434,10 +434,16 @@ func TestHandleSidebarKey_DDeletesSession(t *testing.T) {
 	prepSidebarTest(&m)
 
 	updated, cmd := m.handleKeyMsg(keyText("d"))
-	_ = updated.(Model)
+	m2 := updated.(Model)
 
 	if cmd == nil {
 		t.Fatal("expected non-nil command after pressing d on non-DM session")
+	}
+	if !m2.formOpen || m2.activeForm == nil || m2.activeForm.kind != formKindConfirm {
+		t.Fatalf("expected delete confirm form, got %#v", m2.activeForm)
+	}
+	if m2.activeForm.deleteChatID != -9000002 {
+		t.Fatalf("deleteChatID = %d, want -9000002", m2.activeForm.deleteChatID)
 	}
 }
 
@@ -461,7 +467,19 @@ func TestHandleSidebarKey_DOnDMShowsMessage(t *testing.T) {
 	}
 }
 
-func TestCtrlS_FocusesSidebar(t *testing.T) {
+func TestCtrlS_OpensHistorySearch(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+
+	updated, _ := m.handleKeyMsg(keyCtrl('s'))
+	m2 := updated.(Model)
+
+	if !m2.historySearch.active {
+		t.Error("expected historySearch.active=true after ctrl+s")
+	}
+}
+
+func TestF2_FocusesSidebar(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.showSidebar = true
@@ -470,32 +488,23 @@ func TestCtrlS_FocusesSidebar(t *testing.T) {
 	}
 	m.activeSession = -9000001
 
-	// ctrl+s
-	updated, _ := m.handleKeyMsg(keyCtrl('s'))
+	updated, _ := m.handleKeyMsg(keyPress(tea.KeyF2))
 	m2 := updated.(Model)
 
 	if !m2.sidebarFocused {
-		t.Error("expected sidebarFocused=true after ctrl+s")
+		t.Error("expected sidebarFocused=true after f2")
 	}
 	if m2.sidebarCursor != 0 {
 		t.Errorf("sidebarCursor = %d, want 0 (active session)", m2.sidebarCursor)
 	}
-
-	// f2 (fallback for terminals that intercept ctrl+s)
-	updated2, _ := m.handleKeyMsg(keyPress(tea.KeyF2))
-	m3 := updated2.(Model)
-
-	if !m3.sidebarFocused {
-		t.Error("expected sidebarFocused=true after f2")
-	}
 }
 
-func TestCtrlS_NoopWhenSidebarHidden(t *testing.T) {
+func TestF2_NoopWhenSidebarHidden(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.showSidebar = false
 
-	updated, _ := m.handleKeyMsg(keyCtrl('s'))
+	updated, _ := m.handleKeyMsg(keyPress(tea.KeyF2))
 	m2 := updated.(Model)
 
 	if m2.sidebarFocused {

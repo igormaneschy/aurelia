@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 )
@@ -17,6 +18,8 @@ type transcriptModel struct {
 
 	viewport    viewport.Model
 	viewportSet bool
+	historyNav  historyNav
+	historySearch historySearch
 
 	streamBuf string
 
@@ -48,30 +51,45 @@ func (m *Model) appendOrUpdateAureliaMessage(text string) {
 func (m *Model) ensureViewport() {
 	if m.width > 0 && m.height > 0 && !m.viewportSet {
 		contentWidth := m.contentWidth()
-		m.viewport = viewportForSize(contentWidth, m.height)
+		m.viewport = m.newViewport(contentWidth)
 		m.viewportSet = true
-		m.viewport.SetContent(m.renderMessages(m.messages, contentWidth))
-		m.viewport.GotoBottom()
+		pageMsgs := m.historyNav.pageSlice(m.messages)
+		m.viewport.SetContent(m.renderMessages(pageMsgs, contentWidth))
+		if m.historyNav.paginator.OnLastPage() {
+			m.viewport.GotoBottom()
+		} else {
+			m.viewport.GotoTop()
+		}
 	}
 }
 
 // updateViewport refreshes the viewport content if initialized.
-// Auto-scrolls to bottom only when the user is already at the bottom,
-// so streaming does not yank the viewport while reading earlier messages.
-func (m *Model) updateViewport() {
+// Auto-scrolls to bottom only on the last history page when the user is
+// already at the bottom, so streaming does not yank the viewport on older pages.
+func (m *Model) updateViewport() tea.Cmd {
+	m.syncViewportDimensions()
+	prevNew := m.historyNav.hasNewBelow
+	m.historyNav.syncMessageCount(len(m.messages))
+	var pulse tea.Cmd
+	if m.historyNav.hasNewBelow && !prevNew {
+		pulse = m.animations.pulseNewMessages()
+	}
 	m.ensureViewport()
 	if m.viewportSet && m.viewport.Height() > 0 {
 		contentWidth := m.contentWidth()
-		followBottom := m.viewport.AtBottom()
+		pageMsgs := m.historyNav.pageSlice(m.messages)
+		onLastPage := m.historyNav.paginator.OnLastPage()
+		followBottom := onLastPage && m.viewport.AtBottom()
 		prevOffset := m.viewport.YOffset()
 		m.viewport.SetWidth(contentWidth)
-		m.viewport.SetContent(m.renderMessages(m.messages, contentWidth))
+		m.viewport.SetContent(m.renderMessages(pageMsgs, contentWidth))
 		if followBottom {
 			m.viewport.GotoBottom()
 		} else {
 			m.viewport.SetYOffset(prevOffset)
 		}
 	}
+	return pulse
 }
 
 // getOrCreateRenderer returns a cached glamour renderer, creating a new one
@@ -117,13 +135,25 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 		return b.String()
 	}
 
+	activeMatch := -1
+	if m.historySearch.active && len(m.historySearch.matches) > 0 {
+		activeMatch = m.historySearch.matchCursor
+	}
+	pageStart, _ := m.historyNav.paginator.GetSliceBounds(len(m.messages))
+
 	for i, msg := range messages {
+		globalIndex := pageStart + i
 		if i > 0 {
 			b.WriteString("\n\n")
 		}
 
 		showDate := shouldShowMessageDate(messages, i)
 		timestamp := formatMessageTime(msg.Timestamp, showDate)
+
+		bodyText := msg.Text
+		if m.historySearch.active && m.historySearch.query != "" {
+			bodyText = highlightSearchText(bodyText, globalIndex, activeMatch, m.historySearch.matches, m.styles.SearchHighlightStyle)
+		}
 
 		switch msg.Sender {
 		case "Igor":
@@ -132,24 +162,40 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 			b.WriteString("\n")
 			b.WriteString(m.styles.MessageSeparatorStyle.Render(strings.Repeat("─", maxInt(20, width-4))))
 			b.WriteString("\n")
-			b.WriteString(msg.Text)
+			b.WriteString(bodyText)
 			b.WriteString("\n")
 		case "Aurelia":
 			header := formatMessageHeader("Aurelia", timestamp)
-			b.WriteString(m.styles.AssistantStyle.Render(header))
-			b.WriteString("\n")
-			rendered, err := renderer.Render(msg.Text)
-			if err != nil || rendered == "" {
-				b.WriteString(msg.Text)
-			} else {
-				b.WriteString(strings.TrimSpace(rendered))
+			style := m.styles.AssistantStyle
+			if i == len(messages)-1 && m.waiting && m.animations.enabled {
+				style = fadeStyle(style, m.animations.ResponseOpacity())
 			}
+			b.WriteString(style.Render(header))
 			b.WriteString("\n")
+			searching := m.historySearch.active && m.historySearch.query != "" &&
+				messageHasSearchMatch(globalIndex, m.historySearch.matches)
+			if searching {
+				// Plain highlighted text so matches stay visible (glamour strips ANSI).
+				b.WriteString(bodyText)
+				b.WriteString("\n")
+			} else {
+				rendered, err := renderer.Render(msg.Text)
+				if err != nil || rendered == "" {
+					b.WriteString(bodyText)
+				} else {
+					out := strings.TrimSpace(rendered)
+					if i == len(messages)-1 && m.waiting && m.animations.enabled {
+						out = fadeStyle(m.styles.AssistantStyle, m.animations.ResponseOpacity()).Render(out)
+					}
+					b.WriteString(out)
+				}
+				b.WriteString("\n")
+			}
 		default:
 			header := formatMessageHeader(msg.Sender, timestamp)
 			b.WriteString(m.styles.ErrorStyle.Render(header))
 			b.WriteString("\n")
-			b.WriteString(msg.Text)
+			b.WriteString(bodyText)
 			b.WriteString("\n")
 		}
 	}

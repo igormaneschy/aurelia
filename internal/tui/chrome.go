@@ -3,6 +3,7 @@ package tui
 import (
 	"time"
 
+	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
 
@@ -15,15 +16,21 @@ type chromeModel struct {
 	width  int
 	height int
 
-	showSidebar    bool
-	sidebarFocused bool
-	sidebarTable   table.Model
-	sessions       []tuiSessionInfo
-	sidebarCursor  int
+	showSidebar     bool
+	sidebarFocused  bool
+	sidebarTable    table.Model
+	sessions         []tuiSessionInfo
+	sessionUnread    map[int64]int
+	sessionSeenCount map[int64]int
+	sidebarCursor    int
+	sidebarHoverRow int // hovered session row from mouse motion; -1 = none
 
 	spinner spinner.Model
 
-	helpOverlayOpen  bool
+	helpModel  help.Model
+	activeForm *huhForm
+	formOpen   bool
+
 	projectPanelOpen bool
 	projectState     *ipc.ProjectStatePayload
 
@@ -32,7 +39,12 @@ type chromeModel struct {
 	connectLatency time.Duration
 	activeModel    string
 	turnStart      time.Time
-	mouseEnabled   bool
+	mouseEnabled      bool
+	noMouse           bool
+	sessionFlashUntil time.Time
+	streamProgress    streamProgress
+	attachProgress    attachProgress
+	animations        animState
 
 	styles themeStyles
 	theme  Theme

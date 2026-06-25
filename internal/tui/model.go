@@ -66,6 +66,9 @@ type Model struct {
 	// "Connected to Aurelia daemon" startup message is not present.
 	switchingSession bool
 
+	// pendingSessionModel is sent via /model after session_create completes.
+	pendingSessionModel string
+
 	// Pending request tracking
 	requestID string
 	waiting   bool
@@ -85,10 +88,15 @@ type Model struct {
 
 // NewModel creates a new TUI model with the given socket path and theme.
 func NewModel(socketPath string, theme Theme) Model {
-	return newModel(socketPath, defaultInputHistoryPath(), theme)
+	return NewModelWithOptions(socketPath, theme, ModelOptions{})
 }
 
-func newModel(socketPath, historyPath string, theme Theme) Model {
+// NewModelWithOptions creates a TUI model with optional startup configuration.
+func NewModelWithOptions(socketPath string, theme Theme, opts ModelOptions) Model {
+	return newModel(socketPath, defaultInputHistoryPath(), theme, opts)
+}
+
+func newModel(socketPath, historyPath string, theme Theme, opts ModelOptions) Model {
 	s := spinner.New()
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
@@ -110,13 +118,17 @@ func newModel(socketPath, historyPath string, theme Theme) Model {
 		socketPath: socketPath,
 		ipcClient:  ipc.NewClient(socketPath),
 		chromeModel: chromeModel{
-			spinner:      s,
-			showSidebar:  true,
-			daemonLabel:  "connecting",
-			cwdPath:      "not set",
-			styles:       styles,
-			theme:        theme,
-			sidebarTable: newSidebarTable(styles),
+			spinner:         s,
+			showSidebar:     true,
+			sidebarHoverRow: -1,
+			daemonLabel:     "connecting",
+			cwdPath:         "not set",
+			styles:          styles,
+			theme:           theme,
+			sidebarTable:    newSidebarTable(styles),
+			helpModel:       newHelpModel(styles, theme),
+			noMouse:         opts.NoMouse,
+			animations:      newAnimState(animationsEnabledForTerm(os.Getenv("TERM"), opts.NoAnimations)),
 		},
 		inputModel: inputModel{
 			textarea:          ta,
@@ -125,7 +137,8 @@ func newModel(socketPath, historyPath string, theme Theme) Model {
 			historyPath:       historyPath,
 		},
 		transcriptModel: transcriptModel{
-			messages: make([]chatMessage, 0),
+			messages:   make([]chatMessage, 0),
+			historyNav: newHistoryNav(),
 		},
 		activeSession: ipc.ReservedTUIChatID,
 	}
@@ -133,10 +146,14 @@ func newModel(socketPath, historyPath string, theme Theme) Model {
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		m.spinner.Tick,
 		checkDaemon(m.ipcClient),
-	)
+	}
+	if tick := m.animations.beginTick(); tick != nil {
+		cmds = append(cmds, tick)
+	}
+	return tea.Batch(cmds...)
 }
 
 // isChatMode returns true when no project cwd is set, meaning file system
@@ -477,8 +494,9 @@ func renameTUISession(client *ipc.Client, chatID int64, name string) tea.Cmd {
 // sessionRenamedFromEvents parses a renamed session from IPC events.
 func sessionRenamedFromEvents(events []ipc.IPCEvent) tuiSessionRenamedMsg {
 	type sessionPayload struct {
-		ChatID int64  `json:"chat_id"`
-		Name   string `json:"name"`
+		ChatID       int64  `json:"chat_id"`
+		Name         string `json:"name"`
+		MessageCount int    `json:"message_count"`
 	}
 	for _, ev := range events {
 		if ev.Type != ipc.EventTypeSessionRenamed || ev.Body == "" {
@@ -496,8 +514,9 @@ func sessionRenamedFromEvents(events []ipc.IPCEvent) tuiSessionRenamedMsg {
 // sessionsFromEvents parses the sessions list from IPC events.
 func sessionsFromEvents(events []ipc.IPCEvent) tuiSessionsMsg {
 	type sessionPayload struct {
-		ChatID int64  `json:"chat_id"`
-		Name   string `json:"name"`
+		ChatID       int64  `json:"chat_id"`
+		Name         string `json:"name"`
+		MessageCount int    `json:"message_count"`
 	}
 	for _, ev := range events {
 		if ev.Type != ipc.EventTypeSessions || ev.Body == "" {
@@ -519,8 +538,9 @@ func sessionsFromEvents(events []ipc.IPCEvent) tuiSessionsMsg {
 // sessionCreatedFromEvents parses a created session from IPC events.
 func sessionCreatedFromEvents(events []ipc.IPCEvent) tuiSessionCreatedMsg {
 	type sessionPayload struct {
-		ChatID int64  `json:"chat_id"`
-		Name   string `json:"name"`
+		ChatID       int64  `json:"chat_id"`
+		Name         string `json:"name"`
+		MessageCount int    `json:"message_count"`
 	}
 	for _, ev := range events {
 		if ev.Type != ipc.EventTypeSessionCreated || ev.Body == "" {
@@ -538,8 +558,9 @@ func sessionCreatedFromEvents(events []ipc.IPCEvent) tuiSessionCreatedMsg {
 // sessionOpenedFromEvents parses an opened session from IPC events.
 func sessionOpenedFromEvents(events []ipc.IPCEvent) tuiSessionOpenedMsg {
 	type sessionPayload struct {
-		ChatID int64  `json:"chat_id"`
-		Name   string `json:"name"`
+		ChatID       int64  `json:"chat_id"`
+		Name         string `json:"name"`
+		MessageCount int    `json:"message_count"`
 	}
 	for _, ev := range events {
 		if ev.Type != ipc.EventTypeSessionOpened || ev.Body == "" {

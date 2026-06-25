@@ -112,6 +112,9 @@ func TestTUIHandler_SessionCreateAndList(t *testing.T) {
 	if sessions[0].Name != "work" {
 		t.Errorf("sessions[0].Name = %q, want %q", sessions[0].Name, "work")
 	}
+	if sessions[0].MessageCount < 0 {
+		t.Errorf("sessions[0].MessageCount = %d, want >= 0", sessions[0].MessageCount)
+	}
 }
 
 func TestTUIHandler_SessionCreateEmptyName(t *testing.T) {

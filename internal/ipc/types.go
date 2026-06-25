@@ -76,6 +76,8 @@ const (
 	MsgTypeSessionRename = "session_rename"
 	// MsgTypeProjectState requests a full project state snapshot for the panel.
 	MsgTypeProjectState = "project_state"
+	// MsgTypeModels requests the full PI model catalog for the TUI wizard.
+	MsgTypeModels = "models"
 )
 
 // IPC event types sent from server to client.
@@ -104,7 +106,15 @@ const (
 	EventTypeSessionRenamed = "session_renamed"
 	// EventTypeProjectState returns the project state snapshot JSON in Body.
 	EventTypeProjectState = "project_state"
+	// EventTypeModels returns JSON-encoded []TUIModelEntry in Body.
+	EventTypeModels = "models"
 )
+
+// TUIModelEntry is a provider/model pair for the TUI model wizard catalog.
+type TUIModelEntry struct {
+	Provider string `json:"provider"`
+	ID       string `json:"id"`
+}
 
 // MaxImageCount is the maximum number of images per message.
 const MaxImageCount = 10

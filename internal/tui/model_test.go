@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -15,10 +14,8 @@ import (
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
 
-var ansiEscapePattern = regexp.MustCompile(`\x1b\[[0-9;?]*[ -/]*[@-~]`)
-
 func stripANSIForTest(s string) string {
-	return ansiEscapePattern.ReplaceAllString(s, "")
+	return stripANSI(s)
 }
 
 func TestModel_InitialLoadingState(t *testing.T) {
@@ -871,7 +868,7 @@ func TestModel_InputHistoryDoesNotReplaceEditedHistoryDraft(t *testing.T) {
 }
 
 func TestModel_RememberInputDedupesConsecutiveEntries(t *testing.T) {
-	m := newModel("/tmp/test.sock", "", ThemeDark)
+	m := newModel("/tmp/test.sock", "", ThemeDark, ModelOptions{})
 	m.rememberInput("hello")
 	m.rememberInput("hello")
 	m.rememberInput("world")
@@ -1199,14 +1196,14 @@ func TestModel_SubmitAutoAttachesImagePathFromText(t *testing.T) {
 
 func TestModel_SendCommandForSlashText(t *testing.T) {
 	ta := textarea.New()
-	ta.SetValue("/status")
+	ta.SetValue("/model refresh")
 	m := testChatModelWithTextarea(ta)
 
 	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
 
 	if cmd == nil {
-		t.Fatal("expected command for /status")
+		t.Fatal("expected command for /model refresh")
 	}
 	if m2.waiting != true {
 		t.Error("expected waiting=true after command submit")
@@ -1585,7 +1582,7 @@ func TestModel_StatusBarUsesCompactShortcuts(t *testing.T) {
 
 	status := stripANSIForTest(m.renderStatusBar())
 
-	for _, want := range []string{"↵ send", "alt+enter newline", "✋ mouse", "esc cancel", "⌃L clear", "⌃P project", "tab sidebar"} {
+	for _, want := range []string{"F1 help", "↵ send", "alt+enter newline", "✋ mouse", "esc cancel", "⌃L clear", "⌃P project", "⌃S · f2 · ⌃N"} {
 		if !strings.Contains(status, want) {
 			t.Errorf("expected status bar to contain %q, got %q", want, status)
 		}
@@ -1616,8 +1613,8 @@ func TestModel_StatusBarDropsItemsOnNarrowTerminal(t *testing.T) {
 	if strings.Contains(status, "⌃C quit") {
 		t.Errorf("expected '⌃C quit' to be dropped on width=50, got %q", status)
 	}
-	if strings.Contains(status, "tab sidebar") {
-		t.Errorf("expected 'tab sidebar' to be dropped on width=50, got %q", status)
+	if strings.Contains(status, "⌃S · f2 · ⌃N") {
+		t.Errorf("expected search shortcut hint to be dropped on width=50, got %q", status)
 	}
 	if strings.Contains(status, "⌃P project") {
 		t.Errorf("expected '⌃P project' to be dropped on width=50, got %q", status)
@@ -2184,7 +2181,7 @@ func TestModel_StatusBarShowsElapsedTime(t *testing.T) {
 
 	status := stripANSIForTest(m.renderStatusBar())
 
-	if !strings.Contains(status, "12s") {
+	if !strings.Contains(status, "12.0s") {
 		t.Errorf("expected status bar to contain '12s', got %q", status)
 	}
 }
@@ -2276,28 +2273,25 @@ func TestModel_TurnStartClearedAfterStreamEnd(t *testing.T) {
 
 // ── T5.2.3 Help overlay tests ─────────────────────────────────────────────
 
-func TestModel_HelpOverlayToggleWithQuestionMark(t *testing.T) {
+func TestModel_HelpOverlayToggleWithF1(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
 	m.height = 40
-	// textarea default is empty
-	if m.helpOverlayOpen {
-		t.Fatal("expected helpOverlayOpen=false initially")
+	if m.helpVisible() {
+		t.Fatal("expected help overlay closed initially")
 	}
 
-	// ? with empty input opens help
-	updated, _ := m.handleKeyMsg(keyText("?"))
+	updated, _ := m.handleKeyMsg(keyPress(tea.KeyF1))
 	m2 := updated.(Model)
-	if !m2.helpOverlayOpen {
-		t.Error("expected helpOverlayOpen=true after ?")
+	if !m2.helpVisible() {
+		t.Error("expected help overlay open after F1")
 	}
 
-	// ? again closes help
-	updated2, _ := m2.handleKeyMsg(keyText("?"))
+	updated2, _ := m2.handleKeyMsg(keyPress(tea.KeyF1))
 	m3 := updated2.(Model)
-	if m3.helpOverlayOpen {
-		t.Error("expected helpOverlayOpen=false after second ?")
+	if m3.helpVisible() {
+		t.Error("expected help overlay closed after second F1")
 	}
 }
 
@@ -2305,12 +2299,12 @@ func TestModel_HelpOverlayCloseWithEsc(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
-	m.helpOverlayOpen = true
+	m.helpModel.ShowAll = true
 
 	updated, _ := m.handleKeyMsg(keyPress(tea.KeyEsc))
 	m2 := updated.(Model)
-	if m2.helpOverlayOpen {
-		t.Error("expected helpOverlayOpen=false after Esc")
+	if m2.helpVisible() {
+		t.Error("expected help overlay closed after Esc")
 	}
 }
 
@@ -2318,27 +2312,38 @@ func TestModel_HelpOverlayCloseWithEnter(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
-	m.helpOverlayOpen = true
+	m.helpModel.ShowAll = true
 
 	updated, _ := m.handleKeyMsg(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
-	if m2.helpOverlayOpen {
-		t.Error("expected helpOverlayOpen=false after Enter")
+	if m2.helpVisible() {
+		t.Error("expected help overlay closed after Enter")
 	}
 }
 
-func TestModel_HelpOverlayNotOpenedWithNonEmptyInput(t *testing.T) {
+func TestModel_HelpOverlayOpensWithF1DespiteNonEmptyInput(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
 	m.textarea.SetValue("hello")
 
+	updated, _ := m.handleKeyMsg(keyPress(tea.KeyF1))
+	m2 := updated.(Model)
+	if !m2.helpVisible() {
+		t.Error("expected F1 to open help even when textarea is not empty")
+	}
+}
+
+func TestModel_QuestionMarkDoesNotOpenHelpOverlay(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+
 	updated, _ := m.handleKeyMsg(keyText("?"))
 	m2 := updated.(Model)
-	if m2.helpOverlayOpen {
-		t.Error("expected helpOverlayOpen=false when textarea is not empty")
+	if m2.helpVisible() {
+		t.Error("expected ? alone not to open help overlay")
 	}
-	// ? should have been forwarded to the textarea (delegated)
 }
 
 func TestModel_HelpOverlayRenderContainsKeyBindings(t *testing.T) {
@@ -2347,7 +2352,7 @@ func TestModel_HelpOverlayRenderContainsKeyBindings(t *testing.T) {
 	m.width = 100
 	m.height = 40
 
-	overlay := m.renderHelpOverlay()
+	overlay := m.renderHelpPanel()
 
 	for _, want := range []string{
 		"Keyboard Shortcuts",
@@ -2371,7 +2376,7 @@ func TestModel_HelpOverlayRendersScoped(t *testing.T) {
 	m.state = stateChat
 	m.width = 80
 	m.height = 30
-	m.helpOverlayOpen = true
+	m.helpModel.ShowAll = true
 
 	view := m.View().Content
 

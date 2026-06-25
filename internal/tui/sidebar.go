@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"time"
 
 	"charm.land/bubbles/v2/table"
 	"charm.land/lipgloss/v2"
@@ -9,9 +10,41 @@ import (
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
 
-const sidebarColIcon = 0
-const sidebarColName = 1
-const sidebarColModel = 2
+const (
+	sidebarTitleLines       = 2
+	sidebarTableHeaderLines = 1
+	sidebarBorderLines      = 1 // top border row before inner content
+)
+
+func sidebarTableFirstRowY() int {
+	return topMarginHeight + sidebarBorderLines + sidebarTitleLines + sidebarTableHeaderLines
+}
+
+func sidebarMouseHitX(x int) bool { return x >= 0 && x < sidebarWidth }
+
+func sidebarTableScrollStart(cursor, viewportHeight int) int {
+	if cursor >= 0 { return clampInt(cursor-viewportHeight, 0, cursor) }
+	return 0
+}
+
+func (m Model) sidebarRowAt(y int) int {
+	if !m.shouldShowSidebar() || len(m.sessions) == 0 { return -1 }
+	firstRowY := sidebarTableFirstRowY()
+	if y < firstRowY { return -1 }
+	visibleRow := y - firstRowY
+	tableHeight := m.sidebarTable.Height()
+	if visibleRow < 0 || visibleRow >= tableHeight { return -1 }
+	row := sidebarTableScrollStart(m.sidebarCursor, tableHeight) + visibleRow
+	if row < 0 || row >= len(m.sessions) { return -1 }
+	return row
+}
+
+func clampInt(v, low, high int) int {
+	if v < low { return low }
+	if v > high { return high }
+	return v
+}
+
 
 // newSidebarTable creates a table.Model for the session sidebar.
 func newSidebarTable(styles themeStyles) table.Model {
@@ -36,9 +69,9 @@ func newSidebarTable(styles themeStyles) table.Model {
 
 func sidebarTableStyles(styles themeStyles) table.Styles {
 	s := table.DefaultStyles()
-	s.Header = styles.SidebarMutedStyle.Copy().Bold(true).Padding(0, 1)
-	s.Cell = styles.SidebarMutedStyle.Copy().Padding(0, 1)
-	s.Selected = styles.SidebarActiveStyle.Copy().Padding(0, 1)
+	s.Header = styles.SidebarMutedStyle.Bold(true).Padding(0, 1)
+	s.Cell = styles.SidebarMutedStyle.Padding(0, 1)
+	s.Selected = styles.SidebarActiveStyle.Padding(0, 1)
 	return s
 }
 
@@ -60,7 +93,7 @@ func (m *Model) resizeSidebarTable() {
 		return
 	}
 	m.sidebarTable.SetWidth(sidebarWidth)
-	m.sidebarTable.SetHeight(sidebarTableHeightForTerminal(m.height))
+	m.sidebarTable.SetHeight(m.sidebarTableHeightForBody())
 	m.syncSidebarRows()
 }
 
@@ -72,10 +105,17 @@ func (m *Model) syncSidebarRows() {
 		if s.ChatID == ipc.ReservedTUIChatID {
 			label = "DM"
 		}
+		if badge := m.sessionUnreadBadge(s.ChatID); badge != "" {
+			label = truncateMiddle(label, 11) + " " + m.styles.SidebarUnreadStyle.Render(badge)
+		}
 
 		icon := "○"
 		if s.ChatID == m.activeSession {
 			icon = "●"
+			if !m.sessionFlashUntil.IsZero() && time.Now().Before(m.sessionFlashUntil) &&
+				m.animations.enabled && m.animations.BadgeScale() > 1.05 {
+				icon = m.styles.SidebarActiveStyle.Bold(true).Render("●")
+			}
 		}
 		if m.sidebarFocused && i == m.sidebarCursor {
 			icon = "▶"
@@ -95,17 +135,9 @@ func (m *Model) syncSidebarRows() {
 
 	m.sidebarTable.SetRows(rows)
 	m.sidebarTable.UpdateViewport()
-	if m.sidebarCursor >= 0 && m.sidebarCursor < len(rows) {
-		m.sidebarTable.SetCursor(m.sidebarCursor)
-	}
-}
-
-// sidebarTableWidth returns the width of the sidebar table for layout.
-func sidebarTableWidth(terminalWidth int) int {
-	if terminalWidth < minSidebarScreenWidth {
-		return 0
-	}
-	return sidebarWidth
+	tableCursor := m.sidebarCursor
+	if m.sidebarHoverRow >= 0 && !m.sidebarFocused { tableCursor = m.sidebarHoverRow }
+	if tableCursor >= 0 && tableCursor < len(rows) { m.sidebarTable.SetCursor(tableCursor) }
 }
 
 // shouldShowSidebarTable returns true when sidebar table is visible.
@@ -151,6 +183,7 @@ func (m Model) renderSidebarTable() string {
 		if m.isChatMode() {
 			hints += "\n" + m.styles.ChatModeStyle.Render("(chat mode)")
 		}
+		hints += "\n" + m.styles.SidebarMutedStyle.Render("+ New session (click)")
 	}
 
 	return title + "\n" + tableContent + hints

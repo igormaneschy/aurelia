@@ -32,6 +32,13 @@ type tuiStatusMsg struct {
 	err   error
 }
 
+// tuiModelsMsg carries models grouped by provider from a daemon /model response.
+type tuiModelsMsg struct {
+	catalog  modelCatalog
+	err      error
+	reloaded bool // true when triggered by /model refresh inside the wizard
+}
+
 // tuiHistoryMsg carries recent user/assistant transcript messages loaded from
 // the daemon's PI session history. Errors are non-fatal at startup.
 type tuiHistoryMsg struct {
@@ -106,8 +113,9 @@ type tuiSessionRenamedMsg struct {
 
 // tuiSessionInfo is the TUI-side representation of a session.
 type tuiSessionInfo struct {
-	ChatID int64
-	Name   string
+	ChatID       int64
+	Name         string
+	MessageCount int `json:"message_count"`
 }
 
 // tuiProjectStateMsg carries the project state panel data from the daemon.

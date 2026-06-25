@@ -10,6 +10,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
+	"charm.land/bubbles/v2/stopwatch"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 
@@ -83,6 +84,24 @@ func (m Model) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if keyMsg, ok := msg.(tea.KeyMsg); ok && keyMsg.String() == "ctrl+o" {
+		return m.toggleMouseCapture()
+	}
+
+	if m.formOpen {
+		switch msg.(type) {
+		case tea.KeyMsg, tea.WindowSizeMsg, formInternalMsg:
+			return m.updateActiveForm(msg)
+		}
+	}
+
+	if m.helpVisible() || m.projectPanelOpen {
+		switch msg.(type) {
+		case tea.KeyMsg, tea.WindowSizeMsg:
+			return m.updateModalOverlay(msg)
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -90,13 +109,12 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.textarea.SetWidth(inputTextareaWidth(msg.Width))
 		contentWidth := m.contentWidth()
 		if !m.viewportSet {
-			m.viewport = viewportForSize(contentWidth, msg.Height)
+			m.viewport = m.newViewport(contentWidth)
 			m.viewportSet = true
 			m.viewport.SetContent(m.renderMessages(m.messages, contentWidth))
 			m.viewport.GotoBottom()
 		} else {
-			m.viewport.SetWidth(contentWidth)
-			m.viewport.SetHeight(viewportHeightForTerminal(msg.Height))
+			m.syncViewportDimensions()
 			m.updateViewport()
 		}
 		m.resizeSidebarTable()
@@ -146,15 +164,26 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMsg:
-		if !m.mouseEnabled {
-			return m, nil
+		if !m.mouseEnabled { return m, nil }
+		if m.shouldShowSidebar() {
+			if handled, model, cmd := m.handleSidebarMouse(msg); handled { return model, cmd }
 		}
+		if handled, model, cmd := m.handleChatMouse(msg); handled { return model, cmd }
 		return m.handleViewportMsg(msg)
 
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
+		if m.attachProgress.active {
+			(&m).tickAttachProgress()
+		}
+		if m.waiting && (m.showAttachProgress() || m.showStreamProgress()) {
+			m.syncViewportDimensions()
+		}
 		return m, cmd
+
+	case stopwatch.TickMsg, stopwatch.StartStopMsg, stopwatch.ResetMsg:
+		return m.updateStreamProgressMsgs(msg)
 
 	case daemonReachableMsg:
 		m.daemonLabel = "ready"
@@ -200,22 +229,44 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tuiModelsMsg:
+		if m.formOpen && m.activeForm != nil {
+			switch {
+			case m.activeForm.isModelForm():
+				m = m.applyWizardCatalog(msg)
+			case m.activeForm.kind == formKindNewSession:
+				m = m.applyNewSessionCatalog(msg)
+			default:
+				return m, nil
+			}
+			return m, m.initActiveForm()
+		}
+		return m, nil
+
 	case tuiHistoryMsg:
 		if msg.err != nil {
 			m.messages = append(m.messages, chatMessage{
 				Sender: "⚠️",
 				Text:   fmt.Sprintf("Warning: failed to load chat history: %s", safeSessionLabel(msg.err.Error())),
 			})
+			m.historyNav.syncMessageCount(len(m.messages))
 			m.updateViewport()
 			m.switchingSession = false
 			return m, nil
 		}
 		if m.switchingSession || m.canApplyStartupHistory() {
 			m.messages = msg.messages
+			m.historyNav.resetToLastPage(len(m.messages))
 			m.updateViewport()
 		}
+		m.markSessionSeen(m.activeSession, len(m.messages))
 		m.switchingSession = false
 		return m, nil
+
+	case animTickMsg:
+		vpCmd := m.updateViewport()
+		m.syncSidebarRows()
+		return m, tea.Batch(m.animations.step(), vpCmd)
 
 	case daemonErrorMsg:
 		if msg.streamID != 0 && msg.streamID != m.streamID {
@@ -223,7 +274,8 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.daemonLabel = "error"
 		m.waiting = false
-		m.turnStart = time.Time{}
+		m.resetAttachProgress()
+		m.resetStreamProgress()
 		m.streamBuf = ""
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
@@ -244,8 +296,10 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			_ = msg.reader.Close()
 			return m, nil
 		}
+		m.resetAttachProgress()
 		m.reader = msg.reader
-		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
+		streamCmd := (&m).initStreamProgress()
+		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd(), streamCmd)
 
 	case streamEventMsg:
 		if msg.streamID != m.streamID {
@@ -259,7 +313,8 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Stream ended (EOF) without explicit terminal event.
 		m.waiting = false
-		m.turnStart = time.Time{}
+		m.resetAttachProgress()
+		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
 			_ = m.reader.Close()
@@ -280,7 +335,8 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Stream error.
 		m.waiting = false
-		m.turnStart = time.Time{}
+		m.resetAttachProgress()
+		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
 			_ = m.reader.Close()
@@ -302,19 +358,22 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tuiSessionsMsg:
 		if msg.err == nil {
 			m.sessions = msg.sessions
-			m.syncSidebarRows()
 			// Ensure the active session is in the list (the default DM
 			// always exists implicitly even if not in the store).
 			m.ensureDefaultSessionInList()
+			unreadCmd := m.applySessionsUnread(m.sessions)
+			m.syncSidebarRows()
 			// Clamp sidebar cursor to valid range.
 			if m.sidebarCursor >= len(m.sessions) {
 				m.sidebarCursor = maxInt(0, len(m.sessions)-1)
 			}
+			return m, unreadCmd
 		}
 		return m, nil
 
 	case tuiSessionCreatedMsg:
 		if msg.err != nil {
+			m.pendingSessionModel = ""
 			m.messages = append(m.messages, chatMessage{
 				Sender:    "⚠️",
 				Text:      fmt.Sprintf("Failed to create session: %s", msg.err),
@@ -328,16 +387,27 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Switch to the newly created session.
 		m.activeSession = msg.session.ChatID
 		m.messages = []chatMessage{}
+		m.historyNav.resetToLastPage(0)
 		m.viewportSet = false
 		m.switchingSession = true
 		m.syncSidebarRows()
 		m.updateViewport()
-		// Reload sessions list + history for the new session.
-		return m, tea.Batch(
+		m.sessionFlashUntil = time.Now().Add(500 * time.Millisecond)
+		cmds := []tea.Cmd{
 			fetchTUISessions(m.ipcClient),
 			fetchTUIHistory(m.ipcClient, m.activeSession),
 			fetchTUIStatus(m.ipcClient, m.activeSession),
-		)
+			m.animations.pulseNewMessages(),
+		}
+		if model := strings.TrimSpace(m.pendingSessionModel); model != "" && model != "auto" {
+			m.pendingSessionModel = ""
+			m.waiting = true
+			m.streamID++
+			cmds = append(cmds, m.sendCommandToSession(m.activeSession, "/model "+model, m.streamID), spinnerTickCmd())
+		} else {
+			m.pendingSessionModel = ""
+		}
+		return m, tea.Batch(cmds...)
 
 	case tuiSessionOpenedMsg:
 		if msg.err != nil {
@@ -354,16 +424,19 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Switch to the opened session.
 		m.activeSession = msg.session.ChatID
 		m.messages = []chatMessage{}
+		m.historyNav.resetToLastPage(0)
 		m.viewportSet = false
 		m.switchingSession = true
 		m.syncSidebarRows()
 		m.updateViewport()
 		m.sidebarFocused = false
 		m.sidebarTable.Blur()
+		m.sessionFlashUntil = time.Now().Add(500 * time.Millisecond)
 		// Reload history + status for the new session.
 		return m, tea.Batch(
 			fetchTUIHistory(m.ipcClient, m.activeSession),
 			fetchTUIStatus(m.ipcClient, m.activeSession),
+			m.animations.pulseNewMessages(),
 		)
 
 	case tuiSessionDeletedMsg:
@@ -380,6 +453,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.activeSession == msg.chatID {
 			m.activeSession = ipc.ReservedTUIChatID
 			m.messages = []chatMessage{}
+			m.historyNav.resetToLastPage(0)
 			m.viewportSet = false
 			m.updateViewport()
 			return m, tea.Batch(
@@ -517,11 +591,78 @@ func (m *Model) ensureDefaultSessionInList() {
 	m.syncSidebarRows()
 }
 
+// updateModalOverlay handles keys and resize while help or project panel is open.
+func (m Model) updateModalOverlay(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.textarea.SetWidth(inputTextareaWidth(msg.Width))
+		contentWidth := m.contentWidth()
+		if m.viewportSet {
+			m.viewport.SetWidth(contentWidth)
+			m.syncViewportDimensions()
+			m.updateViewport()
+		}
+		m.resizeSidebarTable()
+		return m, nil
+	case tea.KeyMsg:
+		return m.handleModalKey(msg)
+	default:
+		return m, nil
+	}
+}
+
+// handleModalKey consumes keys while a non-form modal (help or project panel) is open.
+func (m Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+c" {
+		m.cleanupTempImages()
+		m.cleanupSubmittedTempImages()
+		m.cleanupQueuedTempImages()
+		return m, tea.Quit
+	}
+	if msg.String() == "ctrl+o" {
+		return m.toggleMouseCapture()
+	}
+
+	if m.helpVisible() {
+		switch {
+		case isHelpToggleKey(msg):
+			return m.closeHelpOverlay(), nil
+		case key.Matches(msg, m.fullKeyMap().Cancel), key.Matches(msg, m.fullKeyMap().Submit):
+			m = m.closeHelpOverlay()
+			if m.waiting {
+				return m.cancelStreaming()
+			}
+			return m, nil
+		default:
+			return m, nil
+		}
+	}
+
+	if m.projectPanelOpen {
+		switch {
+		case isProjectPanelToggleKey(msg):
+			return m.toggleProjectPanel()
+		case key.Matches(msg, m.fullKeyMap().Cancel), key.Matches(msg, m.fullKeyMap().Submit):
+			return m.closeProjectPanel(), nil
+		default:
+			return m, nil
+		}
+	}
+
+	return m, nil
+}
+
 // handleKeyMsg processes keyboard input.
 // enter submits when not waiting. alt+enter inserts a newline in the textarea.
 // ctrl+j is also accepted as a portable newline fallback.
 // When the sidebar is focused, ↑↓ navigate sessions, enter opens, n creates.
 func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.helpVisible() || m.projectPanelOpen {
+		return m.handleModalKey(msg)
+	}
+
 	if msg.String() == "ctrl+o" {
 		return m.toggleMouseCapture()
 	}
@@ -529,6 +670,10 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Sidebar-focused mode: intercept navigation keys.
 	if m.sidebarFocused && m.state == stateChat {
 		return m.handleSidebarKey(msg)
+	}
+
+	if m.historySearch.active && m.state == stateChat {
+		return m.handleHistorySearchKey(msg)
 	}
 
 	switch {
@@ -540,8 +685,15 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case msg.String() == "ctrl+l":
 		m.messages = nil
+		m.historyNav.resetToLastPage(0)
 		m.updateViewport()
 		return m, nil
+
+	case msg.String() == "ctrl+f":
+		return m.historyNextPage()
+
+	case msg.String() == "ctrl+b":
+		return m.historyPrevPage()
 
 	case msg.String() == "ctrl+x":
 		// Clear pending images and attachments.
@@ -579,36 +731,26 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.refreshAutocomplete(), nil
 
-	// Help overlay: ? toggles it. esc, enter, or ? closes it.
-	case msg.String() == "?" && m.helpOverlayOpen:
-		m.helpOverlayOpen = false
-		return m, nil
-	case msg.String() == "?" && m.textarea.Value() == "":
-		m.helpOverlayOpen = true
-		return m, nil
-	case (msg.String() == "esc" || msg.String() == "enter") && m.helpOverlayOpen:
-		m.helpOverlayOpen = false
-		// If a stream is active, also cancel it so the user doesn't
-		// need to press Esc twice.
-		if m.waiting {
-			return m.cancelStreaming()
-		}
-		return m, nil
+	// Help overlay: F1 toggles it (/? stays free for typing and command autocomplete).
+	case isHelpToggleKey(msg):
+		return m.openHelpOverlay(), nil
 
 	case isProjectPanelToggleKey(msg):
-		m.projectPanelOpen = !m.projectPanelOpen
-		if m.projectPanelOpen {
-			return m, tea.Batch(
-				fetchTUIProjectState(m.ipcClient, m.activeSession),
-				scheduleProjectStatePoll(),
-			)
-		}
-		return m, nil
+		return m.toggleProjectPanel()
 
 	case isSidebarToggleKey(msg):
 		m.showSidebar = !m.showSidebar
 		m.updateViewport()
 		return m, nil
+
+	case msg.String() == "ctrl+s":
+		return m.openHistorySearch()
+
+	case msg.String() == "ctrl+n":
+		if m.warnSessionChangeWhileStreaming() {
+			return m, nil
+		}
+		return m.openNewSessionForm()
 
 	case isSidebarFocusKey(msg):
 		if m.showSidebar && len(m.sessions) > 0 {
@@ -623,6 +765,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
+			m.syncViewportDimensions()
 		}
 		return m, nil
 
@@ -756,6 +899,11 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		if next, cmd, handled := m.openFormForCommand(text); handled {
+			next.textarea.Reset()
+			return next, cmd
+		}
+
 		if m.waiting && len(m.pendingQueue) >= maxPendingQueue {
 			m.messages = append(m.messages, chatMessage{
 				Sender:    "⚠️",
@@ -822,6 +970,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		m.waiting = true
 		m.streamID++
+		if fileCount := len(m.pendingImages) + len(m.pendingAttachments); fileCount > 0 {
+			(&m).initAttachProgress(fileCount)
+		}
 		m.updateViewport()
 
 		if isCommand {
@@ -854,8 +1005,45 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) toggleMouseCapture() (tea.Model, tea.Cmd) {
+	if m.noMouse {
+		return m, nil
+	}
 	m.mouseEnabled = !m.mouseEnabled
 	return m, nil
+}
+
+func (m Model) openSidebarSessionAt(row int) (tea.Model, tea.Cmd) {
+	if row < 0 || row >= len(m.sessions) { return m, nil }
+	m.sidebarCursor = row
+	m.syncSidebarRows()
+	target := m.sessions[row]
+	if target.ChatID == m.activeSession {
+		if m.sidebarFocused { m.sidebarFocused = false; m.sidebarTable.Blur() }
+		return m, nil
+	}
+	if m.warnSessionChangeWhileStreaming() { return m, nil }
+	return m, openTUISession(m.ipcClient, target.ChatID)
+}
+
+func (m Model) handleSidebarMouse(msg tea.MouseMsg) (handled bool, model tea.Model, cmd tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft || !sidebarMouseHitX(msg.X) { return false, m, nil }
+		row := m.sidebarRowAt(msg.Y)
+		if row < 0 { return false, m, nil }
+		model, cmd := m.openSidebarSessionAt(row)
+		return true, model, cmd
+	case tea.MouseMotionMsg:
+		if sidebarMouseHitX(msg.X) {
+			row := m.sidebarRowAt(msg.Y)
+			if row != m.sidebarHoverRow { m.sidebarHoverRow = row; m.syncSidebarRows() }
+			return true, m, nil
+		}
+		if m.sidebarHoverRow != -1 { m.sidebarHoverRow = -1; m.syncSidebarRows() }
+		return false, m, nil
+	default:
+		return false, m, nil
+	}
 }
 
 // handleSidebarKey processes keys when the sidebar is focused.
@@ -889,6 +1077,7 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Exit sidebar focus — return to input.
 		m.sidebarFocused = false
 		m.sidebarTable.Blur()
+		m.syncViewportDimensions()
 		if msg.String() == "tab" || msg.String() == "ctrl+i" || msg.String() == "\t" {
 			// Tab also toggles sidebar visibility.
 			m.showSidebar = !m.showSidebar
@@ -897,20 +1086,7 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "enter":
-		if m.sidebarCursor < 0 || m.sidebarCursor >= len(m.sessions) {
-			return m, nil
-		}
-		target := m.sessions[m.sidebarCursor]
-		if target.ChatID == m.activeSession {
-			// Already on this session — just unfocus.
-			m.sidebarFocused = false
-			m.sidebarTable.Blur()
-			return m, nil
-		}
-		if m.warnSessionChangeWhileStreaming() {
-			return m, nil
-		}
-		return m, openTUISession(m.ipcClient, target.ChatID)
+		return m.openSidebarSessionAt(m.sidebarCursor)
 
 	case "n":
 		if m.warnSessionChangeWhileStreaming() {
@@ -939,7 +1115,7 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.updateViewport()
 			return m, nil
 		}
-		return m, deleteTUISession(m.ipcClient, target.ChatID)
+		return m.openDeleteSessionConfirm(target.ChatID, target.Name)
 
 	case "r":
 		// Rename the selected session (not the default DM).
@@ -1058,6 +1234,8 @@ func (m Model) handleViewportMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) cancelStreaming() (tea.Model, tea.Cmd) {
 	m.waiting = false
 	m.streamID++
+	m.resetAttachProgress()
+	m.resetStreamProgress()
 	m.cleanupSubmittedTempImages()
 	if m.reader != nil {
 		_ = m.reader.Close()
@@ -1111,12 +1289,10 @@ func isSidebarToggleKey(msg tea.KeyMsg) bool {
 	return s == "tab" || s == "ctrl+i" || s == "\t"
 }
 
-// isSidebarFocusKey returns true for ctrl+s or f2, which focus the
-// sidebar for session navigation. ctrl+s is the primary; f2 is the
-// fallback for terminals that intercept ctrl+s as XOFF flow control.
+// isSidebarFocusKey returns true for f2, which focuses the sidebar for
+// session navigation. Ctrl+S is reserved for history search.
 func isSidebarFocusKey(msg tea.KeyMsg) bool {
-	s := msg.String()
-	return s == "ctrl+s" || s == "f2"
+	return msg.String() == "f2"
 }
 
 // isProjectPanelToggleKey returns true for ctrl+p, which toggles the
@@ -1135,10 +1311,15 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
 
 	case "stream_chunk":
+		var animCmd tea.Cmd
+		if m.streamBuf == "" && event.Body != "" {
+			animCmd = m.animations.onStreamStart()
+		}
 		m.streamBuf += event.Body
+		m.updateStreamProgress(len(event.Body))
 		m.appendOrUpdateAureliaMessage(m.streamBuf)
-		m.updateViewport()
-		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
+		vpCmd := m.updateViewport()
+		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd(), animCmd, vpCmd)
 
 	case "message":
 		// Replace accumulated text with the final message to avoid duplication.
@@ -1152,21 +1333,26 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 
 	case "stream_end":
 		// Terminal event — stream complete.
+		animCmd := m.animations.onStreamEnd()
 		m.waiting = false
-		m.turnStart = time.Time{}
+		m.resetAttachProgress()
+		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
 			_ = m.reader.Close()
 			m.reader = nil
 		}
 		m.streamBuf = ""
-		m.updateViewport()
-		return m.continueWithNextQueuedMessage()
+		m.markSessionSeen(m.activeSession, len(m.messages))
+		vpCmd := m.updateViewport()
+		next, queueCmd := m.continueWithNextQueuedMessage()
+		return next, tea.Batch(queueCmd, animCmd, vpCmd, fetchTUISessions(m.ipcClient))
 
 	case "error":
 		// Terminal event — error.
 		m.waiting = false
-		m.turnStart = time.Time{}
+		m.resetAttachProgress()
+		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
 		if m.reader != nil {
 			_ = m.reader.Close()

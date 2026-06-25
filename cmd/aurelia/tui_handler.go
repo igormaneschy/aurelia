@@ -193,6 +193,9 @@ func makeTUIHandler(a *app) func(context.Context, ipc.IPCMessage, func(ipc.IPCEv
 		case ipc.MsgTypeProjectState:
 			forceTUIIDs(&msg, personaID)
 			return handleTUIProjectState(ctx, a, msg, emit)
+		case ipc.MsgTypeModels:
+			forceTUIIDs(&msg, personaID)
+			return handleTUIModels(ctx, a, msg, emit)
 		case ipc.MsgTypeSubscribe:
 			// Terminal error: subscribe not supported.
 			return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "subscribe not supported", RequestID: msg.RequestID})
@@ -242,6 +245,8 @@ func handleTUICommand(ctx context.Context, a *app, msg ipc.IPCMessage, emit func
 		response = handleTUIModel(ctx, a, chatID, threadID, userID, text)
 	case strings.HasPrefix(text, "/cwd"):
 		response = handleTUICwd(ctx, a, chatID, threadID, userID, text)
+	case text == "/reset":
+		response = handleTUIReset(a, chatID, threadID, userID)
 	case strings.HasPrefix(text, "/status"):
 		response = handleTUIStatus(ctx, a, chatID, threadID, userID)
 	default:
@@ -269,6 +274,7 @@ Commands:
 - /cwd — show current project binding
 - /cwd <path> — set the project working directory
 - /cwd clear — remove the project binding
+- /reset — clear PI session context and start fresh
 - /img <path> — attach an image (png, jpg, gif, webp)
 - /attach <path> — attach a document (md, docx, pdf, etc.)
 
@@ -471,6 +477,14 @@ func handleTUICwd(ctx context.Context, a *app, chatID int64, threadID int, userI
 		a.sessions.SetCwd(chatID, threadID, cwd)
 	}
 	return fmt.Sprintf("✅ Project set to: `%s`", cwd)
+}
+
+// handleTUIReset clears the PI session for the active TUI chat.
+func handleTUIReset(a *app, chatID int64, threadID int, userID int64) string {
+	if a.sessions != nil {
+		a.sessions.ClearSessionForUser(chatID, threadID, userID)
+	}
+	return "🗑️ Session reset. Next message starts a fresh conversation."
 }
 
 // buildTUICwdStatus returns a formatted cwd status string.

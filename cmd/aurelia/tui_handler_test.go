@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/png"
 	"os"
@@ -200,13 +201,64 @@ func TestTUIHandler_HistoryWithoutSessionReturnsEmptyList(t *testing.T) {
 	}
 }
 
+func TestFormatTUIModelList_PrioritizesLocalProvidersBeforeDisplayLimit(t *testing.T) {
+	models := make([]bridge.ModelInfo, 0, 55)
+	for i := 0; i < 50; i++ {
+		models = append(models, bridge.ModelInfo{Provider: "openai", ID: fmt.Sprintf("gpt-%d", i)})
+	}
+	models = append(models, bridge.ModelInfo{Provider: "llamacpp-tailscale", ID: "qwen3"})
+
+	body := formatTUIModelList("Current model: **PI default**", models, "")
+
+	if !strings.Contains(body, "llamacpp-tailscale:") || !strings.Contains(body, "`qwen3`") {
+		t.Fatalf("expected local provider before display limit, got %q", body)
+	}
+}
+
+func TestSupplementModelsFromRegistry_AddsConfiguredProviderModels(t *testing.T) {
+	t.Setenv("PI_CODING_AGENT_DIR", t.TempDir())
+	modelsPath := filepath.Join(os.Getenv("PI_CODING_AGENT_DIR"), "models.json")
+	if err := os.WriteFile(modelsPath, []byte(`{
+  "providers": {
+    "llamacpp-tailscale": {
+      "models": [{ "id": "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf" }]
+    }
+  }
+}`), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	entries := supplementModelsFromRegistry([]ipc.TUIModelEntry{{Provider: "openai", ID: "gpt-5.1"}})
+	var found bool
+	for _, entry := range entries {
+		if entry.Provider == "llamacpp-tailscale" && entry.ID == "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("entries = %#v", entries)
+	}
+}
+
+func TestBridgeModelsToIPCEntries_SkipsIncompleteRows(t *testing.T) {
+	entries := bridgeModelsToIPCEntries([]bridge.ModelInfo{
+		{Provider: "llamacpp-tailscale", ID: "qwen3"},
+		{Provider: "", ID: "orphan"},
+		{Provider: "openai", ID: ""},
+	})
+	if len(entries) != 1 || entries[0].Provider != "llamacpp-tailscale" {
+		t.Fatalf("entries = %#v", entries)
+	}
+}
+
 func TestFormatTUIModelListGroupsAndLimitsModels(t *testing.T) {
 	models := []bridge.ModelInfo{
 		{Provider: "openai", ID: "gpt-5.1"},
 		{Provider: "anthropic", ID: "claude-sonnet-4-6", SupportsImages: true},
 	}
 
-	body := formatTUIModelList("Current model: **PI default**", models)
+	body := formatTUIModelList("Current model: **PI default**", models, "")
 
 	for _, want := range []string{"Available models", "anthropic:", "`claude-sonnet-4-6` 📷", "openai:", "`gpt-5.1`", "/model auto"} {
 		if !strings.Contains(body, want) {
@@ -346,6 +398,35 @@ func TestTUIHandler_CwdValidPath(t *testing.T) {
 	}
 	if resolved.Binding.CWD != validDir {
 		t.Errorf("expected CWD=%q, got %q", validDir, resolved.Binding.CWD)
+	}
+}
+
+func TestTUIHandler_ResetClearsSession(t *testing.T) {
+	a, ctx, cleanup := testApp(t)
+	defer cleanup()
+
+	userID := int64(os.Getuid())
+	a.sessions.SetSession(ipc.ReservedTUIChatID, 0, userID, "/tmp/test-session.jsonl")
+
+	handler := makeTUIHandler(a)
+	te := &testEmit{}
+
+	err := handler(ctx, ipc.IPCMessage{
+		Type: "command",
+		Text: "/reset",
+	}, te.emit)
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if te.count() < 2 {
+		t.Fatalf("expected at least 2 events, got %d", te.count())
+	}
+	body := te.events[1].Body
+	if !strings.Contains(body, "reset") {
+		t.Errorf("expected reset confirmation in response, got %q", body)
+	}
+	if got := a.sessions.GetSession(ipc.ReservedTUIChatID, 0, userID); got != "" {
+		t.Fatalf("session should be cleared, got %q", got)
 	}
 }
 
