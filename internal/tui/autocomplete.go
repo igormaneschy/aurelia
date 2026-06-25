@@ -41,9 +41,9 @@ func (m Model) hasAutocomplete() bool {
 }
 
 func (m Model) refreshAutocomplete() Model {
-	options := commandSuggestions(m.inputCommandPrefix())
-	m.autocompleteOptions = options
+	m.autocompleteOptions = commandSuggestions(m.inputCommandPrefix())
 	m.autocompleteIndex = 0
+	(&m).syncViewportDimensions()
 	return m
 }
 
@@ -75,6 +75,10 @@ func (m Model) applyAutocomplete() Model {
 }
 
 func (m *Model) clearAutocomplete() {
+	if len(m.autocompleteOptions) == 0 {
+		return
+	}
 	m.autocompleteOptions = nil
 	m.autocompleteIndex = 0
+	m.syncViewportDimensions()
 }

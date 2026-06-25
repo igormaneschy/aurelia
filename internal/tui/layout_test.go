@@ -30,6 +30,67 @@ func TestLayout_StatusBarStaysOnScreenWithSearch(t *testing.T) {
 	}
 }
 
+func TestLayout_StatusBarWithSidebarAndSearch(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 120
+	m.height = 30
+	m.showSidebar = true
+	m.sessions = []tuiSessionInfo{{ChatID: -2, Name: "work"}}
+	m.cwdPath = "/Users/igor/dev/aurelia"
+	m.ensureViewport()
+
+	m.historySearch.active = true
+	m.historySearch.query = "demo"
+	m.syncViewportDimensions()
+
+	lines := strings.Count(m.renderChatBaseLayout(), "\n") + 1
+	if lines != m.height {
+		t.Fatalf("layout lines=%d want height=%d", lines, m.height)
+	}
+	if m.statusBarY() != m.height-1 {
+		t.Fatalf("statusBarY=%d want %d", m.statusBarY(), m.height-1)
+	}
+}
+
+func TestLayout_StatusBarWithAutocomplete(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 120
+	m.height = 30
+	m.ensureViewport()
+	m.textarea.SetValue("/c")
+	m = m.refreshAutocomplete()
+
+	lines := strings.Count(m.renderChatBaseLayout(), "\n") + 1
+	if lines != m.height {
+		t.Fatalf("layout lines=%d want height=%d", lines, m.height)
+	}
+	if m.statusBarY() != m.height-1 {
+		t.Fatalf("statusBarY=%d want %d", m.statusBarY(), m.height-1)
+	}
+}
+
+func TestLayout_StatusBarWithSidebarFocused(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 120
+	m.height = 30
+	m.showSidebar = true
+	m.sessions = []tuiSessionInfo{{ChatID: -2, Name: "work"}}
+	m.sidebarFocused = true
+	m.ensureViewport()
+	m.syncViewportDimensions()
+
+	lines := strings.Count(m.renderChatBaseLayout(), "\n") + 1
+	if lines != m.height {
+		t.Fatalf("layout lines=%d want height=%d", lines, m.height)
+	}
+	if m.statusBarY() != m.height-1 {
+		t.Fatalf("statusBarY=%d want %d", m.statusBarY(), m.height-1)
+	}
+}
+
 func TestLayout_SearchShrinksViewportNotFooter(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat

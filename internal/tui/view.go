@@ -123,6 +123,7 @@ func (m Model) renderChatBaseLayout() string {
 	} else {
 		body = m.renderMainPane(contentH, m.width)
 	}
+	body = clipLines(body, contentH)
 
 	chatFooter := []string{inputBar}
 	if progressBar != "" {

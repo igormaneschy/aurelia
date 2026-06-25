@@ -2,6 +2,38 @@ package tui
 
 import "strings"
 
+// sidebarChromeLineCount is non-table sidebar chrome (title, hints, table header).
+func (m Model) sidebarChromeLineCount() int {
+	if len(m.sessions) == 0 {
+		return 4
+	}
+	n := sidebarTitleLines + sidebarTableHeaderLines
+	if m.sidebarFocused {
+		return n + 7
+	}
+	n += 7 // project block + daemon label
+	if m.isChatMode() {
+		n++
+	}
+	n++ // "+ New session" hint
+	return n
+}
+
+// sidebarTableHeightForBody sizes the session table to fit the dynamic body height.
+func (m Model) sidebarTableHeightForBody() int {
+	if !m.shouldShowSidebarTable() {
+		return sidebarTableHeightForTerminal(m.height)
+	}
+	h := m.chatBodyHeight() - m.sidebarChromeLineCount()
+	if h < 4 {
+		return 4
+	}
+	if h > 20 {
+		return 20
+	}
+	return h
+}
+
 // footerLineCount returns rendered footer rows (input badges, progress, status bar).
 func (m Model) footerLineCount() int {
 	n := strings.Count(m.renderInput(), "\n") + 1
@@ -37,7 +69,11 @@ func (m Model) viewportHeight() int {
 }
 
 func (m *Model) syncViewportDimensions() {
-	if !m.viewportSet || m.height <= 0 {
+	if m.height <= 0 {
+		return
+	}
+	m.resizeSidebarTable()
+	if !m.viewportSet {
 		return
 	}
 	m.viewport.SetWidth(m.contentWidth())

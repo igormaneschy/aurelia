@@ -170,6 +170,9 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.attachProgress.active {
 			(&m).tickAttachProgress()
 		}
+		if m.waiting && (m.showAttachProgress() || m.showStreamProgress()) {
+			m.syncViewportDimensions()
+		}
 		return m, cmd
 
 	case stopwatch.TickMsg, stopwatch.StartStopMsg, stopwatch.ResetMsg:
@@ -707,6 +710,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 					break
 				}
 			}
+			m.syncViewportDimensions()
 		}
 		return m, nil
 
@@ -1018,6 +1022,7 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Exit sidebar focus — return to input.
 		m.sidebarFocused = false
 		m.sidebarTable.Blur()
+		m.syncViewportDimensions()
 		if msg.String() == "tab" || msg.String() == "ctrl+i" || msg.String() == "\t" {
 			// Tab also toggles sidebar visibility.
 			m.showSidebar = !m.showSidebar

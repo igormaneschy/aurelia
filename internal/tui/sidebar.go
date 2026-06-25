@@ -97,7 +97,7 @@ func (m *Model) resizeSidebarTable() {
 		return
 	}
 	m.sidebarTable.SetWidth(sidebarWidth)
-	m.sidebarTable.SetHeight(sidebarTableHeightForTerminal(m.height))
+	m.sidebarTable.SetHeight(m.sidebarTableHeightForBody())
 	m.syncSidebarRows()
 }
 

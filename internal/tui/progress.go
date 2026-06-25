@@ -61,6 +61,7 @@ func (sp *streamProgress) recordLength(length int) {
 }
 
 func (m *Model) initStreamProgress() tea.Cmd {
+	m.syncViewportDimensions()
 	m.streamProgress.active = true
 	m.streamProgress.showAfter = time.Now().Add(streamProgressDelay)
 	m.streamProgress.tokenEst = 0
@@ -98,6 +99,7 @@ func (m Model) renderStreamProgress(width int) string {
 }
 
 func (m *Model) resetStreamProgress() {
+	wasActive := m.streamProgress.active
 	if m.streamProgress.active && m.streamProgress.tokenEst > 0 {
 		m.streamProgress.recordLength(m.streamProgress.tokenEst)
 	}
@@ -106,6 +108,9 @@ func (m *Model) resetStreamProgress() {
 	m.streamProgress.tokenEst = 0
 	m.streamProgress.tokenMax = 0
 	m.turnStart = time.Time{}
+	if wasActive {
+		m.syncViewportDimensions()
+	}
 }
 
 func (m Model) updateStreamProgressMsgs(msg tea.Msg) (Model, tea.Cmd) {
@@ -123,6 +128,7 @@ func (m *Model) initAttachProgress(fileCount int) {
 		return
 	}
 	m.attachProgress.active = true
+	m.syncViewportDimensions()
 	m.attachProgress.total = fileCount
 	m.attachProgress.pct = 0.05
 	m.attachProgress.bar = newStreamProgressBar(m.styles)
@@ -164,9 +170,13 @@ func (m Model) renderAttachProgress(width int) string {
 }
 
 func (m *Model) resetAttachProgress() {
+	if !m.attachProgress.active {
+		return
+	}
 	m.attachProgress.active = false
 	m.attachProgress.total = 0
 	m.attachProgress.pct = 0
+	m.syncViewportDimensions()
 }
 
 func formatElapsed(d time.Duration) string {
