@@ -591,10 +591,10 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.updateViewport()
 		return m, nil
 
-	case key.Matches(msg, m.fullKeyMap().HistoryNext):
+	case msg.String() == "ctrl+f":
 		return m.historyNextPage()
 
-	case key.Matches(msg, m.fullKeyMap().HistoryPrev):
+	case msg.String() == "ctrl+b":
 		return m.historyPrevPage()
 
 	case msg.String() == "ctrl+x":

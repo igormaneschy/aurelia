@@ -128,11 +128,11 @@ func defaultKeyMap() keyMap {
 		),
 		HistoryNext: key.NewBinding(
 			key.WithKeys("ctrl+f"),
-			key.WithHelp("Ctrl+F", "Next history page"),
+			key.WithHelp("Ctrl+F", "Next history page or scroll down"),
 		),
 		HistoryPrev: key.NewBinding(
 			key.WithKeys("ctrl+b"),
-			key.WithHelp("Ctrl+B", "Previous history page"),
+			key.WithHelp("Ctrl+B", "Previous history page or scroll up"),
 		),
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),

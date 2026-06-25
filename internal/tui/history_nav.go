@@ -86,23 +86,59 @@ func (n historyNav) pageLabel() string {
 }
 
 func (m Model) historyNextPage() (Model, tea.Cmd) {
-	if len(m.messages) == 0 || m.historyNav.paginator.OnLastPage() {
+	if len(m.messages) == 0 {
 		return m, nil
 	}
-	m.historyNav.paginator.NextPage()
-	if m.historyNav.paginator.OnLastPage() {
-		m.historyNav.hasNewBelow = false
+	m.historyNav.syncMessageCount(len(m.messages))
+	if !m.historyNav.paginator.OnLastPage() {
+		m.historyNav.paginator.NextPage()
+		if m.historyNav.paginator.OnLastPage() {
+			m.historyNav.hasNewBelow = false
+		}
+		m.updateViewportToPage()
+		return m, nil
 	}
-	m.updateViewportToPage()
+	m.ensureViewport()
+	if m.viewportSet && !m.viewport.AtBottom() {
+		return m.scrollViewportPage(1)
+	}
 	return m, nil
 }
 
 func (m Model) historyPrevPage() (Model, tea.Cmd) {
-	if len(m.messages) == 0 || m.historyNav.paginator.OnFirstPage() {
+	if len(m.messages) == 0 {
 		return m, nil
 	}
-	m.historyNav.paginator.PrevPage()
-	m.updateViewportToPage()
+	m.historyNav.syncMessageCount(len(m.messages))
+	m.ensureViewport()
+	if !m.historyNav.paginator.OnFirstPage() {
+		if m.viewportSet && !m.viewport.AtTop() {
+			return m.scrollViewportPage(-1)
+		}
+		m.historyNav.paginator.PrevPage()
+		m.updateViewportToPage()
+		return m, nil
+	}
+	if m.viewportSet && !m.viewport.AtTop() {
+		return m.scrollViewportPage(-1)
+	}
+	return m, nil
+}
+
+func (m Model) scrollViewportPage(direction int) (Model, tea.Cmd) {
+	m.ensureViewport()
+	if !m.viewportSet || m.viewport.Height() <= 0 {
+		return m, nil
+	}
+	lines := m.viewport.Height()
+	if lines < 1 {
+		lines = 1
+	}
+	if direction > 0 {
+		m.viewport.ScrollDown(lines)
+	} else {
+		m.viewport.ScrollUp(lines)
+	}
 	return m, nil
 }
 

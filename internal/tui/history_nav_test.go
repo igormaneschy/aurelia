@@ -84,6 +84,29 @@ func TestHistoryNextPage_AdvancesAndShowsEarlierMessages(t *testing.T) {
 	}
 }
 
+func TestHistoryNextPage_OnSinglePageScrollsViewport(t *testing.T) {
+	m := testChatModel()
+	m.width = 80
+	m.height = 24
+	// Plain Igor messages avoid glamour collapsing short lines in tests.
+	m.messages = []chatMessage{{Sender: "Igor", Text: strings.Repeat("scroll-line\n", 200)}}
+	m.historyNav.resetToLastPage(len(m.messages))
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+	m.updateViewport()
+	m.viewport.GotoTop()
+
+	before := m.viewport.YOffset()
+	next, cmd := m.historyNextPage()
+	if cmd != nil {
+		t.Fatal("expected nil cmd for viewport scroll")
+	}
+	if next.viewport.YOffset() <= before {
+		t.Fatalf("expected viewport scroll down, offset %d -> %d (atBottom=%v h=%d)",
+			before, next.viewport.YOffset(), next.viewport.AtBottom(), next.viewport.Height())
+	}
+}
+
 func TestHistoryNextPage_FromFirstReachesLast(t *testing.T) {
 	m := testChatModel()
 	m.width = 80
