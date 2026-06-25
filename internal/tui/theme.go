@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 
+	"charm.land/bubbles/v2/help"
 	"charm.land/lipgloss/v2"
 )
 
@@ -121,6 +122,16 @@ func (t Theme) GlamourStyle() string {
 		return "light"
 	}
 	return "dark"
+}
+
+// helpStylesForTheme returns bubbles/help styles aligned with the TUI palette.
+func helpStylesForTheme(s themeStyles, theme Theme) help.Styles {
+	h := help.DefaultStyles(ResolveTheme(theme) == ThemeDark)
+	h.ShortKey = s.UserStyle
+	h.FullKey = s.UserStyle
+	h.ShortDesc = s.HeaderMetaStyle
+	h.FullDesc = s.HeaderMetaStyle
+	return h
 }
 
 // newStylesForTheme returns the appropriate themeStyles for the given Theme.

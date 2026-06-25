@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -120,8 +121,8 @@ func (m Model) chatView() string {
 	}
 
 	// Overlay help when ? is pressed.
-	if m.helpOverlayOpen {
-		panel := m.renderHelpOverlay()
+	if m.helpVisible() {
+		panel := m.renderHelpPanel()
 		// Use a slightly wider panel for help to fit keybinding descriptions.
 		return m.overlayPanelWide(full, panel)
 	}
@@ -756,73 +757,30 @@ func safeSessionLabel(name string) string {
 	return b.String()
 }
 
-// renderHelpOverlay renders the keyboard shortcuts and commands reference.
-func (m Model) renderHelpOverlay() string {
+// renderHelpPanel renders the bubbles/help keymap overlay with section headers.
+func (m Model) renderHelpPanel() string {
+	km := m.fullKeyMap()
+	panelWidth := maxInt(46, minInt(m.width-8, 72))
+
+	hm := m.helpModel
+	hm.ShowAll = true
+	hm.SetWidth(panelWidth)
+
+	groups := km.FullHelp()
 	var b strings.Builder
 	b.WriteString(m.styles.HeaderTitleStyle.Render("Keyboard Shortcuts"))
 	b.WriteString("\n\n")
-
-	// Two-column layout: keybinding | description.
-	rows := [][2]string{
-		{"Esc", "Cancel current response"},
-		{"Enter", "Send message"},
-		{"Alt+Enter / Ctrl+J", "Insert newline"},
-		{"Ctrl+O", "Toggle mouse (scroll vs text selection)"},
-		{"Ctrl+P", "Toggle project state panel"},
-		{"Ctrl+S / F2", "Focus sidebar sessions"},
-		{"Ctrl+L", "Clear chat screen"},
-		{"Ctrl+Y", "Copy transcript to clipboard"},
-		{"Ctrl+R", "Copy last response to clipboard"},
-		{"Ctrl+X", "Clear pending images/docs"},
-		{"Ctrl+V", "Paste image from clipboard"},
-		{"Ctrl+C", "Quit"},
-		{"? / Esc / Enter", "Close this help"},
-		{"", ""},
-		{"↑↓", "Navigate input history"},
-		{"Tab", "Complete command or cycle sidebar"},
+	if len(groups) > 0 {
+		b.WriteString(hm.FullHelpView([][]key.Binding{groups[0]}))
+	}
+	if len(groups) > 1 {
+		b.WriteString("\n\n")
+		b.WriteString(m.styles.HeaderTitleStyle.Render("Commands"))
+		b.WriteString("\n\n")
+		b.WriteString(hm.FullHelpView([][]key.Binding{groups[1]}))
 	}
 
-	for _, row := range rows {
-		if row[0] == "" {
-			b.WriteString("\n")
-			continue
-		}
-		keyCol := m.styles.UserStyle.Width(22).Render(row[0])
-		descCol := m.styles.HeaderMetaStyle.Render(row[1])
-		b.WriteString(keyCol)
-		b.WriteString("  ")
-		b.WriteString(descCol)
-		b.WriteString("\n")
-	}
-
-	b.WriteString("\n")
-	b.WriteString(m.styles.HeaderTitleStyle.Render("Commands"))
 	b.WriteString("\n\n")
-
-	cmds := [][2]string{
-		{"/help", "Show this help"},
-		{"/status", "Daemon, model, cwd, session status"},
-		{"/model", "List available models"},
-		{"/model <name>", "Switch model"},
-		{"/model auto", "Use automatic model selection"},
-		{"/model refresh", "Refresh model list"},
-		{"/cwd", "Show current project binding"},
-		{"/cwd <path>", "Set project working directory"},
-		{"/cwd clear", "Remove project binding"},
-		{"/img <path>", "Attach image (png, jpg, gif, webp)"},
-		{"/attach <path>", "Attach document (md, docx, pdf, etc.)"},
-	}
-
-	for _, row := range cmds {
-		keyCol := m.styles.UserStyle.Width(22).Render(row[0])
-		descCol := m.styles.HeaderMetaStyle.Render(row[1])
-		b.WriteString(keyCol)
-		b.WriteString("  ")
-		b.WriteString(descCol)
-		b.WriteString("\n")
-	}
-
-	b.WriteString("\n")
 	b.WriteString(m.styles.HeaderMetaStyle.Render("Images: /img <path>, Ctrl+V paste, drag & drop"))
 	b.WriteString("\n")
 	b.WriteString(m.styles.HeaderMetaStyle.Render("Docs: /attach <path>, multiple allowed per message"))

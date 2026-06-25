@@ -2282,22 +2282,22 @@ func TestModel_HelpOverlayToggleWithQuestionMark(t *testing.T) {
 	m.width = 100
 	m.height = 40
 	// textarea default is empty
-	if m.helpOverlayOpen {
-		t.Fatal("expected helpOverlayOpen=false initially")
+	if m.helpVisible() {
+		t.Fatal("expected help overlay closed initially")
 	}
 
 	// ? with empty input opens help
 	updated, _ := m.handleKeyMsg(keyText("?"))
 	m2 := updated.(Model)
-	if !m2.helpOverlayOpen {
-		t.Error("expected helpOverlayOpen=true after ?")
+	if !m2.helpVisible() {
+		t.Error("expected help overlay open after ?")
 	}
 
 	// ? again closes help
 	updated2, _ := m2.handleKeyMsg(keyText("?"))
 	m3 := updated2.(Model)
-	if m3.helpOverlayOpen {
-		t.Error("expected helpOverlayOpen=false after second ?")
+	if m3.helpVisible() {
+		t.Error("expected help overlay closed after second ?")
 	}
 }
 
@@ -2305,12 +2305,12 @@ func TestModel_HelpOverlayCloseWithEsc(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
-	m.helpOverlayOpen = true
+	m.helpModel.ShowAll = true
 
 	updated, _ := m.handleKeyMsg(keyPress(tea.KeyEsc))
 	m2 := updated.(Model)
-	if m2.helpOverlayOpen {
-		t.Error("expected helpOverlayOpen=false after Esc")
+	if m2.helpVisible() {
+		t.Error("expected help overlay closed after Esc")
 	}
 }
 
@@ -2318,12 +2318,12 @@ func TestModel_HelpOverlayCloseWithEnter(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
-	m.helpOverlayOpen = true
+	m.helpModel.ShowAll = true
 
 	updated, _ := m.handleKeyMsg(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
-	if m2.helpOverlayOpen {
-		t.Error("expected helpOverlayOpen=false after Enter")
+	if m2.helpVisible() {
+		t.Error("expected help overlay closed after Enter")
 	}
 }
 
@@ -2335,8 +2335,8 @@ func TestModel_HelpOverlayNotOpenedWithNonEmptyInput(t *testing.T) {
 
 	updated, _ := m.handleKeyMsg(keyText("?"))
 	m2 := updated.(Model)
-	if m2.helpOverlayOpen {
-		t.Error("expected helpOverlayOpen=false when textarea is not empty")
+	if m2.helpVisible() {
+		t.Error("expected help overlay closed when textarea is not empty")
 	}
 	// ? should have been forwarded to the textarea (delegated)
 }
@@ -2347,7 +2347,7 @@ func TestModel_HelpOverlayRenderContainsKeyBindings(t *testing.T) {
 	m.width = 100
 	m.height = 40
 
-	overlay := m.renderHelpOverlay()
+	overlay := m.renderHelpPanel()
 
 	for _, want := range []string{
 		"Keyboard Shortcuts",
@@ -2371,7 +2371,7 @@ func TestModel_HelpOverlayRendersScoped(t *testing.T) {
 	m.state = stateChat
 	m.width = 80
 	m.height = 30
-	m.helpOverlayOpen = true
+	m.helpModel.ShowAll = true
 
 	view := m.View().Content
 

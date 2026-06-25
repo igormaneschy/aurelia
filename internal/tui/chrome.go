@@ -3,6 +3,7 @@ package tui
 import (
 	"time"
 
+	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
 
@@ -24,7 +25,7 @@ type chromeModel struct {
 
 	spinner spinner.Model
 
-	helpOverlayOpen  bool
+	helpModel help.Model
 	projectPanelOpen bool
 	projectState     *ipc.ProjectStatePayload
 

@@ -585,14 +585,14 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.refreshAutocomplete(), nil
 
 	// Help overlay: ? toggles it. esc, enter, or ? closes it.
-	case msg.String() == "?" && m.helpOverlayOpen:
-		m.helpOverlayOpen = false
+	case key.Matches(msg, m.fullKeyMap().Help) && m.helpVisible():
+		m.helpModel.ShowAll = false
 		return m, nil
-	case msg.String() == "?" && m.textarea.Value() == "":
-		m.helpOverlayOpen = true
+	case key.Matches(msg, m.fullKeyMap().Help) && m.textarea.Value() == "":
+		m.helpModel.ShowAll = true
 		return m, nil
-	case (msg.String() == "esc" || msg.String() == "enter") && m.helpOverlayOpen:
-		m.helpOverlayOpen = false
+	case (key.Matches(msg, m.fullKeyMap().Cancel) || key.Matches(msg, m.fullKeyMap().Submit)) && m.helpVisible():
+		m.helpModel.ShowAll = false
 		// If a stream is active, also cancel it so the user doesn't
 		// need to press Esc twice.
 		if m.waiting {
