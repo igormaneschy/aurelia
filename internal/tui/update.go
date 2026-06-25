@@ -627,7 +627,7 @@ func (m Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.helpVisible() {
 		switch {
-		case key.Matches(msg, m.fullKeyMap().Help):
+		case isHelpToggleKey(msg):
 			return m.closeHelpOverlay(), nil
 		case key.Matches(msg, m.fullKeyMap().Cancel), key.Matches(msg, m.fullKeyMap().Submit):
 			m = m.closeHelpOverlay()
@@ -731,8 +731,8 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.refreshAutocomplete(), nil
 
-	// Help overlay: ? toggles it when the input is empty.
-	case key.Matches(msg, m.fullKeyMap().Help) && m.textarea.Value() == "":
+	// Help overlay: F1 toggles it (/? stays free for typing and command autocomplete).
+	case isHelpToggleKey(msg):
 		return m.openHelpOverlay(), nil
 
 	case isProjectPanelToggleKey(msg):

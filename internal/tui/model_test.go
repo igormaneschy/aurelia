@@ -2273,28 +2273,25 @@ func TestModel_TurnStartClearedAfterStreamEnd(t *testing.T) {
 
 // ── T5.2.3 Help overlay tests ─────────────────────────────────────────────
 
-func TestModel_HelpOverlayToggleWithQuestionMark(t *testing.T) {
+func TestModel_HelpOverlayToggleWithF1(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
 	m.height = 40
-	// textarea default is empty
 	if m.helpVisible() {
 		t.Fatal("expected help overlay closed initially")
 	}
 
-	// ? with empty input opens help
-	updated, _ := m.handleKeyMsg(keyText("?"))
+	updated, _ := m.handleKeyMsg(keyPress(tea.KeyF1))
 	m2 := updated.(Model)
 	if !m2.helpVisible() {
-		t.Error("expected help overlay open after ?")
+		t.Error("expected help overlay open after F1")
 	}
 
-	// ? again closes help
-	updated2, _ := m2.handleKeyMsg(keyText("?"))
+	updated2, _ := m2.handleKeyMsg(keyPress(tea.KeyF1))
 	m3 := updated2.(Model)
 	if m3.helpVisible() {
-		t.Error("expected help overlay closed after second ?")
+		t.Error("expected help overlay closed after second F1")
 	}
 }
 
@@ -2324,18 +2321,29 @@ func TestModel_HelpOverlayCloseWithEnter(t *testing.T) {
 	}
 }
 
-func TestModel_HelpOverlayNotOpenedWithNonEmptyInput(t *testing.T) {
+func TestModel_HelpOverlayOpensWithF1DespiteNonEmptyInput(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
 	m.textarea.SetValue("hello")
 
+	updated, _ := m.handleKeyMsg(keyPress(tea.KeyF1))
+	m2 := updated.(Model)
+	if !m2.helpVisible() {
+		t.Error("expected F1 to open help even when textarea is not empty")
+	}
+}
+
+func TestModel_QuestionMarkDoesNotOpenHelpOverlay(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+
 	updated, _ := m.handleKeyMsg(keyText("?"))
 	m2 := updated.(Model)
 	if m2.helpVisible() {
-		t.Error("expected help overlay closed when textarea is not empty")
+		t.Error("expected ? alone not to open help overlay")
 	}
-	// ? should have been forwarded to the textarea (delegated)
 }
 
 func TestModel_HelpOverlayRenderContainsKeyBindings(t *testing.T) {

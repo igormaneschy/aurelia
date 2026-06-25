@@ -3,6 +3,7 @@ package tui
 import (
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
+	tea "charm.land/bubbletea/v2"
 )
 
 // keyMap defines Aurelia TUI shortcuts for bubbles/help and key.Matches handlers.
@@ -104,12 +105,12 @@ func defaultKeyMap() keyMap {
 			key.WithHelp("Ctrl+N", "New session (form)"),
 		),
 		Help: key.NewBinding(
-			key.WithKeys("?"),
-			key.WithHelp("?", "Toggle help"),
+			key.WithKeys("f1"),
+			key.WithHelp("F1", "Toggle help"),
 		),
 		HelpClose: key.NewBinding(
-			key.WithKeys("?", "esc", "enter"),
-			key.WithHelp("? / Esc / Enter", "Close this help"),
+			key.WithKeys("f1", "esc", "enter"),
+			key.WithHelp("F1 / Esc / Enter", "Close this help"),
 		),
 		PageUp: key.NewBinding(
 			key.WithKeys("pgup"),
@@ -249,6 +250,11 @@ func newHelpModel(styles themeStyles, theme Theme) help.Model {
 // helpVisible reports whether the full help overlay is open.
 func (m Model) helpVisible() bool {
 	return m.helpModel.ShowAll
+}
+
+// isHelpToggleKey reports F1 (dedicated help shortcut).
+func isHelpToggleKey(msg tea.KeyMsg) bool {
+	return key.Matches(msg, defaultKeyMap().Help)
 }
 
 // helpOnlyBinding creates a display-only binding for slash commands in help.

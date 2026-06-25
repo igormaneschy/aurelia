@@ -10,11 +10,11 @@ import (
 func TestDefaultKeyMap_HelpBinding(t *testing.T) {
 	km := defaultKeyMap()
 
-	if !key.Matches(keyText("?"), km.Help) {
-		t.Fatal("expected ? to match Help binding")
+	if !key.Matches(keyPress(tea.KeyF1), km.Help) {
+		t.Fatal("expected F1 to match Help binding")
 	}
-	if key.Matches(keyText("?"), km.Submit) {
-		t.Fatal("expected ? not to match Submit binding")
+	if key.Matches(keyText("?"), km.Help) {
+		t.Fatal("expected ? not to match Help binding")
 	}
 }
 
