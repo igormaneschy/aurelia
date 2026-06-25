@@ -1582,7 +1582,7 @@ func TestModel_StatusBarUsesCompactShortcuts(t *testing.T) {
 
 	status := stripANSIForTest(m.renderStatusBar())
 
-	for _, want := range []string{"↵ send", "alt+enter newline", "✋ mouse", "esc cancel", "⌃L clear", "⌃P project", "⌃S · f2 · ⌃N"} {
+	for _, want := range []string{"F1 help", "↵ send", "alt+enter newline", "✋ mouse", "esc cancel", "⌃L clear", "⌃P project", "⌃S · f2 · ⌃N"} {
 		if !strings.Contains(status, want) {
 			t.Errorf("expected status bar to contain %q, got %q", want, status)
 		}

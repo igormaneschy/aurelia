@@ -324,6 +324,9 @@ func (m Model) renderStatusBar() string {
 		// Active model — shown when known.
 		{label: m.activeModelLabel(), min: 14},
 
+		// Help — clickable (opens help modal).
+		{label: m.helpStatusLabel(), min: 20},
+
 		// Pending count — shown when > 0.
 		{label: m.pendingCountLabel(), min: 24},
 
@@ -337,11 +340,11 @@ func (m Model) renderStatusBar() string {
 		{label: fmt.Sprintf("%s newline", newlineFallbackKey), min: 62},
 		{label: m.mouseStatusLabel(), min: 80},
 		{label: "pg scroll", min: 94},
-		{label: "esc cancel", min: 106},
-		{label: "⌃L clear", min: 118},
-		{label: "⌃P project", min: 130},
-		{label: "⌃S · f2 · ⌃N", min: 146},
-		{label: "⌃C quit", min: 162},
+		{label: "esc cancel", min: 124},
+		{label: "⌃L clear", min: 138},
+		{label: "⌃P project", min: 152},
+		{label: "⌃S · f2 · ⌃N", min: 168},
+		{label: "⌃C quit", min: 182},
 	}
 
 	parts := []string{}
@@ -355,6 +358,16 @@ func (m Model) renderStatusBar() string {
 	}
 
 	return m.styles.StatusBarStyle.Width(maxInt(20, m.width-2)).Render(strings.Join(parts, "   ·   "))
+}
+
+const statusBarHelpToken = "F1 help"
+
+// helpStatusLabel returns the clickable help hint for the status bar.
+func (m Model) helpStatusLabel() string {
+	if !m.mouseEnabled {
+		return statusBarHelpToken
+	}
+	return m.styles.HeaderMetaStyle.Underline(true).Render(statusBarHelpToken)
 }
 
 // pendingCountLabel returns the pending count badge for the status bar.

@@ -135,6 +135,54 @@ func TestHandleChatMouse_NewSessionOpensForm(t *testing.T) {
 	}
 }
 
+func TestStatusBarHit_HelpLabel(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 120
+	m.height = 24
+
+	line := m.statusBarPlainLine()
+	idx := indexOf(line, statusBarHelpToken)
+	if idx < 0 {
+		t.Fatalf("help label not found in status line %q", line)
+	}
+
+	mid := idx + len(statusBarHelpToken)/2
+	if m.statusBarHit(mid) != statusBarHitHelp {
+		t.Fatalf("expected help hit at x=%d in %q", mid, line)
+	}
+}
+
+func TestHandleChatMouse_HelpInStatusBar(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 120
+	m.height = 30
+
+	line := m.statusBarPlainLine()
+	idx := indexOf(line, statusBarHelpToken)
+	if idx < 0 {
+		t.Fatalf("help label not in status line %q", line)
+	}
+
+	clickY := m.statusBarFooterStartY()
+	for y := m.statusBarFooterStartY(); y < len(m.layoutLines()); y++ {
+		if strings.Contains(stripANSIForTest(m.layoutLines()[y]), statusBarHelpToken) {
+			clickY = y
+			break
+		}
+	}
+	handled, model, _ := m.handleChatMouse(tea.MouseClickMsg{
+		X: idx + 2, Y: clickY, Button: tea.MouseLeft,
+	})
+	if !handled {
+		t.Fatal("expected help click to open overlay")
+	}
+	if !model.(Model).helpVisible() {
+		t.Fatal("expected help overlay open")
+	}
+}
+
 func TestHandleChatMouse_ModelInStatusBar(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat

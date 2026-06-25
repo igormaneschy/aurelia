@@ -12,6 +12,7 @@ type statusBarHitKind int
 const (
 	statusBarHitNone statusBarHitKind = iota
 	statusBarHitModel
+	statusBarHitHelp
 )
 
 func (m Model) layoutLines() []string {
@@ -25,6 +26,9 @@ func (m Model) layoutLines() []string {
 func (m Model) isStatusBarLine(line string) bool {
 	plain := stripANSI(line)
 	if strings.Contains(plain, "●") {
+		return true
+	}
+	if strings.Contains(plain, statusBarHelpToken) {
 		return true
 	}
 	if model := m.activeModelLabel(); model != "" && strings.Contains(plain, model) {
@@ -62,8 +66,7 @@ func (m Model) statusBarFooterStartY() int {
 }
 
 func (m Model) statusBarHitAt(y, x int) statusBarHitKind {
-	model := m.activeModelLabel()
-	if model == "" || x < 0 || y < 0 || y < m.statusBarFooterStartY() {
+	if x < 0 || y < 0 || y < m.statusBarFooterStartY() {
 		return statusBarHitNone
 	}
 	lines := m.layoutLines()
@@ -71,14 +74,24 @@ func (m Model) statusBarHitAt(y, x int) statusBarHitKind {
 		return statusBarHitNone
 	}
 	plain := stripANSI(lines[y])
-	idx := strings.Index(plain, model)
-	if idx < 0 {
-		return statusBarHitNone
+	if statusBarSegmentHit(plain, statusBarHelpToken, x) {
+		return statusBarHitHelp
 	}
-	if x >= idx && x < idx+len(model) {
+	if model := m.activeModelLabel(); statusBarSegmentHit(plain, model, x) {
 		return statusBarHitModel
 	}
 	return statusBarHitNone
+}
+
+func statusBarSegmentHit(plain, token string, x int) bool {
+	if token == "" {
+		return false
+	}
+	idx := strings.Index(plain, token)
+	if idx < 0 {
+		return false
+	}
+	return x >= idx && x < idx+len(token)
 }
 
 func (m Model) statusBarHit(x int) statusBarHitKind {
@@ -187,6 +200,14 @@ func (m Model) handleChatMouse(msg tea.MouseMsg) (handled bool, model tea.Model,
 			return false, m, nil
 		}
 		switch m.statusBarHitAt(msg.Y, msg.X) {
+		case statusBarHitHelp:
+			next := m
+			if next.helpVisible() {
+				next = next.closeHelpOverlay()
+			} else {
+				next = next.openHelpOverlay()
+			}
+			return true, next, nil
 		case statusBarHitModel:
 			next, c := m.openModelSelect()
 			return true, next, c
