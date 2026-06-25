@@ -117,6 +117,7 @@ func newModel(socketPath, historyPath string, theme Theme) Model {
 			styles:       styles,
 			theme:        theme,
 			sidebarTable: newSidebarTable(styles),
+			helpModel:    newHelpModel(styles, theme),
 		},
 		inputModel: inputModel{
 			textarea:          ta,
