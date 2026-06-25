@@ -8,28 +8,6 @@ import (
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
 
-func TestStatusBarHit_ModelLabel(t *testing.T) {
-	m := NewModel("/tmp/test.sock", ThemeDark)
-	m.state = stateChat
-	m.width = 120
-	m.height = 24
-	m.activeModel = "claude-sonnet"
-
-	line := m.statusBarPlainLine()
-	idx := indexOf(line, "claude-sonnet")
-	if idx < 0 {
-		t.Fatalf("model not found in status line %q", line)
-	}
-
-	mid := idx + len("claude-sonnet")/2
-	if m.statusBarHit(mid) != statusBarHitModel {
-		t.Fatalf("expected model hit at x=%d in %q", mid, line)
-	}
-	if m.statusBarHit(0) == statusBarHitModel {
-		t.Fatal("expected state label at x=0 not to be model hit")
-	}
-}
-
 func TestStatusBarY_StaysAtBottomWithSearchBar(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
@@ -190,37 +168,6 @@ func TestHandleChatMouse_HelpInStatusBar(t *testing.T) {
 	}
 	if !model.(Model).helpVisible() {
 		t.Fatal("expected help overlay open")
-	}
-}
-
-func TestHandleChatMouse_ModelInStatusBar(t *testing.T) {
-	m := NewModel("/tmp/test.sock", ThemeDark)
-	m.state = stateChat
-	m.width = 120
-	m.height = 30
-	m.activeModel = "claude-sonnet"
-
-	line := m.statusBarPlainLine()
-	idx := indexOf(line, "claude-sonnet")
-	if idx < 0 {
-		t.Fatalf("model not in status line %q", line)
-	}
-
-	clickY := m.statusBarFooterStartY()
-	for y := m.statusBarFooterStartY(); y < len(m.layoutLines()); y++ {
-		if strings.Contains(stripANSIForTest(m.layoutLines()[y]), "claude-sonnet") {
-			clickY = y
-			break
-		}
-	}
-	handled, model, _ := m.handleChatMouse(tea.MouseClickMsg{
-		X: idx + 2, Y: clickY, Button: tea.MouseLeft,
-	})
-	if !handled {
-		t.Fatal("expected model click to open form")
-	}
-	if !model.(Model).formOpen {
-		t.Fatal("expected model picker form open")
 	}
 }
 

@@ -11,7 +11,6 @@ type statusBarHitKind int
 
 const (
 	statusBarHitNone statusBarHitKind = iota
-	statusBarHitModel
 	statusBarHitHelp
 )
 
@@ -25,16 +24,10 @@ func (m Model) layoutLines() []string {
 
 func (m Model) isStatusBarLine(line string) bool {
 	plain := stripANSI(line)
-	if strings.Contains(plain, statusBarHelpToken) {
-		return true
-	}
-	if strings.Contains(plain, "🟢") || strings.Contains(plain, "🟡") || strings.Contains(plain, "🔴") {
-		return true
-	}
-	if model := m.activeModelLabel(); model != "" && strings.Contains(plain, model) {
-		return true
-	}
-	return false
+	return strings.Contains(plain, statusBarHelpToken) ||
+		strings.Contains(plain, "🖱️ mouse") ||
+		strings.Contains(plain, "✋ mouse") ||
+		strings.Contains(plain, "↵ send")
 }
 
 func (m Model) statusBarY() int {
@@ -79,9 +72,6 @@ func (m Model) statusBarHitAt(y, x int) statusBarHitKind {
 	plain := stripANSI(lines[y])
 	if statusBarSegmentHit(plain, statusBarHelpToken, x) {
 		return statusBarHitHelp
-	}
-	if model := m.activeModelLabel(); statusBarSegmentHit(plain, model, x) {
-		return statusBarHitModel
 	}
 	return statusBarHitNone
 }
@@ -218,9 +208,6 @@ func (m Model) handleChatMouse(msg tea.MouseMsg) (handled bool, model tea.Model,
 				next = next.openHelpOverlay()
 			}
 			return true, next, nil
-		case statusBarHitModel:
-			next, c := m.openModelSelect()
-			return true, next, c
 		}
 		if m.headerModelHit(msg.X, msg.Y) {
 			next, c := m.openModelSelect()

@@ -1623,8 +1623,8 @@ func TestModel_StatusBarDropsItemsOnNarrowTerminal(t *testing.T) {
 	if !strings.Contains(status, "F1 help") {
 		t.Errorf("expected 'F1 help' to remain on width=50, got %q", status)
 	}
-	if !strings.Contains(status, "ready") {
-		t.Errorf("expected health chip on width=50, got %q", status)
+	if strings.Contains(status, "ready") || strings.Contains(status, "🟢") {
+		t.Errorf("expected no health chip in status bar, got %q", status)
 	}
 }
 
@@ -2130,32 +2130,23 @@ func (e assertError) Error() string { return string(e) }
 
 // ── T5.2.2 Rich status bar tests ───────────────────────────────────────────
 
-func TestModel_StatusBarShowsActiveModel(t *testing.T) {
+func TestModel_StatusBarOmitsModelAndHealth(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
 	m.activeModel = "gpt-5.5"
+	m.daemonLabel = "ready"
 
 	status := stripANSIForTest(m.renderStatusBar())
 
-	if !strings.Contains(status, "gpt-5.5") {
-		t.Errorf("expected status bar to show 'gpt-5.5', got %q", status)
+	if strings.Contains(status, "gpt-5.5") {
+		t.Errorf("expected status bar to omit model, got %q", status)
 	}
-}
-
-func TestModel_StatusBarEmptyModelHidden(t *testing.T) {
-	m := NewModel("/tmp/test.sock", ThemeDark)
-	m.state = stateChat
-	m.width = 100
-	// activeModel defaults to ""
-
-	status := stripANSIForTest(m.renderStatusBar())
-
-	// The status bar should not render a model separator when model is empty.
-	// It's fine if other fields appear — the key is no model label.
-	// Just verify the empty string case is handled gracefully (no crash).
-	if len(status) == 0 {
-		t.Error("expected non-empty status bar")
+	if strings.Contains(status, "ready") || strings.Contains(status, "🟢") {
+		t.Errorf("expected status bar to omit health, got %q", status)
+	}
+	if !strings.Contains(status, "F1 help") {
+		t.Errorf("expected shortcuts in status bar, got %q", status)
 	}
 }
 
@@ -2435,7 +2426,7 @@ func TestModel_ChromeStateReturnsWaiting(t *testing.T) {
 	}
 }
 
-func TestModel_StatusBarShowsOffline(t *testing.T) {
+func TestModel_StatusBarOmitsOfflineHealth(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.width = 100
@@ -2443,8 +2434,8 @@ func TestModel_StatusBarShowsOffline(t *testing.T) {
 
 	status := stripANSIForTest(m.renderStatusBar())
 
-	if !strings.Contains(status, "offline") {
-		t.Errorf("expected status bar to contain 'offline', got %q", status)
+	if strings.Contains(status, "offline") || strings.Contains(status, "🔴") {
+		t.Errorf("expected status bar to omit health state, got %q", status)
 	}
 }
 

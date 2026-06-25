@@ -17,18 +17,6 @@ type statusBarSegment struct {
 	hit   statusBarHitKind
 }
 
-func (m Model) renderHealthStatusLabel() string {
-	state := m.chromeState()
-	switch state {
-	case "offline", "error":
-		return m.styles.StatusErrorStyle.Render(m.healthChipIcon() + " " + state)
-	case "waiting", "connecting":
-		return m.styles.StatusBusyStyle.Render(m.healthChipIcon() + " " + state)
-	default:
-		return m.styles.StatusReadyStyle.Render(m.healthChipIcon() + " " + state)
-	}
-}
-
 func (m Model) helpStatusLabel() string {
 	if !m.mouseEnabled {
 		return statusBarHelpToken
@@ -37,13 +25,7 @@ func (m Model) helpStatusLabel() string {
 }
 
 func (m Model) statusBarSegments() []statusBarSegment {
-	segments := []statusBarSegment{
-		{label: m.renderHealthStatusLabel(), hit: statusBarHitNone},
-	}
-
-	if model := m.activeModelLabel(); model != "" {
-		segments = append(segments, statusBarSegment{label: model, hit: statusBarHitModel})
-	}
+	var segments []statusBarSegment
 
 	for _, extra := range []statusBarSegment{
 		{label: m.pendingCountLabel(), hit: statusBarHitNone},
