@@ -79,14 +79,8 @@ func TestModel_LoadingToChatSchedulesHealthCheck(t *testing.T) {
 func TestModel_SubmitNonEmptyTextCreatesSendMessage(t *testing.T) {
 	ta := textarea.New()
 	ta.SetValue("hello")
-	m := Model{
-		state:      stateChat,
-		ready:      true,
-		messages:   []chatMessage{},
-		textarea:   ta,
-		waiting:    false,
-		socketPath: "/tmp/test.sock",
-	}
+	m := testChatModelWithTextarea(ta)
+	m.messages = []chatMessage{}
 
 	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
@@ -107,13 +101,8 @@ func TestModel_SubmitNonEmptyTextCreatesSendMessage(t *testing.T) {
 }
 
 func TestModel_SubmitEmptyTextDoesNothing(t *testing.T) {
-	m := Model{
-		state:    stateChat,
-		ready:    true,
-		messages: []chatMessage{},
-		textarea: textarea.New(),
-		waiting:  false,
-	}
+	m := testChatModel()
+	m.messages = []chatMessage{}
 
 	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
@@ -129,12 +118,8 @@ func TestModel_SubmitEmptyTextDoesNothing(t *testing.T) {
 func TestModel_SubmitWhileWaitingEnqueuesMessage(t *testing.T) {
 	ta := textarea.New()
 	ta.SetValue("hello")
-	m := Model{
-		state:    stateChat,
-		ready:    true,
-		textarea: ta,
-		waiting:  true,
-	}
+	m := testChatModelWithTextarea(ta)
+	m.waiting = true
 
 	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
@@ -248,14 +233,8 @@ func TestModel_EscCancelsCurrentTurnDrainsQueue(t *testing.T) {
 func TestModel_SubmitWithPendingQueueEnqueuesInsteadOfDirectSend(t *testing.T) {
 	ta := textarea.New()
 	ta.SetValue("new")
-	m := Model{
-		state:        stateChat,
-		ready:        true,
-		textarea:     ta,
-		waiting:      false,
-		socketPath:   "/tmp/test.sock",
-		pendingQueue: []queuedMessage{{chatID: ipc.ReservedTUIChatID, text: "queued-first"}},
-	}
+	m := testChatModelWithTextarea(ta)
+	m.pendingQueue = []queuedMessage{{chatID: ipc.ReservedTUIChatID, text: "queued-first"}}
 
 	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
@@ -336,11 +315,8 @@ func TestModel_PendingQueueBadgeRendersCount(t *testing.T) {
 }
 
 func TestModel_StreamChunkUpdatesMessage(t *testing.T) {
-	m := Model{
-		state:   stateChat,
-		ready:   true,
-		waiting: true,
-	}
+	m := testChatModel()
+	m.waiting = true
 
 	// First chunk creates Aurelia message.
 	updated, _ := m.handleStreamEvent(ipc.IPCEvent{Type: "stream_chunk", Body: "Hello"})
@@ -366,12 +342,9 @@ func TestModel_StreamChunkUpdatesMessage(t *testing.T) {
 }
 
 func TestModel_StreamEndReturnsToReady(t *testing.T) {
-	m := Model{
-		state:     stateChat,
-		ready:     true,
-		waiting:   true,
-		streamBuf: "some text",
-	}
+	m := testChatModel()
+	m.waiting = true
+	m.streamBuf = "some text"
 
 	updated, _ := m.handleStreamEvent(ipc.IPCEvent{Type: "stream_end"})
 	m2 := updated.(Model)
@@ -388,11 +361,8 @@ func TestModel_StreamEndReturnsToReady(t *testing.T) {
 }
 
 func TestModel_ErrorMessage(t *testing.T) {
-	m := Model{
-		state:   stateChat,
-		ready:   true,
-		waiting: true,
-	}
+	m := testChatModel()
+	m.waiting = true
 
 	updated, _ := m.handleStreamEvent(ipc.IPCEvent{Type: "error", Error: "something failed"})
 	m2 := updated.(Model)
@@ -415,11 +385,8 @@ func TestModel_ErrorMessage(t *testing.T) {
 }
 
 func TestModel_CtrlLClearsMessages(t *testing.T) {
-	m := Model{
-		state:    stateChat,
-		ready:    true,
-		messages: []chatMessage{{Sender: "Igor", Text: "hello"}},
-	}
+	m := testChatModel()
+	m.messages = []chatMessage{{Sender: "Igor", Text: "hello"}}
 
 	updated, cmd := m.Update(keyCtrl('l'))
 	m2 := updated.(Model)
@@ -921,11 +888,8 @@ func TestModel_RememberInputDedupesConsecutiveEntries(t *testing.T) {
 }
 
 func TestModel_TabTogglesSidebar(t *testing.T) {
-	m := Model{
-		state:       stateChat,
-		ready:       true,
-		showSidebar: false,
-	}
+	m := testChatModel()
+	m.showSidebar = false
 
 	updated, _ := m.Update(keyPress(tea.KeyTab))
 	m2 := updated.(Model)
@@ -1028,12 +992,7 @@ func TestModel_TextareaAltShortcutDoesNotWriteLiteralRune(t *testing.T) {
 
 func TestModel_AltEnterInsertsNewline(t *testing.T) {
 	ta := textarea.New()
-	m := Model{
-		state:    stateChat,
-		ready:    true,
-		textarea: ta,
-		waiting:  false,
-	}
+	m := testChatModelWithTextarea(ta)
 
 	updated, cmd := m.Update(keyAltEnter())
 	m2 := updated.(Model)
@@ -1048,12 +1007,7 @@ func TestModel_AltEnterInsertsNewline(t *testing.T) {
 
 func TestModel_CtrlJInsertsNewline(t *testing.T) {
 	ta := textarea.New()
-	m := Model{
-		state:    stateChat,
-		ready:    true,
-		textarea: ta,
-		waiting:  false,
-	}
+	m := testChatModelWithTextarea(ta)
 
 	updated, cmd := m.Update(keyCtrl('j'))
 	m2 := updated.(Model)
@@ -1097,13 +1051,7 @@ func TestModel_SubmitWithPendingImagesClearsThem(t *testing.T) {
 
 	ta := textarea.New()
 	ta.SetValue("hello")
-	m := Model{
-		state:      stateChat,
-		ready:      true,
-		textarea:   ta,
-		waiting:    false,
-		socketPath: "/tmp/test.sock",
-	}
+	m := testChatModelWithTextarea(ta)
 	// Attach image.
 	_ = m.attachImageFromPath(path)
 	if len(m.pendingImages) != 1 {
@@ -1131,13 +1079,7 @@ func TestModel_SubmitImageOnlyWithoutText(t *testing.T) {
 
 	ta := textarea.New()
 	// Empty textarea.
-	m := Model{
-		state:      stateChat,
-		ready:      true,
-		textarea:   ta,
-		waiting:    false,
-		socketPath: "/tmp/test.sock",
-	}
+	m := testChatModelWithTextarea(ta)
 	// Attach image.
 	_ = m.attachImageFromPath(path)
 	if len(m.pendingImages) != 1 {
@@ -1167,13 +1109,7 @@ func TestModel_SubmitTempImageDefersCleanupUntilStreamEnd(t *testing.T) {
 
 	ta := textarea.New()
 	ta.SetValue("describe")
-	m := Model{
-		state:      stateChat,
-		ready:      true,
-		textarea:   ta,
-		waiting:    false,
-		socketPath: "/tmp/test.sock",
-	}
+	m := testChatModelWithTextarea(ta)
 	if errMsg := m.attachTempImage(path); errMsg != "" {
 		t.Fatalf("unexpected attach error: %s", errMsg)
 	}
@@ -1209,12 +1145,9 @@ func TestModel_SidebarQuitCleansSubmittedTempImages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	m := Model{
-		state:                   stateChat,
-		ready:                   true,
-		sidebarFocused:          true,
-		submittedTempImagePaths: []string{path},
-	}
+	m := testChatModel()
+	m.sidebarFocused = true
+	m.submittedTempImagePaths = []string{path}
 
 	_, cmd := m.Update(keyCtrl('c'))
 
@@ -1239,13 +1172,7 @@ func TestModel_SubmitAutoAttachesImagePathFromText(t *testing.T) {
 
 	ta := textarea.New()
 	ta.SetValue("descreva essa imagem " + escaped)
-	m := Model{
-		state:      stateChat,
-		ready:      true,
-		textarea:   ta,
-		waiting:    false,
-		socketPath: "/tmp/test.sock",
-	}
+	m := testChatModelWithTextarea(ta)
 
 	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
@@ -1273,13 +1200,7 @@ func TestModel_SubmitAutoAttachesImagePathFromText(t *testing.T) {
 func TestModel_SendCommandForSlashText(t *testing.T) {
 	ta := textarea.New()
 	ta.SetValue("/status")
-	m := Model{
-		state:      stateChat,
-		ready:      true,
-		textarea:   ta,
-		waiting:    false,
-		socketPath: "/tmp/test.sock",
-	}
+	m := testChatModelWithTextarea(ta)
 
 	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
@@ -1301,13 +1222,7 @@ func TestModel_SlashCommandDoesNotAutoAttachImageArgument(t *testing.T) {
 
 	ta := textarea.New()
 	ta.SetValue("/status " + path)
-	m := Model{
-		state:      stateChat,
-		ready:      true,
-		textarea:   ta,
-		waiting:    false,
-		socketPath: "/tmp/test.sock",
-	}
+	m := testChatModelWithTextarea(ta)
 
 	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
@@ -1431,7 +1346,7 @@ func TestModel_AppendOrUpdateAureliaMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := Model{messages: tt.initial}
+			m := Model{transcriptModel: transcriptModel{messages: tt.initial}}
 			m.appendOrUpdateAureliaMessage(tt.text)
 			if len(m.messages) != tt.expected {
 				t.Errorf("expected %d messages, got %d", tt.expected, len(m.messages))
@@ -1460,12 +1375,9 @@ func TestModel_WelcomeMessageOnConnect(t *testing.T) {
 }
 
 func TestModel_MessageReplacesStreamBuf(t *testing.T) {
-	m := Model{
-		state:     stateChat,
-		ready:     true,
-		waiting:   true,
-		streamBuf: "partial text",
-	}
+	m := testChatModel()
+	m.waiting = true
+	m.streamBuf = "partial text"
 
 	// "message" event replaces, not appends to, streamBuf.
 	updated, _ := m.handleStreamEvent(ipc.IPCEvent{Type: "message", Body: "final text"})
@@ -1483,11 +1395,8 @@ func TestModel_MessageReplacesStreamBuf(t *testing.T) {
 }
 
 func TestModel_StreamDoneMsgUnblocks(t *testing.T) {
-	m := Model{
-		state:   stateChat,
-		ready:   true,
-		waiting: true,
-	}
+	m := testChatModel()
+	m.waiting = true
 
 	updated, _ := m.Update(streamDoneMsg{})
 	m2 := updated.(Model)
@@ -1501,11 +1410,8 @@ func TestModel_StreamDoneMsgUnblocks(t *testing.T) {
 }
 
 func TestModel_StreamErrMsgUnblocks(t *testing.T) {
-	m := Model{
-		state:   stateChat,
-		ready:   true,
-		waiting: true,
-	}
+	m := testChatModel()
+	m.waiting = true
 
 	updated, _ := m.Update(streamErrMsg{err: errors.New("connection lost")})
 	m2 := updated.(Model)
@@ -1617,11 +1523,8 @@ func TestModel_ViewportShowsIgorAndAureliaAfterFullFlow(t *testing.T) {
 
 // Edge: updateViewport with no dimensions still no-ops safely.
 func TestModel_UpdateViewportNoopsWithoutDimensions(t *testing.T) {
-	m := Model{
-		state:    stateChat,
-		ready:    true,
-		messages: []chatMessage{{Sender: "Igor", Text: "hello"}},
-	}
+	m := testChatModel()
+	m.messages = []chatMessage{{Sender: "Igor", Text: "hello"}}
 
 	// Should not panic and should not initialize viewport.
 	m.updateViewport()
@@ -1988,11 +1891,7 @@ func TestModel_ChatViewDoesNotExceedVeryShortTerminalHeight(t *testing.T) {
 // ---- Project Panel Tests ----
 
 func TestModel_CtrlPTogglesProjectPanel(t *testing.T) {
-	m := Model{
-		state:            stateChat,
-		ready:            true,
-		projectPanelOpen: false,
-	}
+	m := testChatModel()
 
 	// Toggle on.
 	updated, cmd := m.Update(keyCtrl('p'))
@@ -2018,11 +1917,7 @@ func TestModel_CtrlPTogglesProjectPanel(t *testing.T) {
 }
 
 func TestModel_ProjectStateMsgUpdatesState(t *testing.T) {
-	m := Model{
-		state:        stateChat,
-		ready:        true,
-		projectState: nil,
-	}
+	m := testChatModel()
 
 	ps := &ipc.ProjectStatePayload{
 		CWD:           "/Users/igor/dev/aurelia",
@@ -2050,11 +1945,7 @@ func TestModel_ProjectStateMsgUpdatesState(t *testing.T) {
 }
 
 func TestModel_ProjectStateErrorDoesNotPanic(t *testing.T) {
-	m := Model{
-		state:        stateChat,
-		ready:        true,
-		projectState: nil,
-	}
+	m := testChatModel()
 
 	updated, _ := m.Update(tuiProjectStateMsg{err: assertError("timeout")})
 	m2 := updated.(Model)
@@ -2065,12 +1956,8 @@ func TestModel_ProjectStateErrorDoesNotPanic(t *testing.T) {
 }
 
 func TestModel_ProjectStateMsgWithOpenPanelSchedulesPoll(t *testing.T) {
-	m := Model{
-		state:            stateChat,
-		ready:            true,
-		projectPanelOpen: true,
-		projectState:     nil,
-	}
+	m := testChatModel()
+	m.projectPanelOpen = true
 
 	ps := &ipc.ProjectStatePayload{
 		CWD:           "/tmp/test",
@@ -2092,26 +1979,19 @@ func TestModel_ProjectStateMsgWithOpenPanelSchedulesPoll(t *testing.T) {
 }
 
 func TestModel_ProjectPanelRendersFields(t *testing.T) {
-	m := Model{
-		state:            stateChat,
-		ready:            true,
-		projectPanelOpen: true,
-		projectState: &ipc.ProjectStatePayload{
-			CWD:           "/Users/igor/dev/aurelia",
-			BindingSource: "manual",
-			ActiveAgent:   "coder",
-			Model:         "claude-sonnet-4-6",
-			BridgeStatus:  "online",
-			MemoryLayers: []ipc.ProjectStateMemoryLayer{
-				{Name: "Global", Scope: "global", Exists: true, FileCount: 14},
-				{Name: "Team", Scope: "team", Exists: true, FileCount: 8},
-			},
-			CheckpointLayer: "cwd_overlay",
+	m := testProjectPanelModel(&ipc.ProjectStatePayload{
+		CWD:           "/Users/igor/dev/aurelia",
+		BindingSource: "manual",
+		ActiveAgent:   "coder",
+		Model:         "claude-sonnet-4-6",
+		BridgeStatus:  "online",
+		MemoryLayers: []ipc.ProjectStateMemoryLayer{
+			{Name: "Global", Scope: "global", Exists: true, FileCount: 14},
+			{Name: "Team", Scope: "team", Exists: true, FileCount: 8},
 		},
-		messages: []chatMessage{{Sender: "Igor", Text: "hello"}},
-		width:    80,
-		height:   40,
-	}
+		CheckpointLayer: "cwd_overlay",
+	})
+	m.messages = []chatMessage{{Sender: "Igor", Text: "hello"}}
 
 	panel := m.renderProjectPanel()
 	plain := stripANSIForTest(panel)
@@ -2124,20 +2004,13 @@ func TestModel_ProjectPanelRendersFields(t *testing.T) {
 }
 
 func TestModel_ProjectPanelRendersNoCWD(t *testing.T) {
-	m := Model{
-		state:            stateChat,
-		ready:            true,
-		projectPanelOpen: true,
-		projectState: &ipc.ProjectStatePayload{
-			CWD:           "",
-			BindingSource: "none",
-			ActiveAgent:   "general",
-			Model:         "PI default",
-			BridgeStatus:  "offline",
-		},
-		width:  80,
-		height: 40,
-	}
+	m := testProjectPanelModel(&ipc.ProjectStatePayload{
+		CWD:           "",
+		BindingSource: "none",
+		ActiveAgent:   "general",
+		Model:         "PI default",
+		BridgeStatus:  "offline",
+	})
 
 	panel := m.renderProjectPanel()
 	plain := stripANSIForTest(panel)
@@ -2150,21 +2023,14 @@ func TestModel_ProjectPanelRendersNoCWD(t *testing.T) {
 }
 
 func TestModel_ProjectPanelRendersInheritedBinding(t *testing.T) {
-	m := Model{
-		state:            stateChat,
-		ready:            true,
-		projectPanelOpen: true,
-		projectState: &ipc.ProjectStatePayload{
-			CWD:           "/Users/igor/dev/shared",
-			BindingSource: "inherited",
-			BindingFrom:   "TUI session",
-			ActiveAgent:   "architect",
-			Model:         "claude-opus-4-0",
-			BridgeStatus:  "online",
-		},
-		width:  80,
-		height: 40,
-	}
+	m := testProjectPanelModel(&ipc.ProjectStatePayload{
+		CWD:           "/Users/igor/dev/shared",
+		BindingSource: "inherited",
+		BindingFrom:   "TUI session",
+		ActiveAgent:   "architect",
+		Model:         "claude-opus-4-0",
+		BridgeStatus:  "online",
+	})
 
 	panel := m.renderProjectPanel()
 	plain := stripANSIForTest(panel)
@@ -2178,27 +2044,20 @@ func TestModel_ProjectPanelRendersInheritedBinding(t *testing.T) {
 
 func TestModel_ProjectPanelRendersLatestRun(t *testing.T) {
 	started := time.Date(2026, 6, 19, 10, 30, 0, 0, time.UTC)
-	m := Model{
-		state:            stateChat,
-		ready:            true,
-		projectPanelOpen: true,
-		projectState: &ipc.ProjectStatePayload{
-			CWD:           "/tmp/test",
-			BindingSource: "manual",
-			ActiveAgent:   "general",
-			Model:         "PI default",
-			BridgeStatus:  "online",
-			LatestRun: &ipc.ProjectStateRun{
-				Status:     "completed",
-				Checkpoint: "Refactoring done",
-				AgentName:  "coder",
-				StartedAt:  started,
-				DurationMs: 3500,
-			},
+	m := testProjectPanelModel(&ipc.ProjectStatePayload{
+		CWD:           "/tmp/test",
+		BindingSource: "manual",
+		ActiveAgent:   "general",
+		Model:         "PI default",
+		BridgeStatus:  "online",
+		LatestRun: &ipc.ProjectStateRun{
+			Status:     "completed",
+			Checkpoint: "Refactoring done",
+			AgentName:  "coder",
+			StartedAt:  started,
+			DurationMs: 3500,
 		},
-		width:  80,
-		height: 40,
-	}
+	})
 
 	panel := m.renderProjectPanel()
 	plain := stripANSIForTest(panel)
@@ -2211,11 +2070,7 @@ func TestModel_ProjectPanelRendersLatestRun(t *testing.T) {
 }
 
 func TestModel_ProjectStatePollTickWhilePanelClosedDoesNothing(t *testing.T) {
-	m := Model{
-		state:            stateChat,
-		ready:            true,
-		projectPanelOpen: false,
-	}
+	m := testChatModel()
 
 	updated, cmd := m.Update(projectStatePollTickMsg{})
 	m2 := updated.(Model)
@@ -2229,12 +2084,9 @@ func TestModel_ProjectStatePollTickWhilePanelClosedDoesNothing(t *testing.T) {
 }
 
 func TestModel_ProjectStatePollTickWhileWaitingDoesNothing(t *testing.T) {
-	m := Model{
-		state:            stateChat,
-		ready:            true,
-		projectPanelOpen: true,
-		waiting:          true,
-	}
+	m := testChatModel()
+	m.projectPanelOpen = true
+	m.waiting = true
 
 	updated, cmd := m.Update(projectStatePollTickMsg{})
 	m2 := updated.(Model)
@@ -2248,12 +2100,8 @@ func TestModel_ProjectStatePollTickWhileWaitingDoesNothing(t *testing.T) {
 }
 
 func TestModel_ProjectStatePollTickFetchesState(t *testing.T) {
-	m := Model{
-		state:            stateChat,
-		ready:            true,
-		projectPanelOpen: true,
-		waiting:          false,
-	}
+	m := testChatModel()
+	m.projectPanelOpen = true
 
 	updated, cmd := m.Update(projectStatePollTickMsg{})
 	m2 := updated.(Model)

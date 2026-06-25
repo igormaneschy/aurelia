@@ -11,10 +11,7 @@ import (
 
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
-	"charm.land/bubbles/v2/table"
-	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/igormaneschy/aurelia/internal/ipc"
@@ -44,10 +41,17 @@ type chatMessage struct {
 	Timestamp time.Time
 }
 
-// Model is the main Bubble Tea model for the TUI.
+// Model is the main Bubble Tea model for the TUI. Component state is grouped
+// into embedded sub-models (transcript, input, chrome) so each concern can
+// evolve independently ahead of rich UI widgets in v0.33+.
 type Model struct {
 	// State machine
 	state tuiState
+
+	// Component sub-models — anonymous embedding promotes fields to Model.
+	transcriptModel
+	inputModel
+	chromeModel
 
 	// IPC connection
 	socketPath string
@@ -57,33 +61,10 @@ type Model struct {
 	// Default is ReservedTUIChatID (the DM).
 	activeSession int64
 
-	// Session list for sidebar
-	sessions       []tuiSessionInfo
-	sidebarCursor  int // index into sessions, 0-based
-	sidebarFocused bool
-	sidebarTable   table.Model // bubbles/v2 table for session sidebar
-
-	// Chat history (active session only — reloaded on session switch)
-	messages []chatMessage
-
-	// Viewport for scrolling chat
-	viewport    viewport.Model
-	viewportSet bool
-
-	// Spinner for loading state
-	spinner spinner.Model
-
-	// Textarea for multiline input
-	textarea textarea.Model
-
-	// Command autocomplete state.
-	autocompleteOptions []string
-	autocompleteIndex   int
-
-	// In-memory prompt/command history for ↑/↓ navigation.
-	inputHistory      []string
-	inputHistoryIndex int
-	historyPath       string
+	// switchingSession is true while waiting for history after a session
+	// switch. It tells tuiHistoryMsg to replace messages even when the
+	// "Connected to Aurelia daemon" startup message is not present.
+	switchingSession bool
 
 	// Pending request tracking
 	requestID string
@@ -94,65 +75,12 @@ type Model struct {
 	// one turn at a time; the TUI client sends the next item after stream_end.
 	pendingQueue []queuedMessage
 
-	// switchingSession is true while waiting for history after a session
-	// switch. It tells tuiHistoryMsg to replace messages even when the
-	// "Connected to Aurelia daemon" startup message is not present.
-	switchingSession bool
-
 	// Current stream reader (held between events during streaming)
 	reader *ipc.ResponseReader
 
-	// Accumulated streaming text
-	streamBuf string
-
-	// UI state
-	width          int
-	height         int
-	showSidebar    bool
-	mouseEnabled   bool
-	err            error
-	ready          bool
-	daemonLabel    string
-	cwdPath        string
-	connectLatency time.Duration
-
-	// Cached glamour renderer (recreated when width changes)
-	glamourRenderer *glamour.TermRenderer
-	rendererWidth   int
-
-	// Pending image attachments (cleared after send)
-	pendingImages           []pendingImage
-	submittedTempImagePaths []string
-
-	// Pending document attachments (cleared after send)
-	pendingAttachments []pendingAttachment
-
-	// Project state panel
-	projectPanelOpen bool
-	projectState     *ipc.ProjectStatePayload
-
-	// Help overlay — toggled with ?.
-	helpOverlayOpen bool
-
-	// renameTargetChatID is non-zero when the user is renaming a session.
-	// The textarea shows the current name and Enter sends the rename.
-	renameTargetChatID int64
-
-	// Style palette — owned by theme.go. Default is dark; T5.2.1 will
-	// select light vs dark based on terminal hints and --theme flag.
-	styles themeStyles
-
-	// theme is the requested theme (auto, light, dark). The effective palette
-	// in styles is resolved from this value at startup.
-	theme Theme
-
-	// activeModel is the display name of the currently active AI model
-	// (e.g. "gpt-5.5", "deepseek-v4-pro"). Populated from daemon status.
-	activeModel string
-
-	// turnStart marks when the current turn began. Reset when no turn is
-	// active. Used by the status bar to show elapsed time.
-	turnStart time.Time
+	// App lifecycle
+	err   error
+	ready bool
 }
 
 // NewModel creates a new TUI model with the given socket path and theme.
@@ -176,23 +104,30 @@ func newModel(socketPath, historyPath string, theme Theme) Model {
 
 	inputHistory := loadInputHistory(historyPath)
 
+	styles := newStylesForTheme(theme)
 	return Model{
-		state:             stateLoading,
-		socketPath:        socketPath,
-		ipcClient:         ipc.NewClient(socketPath),
-		spinner:           s,
-		textarea:          ta,
-		showSidebar:       true,
-		daemonLabel:       "connecting",
-		cwdPath:           "not set",
-		messages:          make([]chatMessage, 0),
-		inputHistory:      inputHistory,
-		inputHistoryIndex: len(inputHistory),
-		historyPath:       historyPath,
-		activeSession:     ipc.ReservedTUIChatID,
-		theme:             theme,
-		styles:            newStylesForTheme(theme),
-		sidebarTable:      newSidebarTable(newStylesForTheme(theme)),
+		state:      stateLoading,
+		socketPath: socketPath,
+		ipcClient:  ipc.NewClient(socketPath),
+		chromeModel: chromeModel{
+			spinner:      s,
+			showSidebar:  true,
+			daemonLabel:  "connecting",
+			cwdPath:      "not set",
+			styles:       styles,
+			theme:        theme,
+			sidebarTable: newSidebarTable(styles),
+		},
+		inputModel: inputModel{
+			textarea:          ta,
+			inputHistory:      inputHistory,
+			inputHistoryIndex: len(inputHistory),
+			historyPath:       historyPath,
+		},
+		transcriptModel: transcriptModel{
+			messages: make([]chatMessage, 0),
+		},
+		activeSession: ipc.ReservedTUIChatID,
 	}
 }
 

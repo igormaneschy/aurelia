@@ -7,7 +7,6 @@ import (
 
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -330,15 +329,6 @@ func (m Model) renderStatusBar() string {
 	return m.styles.StatusBarStyle.Width(maxInt(20, m.width-2)).Render(strings.Join(parts, "   ·   "))
 }
 
-// activeModelLabel returns the model label for the status bar.
-// Returns empty string if no model is known.
-func (m Model) activeModelLabel() string {
-	if m.activeModel == "" {
-		return ""
-	}
-	return m.activeModel
-}
-
 // pendingCountLabel returns the pending count badge for the status bar.
 // Returns empty string when there are no pending messages.
 func (m Model) pendingCountLabel() string {
@@ -357,13 +347,6 @@ func (m Model) elapsedLabel() string {
 	}
 	elapsed := time.Since(m.turnStart)
 	return elapsed.Truncate(time.Second).String()
-}
-
-func (m Model) mouseStatusLabel() string {
-	if m.mouseEnabled {
-		return "🖱️ mouse"
-	}
-	return "✋ mouse"
 }
 
 type statusBarItem struct {
@@ -410,22 +393,6 @@ func (m Model) renderChatHeader() string {
 		m.styles.HeaderRuleStyle.Render(strings.Repeat("─", maxInt(20, m.contentWidth()-2))),
 	)
 	return lipgloss.NewStyle().Width(m.contentWidth()).Render(header)
-}
-
-func (m Model) chromeState() string {
-	if m.daemonLabel == "offline" {
-		return "offline"
-	}
-	if m.waiting {
-		return "waiting"
-	}
-	if m.state == stateLoading {
-		return "connecting"
-	}
-	if m.state == stateError {
-		return "error"
-	}
-	return "ready"
 }
 
 func (m Model) renderSidebar() string {
@@ -493,137 +460,6 @@ func (m Model) renderSidebar() string {
 	}
 
 	return strings.Join(lines, "\n")
-}
-
-// getOrCreateRenderer returns a cached glamour renderer, creating a new one
-// if the width has changed or no renderer exists yet.
-func (m *Model) getOrCreateRenderer(width int) (*glamour.TermRenderer, error) {
-	if m.glamourRenderer != nil && m.rendererWidth == width {
-		return m.glamourRenderer, nil
-	}
-
-	contentWidth := width - 4
-	if contentWidth < 40 {
-		contentWidth = 40
-	}
-
-	renderer, err := glamour.NewTermRenderer(
-		// Avoid auto background detection here: it can ask the terminal for
-		// OSC color reports, and some terminals echo the response back into
-		// Bubble Tea input as text (for example, "11;rgb:...").
-		glamour.WithStandardStyle(m.theme.GlamourStyle()),
-		glamour.WithWordWrap(contentWidth),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	m.glamourRenderer = renderer
-	m.rendererWidth = width
-	return renderer, nil
-}
-
-// renderMessages renders the chat messages using Glamour markdown rendering.
-// Uses a cached renderer to avoid expensive re-creation on every call.
-func (m *Model) renderMessages(messages []chatMessage, width int) string {
-	if len(messages) == 0 {
-		return renderEmptyState(width, m.styles)
-	}
-
-	var b strings.Builder
-
-	renderer, err := m.getOrCreateRenderer(width)
-	if err != nil {
-		m.renderMessagesPlain(&b, messages)
-		return b.String()
-	}
-
-	for i, msg := range messages {
-		if i > 0 {
-			b.WriteString("\n\n")
-		}
-
-		// Show full date on the first message of a new day; time-only otherwise.
-		showDate := shouldShowMessageDate(messages, i)
-		timestamp := formatMessageTime(msg.Timestamp, showDate)
-
-		switch msg.Sender {
-		case "Igor":
-			header := formatMessageHeader("Igor", timestamp)
-			b.WriteString(m.styles.UserStyle.Render(header))
-			b.WriteString("\n")
-			b.WriteString(m.styles.MessageSeparatorStyle.Render(strings.Repeat("─", maxInt(20, width-4))))
-			b.WriteString("\n")
-			b.WriteString(msg.Text)
-			b.WriteString("\n")
-		case "Aurelia":
-			header := formatMessageHeader("Aurelia", timestamp)
-			b.WriteString(m.styles.AssistantStyle.Render(header))
-			b.WriteString("\n")
-			rendered, err := renderer.Render(msg.Text)
-			if err != nil || rendered == "" {
-				b.WriteString(msg.Text)
-			} else {
-				b.WriteString(strings.TrimSpace(rendered))
-			}
-			b.WriteString("\n")
-		default:
-			header := formatMessageHeader(msg.Sender, timestamp)
-			b.WriteString(m.styles.ErrorStyle.Render(header))
-			b.WriteString("\n")
-			b.WriteString(msg.Text)
-			b.WriteString("\n")
-		}
-	}
-
-	return b.String()
-}
-
-// renderMessagesPlain renders messages without markdown (fallback).
-func (m *Model) renderMessagesPlain(b *strings.Builder, messages []chatMessage) {
-	for i, msg := range messages {
-		if i > 0 {
-			b.WriteString("\n\n")
-		}
-		fmt.Fprintf(b, "%s:\n%s", msg.Sender, msg.Text)
-	}
-}
-
-// renderEmptyState returns a friendly welcome panel shown when the chat
-// history is empty (initial connect or after Ctrl+L clear).
-func renderEmptyState(width int, styles themeStyles) string {
-	contentWidth := width - 8
-	if contentWidth < 30 {
-		contentWidth = 30
-	}
-
-	title := styles.HeaderTitleStyle.Render("Aurelia TUI")
-	hint := styles.SidebarMutedStyle.Render(
-		"Type a message or /help to start.\n" +
-			"/cwd to set a project directory.",
-	)
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("238")).
-		Padding(1, 2).
-		Width(contentWidth).
-		Render(title + "\n\n" + hint)
-
-	return lipgloss.NewStyle().Width(width).Align(lipgloss.Center).Render(box)
-}
-
-// shouldShowSidebar returns true when sidebar is enabled and the terminal is
-// wide enough to keep the chat readable.
-func (m Model) shouldShowSidebar() bool {
-	return m.showSidebar && m.width >= minSidebarScreenWidth && m.height >= minSidebarScreenHeight
-}
-
-// contentWidth returns the chat viewport width after optional sidebar space.
-func (m Model) contentWidth() int {
-	if m.shouldShowSidebar() {
-		return maxInt(40, m.width-sidebarWidth-5)
-	}
-	return maxInt(40, m.width)
 }
 
 // viewportForSize creates a viewport with the given dimensions.
