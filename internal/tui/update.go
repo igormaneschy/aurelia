@@ -146,8 +146,9 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMsg:
-		if !m.mouseEnabled {
-			return m, nil
+		if !m.mouseEnabled { return m, nil }
+		if m.shouldShowSidebar() {
+			if handled, model, cmd := m.handleSidebarMouse(msg); handled { return model, cmd }
 		}
 		return m.handleViewportMsg(msg)
 
@@ -858,6 +859,41 @@ func (m Model) toggleMouseCapture() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+
+func (m Model) openSidebarSessionAt(row int) (tea.Model, tea.Cmd) {
+	if row < 0 || row >= len(m.sessions) { return m, nil }
+	m.sidebarCursor = row
+	m.syncSidebarRows()
+	target := m.sessions[row]
+	if target.ChatID == m.activeSession {
+		if m.sidebarFocused { m.sidebarFocused = false; m.sidebarTable.Blur() }
+		return m, nil
+	}
+	if m.warnSessionChangeWhileStreaming() { return m, nil }
+	return m, openTUISession(m.ipcClient, target.ChatID)
+}
+
+func (m Model) handleSidebarMouse(msg tea.MouseMsg) (handled bool, model tea.Model, cmd tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.MouseClickMsg:
+		if msg.Button != tea.MouseLeft || !sidebarMouseHitX(msg.X) { return false, m, nil }
+		row := m.sidebarRowAt(msg.Y)
+		if row < 0 { return true, m, nil }
+		model, cmd := m.openSidebarSessionAt(row)
+		return true, model, cmd
+	case tea.MouseMotionMsg:
+		if sidebarMouseHitX(msg.X) {
+			row := m.sidebarRowAt(msg.Y)
+			if row != m.sidebarHoverRow { m.sidebarHoverRow = row; m.syncSidebarRows() }
+			return true, m, nil
+		}
+		if m.sidebarHoverRow != -1 { m.sidebarHoverRow = -1; m.syncSidebarRows() }
+		return false, m, nil
+	default:
+		return false, m, nil
+	}
+}
+
 // handleSidebarKey processes keys when the sidebar is focused.
 func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	var tableCmd tea.Cmd
@@ -897,20 +933,7 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "enter":
-		if m.sidebarCursor < 0 || m.sidebarCursor >= len(m.sessions) {
-			return m, nil
-		}
-		target := m.sessions[m.sidebarCursor]
-		if target.ChatID == m.activeSession {
-			// Already on this session — just unfocus.
-			m.sidebarFocused = false
-			m.sidebarTable.Blur()
-			return m, nil
-		}
-		if m.warnSessionChangeWhileStreaming() {
-			return m, nil
-		}
-		return m, openTUISession(m.ipcClient, target.ChatID)
+		return m.openSidebarSessionAt(m.sidebarCursor)
 
 	case "n":
 		if m.warnSessionChangeWhileStreaming() {

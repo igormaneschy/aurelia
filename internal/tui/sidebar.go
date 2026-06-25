@@ -13,6 +13,42 @@ const sidebarColIcon = 0
 const sidebarColName = 1
 const sidebarColModel = 2
 
+const (
+	sidebarTitleLines       = 2
+	sidebarTableHeaderLines = 1
+	sidebarBorderLines      = 1 // top border row before inner content
+)
+
+func sidebarTableFirstRowY() int {
+	return topMarginHeight + sidebarBorderLines + sidebarTitleLines + sidebarTableHeaderLines
+}
+
+func sidebarMouseHitX(x int) bool { return x >= 0 && x < sidebarWidth }
+
+func sidebarTableScrollStart(cursor, viewportHeight int) int {
+	if cursor >= 0 { return clampInt(cursor-viewportHeight, 0, cursor) }
+	return 0
+}
+
+func (m Model) sidebarRowAt(y int) int {
+	if !m.shouldShowSidebar() || len(m.sessions) == 0 { return -1 }
+	firstRowY := sidebarTableFirstRowY()
+	if y < firstRowY { return -1 }
+	visibleRow := y - firstRowY
+	tableHeight := m.sidebarTable.Height()
+	if visibleRow < 0 || visibleRow >= tableHeight { return -1 }
+	row := sidebarTableScrollStart(m.sidebarCursor, tableHeight) + visibleRow
+	if row < 0 || row >= len(m.sessions) { return -1 }
+	return row
+}
+
+func clampInt(v, low, high int) int {
+	if v < low { return low }
+	if v > high { return high }
+	return v
+}
+
+
 // newSidebarTable creates a table.Model for the session sidebar.
 func newSidebarTable(styles themeStyles) table.Model {
 	cols := []table.Column{
@@ -95,9 +131,9 @@ func (m *Model) syncSidebarRows() {
 
 	m.sidebarTable.SetRows(rows)
 	m.sidebarTable.UpdateViewport()
-	if m.sidebarCursor >= 0 && m.sidebarCursor < len(rows) {
-		m.sidebarTable.SetCursor(m.sidebarCursor)
-	}
+	tableCursor := m.sidebarCursor
+	if m.sidebarHoverRow >= 0 && !m.sidebarFocused { tableCursor = m.sidebarHoverRow }
+	if tableCursor >= 0 && tableCursor < len(rows) { m.sidebarTable.SetCursor(tableCursor) }
 }
 
 // sidebarTableWidth returns the width of the sidebar table for layout.

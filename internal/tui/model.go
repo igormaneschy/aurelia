@@ -110,9 +110,10 @@ func newModel(socketPath, historyPath string, theme Theme) Model {
 		socketPath: socketPath,
 		ipcClient:  ipc.NewClient(socketPath),
 		chromeModel: chromeModel{
-			spinner:      s,
-			showSidebar:  true,
-			daemonLabel:  "connecting",
+			spinner:         s,
+			showSidebar:     true,
+			sidebarHoverRow: -1,
+			daemonLabel:     "connecting",
 			cwdPath:      "not set",
 			styles:       styles,
 			theme:        theme,

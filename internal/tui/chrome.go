@@ -15,11 +15,12 @@ type chromeModel struct {
 	width  int
 	height int
 
-	showSidebar    bool
-	sidebarFocused bool
-	sidebarTable   table.Model
-	sessions       []tuiSessionInfo
-	sidebarCursor  int
+	showSidebar     bool
+	sidebarFocused  bool
+	sidebarTable    table.Model
+	sessions        []tuiSessionInfo
+	sidebarCursor   int
+	sidebarHoverRow int // hovered session row from mouse motion; -1 = none
 
 	spinner spinner.Model
 
