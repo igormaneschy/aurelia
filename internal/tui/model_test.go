@@ -1196,14 +1196,14 @@ func TestModel_SubmitAutoAttachesImagePathFromText(t *testing.T) {
 
 func TestModel_SendCommandForSlashText(t *testing.T) {
 	ta := textarea.New()
-	ta.SetValue("/status")
+	ta.SetValue("/model refresh")
 	m := testChatModelWithTextarea(ta)
 
 	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
 
 	if cmd == nil {
-		t.Fatal("expected command for /status")
+		t.Fatal("expected command for /model refresh")
 	}
 	if m2.waiting != true {
 		t.Error("expected waiting=true after command submit")

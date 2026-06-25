@@ -11,6 +11,11 @@ import (
 func (m Model) openFormForCommand(text string) (Model, tea.Cmd, bool) {
 	text = strings.TrimSpace(text)
 	switch {
+	case isBareHelpCommand(text):
+		return m.openHelpOverlay(), nil, true
+	case isBareStatusCommand(text):
+		next, cmd := m.openProjectPanel()
+		return next, cmd, true
 	case isBareModelCommand(text):
 		next, cmd := m.openModelSelect()
 		return next, cmd, true

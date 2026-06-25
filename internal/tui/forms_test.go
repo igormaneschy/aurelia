@@ -19,6 +19,8 @@ func TestIsBareInteractiveCommands(t *testing.T) {
 		{isBareNewSessionCommand, "/new", "/new foo"},
 		{isBareClearCommand, "/clear", "/clear all"},
 		{isBareResetCommand, "/reset", "/reset now"},
+		{isBareHelpCommand, "/help", "/help extra"},
+		{isBareStatusCommand, "/status", "/status extra"},
 	}
 	for _, tc := range cases {
 		if !tc.fn(tc.ok) || tc.fn(tc.fail) {
@@ -152,6 +154,17 @@ func TestOpenFormForCommand_RoutesBareCommands(t *testing.T) {
 			t.Fatalf("%q handled=%v formOpen=%v cmd=%v", text, handled, next.formOpen, cmd)
 		}
 		m = next.closeForm()
+	}
+
+	next, cmd, handled := m.openFormForCommand("/help")
+	if !handled || cmd != nil || !next.helpVisible() {
+		t.Fatalf("/help handled=%v helpVisible=%v cmd=%v", handled, next.helpVisible(), cmd)
+	}
+	next = next.closeHelpOverlay()
+
+	next, cmd, handled = m.openFormForCommand("/status")
+	if !handled || cmd == nil || !next.projectPanelOpen {
+		t.Fatalf("/status handled=%v projectPanelOpen=%v cmd=%v", handled, next.projectPanelOpen, cmd)
 	}
 }
 

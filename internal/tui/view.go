@@ -82,22 +82,21 @@ func (m Model) chatView() string {
 
 	full := m.renderChatBaseLayout()
 
-	// Overlay project panel when open.
-	if m.projectPanelOpen {
-		panel := m.renderProjectPanel()
-		return m.overlayPanel(full, panel)
-	}
-
-	// Overlay help when ? is pressed.
-	if m.helpVisible() {
-		panel := m.renderHelpPanel()
-		// Use a slightly wider panel for help to fit keybinding descriptions.
-		return m.overlayPanelWide(full, panel)
-	}
-
-	// Overlay interactive huh form (e.g. /model picker).
-	if m.formOpen {
-		return m.renderFormOverlay(full)
+	if m.modalOpen() {
+		var panel string
+		wide := false
+		switch {
+		case m.projectPanelOpen:
+			panel = m.renderProjectPanel()
+		case m.helpVisible():
+			panel = m.renderHelpPanel()
+			wide = true
+		case m.formOpen && m.activeForm != nil:
+			panel = m.activeForm.view()
+		default:
+			return full
+		}
+		return m.renderModalOverlay(full, panel, wide)
 	}
 
 	return full

@@ -95,6 +95,13 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	if m.helpVisible() || m.projectPanelOpen {
+		switch msg.(type) {
+		case tea.KeyMsg, tea.WindowSizeMsg:
+			return m.updateModalOverlay(msg)
+		}
+	}
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -584,11 +591,78 @@ func (m *Model) ensureDefaultSessionInList() {
 	m.syncSidebarRows()
 }
 
+// updateModalOverlay handles keys and resize while help or project panel is open.
+func (m Model) updateModalOverlay(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.textarea.SetWidth(inputTextareaWidth(msg.Width))
+		contentWidth := m.contentWidth()
+		if m.viewportSet {
+			m.viewport.SetWidth(contentWidth)
+			m.syncViewportDimensions()
+			m.updateViewport()
+		}
+		m.resizeSidebarTable()
+		return m, nil
+	case tea.KeyMsg:
+		return m.handleModalKey(msg)
+	default:
+		return m, nil
+	}
+}
+
+// handleModalKey consumes keys while a non-form modal (help or project panel) is open.
+func (m Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if msg.String() == "ctrl+c" {
+		m.cleanupTempImages()
+		m.cleanupSubmittedTempImages()
+		m.cleanupQueuedTempImages()
+		return m, tea.Quit
+	}
+	if msg.String() == "ctrl+o" {
+		return m.toggleMouseCapture()
+	}
+
+	if m.helpVisible() {
+		switch {
+		case key.Matches(msg, m.fullKeyMap().Help):
+			return m.closeHelpOverlay(), nil
+		case key.Matches(msg, m.fullKeyMap().Cancel), key.Matches(msg, m.fullKeyMap().Submit):
+			m = m.closeHelpOverlay()
+			if m.waiting {
+				return m.cancelStreaming()
+			}
+			return m, nil
+		default:
+			return m, nil
+		}
+	}
+
+	if m.projectPanelOpen {
+		switch {
+		case isProjectPanelToggleKey(msg):
+			return m.toggleProjectPanel()
+		case key.Matches(msg, m.fullKeyMap().Cancel), key.Matches(msg, m.fullKeyMap().Submit):
+			return m.closeProjectPanel(), nil
+		default:
+			return m, nil
+		}
+	}
+
+	return m, nil
+}
+
 // handleKeyMsg processes keyboard input.
 // enter submits when not waiting. alt+enter inserts a newline in the textarea.
 // ctrl+j is also accepted as a portable newline fallback.
 // When the sidebar is focused, ↑↓ navigate sessions, enter opens, n creates.
 func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.helpVisible() || m.projectPanelOpen {
+		return m.handleModalKey(msg)
+	}
+
 	if msg.String() == "ctrl+o" {
 		return m.toggleMouseCapture()
 	}
@@ -657,31 +731,12 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m.refreshAutocomplete(), nil
 
-	// Help overlay: ? toggles it. esc, enter, or ? closes it.
-	case key.Matches(msg, m.fullKeyMap().Help) && m.helpVisible():
-		m.helpModel.ShowAll = false
-		return m, nil
+	// Help overlay: ? toggles it when the input is empty.
 	case key.Matches(msg, m.fullKeyMap().Help) && m.textarea.Value() == "":
-		m.helpModel.ShowAll = true
-		return m, nil
-	case (key.Matches(msg, m.fullKeyMap().Cancel) || key.Matches(msg, m.fullKeyMap().Submit)) && m.helpVisible():
-		m.helpModel.ShowAll = false
-		// If a stream is active, also cancel it so the user doesn't
-		// need to press Esc twice.
-		if m.waiting {
-			return m.cancelStreaming()
-		}
-		return m, nil
+		return m.openHelpOverlay(), nil
 
 	case isProjectPanelToggleKey(msg):
-		m.projectPanelOpen = !m.projectPanelOpen
-		if m.projectPanelOpen {
-			return m, tea.Batch(
-				fetchTUIProjectState(m.ipcClient, m.activeSession),
-				scheduleProjectStatePoll(),
-			)
-		}
-		return m, nil
+		return m.toggleProjectPanel()
 
 	case isSidebarToggleKey(msg):
 		m.showSidebar = !m.showSidebar

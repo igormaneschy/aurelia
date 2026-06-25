@@ -169,7 +169,7 @@ func (m Model) renderFormOverlay(bg string) string {
 	if !m.formOpen || m.activeForm == nil {
 		return bg
 	}
-	return m.overlayPanel(bg, m.activeForm.view())
+	return m.renderModalOverlay(bg, m.activeForm.view(), false)
 }
 
 func wrapFormCmd(cmd tea1.Cmd) tea.Cmd {

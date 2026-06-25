@@ -178,7 +178,7 @@ func (m Model) sidebarProjectHit(x, y int) bool {
 }
 
 func (m Model) handleChatMouse(msg tea.MouseMsg) (handled bool, model tea.Model, cmd tea.Cmd) {
-	if m.formOpen || m.helpVisible() || m.projectPanelOpen {
+	if m.modalOpen() {
 		return false, m, nil
 	}
 	switch msg := msg.(type) {
