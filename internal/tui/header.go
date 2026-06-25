@@ -48,11 +48,11 @@ func (m Model) renderHeaderModelChip() string {
 	if m.activeModel != "" {
 		label = truncateMiddle(m.activeModel, maxInt(12, m.contentWidth()/4))
 	}
-	chip := m.styles.ChipStyle.Render(label)
+	style := m.styles.HeaderMetaStyle
 	if m.mouseEnabled {
-		chip = m.styles.ChipStyle.Underline(true).Render(label)
+		style = style.Underline(true)
 	}
-	return chip
+	return style.Render(label)
 }
 
 func (m Model) renderModeChip() string {
@@ -79,12 +79,25 @@ func (m Model) decorativeHeaderRule(width int) string {
 	if !m.animations.enabled {
 		pattern = "─"
 	}
-	repeat := maxInt(20, width-2)
+	repeat := maxInt(20, width)
 	var b strings.Builder
 	for i := 0; i < repeat; i++ {
 		b.WriteRune(rune(pattern[i%len(pattern)]))
 	}
 	return m.styles.HeaderRuleStyle.Render(b.String())
+}
+
+func (m Model) renderChatHeaderTitleLine(width int, sessionName string) string {
+	title := m.styles.HeaderTitleStyle.Render("Aurelia / " + sessionName)
+	meta := strings.Join(m.headerMetaChips(), " · ")
+
+	titleW := lipgloss.Width(title)
+	metaW := lipgloss.Width(meta)
+	gap := width - titleW - metaW
+	if gap >= 2 {
+		return title + strings.Repeat(" ", gap) + meta
+	}
+	return title + " · " + meta
 }
 
 func (m Model) renderChatHeader() string {
@@ -98,12 +111,11 @@ func (m Model) renderChatHeader() string {
 		}
 	}
 
-	meta := strings.Join(m.headerMetaChips(), "   ·   ")
-	title := m.styles.HeaderTitleStyle.Render("Aurelia / "+sessionName)
+	width := m.contentWidth()
 	header := lipgloss.JoinVertical(
 		lipgloss.Left,
-		title+"  "+m.styles.HeaderMetaStyle.Render(meta),
-		m.decorativeHeaderRule(m.contentWidth()),
+		m.renderChatHeaderTitleLine(width, sessionName),
+		m.decorativeHeaderRule(width),
 	)
-	return lipgloss.NewStyle().Width(m.contentWidth()).Render(header)
+	return lipgloss.NewStyle().Width(width).Render(header)
 }

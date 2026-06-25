@@ -44,6 +44,22 @@ func TestRenderChatHeader_OfflineHealthChip(t *testing.T) {
 	}
 }
 
+func TestRenderChatHeader_MetaRightAligned(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 120
+	m.height = 40
+	m.daemonLabel = "ready"
+	m.activeModel = "deepseek-v4-flash"
+
+	line := stripANSIForTest(strings.Split(m.renderChatHeader(), "\n")[0])
+	titleIdx := strings.Index(line, "Aurelia /")
+	modelIdx := strings.Index(line, "deepseek-v4-flash")
+	if titleIdx < 0 || modelIdx < 0 || modelIdx <= titleIdx+len("Aurelia / DM") {
+		t.Fatalf("expected model chip to the right of title, got %q", line)
+	}
+}
+
 func TestRenderChatHeader_ChatModeChip(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
