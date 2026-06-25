@@ -907,9 +907,15 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.sidebarTable.Blur()
 			return m, nil
 		}
+		if m.warnSessionChangeWhileStreaming() {
+			return m, nil
+		}
 		return m, openTUISession(m.ipcClient, target.ChatID)
 
 	case "n":
+		if m.warnSessionChangeWhileStreaming() {
+			return m, nil
+		}
 		// Create a new session — use a default name based on count.
 		name := fmt.Sprintf("session-%d", len(m.sessions))
 		return m, createTUISession(m.ipcClient, name)
@@ -917,6 +923,9 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d":
 		// Delete the selected session (not the default DM).
 		if m.sidebarCursor < 0 || m.sidebarCursor >= len(m.sessions) {
+			return m, nil
+		}
+		if m.warnSessionChangeWhileStreaming() {
 			return m, nil
 		}
 		target := m.sessions[m.sidebarCursor]
@@ -1304,12 +1313,35 @@ func (m *Model) ensureViewport() {
 }
 
 // updateViewport refreshes the viewport content if initialized.
+// Auto-scrolls to bottom only when the user is already at the bottom,
+// so streaming does not yank the viewport while reading earlier messages.
 func (m *Model) updateViewport() {
 	m.ensureViewport()
 	if m.viewportSet && m.viewport.Height() > 0 {
 		contentWidth := m.contentWidth()
+		followBottom := m.viewport.AtBottom()
+		prevOffset := m.viewport.YOffset()
 		m.viewport.SetWidth(contentWidth)
 		m.viewport.SetContent(m.renderMessages(m.messages, contentWidth))
-		m.viewport.GotoBottom()
+		if followBottom {
+			m.viewport.GotoBottom()
+		} else {
+			m.viewport.SetYOffset(prevOffset)
+		}
 	}
+}
+
+// warnSessionChangeWhileStreaming appends a warning when session mutations
+// are attempted during an active stream.
+func (m *Model) warnSessionChangeWhileStreaming() bool {
+	if !m.waiting {
+		return false
+	}
+	m.messages = append(m.messages, chatMessage{
+		Sender:    "⚠️",
+		Text:      "Wait for the current response to finish before changing sessions.",
+		Timestamp: time.Now(),
+	})
+	m.updateViewport()
+	return true
 }

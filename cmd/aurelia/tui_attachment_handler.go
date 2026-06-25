@@ -225,6 +225,11 @@ func copyFileNoFollow(ctx context.Context, src, dst string, maxBytes int64) (int
 	}
 	ch := make(chan copyResult, 1)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				ch <- copyResult{0, fmt.Errorf("copy panic: %v", r)}
+			}
+		}()
 		n, err := io.Copy(dstFd, io.LimitReader(srcFd, maxBytes+1))
 		ch <- copyResult{n, err}
 	}()

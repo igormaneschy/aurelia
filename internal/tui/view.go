@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/glamour/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
@@ -806,24 +807,46 @@ func (m Model) overlayPanel(bg, panel string) string {
 	var out []string
 	for i, line := range bgLines {
 		if i >= startRow && i-startRow < len(panelLines) {
-			pl := panelLines[i-startRow]
-			pw := lipgloss.Width(pl)
-			// Build the overlay line: left padding + panel line + right padding.
-			var sb strings.Builder
-			if startCol > 0 {
-				sb.WriteString(strings.Repeat(" ", startCol))
-			}
-			sb.WriteString(pl)
-			rightPad := m.width - startCol - pw
-			if rightPad > 0 {
-				sb.WriteString(strings.Repeat(" ", rightPad))
-			}
-			out = append(out, sb.String())
+			out = append(out, compositeOverlayRow(line, panelLines[i-startRow], startCol, m.width))
 		} else {
 			out = append(out, line)
 		}
 	}
 	return strings.Join(out, "\n")
+}
+
+// compositeOverlayRow splices a panel line into a background row while
+// preserving chat content to the left and right (ANSI-aware).
+func compositeOverlayRow(bgLine, panelLine string, startCol, width int) string {
+	pw := lipgloss.Width(panelLine)
+	bgWidth := lipgloss.Width(bgLine)
+
+	left := ""
+	if startCol > 0 {
+		if startCol <= bgWidth {
+			left = ansi.Cut(bgLine, 0, startCol)
+		} else {
+			left = bgLine + strings.Repeat(" ", startCol-bgWidth)
+		}
+	}
+
+	rightCol := startCol + pw
+	right := ""
+	if rightCol < width {
+		need := width - rightCol
+		if rightCol < bgWidth {
+			right = ansi.Cut(bgLine, rightCol, bgWidth)
+			if gap := need - lipgloss.Width(right); gap > 0 {
+				right += strings.Repeat(" ", gap)
+			} else if lipgloss.Width(right) > need {
+				right = ansi.Cut(right, 0, need)
+			}
+		} else {
+			right = strings.Repeat(" ", need)
+		}
+	}
+
+	return left + panelLine + right
 }
 
 // safeSessionLabel strips terminal-control characters from a session name
@@ -998,18 +1021,7 @@ func (m Model) overlayPanelWide(bg, panel string) string {
 	var out []string
 	for i, line := range bgLines {
 		if i >= startRow && i-startRow < len(panelLines) {
-			pl := panelLines[i-startRow]
-			pw := lipgloss.Width(pl)
-			var sb strings.Builder
-			if startCol > 0 {
-				sb.WriteString(strings.Repeat(" ", startCol))
-			}
-			sb.WriteString(pl)
-			rightPad := m.width - startCol - pw
-			if rightPad > 0 {
-				sb.WriteString(strings.Repeat(" ", rightPad))
-			}
-			out = append(out, sb.String())
+			out = append(out, compositeOverlayRow(line, panelLines[i-startRow], startCol, m.width))
 		} else {
 			out = append(out, line)
 		}

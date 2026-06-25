@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.32.2 - 2026-06-25
+
+### Fixed
+- **Overlay compositing** — painéis centrais preservam chat nas laterais (`ansi.Cut`)
+- **Scroll durante streaming** — viewport mantém posição quando utilizador leu mensagens anteriores
+- **Troca de sessão durante stream** — open/create/delete bloqueados com aviso
+- **Goroutine recover em attachments** — copy de ficheiros não derruba o daemon em panic
+
 ## v0.32.1 - 2026-06-25
 
 ### Fixed
