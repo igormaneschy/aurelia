@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.32.0 - 2026-06-25
+
+### Changed
+- **TUI stack v2** — migração bubbletea/lipgloss/bubbles/glamour para charm.land v2
+- **Sidebar table** — sessões renderizadas com bubbles/table (ícones, coluna model)
+
+### Fixed
+- **Paste de documentos** — drag-and-drop restaurado na migração v2
+- **Sidebar sync** — ícones e coluna model actualizados após navegação e troca de sessão
+- **Tema light** — estilos theme-aware na table (sem cores hardcoded)
+- **Resize terminal** — altura da sidebar table adapta ao tamanho do terminal
+- **Testes TUI** — suite migrada para API bubbletea/bubbles v2
+
 ## v0.31.2 - 2026-06-23
 
 ### Fixed
