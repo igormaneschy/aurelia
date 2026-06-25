@@ -2184,7 +2184,7 @@ func TestModel_StatusBarShowsElapsedTime(t *testing.T) {
 
 	status := stripANSIForTest(m.renderStatusBar())
 
-	if !strings.Contains(status, "12s") {
+	if !strings.Contains(status, "12.0s") {
 		t.Errorf("expected status bar to contain '12s', got %q", status)
 	}
 }

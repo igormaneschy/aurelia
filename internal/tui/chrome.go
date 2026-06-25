@@ -33,6 +33,7 @@ type chromeModel struct {
 	activeModel    string
 	turnStart      time.Time
 	mouseEnabled   bool
+	streamProgress streamProgress
 
 	styles themeStyles
 	theme  Theme

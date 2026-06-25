@@ -39,9 +39,12 @@ type themeStyles struct {
 	HeaderMetaStyle  lipgloss.Style
 	HeaderRuleStyle  lipgloss.Style
 
-	// Misc.
+	ProgressBarStyle lipgloss.Style
+	ProgressFullColor string
+	ProgressEmptyColor string
+
 	MessageSeparatorStyle lipgloss.Style
-	ChatModeStyle         lipgloss.Style
+	ChatModeStyle lipgloss.Style
 }
 
 // Theme represents the TUI color theme.
@@ -204,9 +207,9 @@ func newDarkStyles() themeStyles {
 			Foreground(lipgloss.Color("238")),
 
 		// ChatModeStyle highlights that file system tools are disabled.
-		ChatModeStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("214")). // amber
-			Italic(true),
+		ChatModeStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Italic(true),
+		ProgressBarStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
+		ProgressFullColor: "244", ProgressEmptyColor: "238",
 	}
 }
 
@@ -286,8 +289,8 @@ func newLightStyles() themeStyles {
 		MessageSeparatorStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("248")),
 
-		ChatModeStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("130")). // amber
-			Italic(true),
+		ChatModeStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("130")).Italic(true),
+		ProgressBarStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
+		ProgressFullColor: "245", ProgressEmptyColor: "250",
 	}
 }

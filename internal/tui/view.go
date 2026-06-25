@@ -80,7 +80,8 @@ func (m Model) chatView() string {
 	}
 
 	inputBar := m.renderInput()
-
+	progressBar := ""
+	if m.showStreamProgress() { progressBar = m.renderStreamProgress(m.width) }
 	statusBar := m.renderStatusBar()
 
 	viewHeight := m.height
@@ -107,13 +108,10 @@ func (m Model) chatView() string {
 		body = m.renderMainPane(mainContentHeight, m.width)
 	}
 
-	full := lipgloss.JoinVertical(
-		lipgloss.Left,
-		m.renderTopMargin(),
-		body,
-		inputBar,
-		statusBar,
-	)
+	chatFooter := []string{inputBar}
+	if progressBar != "" { chatFooter = append(chatFooter, progressBar) }
+	chatFooter = append(chatFooter, statusBar)
+	full := lipgloss.JoinVertical(lipgloss.Left, m.renderTopMargin(), body, strings.Join(chatFooter, "\n"))
 
 	// Overlay project panel when open.
 	if m.projectPanelOpen {
@@ -342,11 +340,16 @@ func (m Model) pendingCountLabel() string {
 // elapsedLabel returns the elapsed time label for the status bar.
 // Returns empty string when no turn is active.
 func (m Model) elapsedLabel() string {
-	if m.turnStart.IsZero() {
+	var elapsed time.Duration
+	switch {
+	case m.streamProgress.active && m.streamProgress.stopwatch.Running():
+		elapsed = m.streamProgress.stopwatch.Elapsed()
+	case !m.turnStart.IsZero():
+		elapsed = time.Since(m.turnStart)
+	default:
 		return ""
 	}
-	elapsed := time.Since(m.turnStart)
-	return elapsed.Truncate(time.Second).String()
+	return "⏱ " + formatElapsed(elapsed)
 }
 
 type statusBarItem struct {
