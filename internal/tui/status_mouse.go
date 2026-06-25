@@ -167,27 +167,30 @@ func (m Model) sidebarNewSessionHit(x, y int) bool {
 	return hintY >= 0 && y >= hintY && y <= hintY+1
 }
 
-func (m Model) sidebarProjectBlockYRange() (start, end int) {
-	start = m.sidebarLineY("Project")
-	if start < 0 {
-		return -1, -1
-	}
-	// Title, project name, and full cwd path lines.
-	return start, start + 2
-}
-
-func (m Model) sidebarProjectHit(x, y int) bool {
-	if !m.shouldShowSidebar() || m.sidebarFocused || m.isChatMode() {
+func (m Model) sidebarCwdHit(x, y int) bool {
+	if !m.shouldShowSidebar() || m.sidebarFocused {
 		return false
 	}
 	if !sidebarMouseHitX(x) {
 		return false
 	}
-	start, end := m.sidebarProjectBlockYRange()
-	if start < 0 {
+	lineY := m.sidebarLineY("📂")
+	return lineY >= 0 && y == lineY
+}
+
+func (m Model) sidebarModelHit(x, y int) bool {
+	if !m.shouldShowSidebar() || m.sidebarFocused {
 		return false
 	}
-	return y >= start && y <= end
+	if !sidebarMouseHitX(x) {
+		return false
+	}
+	lineY := m.sidebarLineY("🤖")
+	return lineY >= 0 && y == lineY
+}
+
+func (m Model) sidebarProjectHit(x, y int) bool {
+	return m.sidebarCwdHit(x, y)
 }
 
 func (m Model) handleChatMouse(msg tea.MouseMsg) (handled bool, model tea.Model, cmd tea.Cmd) {
@@ -218,6 +221,10 @@ func (m Model) handleChatMouse(msg tea.MouseMsg) (handled bool, model tea.Model,
 		}
 		if m.sidebarProjectHit(msg.X, msg.Y) {
 			next, c := m.openCwdForm()
+			return true, next, c
+		}
+		if m.sidebarModelHit(msg.X, msg.Y) {
+			next, c := m.openModelSelect()
 			return true, next, c
 		}
 		if m.sidebarNewSessionHit(msg.X, msg.Y) {

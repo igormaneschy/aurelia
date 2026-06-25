@@ -17,10 +17,18 @@ type themeStyles struct {
 	ErrorStyle      lipgloss.Style
 	MessageDividerStyle lipgloss.Style // subtle divider between consecutive messages
 
+	// Surfaces and chrome accents.
+	Surface1Style       lipgloss.Style
+	ChipStyle           lipgloss.Style
+	SidebarSectionStyle lipgloss.Style
+	SidebarHoverStyle   lipgloss.Style
+	SidebarButtonStyle  lipgloss.Style
+
 	// Input box.
 	InputPromptStyle  lipgloss.Style
 	InputBoxStyle     lipgloss.Style
 	InputWaitingStyle lipgloss.Style
+	InputPendingStyle lipgloss.Style
 
 	// Status bar.
 	StatusBarStyle   lipgloss.Style
@@ -176,6 +184,33 @@ func newDarkStyles() themeStyles {
 			BorderForeground(lipgloss.Color("205")).
 			Padding(0, 1),
 
+		InputPendingStyle: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("214")).
+			Padding(0, 1),
+
+		Surface1Style: lipgloss.NewStyle().
+			Background(lipgloss.Color("237")),
+
+		ChipStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("244")).
+			Background(lipgloss.Color("236")).
+			Padding(0, 1),
+
+		SidebarSectionStyle: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("244")),
+
+		SidebarHoverStyle: lipgloss.NewStyle().
+			Background(lipgloss.Color("236")).
+			Foreground(lipgloss.Color("252")),
+
+		SidebarButtonStyle: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("244")).
+			Foreground(lipgloss.Color("252")).
+			Padding(0, 1),
+
 		StatusBarStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("244")).
 			Background(lipgloss.Color("235")).
@@ -264,6 +299,33 @@ func newLightStyles() themeStyles {
 		InputWaitingStyle: lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("125")). // magenta
+			Padding(0, 1),
+
+		InputPendingStyle: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("130")).
+			Padding(0, 1),
+
+		Surface1Style: lipgloss.NewStyle().
+			Background(lipgloss.Color("254")),
+
+		ChipStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")).
+			Background(lipgloss.Color("252")).
+			Padding(0, 1),
+
+		SidebarSectionStyle: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("240")),
+
+		SidebarHoverStyle: lipgloss.NewStyle().
+			Background(lipgloss.Color("252")).
+			Foreground(lipgloss.Color("235")),
+
+		SidebarButtonStyle: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("244")).
+			Foreground(lipgloss.Color("235")).
 			Padding(0, 1),
 
 		StatusBarStyle: lipgloss.NewStyle().

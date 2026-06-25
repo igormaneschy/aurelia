@@ -98,12 +98,12 @@ func TestHandleChatMouse_ProjectTitleOpensCwdForm(t *testing.T) {
 	m.cwdPath = "/Users/igor/dev/aurelia"
 	prepSidebarMouseTest(&m)
 
-	titleY := m.sidebarLineY("Project")
-	if titleY < 0 {
-		t.Fatal("expected Project title line in sidebar")
+	cwdY := m.sidebarLineY("📂")
+	if cwdY < 0 {
+		t.Fatal("expected cwd line in sidebar context panel")
 	}
 
-	handled, model, _ := m.handleChatMouse(tea.MouseClickMsg{X: 2, Y: titleY, Button: tea.MouseLeft})
+	handled, model, _ := m.handleChatMouse(tea.MouseClickMsg{X: 2, Y: cwdY, Button: tea.MouseLeft})
 	if !handled {
 		t.Fatal("expected click on Project title to open cwd form")
 	}

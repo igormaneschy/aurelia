@@ -18,9 +18,45 @@ func prepSidebarMouseTest(m *Model) {
 }
 
 func TestSidebarTableFirstRowY(t *testing.T) {
-	want := topMarginHeight + sidebarBorderLines + sidebarTitleLines + sidebarTableHeaderLines
+	want := topMarginHeight + sidebarBorderLines + sidebarTitleLines + sidebarSectionHeader + sidebarTableHeaderLines
 	if got := sidebarTableFirstRowY(); got != want {
 		t.Fatalf("got %d want %d", got, want)
+	}
+}
+
+func TestRenderSidebarPanels_IncludesSections(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.sessions = []tuiSessionInfo{{ChatID: ipc.ReservedTUIChatID, Name: "dm"}, {ChatID: -2, Name: "work"}}
+	m.width = 100
+	m.height = 30
+	m.showSidebar = true
+	m.cwdPath = "not set"
+	prepSidebarTest(&m)
+
+	view := stripANSIForTest(m.renderSidebarTable())
+	for _, want := range []string{"Sessions", "Context", "Actions", "+ New session", "📂", "🤖"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("expected sidebar to contain %q, got:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "(click)") {
+		t.Fatal("expected no (click) hint in sidebar")
+	}
+}
+
+func TestSessionModelLabel_NeverEmpty(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.sessions = []tuiSessionInfo{{ChatID: -2, Name: "work"}}
+	m.activeSession = ipc.ReservedTUIChatID
+	label := stripANSIForTest(m.sessionModelLabel(m.sessions[0]))
+	if label != sidebarModelPlaceholder {
+		t.Fatalf("expected %q, got %q", sidebarModelPlaceholder, label)
+	}
+	m.activeModel = "gpt-5.1"
+	m.activeSession = -2
+	label = stripANSIForTest(m.sessionModelLabel(m.sessions[0]))
+	if label == "" || label == sidebarModelPlaceholder {
+		t.Fatalf("expected active model label, got %q", label)
 	}
 }
 
