@@ -56,6 +56,26 @@ func TestModel_LoadingToChatOnReachableDaemon(t *testing.T) {
 	}
 }
 
+func TestModel_LoadingToChatSchedulesHealthCheck(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+
+	updated, cmd := m.updateLoading(daemonReachableMsg{latency: 12 * time.Millisecond})
+	m2 := updated.(Model)
+
+	if m2.state != stateChat {
+		t.Fatalf("expected stateChat, got %v", m2.state)
+	}
+	if cmd == nil {
+		t.Fatal("expected batch command after initial connect")
+	}
+
+	// scheduleHealthCheck uses tea.Tick; invoking the batch cmd should not panic
+	// and must return a follow-up tick message.
+	if msg := cmd(); msg == nil {
+		t.Fatal("expected health-check tick command to produce a message")
+	}
+}
+
 func TestModel_SubmitNonEmptyTextCreatesSendMessage(t *testing.T) {
 	ta := textarea.New()
 	ta.SetValue("hello")
@@ -195,7 +215,7 @@ func TestModel_StreamErrorStartsNextQueuedMessage(t *testing.T) {
 	}
 }
 
-func TestModel_EscCancelsCurrentTurnKeepsQueue(t *testing.T) {
+func TestModel_EscCancelsCurrentTurnDrainsQueue(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 	m.waiting = true
@@ -205,14 +225,14 @@ func TestModel_EscCancelsCurrentTurnKeepsQueue(t *testing.T) {
 	updated, cmd := m.Update(keyPress(tea.KeyEsc))
 	m2 := updated.(Model)
 
-	if cmd != nil {
-		t.Fatal("expected nil command for cancel")
+	if cmd == nil {
+		t.Fatal("expected command to drain queued message after cancel")
 	}
-	if m2.waiting {
-		t.Fatal("expected waiting=false after cancel")
+	if !m2.waiting {
+		t.Fatal("expected waiting=true while sending queued message")
 	}
-	if got := m2.pendingCount(); got != 1 {
-		t.Fatalf("expected queue preserved after cancel, got %d", got)
+	if got := m2.pendingCount(); got != 0 {
+		t.Fatalf("expected queue drained after cancel, got %d", got)
 	}
 
 	updated, cmd = m2.Update(streamDoneMsg{streamID: 4})
@@ -220,8 +240,37 @@ func TestModel_EscCancelsCurrentTurnKeepsQueue(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("expected late stream end after cancel to be ignored")
 	}
-	if got := m3.pendingCount(); got != 1 {
-		t.Fatalf("expected queue still preserved after late stream end, got %d", got)
+	if got := m3.pendingCount(); got != 0 {
+		t.Fatalf("expected queue to remain empty after late stream end, got %d", got)
+	}
+}
+
+func TestModel_SubmitWithPendingQueueEnqueuesInsteadOfDirectSend(t *testing.T) {
+	ta := textarea.New()
+	ta.SetValue("new")
+	m := Model{
+		state:        stateChat,
+		ready:        true,
+		textarea:     ta,
+		waiting:      false,
+		socketPath:   "/tmp/test.sock",
+		pendingQueue: []queuedMessage{{chatID: ipc.ReservedTUIChatID, text: "queued-first"}},
+	}
+
+	updated, cmd := m.Update(keyPress(tea.KeyEnter))
+	m2 := updated.(Model)
+
+	if cmd == nil {
+		t.Fatal("expected command to start queued message")
+	}
+	if got := m2.pendingCount(); got != 1 {
+		t.Fatalf("expected 1 queued message (new), got %d", got)
+	}
+	if m2.pendingQueue[0].text != "new" {
+		t.Errorf("queued text = %q, want new", m2.pendingQueue[0].text)
+	}
+	if !m2.waiting {
+		t.Fatal("expected waiting=true while draining queue")
 	}
 }
 
