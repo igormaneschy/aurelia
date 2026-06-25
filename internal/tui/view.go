@@ -165,7 +165,12 @@ func (m Model) renderMainContent() string {
 	if !m.viewportSet || m.viewport.Height() <= 0 {
 		return "Initializing..."
 	}
-	return m.viewport.View()
+	content := m.viewport.View()
+	if m.historyNav.hasNewBelow {
+		banner := m.styles.SidebarMutedStyle.Render("↓ New messages")
+		content = banner + "\n" + content
+	}
+	return content
 }
 
 func (m Model) renderInput() string {
@@ -304,6 +309,9 @@ func (m Model) renderStatusBar() string {
 
 		// Pending count — shown when > 0.
 		{label: m.pendingCountLabel(), min: 24},
+
+		// History page — shown when paginated.
+		{label: m.historyNav.pageLabel(), min: 28},
 
 		// Elapsed time — shown when waiting.
 		{label: m.elapsedLabel(), min: 34},

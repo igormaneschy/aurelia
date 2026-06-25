@@ -88,10 +88,15 @@ type Model struct {
 
 // NewModel creates a new TUI model with the given socket path and theme.
 func NewModel(socketPath string, theme Theme) Model {
-	return newModel(socketPath, defaultInputHistoryPath(), theme)
+	return NewModelWithOptions(socketPath, theme, ModelOptions{})
 }
 
-func newModel(socketPath, historyPath string, theme Theme) Model {
+// NewModelWithOptions creates a TUI model with optional startup configuration.
+func NewModelWithOptions(socketPath string, theme Theme, opts ModelOptions) Model {
+	return newModel(socketPath, defaultInputHistoryPath(), theme, opts)
+}
+
+func newModel(socketPath, historyPath string, theme Theme, opts ModelOptions) Model {
 	s := spinner.New()
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
@@ -117,11 +122,12 @@ func newModel(socketPath, historyPath string, theme Theme) Model {
 			showSidebar:     true,
 			sidebarHoverRow: -1,
 			daemonLabel:     "connecting",
-			cwdPath:      "not set",
-			styles:       styles,
-			theme:        theme,
-			sidebarTable: newSidebarTable(styles),
-			helpModel:    newHelpModel(styles, theme),
+			cwdPath:         "not set",
+			styles:          styles,
+			theme:           theme,
+			sidebarTable:    newSidebarTable(styles),
+			helpModel:       newHelpModel(styles, theme),
+			animations:      newAnimState(animationsEnabledForTerm(os.Getenv("TERM"), opts.NoAnimations)),
 		},
 		inputModel: inputModel{
 			textarea:          ta,
@@ -130,7 +136,8 @@ func newModel(socketPath, historyPath string, theme Theme) Model {
 			historyPath:       historyPath,
 		},
 		transcriptModel: transcriptModel{
-			messages: make([]chatMessage, 0),
+			messages:   make([]chatMessage, 0),
+			historyNav: newHistoryNav(),
 		},
 		activeSession: ipc.ReservedTUIChatID,
 	}
@@ -138,10 +145,14 @@ func newModel(socketPath, historyPath string, theme Theme) Model {
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		m.spinner.Tick,
 		checkDaemon(m.ipcClient),
-	)
+	}
+	if tick := m.animations.beginTick(); tick != nil {
+		cmds = append(cmds, tick)
+	}
+	return tea.Batch(cmds...)
 }
 
 // isChatMode returns true when no project cwd is set, meaning file system

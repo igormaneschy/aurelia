@@ -26,6 +26,8 @@ type keyMap struct {
 	PasteImage   key.Binding
 	HistoryUp    key.Binding
 	HistoryDown  key.Binding
+	HistoryNext  key.Binding
+	HistoryPrev  key.Binding
 	Tab          key.Binding
 
 	CmdHelp         key.Binding
@@ -124,6 +126,14 @@ func defaultKeyMap() keyMap {
 			key.WithKeys("down"),
 			key.WithHelp("↓", "Navigate input history"),
 		),
+		HistoryNext: key.NewBinding(
+			key.WithKeys("ctrl+f"),
+			key.WithHelp("Ctrl+F", "Next history page"),
+		),
+		HistoryPrev: key.NewBinding(
+			key.WithKeys("ctrl+b"),
+			key.WithHelp("Ctrl+B", "Previous history page"),
+		),
 		Tab: key.NewBinding(
 			key.WithKeys("tab"),
 			key.WithHelp("Tab", "Complete command or cycle sidebar"),
@@ -173,6 +183,8 @@ func (k keyMap) FullHelp() [][]key.Binding {
 			k.HelpClose,
 			k.HistoryUp,
 			k.HistoryDown,
+			k.HistoryNext,
+			k.HistoryPrev,
 			k.Tab,
 			k.PageUp,
 			k.PageDown,

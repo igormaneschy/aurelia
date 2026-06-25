@@ -236,16 +236,21 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				Sender: "⚠️",
 				Text:   fmt.Sprintf("Warning: failed to load chat history: %s", safeSessionLabel(msg.err.Error())),
 			})
+			m.historyNav.syncMessageCount(len(m.messages))
 			m.updateViewport()
 			m.switchingSession = false
 			return m, nil
 		}
 		if m.switchingSession || m.canApplyStartupHistory() {
 			m.messages = msg.messages
+			m.historyNav.resetToLastPage(len(m.messages))
 			m.updateViewport()
 		}
 		m.switchingSession = false
 		return m, nil
+
+	case animTickMsg:
+		return m, m.animations.step()
 
 	case daemonErrorMsg:
 		if msg.streamID != 0 && msg.streamID != m.streamID {
@@ -359,6 +364,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Switch to the newly created session.
 		m.activeSession = msg.session.ChatID
 		m.messages = []chatMessage{}
+		m.historyNav.resetToLastPage(0)
 		m.viewportSet = false
 		m.switchingSession = true
 		m.syncSidebarRows()
@@ -393,6 +399,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Switch to the opened session.
 		m.activeSession = msg.session.ChatID
 		m.messages = []chatMessage{}
+		m.historyNav.resetToLastPage(0)
 		m.viewportSet = false
 		m.switchingSession = true
 		m.syncSidebarRows()
@@ -419,6 +426,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.activeSession == msg.chatID {
 			m.activeSession = ipc.ReservedTUIChatID
 			m.messages = []chatMessage{}
+			m.historyNav.resetToLastPage(0)
 			m.viewportSet = false
 			m.updateViewport()
 			return m, tea.Batch(
@@ -579,8 +587,15 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case msg.String() == "ctrl+l":
 		m.messages = nil
+		m.historyNav.resetToLastPage(0)
 		m.updateViewport()
 		return m, nil
+
+	case key.Matches(msg, m.fullKeyMap().HistoryNext):
+		return m.historyNextPage()
+
+	case key.Matches(msg, m.fullKeyMap().HistoryPrev):
+		return m.historyPrevPage()
 
 	case msg.String() == "ctrl+x":
 		// Clear pending images and attachments.

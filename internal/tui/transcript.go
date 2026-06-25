@@ -17,6 +17,7 @@ type transcriptModel struct {
 
 	viewport    viewport.Model
 	viewportSet bool
+	historyNav  historyNav
 
 	streamBuf string
 
@@ -50,22 +51,30 @@ func (m *Model) ensureViewport() {
 		contentWidth := m.contentWidth()
 		m.viewport = viewportForSize(contentWidth, m.height)
 		m.viewportSet = true
-		m.viewport.SetContent(m.renderMessages(m.messages, contentWidth))
-		m.viewport.GotoBottom()
+		pageMsgs := m.historyNav.pageSlice(m.messages)
+		m.viewport.SetContent(m.renderMessages(pageMsgs, contentWidth))
+		if m.historyNav.paginator.OnLastPage() {
+			m.viewport.GotoBottom()
+		} else {
+			m.viewport.GotoTop()
+		}
 	}
 }
 
 // updateViewport refreshes the viewport content if initialized.
-// Auto-scrolls to bottom only when the user is already at the bottom,
-// so streaming does not yank the viewport while reading earlier messages.
+// Auto-scrolls to bottom only on the last history page when the user is
+// already at the bottom, so streaming does not yank the viewport on older pages.
 func (m *Model) updateViewport() {
+	m.historyNav.syncMessageCount(len(m.messages))
 	m.ensureViewport()
 	if m.viewportSet && m.viewport.Height() > 0 {
 		contentWidth := m.contentWidth()
-		followBottom := m.viewport.AtBottom()
+		pageMsgs := m.historyNav.pageSlice(m.messages)
+		onLastPage := m.historyNav.paginator.OnLastPage()
+		followBottom := onLastPage && m.viewport.AtBottom()
 		prevOffset := m.viewport.YOffset()
 		m.viewport.SetWidth(contentWidth)
-		m.viewport.SetContent(m.renderMessages(m.messages, contentWidth))
+		m.viewport.SetContent(m.renderMessages(pageMsgs, contentWidth))
 		if followBottom {
 			m.viewport.GotoBottom()
 		} else {

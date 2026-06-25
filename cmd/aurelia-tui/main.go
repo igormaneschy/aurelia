@@ -17,6 +17,7 @@ import (
 
 func main() {
 	themeFlag := flag.String("theme", "auto", "TUI theme: auto, light, or dark")
+	noAnimations := flag.Bool("no-animations", false, "Disable TUI animations")
 	flag.Parse()
 
 	theme := tui.ParseTheme(*themeFlag)
@@ -40,7 +41,9 @@ func main() {
 	// reachability so startup stays visual even when the socket is missing.
 	// Mouse capture is opt-in via Ctrl+O so native terminal text selection works
 	// by default.
-	m := tui.NewModel(socketPath, theme)
+	m := tui.NewModelWithOptions(socketPath, theme, tui.ModelOptions{
+		NoAnimations: *noAnimations,
+	})
 	p := tea.NewProgram(m)
 
 	finalModel, err := p.Run()

@@ -871,7 +871,7 @@ func TestModel_InputHistoryDoesNotReplaceEditedHistoryDraft(t *testing.T) {
 }
 
 func TestModel_RememberInputDedupesConsecutiveEntries(t *testing.T) {
-	m := newModel("/tmp/test.sock", "", ThemeDark)
+	m := newModel("/tmp/test.sock", "", ThemeDark, ModelOptions{})
 	m.rememberInput("hello")
 	m.rememberInput("hello")
 	m.rememberInput("world")

@@ -100,7 +100,7 @@ func TestNewModelLoadsInputHistory(t *testing.T) {
 		t.Fatalf("saveInputHistory error: %v", err)
 	}
 
-	m := newModel("/tmp/test.sock", path, ThemeDark)
+	m := newModel("/tmp/test.sock", path, ThemeDark, ModelOptions{})
 
 	if !reflect.DeepEqual(m.inputHistory, []string{"first", "second"}) {
 		t.Fatalf("inputHistory = %#v", m.inputHistory)
@@ -112,7 +112,7 @@ func TestNewModelLoadsInputHistory(t *testing.T) {
 
 func TestModelSaveInputHistoryUsesConfiguredPath(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tui_history.json")
-	m := newModel("/tmp/test.sock", path, ThemeDark)
+	m := newModel("/tmp/test.sock", path, ThemeDark, ModelOptions{})
 	m.inputHistory = []string{"persist me"}
 
 	if err := m.SaveInputHistory(); err != nil {
