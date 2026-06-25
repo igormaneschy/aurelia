@@ -15,6 +15,7 @@ const (
 	sidebarTitleLines       = 2
 	sidebarTableHeaderLines = 1
 	sidebarBorderLines      = 1 // top border row before inner content
+	sidebarSectionRuleLines = 1
 	sidebarSectionHeader    = 1
 	sidebarContextLines     = 4 // cwd, model, health, spacing
 	sidebarActionsLines     = 2 // section title + button
@@ -25,7 +26,7 @@ const (
 const sidebarModelPlaceholder = "—"
 
 func sidebarTableFirstRowY() int {
-	return topMarginHeight + sidebarBorderLines + sidebarTitleLines + sidebarSectionHeader + sidebarTableHeaderLines
+	return topMarginHeight + sidebarBorderLines + sidebarTitleLines + sidebarSectionRuleLines + sidebarSectionHeader + sidebarTableHeaderLines
 }
 
 func sidebarMouseHitX(x int) bool { return x >= 0 && x < sidebarWidth }

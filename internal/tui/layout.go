@@ -7,12 +7,13 @@ func (m Model) sidebarChromeLineCount() int {
 	if len(m.sessions) == 0 {
 		return sidebarEmptyLines
 	}
-	n := sidebarTitleLines + sidebarSectionHeader + sidebarTableHeaderLines
+	n := sidebarTitleLines + sidebarSectionRuleLines + sidebarSectionHeader + sidebarTableHeaderLines
 	if m.sidebarFocused {
 		return n + sidebarFocusedHintLines
 	}
-	// Sessions section rule + context + actions panels.
-	n += sidebarSectionHeader + sidebarContextLines + sidebarSectionHeader + sidebarActionsLines
+	// Context + actions panels (each preceded by a section rule).
+	n += sidebarSectionRuleLines + sidebarSectionHeader + sidebarContextLines
+	n += sidebarSectionRuleLines + sidebarSectionHeader + sidebarActionsLines
 	return n
 }
 

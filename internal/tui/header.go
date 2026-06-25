@@ -75,14 +75,16 @@ func (m Model) headerMetaChips() []string {
 }
 
 func (m Model) decorativeHeaderRule(width int) string {
-	pattern := "░▒▓"
-	if !m.animations.enabled {
-		pattern = "─"
+	var runes []rune
+	if m.animations.enabled {
+		runes = []rune("░▒▓")
+	} else {
+		runes = []rune("─")
 	}
 	repeat := maxInt(20, width)
 	var b strings.Builder
 	for i := 0; i < repeat; i++ {
-		b.WriteRune(rune(pattern[i%len(pattern)]))
+		b.WriteRune(runes[i%len(runes)])
 	}
 	return m.styles.HeaderRuleStyle.Render(b.String())
 }

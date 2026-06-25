@@ -44,6 +44,18 @@ func TestRenderChatHeader_OfflineHealthChip(t *testing.T) {
 	}
 }
 
+func TestDecorativeHeaderRule_NoCorruptUTF8(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.width = 100
+	m.height = 30
+	rule := stripANSIForTest(m.decorativeHeaderRule(40))
+	for _, r := range rule {
+		if r != '░' && r != '▒' && r != '▓' && r != '─' {
+			t.Fatalf("unexpected rune %U in rule %q", r, rule)
+		}
+	}
+}
+
 func TestRenderChatHeader_MetaRightAligned(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat

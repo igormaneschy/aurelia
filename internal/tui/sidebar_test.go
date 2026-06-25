@@ -18,9 +18,27 @@ func prepSidebarMouseTest(m *Model) {
 }
 
 func TestSidebarTableFirstRowY(t *testing.T) {
-	want := topMarginHeight + sidebarBorderLines + sidebarTitleLines + sidebarSectionHeader + sidebarTableHeaderLines
+	want := topMarginHeight + sidebarBorderLines + sidebarTitleLines + sidebarSectionRuleLines + sidebarSectionHeader + sidebarTableHeaderLines
 	if got := sidebarTableFirstRowY(); got != want {
 		t.Fatalf("got %d want %d", got, want)
+	}
+}
+
+func TestHandleSidebarMouse_ClickDMRow(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.activeSession = -9000002
+	m.sessions = []tuiSessionInfo{
+		{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
+		{ChatID: -9000002, Name: "Trade"},
+	}
+	prepSidebarMouseTest(&m)
+
+	updated, cmd := m.Update(tea.MouseClickMsg{X: 2, Y: sidebarTableFirstRowY(), Button: tea.MouseLeft})
+	if cmd == nil {
+		t.Fatal("expected cmd to open DM session")
+	}
+	if updated.(Model).sidebarCursor != 0 {
+		t.Fatalf("expected cursor on DM row 0, got %d", updated.(Model).sidebarCursor)
 	}
 }
 
