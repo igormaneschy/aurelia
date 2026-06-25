@@ -61,7 +61,7 @@ type Model struct {
 	sessions       []tuiSessionInfo
 	sidebarCursor  int // index into sessions, 0-based
 	sidebarFocused bool
-	sidebarTable   table.Model // bubbles/table for sidebar (v0.32+)
+	sidebarTable   table.Model // bubbles/v2 table for session sidebar
 
 	// Chat history (active session only — reloaded on session switch)
 	messages []chatMessage
@@ -192,7 +192,7 @@ func newModel(socketPath, historyPath string, theme Theme) Model {
 		activeSession:     ipc.ReservedTUIChatID,
 		theme:             theme,
 		styles:            newStylesForTheme(theme),
-		sidebarTable:      newSidebarTable(),
+		sidebarTable:      newSidebarTable(newStylesForTheme(theme)),
 	}
 }
 

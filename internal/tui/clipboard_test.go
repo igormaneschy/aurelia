@@ -9,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestFormatChatForClipboardCopiesOnlyMessages(t *testing.T) {
@@ -55,13 +54,11 @@ func TestCopyChatShortcutUsesClipboardText(t *testing.T) {
 	m.state = stateChat
 	m.messages = []chatMessage{{Sender: "Igor", Text: "hello"}}
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	_, cmd := m.Update(keyCtrl('y'))
 	if cmd == nil {
 		t.Fatal("expected copy command")
 	}
-	msg := cmd().(clipboardCopyMsg)
-
-	if msg.err != nil {
+	if msg, ok := cmd().(clipboardCopyMsg); ok && msg.err != nil {
 		t.Fatalf("copy msg err: %v", msg.err)
 	}
 	if copied != "Igor:\nhello" {
@@ -86,13 +83,11 @@ func TestCopyLastResponseShortcutUsesClipboardText(t *testing.T) {
 		{Sender: "Aurelia", Text: "second"},
 	}
 
-	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+	_, cmd := m.Update(keyCtrl('r'))
 	if cmd == nil {
 		t.Fatal("expected copy command")
 	}
-	msg := cmd().(clipboardCopyMsg)
-
-	if msg.err != nil {
+	if msg, ok := cmd().(clipboardCopyMsg); ok && msg.err != nil {
 		t.Fatalf("copy msg err: %v", msg.err)
 	}
 	if copied != "second" {

@@ -94,6 +94,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewport.SetHeight(viewportHeightForTerminal(msg.Height))
 			m.updateViewport()
 		}
+		m.resizeSidebarTable()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -113,6 +114,29 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				})
 				m.updateViewport()
 			}
+			return m, nil
+		}
+		if looksLikeFilePath(text) {
+			normalized := normalizeImagePath(text)
+			errMsg := m.attachDocumentFromPath(normalized)
+			if errMsg != "" {
+				m.messages = append(m.messages, chatMessage{Sender: "⚠️", Text: errMsg})
+			} else {
+				name := filepath.Base(normalized)
+				if len(m.pendingAttachments) > 0 {
+					name = m.pendingAttachments[len(m.pendingAttachments)-1].name
+				}
+				m.messages = append(m.messages, chatMessage{
+					Sender: "📎",
+					Text:   fmt.Sprintf("Document attached: %s", name),
+				})
+			}
+			m.updateViewport()
+			return m, nil
+		}
+		if msg.Content != "" {
+			m.textarea.InsertString(msg.Content)
+			m.clearAutocomplete()
 		}
 		return m, nil
 
@@ -167,6 +191,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cwdPath = "not set"
 			}
 			m.activeModel = msg.model
+			m.syncSidebarRows()
 		}
 		return m, nil
 
@@ -302,6 +327,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.messages = []chatMessage{}
 		m.viewportSet = false
 		m.switchingSession = true
+		m.syncSidebarRows()
 		m.updateViewport()
 		// Reload sessions list + history for the new session.
 		return m, tea.Batch(
@@ -327,9 +353,10 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.messages = []chatMessage{}
 		m.viewportSet = false
 		m.switchingSession = true
+		m.syncSidebarRows()
 		m.updateViewport()
 		m.sidebarFocused = false
-				m.sidebarTable.Blur()
+		m.sidebarTable.Blur()
 		// Reload history + status for the new session.
 		return m, tea.Batch(
 			fetchTUIHistory(m.ipcClient, m.activeSession),
@@ -827,10 +854,23 @@ func (m Model) toggleMouseCapture() (tea.Model, tea.Cmd) {
 
 // handleSidebarKey processes keys when the sidebar is focused.
 func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	// Delegate navigation to the table component.
-	updatedTable, _ := m.sidebarTable.Update(msg)
-	m.sidebarTable = updatedTable
-	m.sidebarCursor = m.sidebarTable.Cursor()
+	var tableCmd tea.Cmd
+	switch msg.String() {
+	case "up", "k":
+		if m.sidebarCursor > 0 {
+			m.sidebarCursor--
+		}
+	case "down", "j":
+		if m.sidebarCursor < len(m.sessions)-1 {
+			m.sidebarCursor++
+		}
+	default:
+		updatedTable, cmd := m.sidebarTable.Update(msg)
+		m.sidebarTable = updatedTable
+		tableCmd = cmd
+		m.sidebarCursor = m.sidebarTable.Cursor()
+	}
+	m.syncSidebarRows()
 
 	switch msg.String() {
 	case "ctrl+c":
@@ -842,7 +882,7 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc", "tab", "ctrl+i", "\t":
 		// Exit sidebar focus — return to input.
 		m.sidebarFocused = false
-			m.sidebarTable.Blur()
+		m.sidebarTable.Blur()
 		if msg.String() == "tab" || msg.String() == "ctrl+i" || msg.String() == "\t" {
 			// Tab also toggles sidebar visibility.
 			m.showSidebar = !m.showSidebar
@@ -858,7 +898,7 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if target.ChatID == m.activeSession {
 			// Already on this session — just unfocus.
 			m.sidebarFocused = false
-				m.sidebarTable.Blur()
+			m.sidebarTable.Blur()
 			return m, nil
 		}
 		return m, openTUISession(m.ipcClient, target.ChatID)
@@ -904,14 +944,14 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Enter rename mode: show the current name as placeholder, clear textarea.
 		m.renameTargetChatID = target.ChatID
 		m.sidebarFocused = false
-				m.sidebarTable.Blur()
+		m.sidebarTable.Blur()
 		m.textarea.Reset()
 		m.textarea.Placeholder = fmt.Sprintf("Rename '%s' to...", target.Name)
 		m.textarea.Focus()
 		return m, nil
 
 	default:
-		return m, nil
+		return m, tableCmd
 	}
 }
 

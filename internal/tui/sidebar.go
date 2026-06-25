@@ -14,7 +14,7 @@ const sidebarColName = 1
 const sidebarColModel = 2
 
 // newSidebarTable creates a table.Model for the session sidebar.
-func newSidebarTable() table.Model {
+func newSidebarTable(styles themeStyles) table.Model {
 	cols := []table.Column{
 		{Title: "", Width: 3},     // icon
 		{Title: "Session", Width: 16},
@@ -29,14 +29,39 @@ func newSidebarTable() table.Model {
 
 	t.SetWidth(sidebarWidth)
 	t.SetHeight(12)
-
-	s := table.DefaultStyles()
-	s.Header = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("243")).Bold(true)
-	s.Selected = lipgloss.NewStyle().Padding(0, 1).Foreground(lipgloss.Color("255")).Background(lipgloss.Color("57"))
-	s.Cell = lipgloss.NewStyle().Padding(0, 1)
-	t.SetStyles(s)
+	t.SetStyles(sidebarTableStyles(styles))
 
 	return t
+}
+
+func sidebarTableStyles(styles themeStyles) table.Styles {
+	s := table.DefaultStyles()
+	s.Header = styles.SidebarMutedStyle.Copy().Bold(true).Padding(0, 1)
+	s.Cell = styles.SidebarMutedStyle.Copy().Padding(0, 1)
+	s.Selected = styles.SidebarActiveStyle.Copy().Padding(0, 1)
+	return s
+}
+
+// sidebarTableHeightForTerminal returns the table body height for the sidebar.
+func sidebarTableHeightForTerminal(termHeight int) int {
+	h := viewportHeightForTerminal(termHeight) - 8
+	if h < 4 {
+		return 4
+	}
+	if h > 20 {
+		return 20
+	}
+	return h
+}
+
+// resizeSidebarTable updates sidebar table dimensions after terminal resize.
+func (m *Model) resizeSidebarTable() {
+	if !m.shouldShowSidebarTable() {
+		return
+	}
+	m.sidebarTable.SetWidth(sidebarWidth)
+	m.sidebarTable.SetHeight(sidebarTableHeightForTerminal(m.height))
+	m.syncSidebarRows()
 }
 
 // syncSidebarRows rebuilds the table rows from the current sessions slice.
@@ -107,7 +132,7 @@ func (m Model) renderSidebarTable() string {
 	// Sidebar hints when focused
 	var hints string
 	if m.sidebarFocused {
-		hints = fmt.Sprintf("\n%s\n%s\n%s\n%s\n%s\n%s\n%s",
+		hints = fmt.Sprintf("\n%s\n%s\n%s\n%s\n%s\n%s",
 			m.styles.SidebarMutedStyle.Render("↑↓ navigate"),
 			m.styles.SidebarMutedStyle.Render("enter open"),
 			m.styles.SidebarMutedStyle.Render("n new"),

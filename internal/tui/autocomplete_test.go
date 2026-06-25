@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
 
 func TestCommandSuggestionsPrefixMatch(t *testing.T) {
@@ -28,7 +28,7 @@ func TestModel_TabShowsAutocompleteForSlashInput(t *testing.T) {
 	m.state = stateChat
 	m.textarea.SetValue("/")
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, cmd := m.Update(keyPress(tea.KeyTab))
 	m2 := updated.(Model)
 
 	if cmd != nil {
@@ -48,7 +48,7 @@ func TestModel_TabCyclesAutocomplete(t *testing.T) {
 	m.textarea.SetValue("/")
 	m = m.refreshAutocomplete()
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, _ := m.Update(keyPress(tea.KeyTab))
 	m2 := updated.(Model)
 
 	if m2.autocompleteIndex != 1 {
@@ -62,7 +62,7 @@ func TestModel_EnterAppliesAutocomplete(t *testing.T) {
 	m.textarea.SetValue("/mo")
 	m = m.refreshAutocomplete()
 
-	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.Update(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
 
 	if cmd != nil {
@@ -81,7 +81,7 @@ func TestModel_QuestionMarkShowsCommandSuggestions(t *testing.T) {
 	m.state = stateChat
 	m.textarea.SetValue("/c")
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	updated, _ := m.Update(keyText("?"))
 	m2 := updated.(Model)
 
 	if got := len(m2.autocompleteOptions); got != 1 || m2.autocompleteOptions[0] != "/cwd" {
@@ -95,7 +95,7 @@ func TestModel_QuestionMarkInCommandArgumentsDelegatesToTextarea(t *testing.T) {
 	m.textarea.SetValue("/cwd /tmp/project")
 	m.textarea.CursorEnd()
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	updated, _ := m.Update(keyText("?"))
 	m2 := updated.(Model)
 
 	if m2.hasAutocomplete() {
@@ -112,7 +112,7 @@ func TestModel_TabTogglesSidebarForNonCommandInput(t *testing.T) {
 	m.showSidebar = true
 	m.textarea.SetValue("hello")
 
-	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	updated, _ := m.Update(keyPress(tea.KeyTab))
 	m2 := updated.(Model)
 
 	if m2.showSidebar {

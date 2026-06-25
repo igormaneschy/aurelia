@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
@@ -251,8 +251,9 @@ func TestHandleSidebarKey_UpNavigatesCursor(t *testing.T) {
 		{ChatID: -9000002, Name: "work"},
 		{ChatID: -9000003, Name: "research"},
 	}
+	prepSidebarTest(&m)
 
-	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyUp})
+	updated, _ := m.handleKeyMsg(keyPress(tea.KeyUp))
 	m2 := updated.(Model)
 
 	if m2.sidebarCursor != 1 {
@@ -269,8 +270,9 @@ func TestHandleSidebarKey_DownNavigatesCursor(t *testing.T) {
 		{ChatID: -9000001, Name: "dm"},
 		{ChatID: -9000002, Name: "work"},
 	}
+	prepSidebarTest(&m)
 
-	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ := m.handleKeyMsg(keyPress(tea.KeyDown))
 	m2 := updated.(Model)
 
 	if m2.sidebarCursor != 1 {
@@ -287,8 +289,9 @@ func TestHandleSidebarKey_DownClampsAtEnd(t *testing.T) {
 		{ChatID: -9000001, Name: "dm"},
 		{ChatID: -9000002, Name: "work"},
 	}
+	prepSidebarTest(&m)
 
-	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyDown})
+	updated, _ := m.handleKeyMsg(keyPress(tea.KeyDown))
 	m2 := updated.(Model)
 
 	if m2.sidebarCursor != 1 {
@@ -301,7 +304,7 @@ func TestHandleSidebarKey_EscExitsFocus(t *testing.T) {
 	m.state = stateChat
 	m.sidebarFocused = true
 
-	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyEsc})
+	updated, _ := m.handleKeyMsg(keyPress(tea.KeyEsc))
 	m2 := updated.(Model)
 
 	if m2.sidebarFocused {
@@ -319,8 +322,9 @@ func TestHandleSidebarKey_EnterOpensSession(t *testing.T) {
 		{ChatID: -9000002, Name: "work"},
 	}
 	m.activeSession = -9000001
+	prepSidebarTest(&m)
 
-	updated, cmd := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKeyMsg(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
 
 	// Should return a command (openTUISession).
@@ -344,7 +348,7 @@ func TestHandleSidebarKey_EnterOnActiveSessionJustUnfocuses(t *testing.T) {
 	}
 	m.activeSession = -9000001
 
-	updated, cmd := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyEnter})
+	updated, cmd := m.handleKeyMsg(keyPress(tea.KeyEnter))
 	m2 := updated.(Model)
 
 	if cmd != nil {
@@ -363,7 +367,7 @@ func TestHandleSidebarKey_NCreatesSession(t *testing.T) {
 		{ChatID: -9000001, Name: "dm"},
 	}
 
-	updated, cmd := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	updated, cmd := m.handleKeyMsg(keyText("n"))
 	_ = updated.(Model)
 
 	if cmd == nil {
@@ -380,8 +384,9 @@ func TestHandleSidebarKey_DDeletesSession(t *testing.T) {
 		{ChatID: -9000001, Name: "dm"},
 		{ChatID: -9000002, Name: "work"},
 	}
+	prepSidebarTest(&m)
 
-	updated, cmd := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	updated, cmd := m.handleKeyMsg(keyText("d"))
 	_ = updated.(Model)
 
 	if cmd == nil {
@@ -398,7 +403,7 @@ func TestHandleSidebarKey_DOnDMShowsMessage(t *testing.T) {
 		{ChatID: -9000001, Name: "dm"},
 	}
 
-	updated, cmd := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	updated, cmd := m.handleKeyMsg(keyText("d"))
 	m2 := updated.(Model)
 
 	if cmd != nil {
@@ -419,7 +424,7 @@ func TestCtrlS_FocusesSidebar(t *testing.T) {
 	m.activeSession = -9000001
 
 	// ctrl+s
-	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ := m.handleKeyMsg(keyCtrl('s'))
 	m2 := updated.(Model)
 
 	if !m2.sidebarFocused {
@@ -430,7 +435,7 @@ func TestCtrlS_FocusesSidebar(t *testing.T) {
 	}
 
 	// f2 (fallback for terminals that intercept ctrl+s)
-	updated2, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyF2})
+	updated2, _ := m.handleKeyMsg(keyPress(tea.KeyF2))
 	m3 := updated2.(Model)
 
 	if !m3.sidebarFocused {
@@ -443,7 +448,7 @@ func TestCtrlS_NoopWhenSidebarHidden(t *testing.T) {
 	m.state = stateChat
 	m.showSidebar = false
 
-	updated, _ := m.handleKeyMsg(tea.KeyMsg{Type: tea.KeyCtrlS})
+	updated, _ := m.handleKeyMsg(keyCtrl('s'))
 	m2 := updated.(Model)
 
 	if m2.sidebarFocused {
@@ -463,11 +468,11 @@ func TestRenderSidebar_ShowsSessionList(t *testing.T) {
 	}
 	m.activeSession = -9000002
 
-	sidebar := m.renderSidebar()
+	sidebar := sidebarViewForTest(m)
 	plain := stripANSIForTest(sidebar)
 
-	if !containsStr(plain, "Sessions") {
-		t.Error("sidebar should show 'Sessions' title")
+	if !containsStr(plain, "Aurelia") {
+		t.Error("sidebar should show 'Aurelia' title")
 	}
 	if !containsStr(plain, "work") {
 		t.Error("sidebar should show 'work' session")
@@ -485,7 +490,7 @@ func TestRenderSidebar_FocusedShowsHints(t *testing.T) {
 		{ChatID: -9000001, Name: "dm"},
 	}
 
-	sidebar := m.renderSidebar()
+	sidebar := sidebarViewForTest(m)
 	plain := stripANSIForTest(sidebar)
 
 	if !containsStr(plain, "navigate") {
@@ -575,7 +580,7 @@ func TestRenderSidebar_SanitizesLegacySessionNames(t *testing.T) {
 	}
 	m.activeSession = -9000003
 
-	sidebar := m.renderSidebar()
+	sidebar := sidebarViewForTest(m)
 	plain := stripANSIForTest(sidebar)
 
 	// The sanitized versions should appear in the sidebar, not the raw strings.

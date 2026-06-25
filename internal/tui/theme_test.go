@@ -1,28 +1,15 @@
 package tui
 
 import (
-	"bytes"
 	"os"
 	"testing"
 
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
+	"charm.land/lipgloss/v2"
 )
 
-// forceColorRenderer returns a lipgloss renderer with TrueColor forced so
-// that ANSI escape codes are always emitted in tests.
-func forceColorRenderer() *lipgloss.Renderer {
-	r := lipgloss.NewRenderer(bytes.NewBuffer(nil))
-	r.SetColorProfile(termenv.TrueColor)
-	return r
-}
-
-// renderColored renders the style with forced TrueColor via a renderer,
-// ensuring ANSI codes are present even in non-TTY test environments.
+// renderColored renders styled text for palette comparison in tests.
 func renderColored(st lipgloss.Style, text string) string {
-	r := forceColorRenderer()
-	s := st.Renderer(r) //nolint:staticcheck // Renderer is deprecated but functional for test
-	return s.Render(text)
+	return st.Render(text)
 }
 
 // TestNewDarkStylesPopulatesAllFields guards against a future refactor that
