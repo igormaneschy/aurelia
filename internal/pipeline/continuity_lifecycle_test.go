@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/igormaneschy/aurelia/internal/bridge"
+	"github.com/igormaneschy/aurelia/internal/engine"
 	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/session"
 )
@@ -284,9 +284,10 @@ func newContinuityTestStore(t *testing.T) *continuity.SQLiteStore {
 	return store
 }
 
-func newFakeResultEvent(content string, turns int, inTokens, outTokens int, costUSD float64) bridge.Event {
-	return bridge.Event{
-		Type:         "result",
+func newFakeResultEvent(content string, turns int, inTokens, outTokens int, costUSD float64) engine.Event {
+	return engine.Event{
+		Type:         engine.EventTypeDone,
+		RawType:      "result",
 		Content:      content,
 		NumTurns:     turns,
 		InputTokens:  inTokens,
@@ -295,9 +296,10 @@ func newFakeResultEvent(content string, turns int, inTokens, outTokens int, cost
 	}
 }
 
-func newFakeErrorEvent(message string) bridge.Event {
-	return bridge.Event{
-		Type:    "error",
+func newFakeErrorEvent(message string) engine.Event {
+	return engine.Event{
+		Type:    engine.EventTypeError,
+		RawType: "error",
 		Message: message,
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
+	"github.com/igormaneschy/aurelia/internal/engine"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/session"
 )
@@ -24,10 +25,10 @@ const (
 )
 
 // lifecycleDecisionResult captures the outcome of a lifecycle evaluation
-// and any modifications to apply to the bridge request.
+// and any modifications to apply to the engine request.
 type lifecycleDecisionResult struct {
 	Decision      session.Decision
-	ModifiedReq   *bridge.Request // non-nil when the request was modified
+	ModifiedReq   *engine.Request // non-nil when the request was modified
 	SkipExecution bool            // true when the query should not proceed (critical failure)
 	ErrorMessage  string          // user-facing message when SkipExecution
 }
@@ -42,7 +43,7 @@ func (s *Service) sendLifecycleNotice(chatID int64, threadID int, message string
 }
 
 // applyLifecycle evaluates session health and applies the lifecycle decision
-// to the bridge request. It modifies req in-place when action is taken.
+// to the engine request. It modifies req in-place when action is taken.
 //
 // Flow:
 //  1. Gather signals from session store
@@ -55,7 +56,7 @@ func (s *Service) sendLifecycleNotice(chatID int64, threadID int, message string
 //  4. Record lifecycle decision as runlog event
 //
 // Returns a result with the modified request or skip signal.
-func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatID int64, threadID int, userID int64) lifecycleDecisionResult {
+func (s *Service) applyLifecycle(ctx context.Context, req *engine.Request, chatID int64, threadID int, userID int64) lifecycleDecisionResult {
 	if s.config == nil {
 		return lifecycleDecisionResult{
 			Decision: session.Decision{
@@ -105,7 +106,7 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 
 	case session.ActionColdResume:
 		// Force Continue=false — session will be resumed without continuing
-		req.Options.Continue = false
+		req.Continue = false
 		return lifecycleDecisionResult{
 			Decision:    dec,
 			ModifiedReq: req,
@@ -116,14 +117,14 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 		// technical compaction language in user-facing messages).
 		s.sendLifecycleNotice(chatID, threadID, lifecycleCompactMessage)
 
-		result, err := s.compactSession(ctx, chatID, threadID, userID, req.Options)
+		result, err := s.compactSession(ctx, chatID, threadID, userID, bridge.OptionsFromEngine(*req))
 		if err != nil {
 			log.Printf("lifecycle: compaction failed for chat=%d: %v — falling back to cold resume", chatID, err)
 			s.sendLifecycleNotice(chatID, threadID, lifecycleCompactFailedMessage)
 			if s.sessions != nil {
 				s.sessions.MarkFailure(chatID, threadID, userID, "compaction failed")
 			}
-			req.Options.Continue = false
+			req.Continue = false
 			return lifecycleDecisionResult{
 				Decision: session.Decision{
 					State:  session.HealthSuspect,
@@ -139,7 +140,7 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 			if s.sessions != nil {
 				s.sessions.MarkFailure(chatID, threadID, userID, "compaction returned unsuccessful result")
 			}
-			req.Options.Continue = false
+			req.Continue = false
 			return lifecycleDecisionResult{
 				Decision: session.Decision{
 					State:  session.HealthSuspect,
@@ -154,9 +155,9 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 
 		// After compaction, the session is healthy enough to continue
 		if result.SessionFile != "" {
-			req.Options.Resume = result.SessionFile
+			req.SessionKey = result.SessionFile
 		}
-		req.Options.Continue = true
+		req.Continue = true
 		return lifecycleDecisionResult{
 			Decision:    dec,
 			ModifiedReq: req,
@@ -170,7 +171,7 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 		// technical terms and old lifecycle language in user-facing messages).
 		s.sendLifecycleNotice(chatID, threadID, lifecycleRotateMessage)
 
-		result, err := s.rotateSession(ctx, chatID, threadID, userID, req.Options)
+		result, err := s.rotateSession(ctx, chatID, threadID, userID, bridge.OptionsFromEngine(*req))
 		if err != nil {
 			log.Printf("lifecycle: rotation failed for chat=%d: %v — falling back to cold resume", chatID, err)
 
@@ -184,7 +185,7 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 					s.sessions.MarkFailure(chatID, threadID, userID, "rotation failed")
 				}
 			}
-			req.Options.Continue = false
+			req.Continue = false
 			return lifecycleDecisionResult{
 				Decision: session.Decision{
 					State:  session.HealthSuspect,
@@ -200,7 +201,7 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 			if s.sessions != nil {
 				s.sessions.MarkFailure(chatID, threadID, userID, "rotation returned invalid result")
 			}
-			req.Options.Continue = false
+			req.Continue = false
 			return lifecycleDecisionResult{
 				Decision: session.Decision{
 					State:  session.HealthSuspect,
@@ -224,15 +225,15 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 			s.sessions.ClearFailureState(chatID, threadID, userID)
 		}
 
-		req.Options.Resume = result.NewSessionFile
+		req.SessionKey = result.NewSessionFile
 		// Validate the new session file exists before setting Continue=true.
 		// A missing/corrupt file with Continue=true would cause the PI SDK
 		// to fail silently. Fall back to cold resume in that case.
 		if fi, err := os.Stat(result.NewSessionFile); err == nil && fi.Size() > 0 {
-			req.Options.Continue = true
+			req.Continue = true
 		} else {
 			log.Printf("lifecycle: rotated session file missing or empty (%s), falling back to cold resume", result.NewSessionFile)
-			req.Options.Continue = false
+			req.Continue = false
 		}
 		return lifecycleDecisionResult{
 			Decision:    dec,
@@ -246,17 +247,17 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 // enrichLifecycleSignals reads PI session stats when possible and merges them
 // into store-derived signals. Stats failures are non-fatal: lifecycle still
 // protects known cold/suspect sessions from the store metadata.
-func (s *Service) enrichLifecycleSignals(ctx context.Context, req *bridge.Request, signals session.HealthSignals) session.HealthSignals {
-	if s == nil || s.bridge == nil || req == nil || req.Options.Resume == "" {
+func (s *Service) enrichLifecycleSignals(ctx context.Context, req *engine.Request, signals session.HealthSignals) session.HealthSignals {
+	if s == nil || s.bridge == nil || req == nil || req.SessionKey == "" {
 		return signals
 	}
 
 	statsCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	stats, err := s.bridge.GetSessionStats(statsCtx, req.Options)
+	stats, err := s.bridge.GetSessionStats(statsCtx, bridge.OptionsFromEngine(*req))
 	if err != nil {
-		log.Printf("lifecycle: get-session-stats failed for session=%s: %s", filepath.Base(req.Options.Resume), redactSecrets(err.Error()))
+		log.Printf("lifecycle: get-session-stats failed for session=%s: %s", filepath.Base(req.SessionKey), redactSecrets(err.Error()))
 		return signals
 	}
 	if stats == nil {

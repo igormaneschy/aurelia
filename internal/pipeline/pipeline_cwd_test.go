@@ -22,8 +22,8 @@ func TestBuildBridgeRequest_DisablesFileToolsInChatMode(t *testing.T) {
 
 	req := svc.buildBridgeRequest("oi", "system", nil, 42, 0, 0, false)
 	for _, tool := range chatModeDisallowedTools {
-		if !slices.Contains(req.Options.DisallowedTools, tool) {
-			t.Fatalf("expected %s to be disallowed in chat mode, got %v", tool, req.Options.DisallowedTools)
+		if !slices.Contains(req.DisallowedTools, tool) {
+			t.Fatalf("expected %s to be disallowed in chat mode, got %v", tool, req.DisallowedTools)
 		}
 	}
 }
@@ -36,8 +36,8 @@ func TestBuildBridgeRequest_OmitsModelOptionsInAutoMode(t *testing.T) {
 	}
 
 	req := svc.buildBridgeRequest("oi", "system", nil, 42, 0, 100, false)
-	if req.Options.Provider != "" || req.Options.Model != "" {
-		t.Fatalf("expected auto mode to omit provider/model, got provider=%q model=%q", req.Options.Provider, req.Options.Model)
+	if req.Provider != "" || req.Model != "" {
+		t.Fatalf("expected auto mode to omit provider/model, got provider=%q model=%q", req.Provider, req.Model)
 	}
 }
 
@@ -52,8 +52,8 @@ func TestBuildBridgeRequest_SendsExplicitModelOptions(t *testing.T) {
 	}
 
 	req := svc.buildBridgeRequest("oi", "system", nil, 42, 0, 100, false)
-	if req.Options.Provider != "anthropic" || req.Options.Model != "claude-sonnet-4-6" {
-		t.Fatalf("expected explicit provider/model, got provider=%q model=%q", req.Options.Provider, req.Options.Model)
+	if req.Provider != "anthropic" || req.Model != "claude-sonnet-4-6" {
+		t.Fatalf("expected explicit provider/model, got provider=%q model=%q", req.Provider, req.Model)
 	}
 }
 
@@ -66,8 +66,8 @@ func TestBuildBridgeRequest_AgentModelOverrideWorksWithAutoMode(t *testing.T) {
 	pp := &profiles.PromptProfile{Model: "openai/gpt-5.4"}
 
 	req := svc.buildBridgeRequest("oi", "system", pp, 42, 0, 100, false)
-	if req.Options.Provider != "" || req.Options.Model != "openai/gpt-5.4" {
-		t.Fatalf("expected only agent model override, got provider=%q model=%q", req.Options.Provider, req.Options.Model)
+	if req.Provider != "" || req.Model != "openai/gpt-5.4" {
+		t.Fatalf("expected only agent model override, got provider=%q model=%q", req.Provider, req.Model)
 	}
 }
 
@@ -81,11 +81,11 @@ func TestBuildBridgeRequest_AllowsFileToolsWhenCwdBound(t *testing.T) {
 	}
 
 	req := svc.buildBridgeRequest("oi", "system", nil, 42, 0, 0, false)
-	if len(req.Options.DisallowedTools) != 0 {
-		t.Fatalf("expected no chat-mode disallowed tools when cwd is bound, got %v", req.Options.DisallowedTools)
+	if len(req.DisallowedTools) != 0 {
+		t.Fatalf("expected no chat-mode disallowed tools when cwd is bound, got %v", req.DisallowedTools)
 	}
-	if req.Options.Cwd != "/repo/aurelia" {
-		t.Fatalf("Cwd = %q, want bound cwd", req.Options.Cwd)
+	if req.Cwd != "/repo/aurelia" {
+		t.Fatalf("Cwd = %q, want bound cwd", req.Cwd)
 	}
 }
 
@@ -108,12 +108,12 @@ func TestBuildBridgeRequest_UsesPrivateDefaultCWD(t *testing.T) {
 	}
 
 	req := svc.buildBridgeRequest("oi", "system", nil, 42, 0, 100, true)
-	if req.Options.Cwd != want {
-		t.Fatalf("Cwd = %q, want DefaultCWD %q", req.Options.Cwd, want)
+	if req.Cwd != want {
+		t.Fatalf("Cwd = %q, want DefaultCWD %q", req.Cwd, want)
 	}
 	for _, tool := range chatModeDisallowedTools {
-		if slices.Contains(req.Options.DisallowedTools, tool) {
-			t.Fatalf("did not expect chat-mode tool %s to be disallowed with DefaultCWD: %v", tool, req.Options.DisallowedTools)
+		if slices.Contains(req.DisallowedTools, tool) {
+			t.Fatalf("did not expect chat-mode tool %s to be disallowed with DefaultCWD: %v", tool, req.DisallowedTools)
 		}
 	}
 }

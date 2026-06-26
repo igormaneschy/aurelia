@@ -8,18 +8,13 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/igormaneschy/aurelia/internal/bridge"
+	"github.com/igormaneschy/aurelia/internal/engine"
 	"github.com/igormaneschy/aurelia/internal/observability"
 )
 
-// BridgeExecutor is the minimal interface the pipeline needs from a bridge.
-type BridgeExecutor interface {
-	Execute(ctx context.Context, req bridge.Request) (<-chan bridge.Event, error)
-}
-
-// ResilientBridge wraps a real bridge with retry, circuit breaker, and fallback.
+// ResilientBridge wraps an engine with retry, circuit breaker, and fallback.
 type ResilientBridge struct {
-	bridge   BridgeExecutor
+	bridge   engine.Engine
 	breakers *circuitBreakerRegistry
 	config   ResilientConfig
 
@@ -54,7 +49,7 @@ func DefaultResilientConfig() ResilientConfig {
 }
 
 // NewResilientBridge wraps the given bridge with resilience features.
-func NewResilientBridge(b BridgeExecutor, cfg ResilientConfig) *ResilientBridge {
+func NewResilientBridge(b engine.Engine, cfg ResilientConfig) *ResilientBridge {
 	return &ResilientBridge{
 		bridge:   b,
 		breakers: newCircuitBreakerRegistry(),
@@ -64,7 +59,7 @@ func NewResilientBridge(b BridgeExecutor, cfg ResilientConfig) *ResilientBridge 
 
 // ExecuteResult holds the outcome of a resilient execution.
 type ExecuteResult struct {
-	Events       <-chan bridge.Event
+	Events       <-chan engine.Event
 	UsedFallback bool
 	Err          error
 }
@@ -78,11 +73,11 @@ var errProcessDeath = errors.New("bridge process exited without producing a term
 // onNotify is called with user-facing messages (e.g. fallback activated).
 func (rb *ResilientBridge) Execute(
 	ctx context.Context,
-	req bridge.Request,
+	req engine.Request,
 	onNotify func(msg string),
 ) ExecuteResult {
-	provider := req.Options.Provider
-	model := req.Options.Model
+	provider := req.Provider
+	model := req.Model
 
 	// Extract chat/thread from security context for fallback snapshot injection.
 	// Must be captured once per Execute call and passed explicitly to tryFallback
@@ -144,13 +139,13 @@ func (rb *ResilientBridge) Execute(
 
 // executeWithRetry attempts the request up to MaxRetries with exponential backoff.
 // Only transient errors trigger retry; others fail fast.
-func (rb *ResilientBridge) executeWithRetry(ctx context.Context, req bridge.Request, chatID int64, threadID int, userID int64) ExecuteResult {
+func (rb *ResilientBridge) executeWithRetry(ctx context.Context, req engine.Request, chatID int64, threadID int, userID int64) ExecuteResult {
 	var lastErr error
 
 	for attempt := 0; attempt <= rb.config.MaxRetries; attempt++ {
 		if attempt > 0 {
 			rb.fireEvent(chatID, threadID, userID, observability.PhaseRetryStarted, "warn",
-				fmt.Sprintf("attempt=%d/%d provider=%s model=%s", attempt, rb.config.MaxRetries, req.Options.Provider, req.Options.Model))
+				fmt.Sprintf("attempt=%d/%d provider=%s model=%s", attempt, rb.config.MaxRetries, req.Provider, req.Model))
 			delay := rb.config.RetryBackoffBase * (1 << (attempt - 1))
 			select {
 			case <-time.After(delay):
@@ -159,7 +154,7 @@ func (rb *ResilientBridge) executeWithRetry(ctx context.Context, req bridge.Requ
 			}
 		}
 
-		evCh, err := rb.bridge.Execute(ctx, req)
+		evCh, err := rb.bridge.Query(ctx, req)
 		if err == nil {
 			// Validate the first terminal event — if it's an error, classify it.
 			validated, valErr := rb.validateChannel(ctx, evCh)
@@ -191,8 +186,8 @@ func (rb *ResilientBridge) executeWithRetry(ctx context.Context, req bridge.Requ
 // the events already consumed and proxies the rest live so downstream
 // consumers (e.g. ProgressReporter) see tool_use events as they happen
 // instead of after the full response completes.
-func (rb *ResilientBridge) validateChannel(ctx context.Context, src <-chan bridge.Event) (<-chan bridge.Event, error) {
-	var prefix []bridge.Event
+func (rb *ResilientBridge) validateChannel(ctx context.Context, src <-chan engine.Event) (<-chan engine.Event, error) {
+	var prefix []engine.Event
 	for {
 		select {
 		case ev, ok := <-src:
@@ -206,10 +201,13 @@ func (rb *ResilientBridge) validateChannel(ctx context.Context, src <-chan bridg
 				return replayBuffer(prefix), nil
 			}
 			if ev.IsTerminal() {
-				if ev.Type == "error" {
+				if ev.RawType == "error" || ev.Type == engine.EventTypeError {
 					msg := ev.Message
 					if msg == "" {
 						msg = ev.Content
+					}
+					if msg == "" && ev.Err != nil {
+						msg = ev.Err.Error()
 					}
 					if msg == "" {
 						msg = "unknown bridge error"
@@ -230,8 +228,8 @@ func (rb *ResilientBridge) validateChannel(ctx context.Context, src <-chan bridg
 }
 
 // replayBuffer returns a closed channel preloaded with the buffered events.
-func replayBuffer(buf []bridge.Event) <-chan bridge.Event {
-	out := make(chan bridge.Event, len(buf))
+func replayBuffer(buf []engine.Event) <-chan engine.Event {
+	out := make(chan engine.Event, len(buf))
 	for _, ev := range buf {
 		out <- ev
 	}
@@ -241,8 +239,8 @@ func replayBuffer(buf []bridge.Event) <-chan bridge.Event {
 
 // proxyChannel returns a channel that emits the prefix first, then forwards
 // every event from src as it arrives. Closes when src closes.
-func proxyChannel(prefix []bridge.Event, src <-chan bridge.Event) <-chan bridge.Event {
-	out := make(chan bridge.Event, len(prefix)+16)
+func proxyChannel(prefix []engine.Event, src <-chan engine.Event) <-chan engine.Event {
+	out := make(chan engine.Event, len(prefix)+16)
 	for _, ev := range prefix {
 		out <- ev
 	}
@@ -264,10 +262,10 @@ func proxyChannel(prefix []bridge.Event, src <-chan bridge.Event) <-chan bridge.
 // chatID, threadID, and userID are extracted from the request security context by the
 // caller (Execute) and passed explicitly instead of stored on the struct to
 // avoid data races — ResilientBridge is shared across goroutines.
-func (rb *ResilientBridge) tryFallback(ctx context.Context, req bridge.Request, onNotify func(string), chatID int64, threadID int, userID int64) ExecuteResult {
+func (rb *ResilientBridge) tryFallback(ctx context.Context, req engine.Request, onNotify func(string), chatID int64, threadID int, userID int64) ExecuteResult {
 	rb.fireEvent(chatID, threadID, userID, observability.PhaseFallbackStarted, "warn",
 		fmt.Sprintf("provider=%s model=%s fallback_provider=%s",
-			req.Options.Provider, req.Options.Model, rb.config.FallbackProvider))
+			req.Provider, req.Model, rb.config.FallbackProvider))
 
 	if rb.config.OpenRouterAPIKey == "" {
 		safeNotify(onNotify, OpenRouterNotConfiguredMessage())
@@ -275,13 +273,13 @@ func (rb *ResilientBridge) tryFallback(ctx context.Context, req bridge.Request, 
 	}
 
 	fallbackReq := req
-	fallbackReq.Options.Provider = rb.config.FallbackProvider
-	fallbackReq.Options.Model = rb.config.FallbackModel
+	fallbackReq.Provider = rb.config.FallbackProvider
+	fallbackReq.Model = rb.config.FallbackModel
 	// Do NOT carry over resume/continue across providers (PI SDK limitation).
-	fallbackReq.Options.Resume = ""
-	fallbackReq.Options.Continue = false
+	fallbackReq.SessionKey = ""
+	fallbackReq.Continue = false
 
-	safeNotify(onNotify, FallbackMessage(req.Options.Provider))
+	safeNotify(onNotify, FallbackMessage(req.Provider))
 
 	log.Printf("resilience: falling back to %s/%s", rb.config.FallbackProvider, rb.config.FallbackModel)
 
@@ -302,17 +300,17 @@ func (rb *ResilientBridge) tryFallback(ctx context.Context, req bridge.Request, 
 					"Use it to continue the task.\n\n" +
 					"<fallback_context_untrusted>\n" + snapshot + "\n</fallback_context_untrusted>"
 
-				if fallbackReq.Options.SystemPrompt != "" {
-					fallbackReq.Options.SystemPrompt += snapshotBlock
+				if fallbackReq.SystemPrompt != "" {
+					fallbackReq.SystemPrompt += snapshotBlock
 				} else {
-					fallbackReq.Options.SystemPrompt = snapshotBlock
+					fallbackReq.SystemPrompt = snapshotBlock
 				}
 				log.Printf("resilience: injected continuity snapshot into fallback prompt (chat=%d thread=%d)", chatID, threadID)
 			}
 		}()
 	}
 
-	evCh, err := rb.bridge.Execute(ctx, fallbackReq)
+	evCh, err := rb.bridge.Query(ctx, fallbackReq)
 	if err != nil {
 		safeNotify(onNotify, FinalErrorMessage())
 		return ExecuteResult{Err: fmt.Errorf("fallback failed: %w", err)}
@@ -364,9 +362,9 @@ func (rb *ResilientBridge) fireEvent(chatID int64, threadID int, userID int64, p
 // context, or returns zero values when no security context is present.
 // Must be called once per Execute invocation and the results passed explicitly
 // to tryFallback to avoid data races on ResilientBridge shared state.
-func extractChatThreadUser(req bridge.Request) (chatID int64, threadID int, userID int64) {
-	if req.Options.Security != nil {
-		return req.Options.Security.ChatID, req.Options.Security.ThreadID, req.Options.Security.UserID
+func extractChatThreadUser(req engine.Request) (chatID int64, threadID int, userID int64) {
+	if req.Security != nil {
+		return req.Security.ChatID, req.Security.ThreadID, req.Security.UserID
 	}
-	return 0, 0, 0
+	return req.ChatID, req.ThreadID, req.UserID
 }

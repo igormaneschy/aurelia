@@ -8,6 +8,7 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
+	"github.com/igormaneschy/aurelia/internal/engine"
 )
 
 // fakeModelCataloger implements ModelCataloger for tests without a live bridge.
@@ -70,7 +71,7 @@ func cat(provider, model string) map[string]bool {
 //
 // Behavior assertion: Given an image request whose selected provider/model is
 // present in the model catalog with SupportsImages=true, when the pipeline
-// prepares the bridge request, then req.Options.Provider and req.Options.Model
+// prepares the bridge request, then req.Provider and req.Model
 // remain the selected values and configured vision fallback is not applied.
 func TestApplyVisionFallback_ModelSupportsImages(t *testing.T) {
 	cfg := &config.AppConfig{
@@ -84,19 +85,19 @@ func TestApplyVisionFallback_ModelSupportsImages(t *testing.T) {
 		modelCataloger: &fakeModelCataloger{supports: cat("openai", "gpt-4-vision")},
 	}
 
-	req := bridge.Request{Options: bridge.RequestOptions{
+	req := engine.Request{
 		Provider: "openai",
 		Model:    "gpt-4-vision",
-	}}
+	}
 	images := []bridge.ImageAttachment{{Path: "/tmp/test.png"}}
 
 	s.applyVisionFallback(context.Background(), &req, images)
 
-	if req.Options.Provider != "openai" {
-		t.Errorf("Provider = %q, want %q", req.Options.Provider, "openai")
+	if req.Provider != "openai" {
+		t.Errorf("Provider = %q, want %q", req.Provider, "openai")
 	}
-	if req.Options.Model != "gpt-4-vision" {
-		t.Errorf("Model = %q, want %q", req.Options.Model, "gpt-4-vision")
+	if req.Model != "gpt-4-vision" {
+		t.Errorf("Model = %q, want %q", req.Model, "gpt-4-vision")
 	}
 }
 
@@ -121,19 +122,19 @@ func TestApplyVisionFallback_ModelDoesNotSupportImages(t *testing.T) {
 			modelCataloger: &fakeModelCataloger{supports: map[string]bool{"openai:gpt-4": false}},
 		}
 
-		req := bridge.Request{Options: bridge.RequestOptions{
+		req := engine.Request{
 			Provider: "openai",
 			Model:    "gpt-4",
-		}}
+		}
 		images := []bridge.ImageAttachment{{Path: "/tmp/test.png"}}
 
 		s.applyVisionFallback(context.Background(), &req, images)
 
-		if req.Options.Model != "gpt-4-vision" {
-			t.Errorf("Model = %q, want %q", req.Options.Model, "gpt-4-vision")
+		if req.Model != "gpt-4-vision" {
+			t.Errorf("Model = %q, want %q", req.Model, "gpt-4-vision")
 		}
-		if req.Options.Provider != "openai" {
-			t.Errorf("Provider = %q, want %q", req.Options.Provider, "openai")
+		if req.Provider != "openai" {
+			t.Errorf("Provider = %q, want %q", req.Provider, "openai")
 		}
 	})
 
@@ -149,20 +150,20 @@ func TestApplyVisionFallback_ModelDoesNotSupportImages(t *testing.T) {
 			modelCataloger: &fakeModelCataloger{supports: map[string]bool{"anthropic:claude-3": false}},
 		}
 
-		req := bridge.Request{Options: bridge.RequestOptions{
+		req := engine.Request{
 			Provider: "anthropic",
 			Model:    "claude-3",
-		}}
+		}
 		images := []bridge.ImageAttachment{{Path: "/tmp/test.png"}}
 
 		s.applyVisionFallback(context.Background(), &req, images)
 
-		if req.Options.Model != "claude-3-vision" {
-			t.Errorf("Model = %q, want %q", req.Options.Model, "claude-3-vision")
+		if req.Model != "claude-3-vision" {
+			t.Errorf("Model = %q, want %q", req.Model, "claude-3-vision")
 		}
 		// Provider remains unchanged when VisionProvider is empty.
-		if req.Options.Provider != "anthropic" {
-			t.Errorf("Provider = %q, want %q (should preserve current provider)", req.Options.Provider, "anthropic")
+		if req.Provider != "anthropic" {
+			t.Errorf("Provider = %q, want %q (should preserve current provider)", req.Provider, "anthropic")
 		}
 	})
 }
@@ -188,19 +189,19 @@ func TestApplyVisionFallback_CatalogUnavailable(t *testing.T) {
 			modelCataloger: &fakeModelCataloger{err: errors.New("bridge not ready")},
 		}
 
-		req := bridge.Request{Options: bridge.RequestOptions{
+		req := engine.Request{
 			Provider: "openai",
 			Model:    "gpt-4",
-		}}
+		}
 		images := []bridge.ImageAttachment{{Path: "/tmp/test.png"}}
 
 		s.applyVisionFallback(context.Background(), &req, images)
 
-		if req.Options.Model != "gpt-4-vision" {
-			t.Errorf("Model = %q, want %q (fallback on error)", req.Options.Model, "gpt-4-vision")
+		if req.Model != "gpt-4-vision" {
+			t.Errorf("Model = %q, want %q (fallback on error)", req.Model, "gpt-4-vision")
 		}
-		if req.Options.Provider != "openai" {
-			t.Errorf("Provider = %q, want %q", req.Options.Provider, "openai")
+		if req.Provider != "openai" {
+			t.Errorf("Provider = %q, want %q", req.Provider, "openai")
 		}
 	})
 
@@ -215,16 +216,16 @@ func TestApplyVisionFallback_CatalogUnavailable(t *testing.T) {
 			modelCataloger: &fakeModelCataloger{supports: map[string]bool{}},
 		}
 
-		req := bridge.Request{Options: bridge.RequestOptions{
+		req := engine.Request{
 			Provider: "openai",
 			Model:    "gpt-4",
-		}}
+		}
 		images := []bridge.ImageAttachment{{Path: "/tmp/test.png"}}
 
 		s.applyVisionFallback(context.Background(), &req, images)
 
-		if req.Options.Model != "gpt-4-vision" {
-			t.Errorf("Model = %q, want %q (fallback on missing model)", req.Options.Model, "gpt-4-vision")
+		if req.Model != "gpt-4-vision" {
+			t.Errorf("Model = %q, want %q (fallback on missing model)", req.Model, "gpt-4-vision")
 		}
 	})
 
@@ -239,16 +240,16 @@ func TestApplyVisionFallback_CatalogUnavailable(t *testing.T) {
 			modelCataloger: nil, // no cataloger
 		}
 
-		req := bridge.Request{Options: bridge.RequestOptions{
+		req := engine.Request{
 			Provider: "openai",
 			Model:    "gpt-4",
-		}}
+		}
 		images := []bridge.ImageAttachment{{Path: "/tmp/test.png"}}
 
 		s.applyVisionFallback(context.Background(), &req, images)
 
-		if req.Options.Model != "gpt-4-vision" {
-			t.Errorf("Model = %q, want %q (fallback without cataloger)", req.Options.Model, "gpt-4-vision")
+		if req.Model != "gpt-4-vision" {
+			t.Errorf("Model = %q, want %q (fallback without cataloger)", req.Model, "gpt-4-vision")
 		}
 	})
 }
@@ -271,32 +272,32 @@ func TestApplyVisionFallback_NoImages(t *testing.T) {
 	}
 
 	t.Run("nil images", func(t *testing.T) {
-		req := bridge.Request{Options: bridge.RequestOptions{
+		req := engine.Request{
 			Provider: "openai",
 			Model:    "gpt-4",
-		}}
+		}
 		s.applyVisionFallback(context.Background(), &req, nil)
 
-		if req.Options.Model != "gpt-4" {
-			t.Errorf("Model = %q, want %q", req.Options.Model, "gpt-4")
+		if req.Model != "gpt-4" {
+			t.Errorf("Model = %q, want %q", req.Model, "gpt-4")
 		}
-		if req.Options.Provider != "openai" {
-			t.Errorf("Provider = %q, want %q", req.Options.Provider, "openai")
+		if req.Provider != "openai" {
+			t.Errorf("Provider = %q, want %q", req.Provider, "openai")
 		}
 	})
 
 	t.Run("empty images", func(t *testing.T) {
-		req := bridge.Request{Options: bridge.RequestOptions{
+		req := engine.Request{
 			Provider: "openai",
 			Model:    "gpt-4",
-		}}
+		}
 		s.applyVisionFallback(context.Background(), &req, []bridge.ImageAttachment{})
 
-		if req.Options.Model != "gpt-4" {
-			t.Errorf("Model = %q, want %q", req.Options.Model, "gpt-4")
+		if req.Model != "gpt-4" {
+			t.Errorf("Model = %q, want %q", req.Model, "gpt-4")
 		}
-		if req.Options.Provider != "openai" {
-			t.Errorf("Provider = %q, want %q", req.Options.Provider, "openai")
+		if req.Provider != "openai" {
+			t.Errorf("Provider = %q, want %q", req.Provider, "openai")
 		}
 	})
 }
@@ -321,30 +322,30 @@ func TestApplyVisionFallback_ProfileOverride(t *testing.T) {
 	}
 
 	// Profile model override (gpt-4-haiku) supports images.
-	req := bridge.Request{Options: bridge.RequestOptions{
+	req := engine.Request{
 		Provider: "anthropic",
 		Model:    "claude-3-haiku", // profile override
-	}}
+	}
 	images := []bridge.ImageAttachment{{Path: "/tmp/test.png"}}
 
 	s.applyVisionFallback(context.Background(), &req, images)
 
-	if req.Options.Model != "claude-3-haiku" {
-		t.Errorf("Model = %q, want %q (profile model should be kept)", req.Options.Model, "claude-3-haiku")
+	if req.Model != "claude-3-haiku" {
+		t.Errorf("Model = %q, want %q (profile model should be kept)", req.Model, "claude-3-haiku")
 	}
-	if req.Options.Provider != "anthropic" {
-		t.Errorf("Provider = %q, want %q", req.Options.Provider, "anthropic")
+	if req.Provider != "anthropic" {
+		t.Errorf("Provider = %q, want %q", req.Provider, "anthropic")
 	}
 }
 
 // TestApplyVisionFallback_ProviderQualifiedProfileModel verifies that a profile
 // model with a provider-qualified name (e.g. "openai/gpt-5.4") is parsed and
-// looked up correctly even when req.Options.Provider is empty (auto mode).
+// looked up correctly even when req.Provider is empty (auto mode).
 //
 // This is the most common real-world profile-override pattern:
 //   - Config is auto mode → applyConfiguredModelOptions is a no-op
 //   - Profile sets pp.Model = "openai/gpt-5.4"
-//   - req.Options.Provider="" and req.Options.Model="openai/gpt-5.4"
+//   - req.Provider="" and req.Model="openai/gpt-5.4"
 //   - The fallback must parse "openai/gpt-5.4" and check that specific model
 func TestApplyVisionFallback_ProviderQualifiedProfileModel(t *testing.T) {
 	cfg := &config.AppConfig{
@@ -361,20 +362,20 @@ func TestApplyVisionFallback_ProviderQualifiedProfileModel(t *testing.T) {
 	}
 
 	// Profile set Model to "openai/gpt-5.4" without setting Provider.
-	req := bridge.Request{Options: bridge.RequestOptions{
+	req := engine.Request{
 		Provider: "",
 		Model:    "openai/gpt-5.4",
-	}}
+	}
 	images := []bridge.ImageAttachment{{Path: "/tmp/test.png"}}
 
 	s.applyVisionFallback(context.Background(), &req, images)
 
 	// Model supports images — must be normalized to separate provider/model fields.
-	if req.Options.Provider != "openai" {
-		t.Errorf("Provider = %q, want %q (should be normalized from parsed model)", req.Options.Provider, "openai")
+	if req.Provider != "openai" {
+		t.Errorf("Provider = %q, want %q (should be normalized from parsed model)", req.Provider, "openai")
 	}
-	if req.Options.Model != "gpt-5.4" {
-		t.Errorf("Model = %q, want %q (should be normalized, without provider prefix)", req.Options.Model, "gpt-5.4")
+	if req.Model != "gpt-5.4" {
+		t.Errorf("Model = %q, want %q (should be normalized, without provider prefix)", req.Model, "gpt-5.4")
 	}
 }
 
@@ -395,16 +396,16 @@ func TestApplyVisionFallback_ProviderQualifiedModelNotFound(t *testing.T) {
 		}},
 	}
 
-	req := bridge.Request{Options: bridge.RequestOptions{
+	req := engine.Request{
 		Provider: "",
 		Model:    "openai/gpt-5.4", // not in catalog
-	}}
+	}
 	images := []bridge.ImageAttachment{{Path: "/tmp/test.png"}}
 
 	s.applyVisionFallback(context.Background(), &req, images)
 
-	if req.Options.Model != "claude-3-vision" {
-		t.Errorf("Model = %q, want %q (fallback on not found)", req.Options.Model, "claude-3-vision")
+	if req.Model != "claude-3-vision" {
+		t.Errorf("Model = %q, want %q (fallback on not found)", req.Model, "claude-3-vision")
 	}
 }
 
@@ -430,19 +431,19 @@ func TestApplyVisionFallback_UnqualifiedModelSingleMatch(t *testing.T) {
 		}},
 	}
 
-	req := bridge.Request{Options: bridge.RequestOptions{
+	req := engine.Request{
 		Provider: "",
 		Model:    "gpt-4-vision",
-	}}
+	}
 	images := []bridge.ImageAttachment{{Path: "/tmp/test.png"}}
 
 	s.applyVisionFallback(context.Background(), &req, images)
 
-	if req.Options.Model != "gpt-4-vision" {
-		t.Errorf("Model = %q, want %q (single catalog match should be kept)", req.Options.Model, "gpt-4-vision")
+	if req.Model != "gpt-4-vision" {
+		t.Errorf("Model = %q, want %q (single catalog match should be kept)", req.Model, "gpt-4-vision")
 	}
-	if req.Options.Provider != "" {
-		t.Errorf("Provider = %q, want %q (should remain empty)", req.Options.Provider, "")
+	if req.Provider != "" {
+		t.Errorf("Provider = %q, want %q (should remain empty)", req.Provider, "")
 	}
 }
 
@@ -465,16 +466,16 @@ func TestApplyVisionFallback_UnqualifiedModelAmbiguous(t *testing.T) {
 		}},
 	}
 
-	req := bridge.Request{Options: bridge.RequestOptions{
+	req := engine.Request{
 		Provider: "",
 		Model:    "gpt-4",
-	}}
+	}
 	images := []bridge.ImageAttachment{{Path: "/tmp/test.png"}}
 
 	s.applyVisionFallback(context.Background(), &req, images)
 
-	if req.Options.Model != "claude-3-vision" {
-		t.Errorf("Model = %q, want %q (fallback on ambiguous)", req.Options.Model, "claude-3-vision")
+	if req.Model != "claude-3-vision" {
+		t.Errorf("Model = %q, want %q (fallback on ambiguous)", req.Model, "claude-3-vision")
 	}
 }
 
@@ -495,16 +496,16 @@ func TestApplyVisionFallback_UnqualifiedModelNotFound(t *testing.T) {
 		}},
 	}
 
-	req := bridge.Request{Options: bridge.RequestOptions{
+	req := engine.Request{
 		Provider: "",
 		Model:    "gpt-4-vision", // not in catalog
-	}}
+	}
 	images := []bridge.ImageAttachment{{Path: "/tmp/test.png"}}
 
 	s.applyVisionFallback(context.Background(), &req, images)
 
-	if req.Options.Model != "claude-3-vision" {
-		t.Errorf("Model = %q, want %q (fallback on not found)", req.Options.Model, "claude-3-vision")
+	if req.Model != "claude-3-vision" {
+		t.Errorf("Model = %q, want %q (fallback on not found)", req.Model, "claude-3-vision")
 	}
 }
 
@@ -523,29 +524,29 @@ func TestApplyVisionFallback_RequestLocal(t *testing.T) {
 	}
 
 	// First request WITH images — fallback kicks in.
-	req1 := bridge.Request{Options: bridge.RequestOptions{
+	req1 := engine.Request{
 		Provider: "openai",
 		Model:    "gpt-4",
-	}}
+	}
 	images := []bridge.ImageAttachment{{Path: "/tmp/test.png"}}
 	s.applyVisionFallback(context.Background(), &req1, images)
 
-	if req1.Options.Model != "gpt-4-vision" {
-		t.Errorf("req1 Model = %q, want %q", req1.Options.Model, "gpt-4-vision")
+	if req1.Model != "gpt-4-vision" {
+		t.Errorf("req1 Model = %q, want %q", req1.Model, "gpt-4-vision")
 	}
 
 	// Second request WITHOUT images — defaults preserved.
-	req2 := bridge.Request{Options: bridge.RequestOptions{
+	req2 := engine.Request{
 		Provider: "openai",
 		Model:    "gpt-4",
-	}}
+	}
 	s.applyVisionFallback(context.Background(), &req2, nil)
 
-	if req2.Options.Model != "gpt-4" {
-		t.Errorf("req2 Model = %q, want %q (should be default, not fallback)", req2.Options.Model, "gpt-4")
+	if req2.Model != "gpt-4" {
+		t.Errorf("req2 Model = %q, want %q (should be default, not fallback)", req2.Model, "gpt-4")
 	}
-	if req2.Options.Provider != "openai" {
-		t.Errorf("req2 Provider = %q, want %q (should be default)", req2.Options.Provider, "openai")
+	if req2.Provider != "openai" {
+		t.Errorf("req2 Provider = %q, want %q (should be default)", req2.Provider, "openai")
 	}
 }
 
@@ -561,19 +562,19 @@ func TestApplyVisionFallback_NoFallbackConfigured(t *testing.T) {
 		modelCataloger: &fakeModelCataloger{supports: map[string]bool{"openai:gpt-4": false}},
 	}
 
-	req := bridge.Request{Options: bridge.RequestOptions{
+	req := engine.Request{
 		Provider: "openai",
 		Model:    "gpt-4",
-	}}
+	}
 	images := []bridge.ImageAttachment{{Path: "/tmp/test.png"}}
 
 	s.applyVisionFallback(context.Background(), &req, images)
 
 	// No fallback configured — nothing to switch to, model stays unchanged.
-	if req.Options.Model != "gpt-4" {
-		t.Errorf("Model = %q, want %q", req.Options.Model, "gpt-4")
+	if req.Model != "gpt-4" {
+		t.Errorf("Model = %q, want %q", req.Model, "gpt-4")
 	}
-	if req.Options.Provider != "openai" {
-		t.Errorf("Provider = %q, want %q", req.Options.Provider, "openai")
+	if req.Provider != "openai" {
+		t.Errorf("Provider = %q, want %q", req.Provider, "openai")
 	}
 }

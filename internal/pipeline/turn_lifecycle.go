@@ -9,8 +9,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/continuity"
+	"github.com/igormaneschy/aurelia/internal/engine"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 )
@@ -81,25 +81,37 @@ Updated summary (max 900 chars, no preamble):`,
 	sumCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	options := bridge.RequestOptions{
+	req := engine.Request{
+		Prompt:       prompt,
 		SystemPrompt: "You are a conversation summarizer. Output ONLY the requested summary, no preamble, no explanation. Maximum 900 characters, in the same language as the conversation (Portuguese).",
 	}
-	s.applyConfiguredModelOptions(&options)
+	s.applyConfiguredModelOptions(&req)
 
-	result, err := s.bridge.ExecuteSync(sumCtx, bridge.Request{
-		Command: "query",
-		Prompt:  prompt,
-		Options: options,
-	})
-
+	ch, err := s.engine.Query(sumCtx, req)
 	if err != nil {
 		log.Printf("summary: failed to generate progressive summary: %v", err)
 		return ""
 	}
 
+	var content string
+	for ev := range ch {
+		if ev.RawType == "result" || ev.Type == engine.EventTypeDone {
+			content = ev.ContentText()
+			break
+		}
+		if ev.RawType == "error" || ev.Type == engine.EventTypeError {
+			log.Printf("summary: engine error: %v", ev.Err)
+			return ""
+		}
+	}
+	if content == "" {
+		log.Printf("summary: no result from engine")
+		return ""
+	}
+
 	// Redact BEFORE truncation (per redaction-before-truncation.md) so
 	// secrets straddling the boundary aren't sliced in half.
-	summary := redactSecrets(strings.TrimSpace(result.Content))
+	summary := redactSecrets(strings.TrimSpace(content))
 	return runeCap(summary, continuity.MaxAssistantSummary)
 }
 
@@ -398,7 +410,7 @@ func classifyBridgeErrorOutcome(message string) (string, runlog.RunStatus, strin
 	return "failed", runlog.RunFailed, message
 }
 
-func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev bridge.Event, userID int64) Outcome {
+func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev engine.Event, userID int64) Outcome {
 	errMsg := ev.Message
 	if errMsg == "" {
 		errMsg = ev.Content

@@ -13,6 +13,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
+	"github.com/igormaneschy/aurelia/internal/engine"
 	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
@@ -80,7 +81,8 @@ type Config struct {
 // Service owns the LLM/message pipeline independent from Telegram routing.
 type Service struct {
 	config          *config.AppConfig
-	bridge          *bridge.Bridge
+	bridge          *bridge.Bridge // PI-specific: lifecycle, cancel, model catalog
+	engine          engine.Engine
 	resilient       *ResilientBridge
 	agents          *agents.Registry
 	profiles        *profiles.Resolver // Phase 1: canonical profile resolver
@@ -154,12 +156,13 @@ func NewService(cfg Config) *Service {
 	}
 
 	if cfg.Bridge != nil {
+		s.engine = bridge.NewPIAdapter(cfg.Bridge)
 		s.modelCataloger = &bridgeModelCataloger{br: cfg.Bridge, ttl: defaultModelsCacheTTL}
 		rbCfg := DefaultResilientConfig()
 		if cfg.AppConfig != nil {
 			rbCfg.OpenRouterAPIKey = cfg.AppConfig.ProviderAPIKey("openrouter")
 		}
-		s.resilient = NewResilientBridge(cfg.Bridge, rbCfg)
+		s.resilient = NewResilientBridge(s.engine, rbCfg)
 		s.resilient.ContinuitySnapshot = s.continuitySnapshot
 		s.resilient.OnEvent = func(chatID int64, threadID int, userID int64, phase, level, message string) {
 			s.recordPipelineEvent(chatID, threadID, userID, observability.RunEvent{
@@ -199,10 +202,7 @@ func (s *Service) Cancel(chatID int64, threadID int, userID ...int64) bool {
 
 	ctx, cancel := context.WithTimeout(context.Background(), bridgeCommandTimeout)
 	defer cancel()
-	_, err := s.bridge.ExecuteSync(ctx, bridge.Request{
-		Command: "abort",
-		Options: bridge.RequestOptions{ChatID: chatID, ThreadID: threadID, UserID: uid},
-	})
+	_, err := s.engine.Command(ctx, scopedAbortCommand(chatID, threadID, uid))
 	return err == nil
 }
 
@@ -252,10 +252,12 @@ func (s *Service) CancelAllForUser(userID int64) bool {
 // scopedAbortRequest builds a bridge abort request scoped to a specific
 // chat/thread/user session. This is a separate function so it can be
 // unit-tested for scope correctness without a bridge process.
-func scopedAbortRequest(chatID int64, threadID int, userID int64) bridge.Request {
-	return bridge.Request{
-		Command: "abort",
-		Options: bridge.RequestOptions{ChatID: chatID, ThreadID: threadID, UserID: userID},
+func scopedAbortCommand(chatID int64, threadID int, userID int64) engine.Command {
+	return engine.Command{
+		Name:     "abort",
+		ChatID:   chatID,
+		ThreadID: threadID,
+		UserID:   userID,
 	}
 }
 
@@ -267,7 +269,7 @@ func (s *Service) sendScopedAbort(chatID int64, threadID int, userID int64) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), bridgeCommandTimeout)
 	defer cancel()
-	_, _ = s.bridge.ExecuteSync(ctx, scopedAbortRequest(chatID, threadID, userID))
+	_, _ = s.engine.Command(ctx, scopedAbortCommand(chatID, threadID, userID))
 }
 
 // WorkStatus returns the active session status from the bridge.
@@ -287,9 +289,11 @@ func (s *Service) WorkStatus(chatID int64, threadID int, userID ...int64) (strin
 
 	ctx, cancel := context.WithTimeout(context.Background(), bridgeCommandTimeout)
 	defer cancel()
-	ev, err := s.bridge.ExecuteSync(ctx, bridge.Request{
-		Command: "get-state",
-		Options: bridge.RequestOptions{ChatID: chatID, ThreadID: threadID, UserID: uid},
+	ev, err := s.engine.Command(ctx, engine.Command{
+		Name:     "get-state",
+		ChatID:   chatID,
+		ThreadID: threadID,
+		UserID:   uid,
 	})
 	if err != nil {
 		return "", 0
