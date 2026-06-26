@@ -6,8 +6,8 @@ import (
 
 	"gopkg.in/telebot.v3"
 
-	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
+	"github.com/igormaneschy/aurelia/internal/engine"
 	"github.com/igormaneschy/aurelia/internal/session"
 )
 
@@ -32,9 +32,9 @@ func TestProcessBridgeEventsAsync_ProcessDeath_NoTerminalEvent(t *testing.T) {
 	bc := newTestBotController()
 	chat := &telebot.Chat{ID: 1}
 
-	ch := make(chan bridge.Event, 2)
-	ch <- bridge.Event{Type: "system", SessionID: "sess-1", SessionFile: "/tmp/test-session.jsonl"}
-	ch <- bridge.Event{Type: "assistant", Text: "partial response"}
+	ch := make(chan engine.Event, 2)
+	ch <- engine.Event{Type: engine.EventTypeSystem, RawType: "system", SessionID: "sess-1", SessionFile: "/tmp/test-session.jsonl"}
+	ch <- engine.Event{Type: engine.EventTypeText, RawType: "assistant", Text: "partial response"}
 	close(ch) // simulate process death — no terminal event
 
 	outcome := bc.processBridgeEventsAsync(chat, ch, noopProgress(), "test", 1)
@@ -53,7 +53,7 @@ func TestProcessBridgeEventsAsync_EmptyChannelIsDeath(t *testing.T) {
 	bc := newTestBotController()
 	chat := &telebot.Chat{ID: 1}
 
-	ch := make(chan bridge.Event)
+	ch := make(chan engine.Event)
 	close(ch) // immediate close — no events at all
 
 	outcome := bc.processBridgeEventsAsync(chat, ch, noopProgress(), "test", 1)
@@ -66,8 +66,8 @@ func TestProcessBridgeEventsAsync_SessionSetFromSystemEvent(t *testing.T) {
 	bc := newTestBotController()
 	chat := &telebot.Chat{ID: 42}
 
-	ch := make(chan bridge.Event, 1)
-	ch <- bridge.Event{Type: "system", SessionID: "sess-xyz", SessionFile: "/tmp/test-session.jsonl"}
+	ch := make(chan engine.Event, 1)
+	ch <- engine.Event{Type: engine.EventTypeSystem, RawType: "system", SessionID: "sess-xyz", SessionFile: "/tmp/test-session.jsonl"}
 	close(ch) // death after system event
 
 	bc.processBridgeEventsAsync(chat, ch, noopProgress(), "test", 1)

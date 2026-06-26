@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/igormaneschy/aurelia/internal/bridge"
+	"github.com/igormaneschy/aurelia/internal/engine"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/transport"
 )
@@ -83,7 +83,7 @@ func TestHandleResultEvent_EmptyContent_ReturnsLLMError(t *testing.T) {
 	fo := &fakeOutput{}
 	s := newTestService(fo)
 
-	ev := bridge.Event{Type: "result", Content: ""}
+	ev := engine.Event{Type: engine.EventTypeDone, RawType: "result", Content: ""}
 	var assistantText strings.Builder
 
 	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
@@ -103,7 +103,7 @@ func TestHandleResultEvent_AssistantText_EmptyResult_ReturnsSuccess(t *testing.T
 	fo := &fakeOutput{}
 	s := newTestService(fo)
 
-	ev := bridge.Event{Type: "result", Content: ""}
+	ev := engine.Event{Type: engine.EventTypeDone, RawType: "result", Content: ""}
 	var assistantText strings.Builder
 	assistantText.WriteString("Resposta acumulada.")
 
@@ -124,7 +124,7 @@ func TestHandleResultEvent_ResultContent_ReturnsSuccess(t *testing.T) {
 	fo := &fakeOutput{}
 	s := newTestService(fo)
 
-	ev := bridge.Event{Type: "result", Content: "Resposta direta do modelo."}
+	ev := engine.Event{Type: engine.EventTypeDone, RawType: "result", Content: "Resposta direta do modelo."}
 	var assistantText strings.Builder
 
 	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
@@ -143,13 +143,13 @@ func TestHandleResultEvent_ResultContent_ReturnsSuccess(t *testing.T) {
 func TestEventContent_PrefersTextOverContent(t *testing.T) {
 	tests := []struct {
 		name string
-		ev   bridge.Event
+		ev   engine.Event
 		want string
 	}{
-		{name: "both empty", ev: bridge.Event{}, want: ""},
-		{name: "content only", ev: bridge.Event{Content: "c"}, want: "c"},
-		{name: "text only", ev: bridge.Event{Text: "t"}, want: "t"},
-		{name: "text preferred", ev: bridge.Event{Text: "text", Content: "content"}, want: "text"},
+		{name: "both empty", ev: engine.Event{}, want: ""},
+		{name: "content only", ev: engine.Event{Content: "c"}, want: "c"},
+		{name: "text only", ev: engine.Event{Text: "t"}, want: "t"},
+		{name: "text preferred", ev: engine.Event{Text: "text", Content: "content"}, want: "text"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -166,7 +166,7 @@ func TestHandleResultEvent_TextContent_ReturnsSuccess(t *testing.T) {
 	s := newTestService(fo)
 
 	// eventContent prefers ev.Text over ev.Content
-	ev := bridge.Event{Type: "result", Text: "Resposta via campo Text."}
+	ev := engine.Event{Type: engine.EventTypeDone, RawType: "result", Text: "Resposta via campo Text."}
 	var assistantText strings.Builder
 
 	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
@@ -183,7 +183,7 @@ func TestHandleResultEvent_StripsPlanBlockFromNormalReply(t *testing.T) {
 	fo := &fakeOutput{}
 	s := newTestService(fo)
 
-	ev := bridge.Event{Type: "result", Content: "Vou executar.\n\n```aurelia-plan\n{\"tasks\":[{\"id\":\"T1\",\"description\":\"secret\",\"prompt\":\"internal prompt\",\"needs_worktree\":false}]}\n```"}
+	ev := engine.Event{Type: engine.EventTypeDone, RawType: "result", Content: "Vou executar.\n\n```aurelia-plan\n{\"tasks\":[{\"id\":\"T1\",\"description\":\"secret\",\"prompt\":\"internal prompt\",\"needs_worktree\":false}]}\n```"}
 	var assistantText strings.Builder
 
 	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
@@ -204,7 +204,7 @@ func TestHandleResultEvent_InvalidPlanMarkerIsNotSentRaw(t *testing.T) {
 	s := newTestService(fo)
 	s.orchestrator = orchestrator.NewOrchestrator(nil, orchestrator.OrchestratorConfig{})
 
-	ev := bridge.Event{Type: "result", Content: "Now emit plan.\n\n```aurelia-plan\n{not valid json with prompt: secret}\n```"}
+	ev := engine.Event{Type: engine.EventTypeDone, RawType: "result", Content: "Now emit plan.\n\n```aurelia-plan\n{not valid json with prompt: secret}\n```"}
 	var assistantText strings.Builder
 
 	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "pode iniciar", 100, false)

@@ -6,30 +6,30 @@ import (
 	"testing"
 	"time"
 
-	"github.com/igormaneschy/aurelia/internal/bridge"
+	"github.com/igormaneschy/aurelia/internal/engine"
 )
 
-// fakeBridge is a test double for BridgeExecutor.
-type fakeBridge struct {
-	calls     []bridge.Request
-	responses map[string][]bridge.Event
-	defaultEv bridge.Event
-	executeFn func(ctx context.Context, req bridge.Request) (<-chan bridge.Event, error)
+// fakeEngine is a test double for engine.Engine.
+type fakeEngine struct {
+	calls     []engine.Request
+	responses map[string][]engine.Event
+	defaultEv engine.Event
+	queryFn   func(ctx context.Context, req engine.Request) (<-chan engine.Event, error)
 }
 
-func newFakeBridge() *fakeBridge {
-	f := &fakeBridge{responses: make(map[string][]bridge.Event)}
-	f.executeFn = f.defaultExecute
+func newFakeEngine() *fakeEngine {
+	f := &fakeEngine{responses: make(map[string][]engine.Event)}
+	f.queryFn = f.defaultQuery
 	return f
 }
 
-func (f *fakeBridge) addResponse(prompt string, events []bridge.Event) {
+func (f *fakeEngine) addResponse(prompt string, events []engine.Event) {
 	f.responses[prompt] = events
 }
 
-func (f *fakeBridge) defaultExecute(ctx context.Context, req bridge.Request) (<-chan bridge.Event, error) {
+func (f *fakeEngine) defaultQuery(ctx context.Context, req engine.Request) (<-chan engine.Event, error) {
 	f.calls = append(f.calls, req)
-	ch := make(chan bridge.Event, 16)
+	ch := make(chan engine.Event, 16)
 	evts, ok := f.responses[req.Prompt]
 	if !ok {
 		ch <- f.defaultEv
@@ -43,18 +43,32 @@ func (f *fakeBridge) defaultExecute(ctx context.Context, req bridge.Request) (<-
 	return ch, nil
 }
 
-func (f *fakeBridge) Execute(ctx context.Context, req bridge.Request) (<-chan bridge.Event, error) {
-	return f.executeFn(ctx, req)
+func (f *fakeEngine) Query(ctx context.Context, req engine.Request) (<-chan engine.Event, error) {
+	return f.queryFn(ctx, req)
+}
+
+func (f *fakeEngine) Command(_ context.Context, _ engine.Command) (engine.Event, error) {
+	return engine.Event{}, nil
+}
+
+func (f *fakeEngine) Stats(_ context.Context, _ string, _ engine.StatsOptions) (engine.Stats, error) {
+	return engine.Stats{}, nil
+}
+
+func resultEvent(content string) engine.Event {
+	return engine.Event{Type: engine.EventTypeDone, RawType: "result", Content: content}
+}
+
+func errorEvent(message string) engine.Event {
+	return engine.Event{Type: engine.EventTypeError, RawType: "error", Message: message}
 }
 
 func TestResilientBridge_Success(t *testing.T) {
-	fb := newFakeBridge()
-	fb.addResponse("hello", []bridge.Event{
-		{Type: "result", Content: "world"},
-	})
+	fb := newFakeEngine()
+	fb.addResponse("hello", []engine.Event{resultEvent("world")})
 
 	rb := NewResilientBridge(fb, fastConfig())
-	req := bridge.Request{Prompt: "hello", Options: bridge.RequestOptions{Provider: "kimi", Model: "kimi-k2"}}
+	req := engine.Request{Prompt: "hello", Provider: "kimi", Model: "kimi-k2"}
 
 	var notify string
 	res := rb.Execute(context.Background(), req, func(msg string) { notify = msg })
@@ -71,25 +85,23 @@ func TestResilientBridge_Success(t *testing.T) {
 }
 
 func TestResilientBridge_TransientRetryThenSuccess(t *testing.T) {
-	fb := newFakeBridge()
-	// First two attempts return error, third succeeds.
+	fb := newFakeEngine()
 	attempt := 0
-	fb.defaultEv = bridge.Event{Type: "error", Message: "rate limit exceeded"}
+	fb.defaultEv = errorEvent("rate limit exceeded")
 
 	rb := NewResilientBridge(fb, ResilientConfig{
 		MaxRetries:       3,
 		RetryBackoffBase: 50 * time.Millisecond,
 	})
 
-	req := bridge.Request{Prompt: "retry-test", Options: bridge.RequestOptions{Provider: "kimi", Model: "kimi-k2"}}
+	req := engine.Request{Prompt: "retry-test", Provider: "kimi", Model: "kimi-k2"}
 
-	// Override the fake to succeed on third call
-	original := fb.executeFn
-	fb.executeFn = func(ctx context.Context, r bridge.Request) (<-chan bridge.Event, error) {
+	original := fb.queryFn
+	fb.queryFn = func(ctx context.Context, r engine.Request) (<-chan engine.Event, error) {
 		attempt++
 		if attempt >= 3 {
-			ch := make(chan bridge.Event, 2)
-			ch <- bridge.Event{Type: "result", Content: "success after retry"}
+			ch := make(chan engine.Event, 2)
+			ch <- resultEvent("success after retry")
 			close(ch)
 			return ch, nil
 		}
@@ -106,28 +118,26 @@ func TestResilientBridge_TransientRetryThenSuccess(t *testing.T) {
 }
 
 func TestResilientBridge_CircuitBreakerOpens(t *testing.T) {
-	fb := newFakeBridge()
-	fb.defaultEv = bridge.Event{Type: "error", Message: "rate limit exceeded"}
+	fb := newFakeEngine()
+	fb.defaultEv = errorEvent("rate limit exceeded")
 
 	cfg := fastConfig()
 	cfg.OpenRouterAPIKey = "sk-test"
 	rb := NewResilientBridge(fb, cfg)
 
-	req := bridge.Request{Prompt: "fail", Options: bridge.RequestOptions{Provider: "kimi", Model: "kimi-k2"}}
+	req := engine.Request{Prompt: "fail", Provider: "kimi", Model: "kimi-k2"}
 
-	// Override to return success on fallback (openrouter)
-	original := fb.executeFn
-	fb.executeFn = func(ctx context.Context, r bridge.Request) (<-chan bridge.Event, error) {
-		if r.Options.Provider == "openrouter" {
-			ch := make(chan bridge.Event, 2)
-			ch <- bridge.Event{Type: "result", Content: "fallback success"}
+	original := fb.queryFn
+	fb.queryFn = func(ctx context.Context, r engine.Request) (<-chan engine.Event, error) {
+		if r.Provider == "openrouter" {
+			ch := make(chan engine.Event, 2)
+			ch <- resultEvent("fallback success")
 			close(ch)
 			return ch, nil
 		}
 		return original(ctx, r)
 	}
 
-	// Trigger failures to open circuit
 	for i := 0; i < circuitFailureThreshold; i++ {
 		rb.Execute(context.Background(), req, nil)
 	}
@@ -136,7 +146,6 @@ func TestResilientBridge_CircuitBreakerOpens(t *testing.T) {
 		t.Fatal("circuit should be open")
 	}
 
-	// Next request should skip to fallback
 	var notifyMsg string
 	res := rb.Execute(context.Background(), req, func(msg string) { notifyMsg = msg })
 
@@ -155,14 +164,14 @@ func fastConfig() ResilientConfig {
 }
 
 func TestResilientBridge_FallbackWithoutOpenRouterKey(t *testing.T) {
-	fb := newFakeBridge()
-	fb.defaultEv = bridge.Event{Type: "error", Message: "rate limit exceeded"}
+	fb := newFakeEngine()
+	fb.defaultEv = errorEvent("rate limit exceeded")
 
 	cfg := fastConfig()
-	cfg.OpenRouterAPIKey = "" // disabled
+	cfg.OpenRouterAPIKey = ""
 	rb := NewResilientBridge(fb, cfg)
 
-	req := bridge.Request{Prompt: "fail", Options: bridge.RequestOptions{Provider: "kimi", Model: "kimi-k2"}}
+	req := engine.Request{Prompt: "fail", Provider: "kimi", Model: "kimi-k2"}
 
 	var notifyMsg string
 	res := rb.Execute(context.Background(), req, func(msg string) { notifyMsg = msg })
@@ -176,13 +185,11 @@ func TestResilientBridge_FallbackWithoutOpenRouterKey(t *testing.T) {
 }
 
 func TestResilientBridge_NonRetryableError(t *testing.T) {
-	fb := newFakeBridge()
-	fb.addResponse("auth-fail", []bridge.Event{
-		{Type: "error", Message: "Invalid API key"},
-	})
+	fb := newFakeEngine()
+	fb.addResponse("auth-fail", []engine.Event{errorEvent("Invalid API key")})
 
 	rb := NewResilientBridge(fb, fastConfig())
-	req := bridge.Request{Prompt: "auth-fail", Options: bridge.RequestOptions{Provider: "kimi", Model: "kimi-k2"}}
+	req := engine.Request{Prompt: "auth-fail", Provider: "kimi", Model: "kimi-k2"}
 
 	var notifyMsg string
 	res := rb.Execute(context.Background(), req, func(msg string) { notifyMsg = msg })
@@ -199,25 +206,20 @@ func TestResilientBridge_NonRetryableError(t *testing.T) {
 }
 
 func TestResilientBridge_FallbackSuccess(t *testing.T) {
-	fb := newFakeBridge()
-	fb.addResponse("primary-fail", []bridge.Event{
-		{Type: "error", Message: "rate limit exceeded"},
-	})
-	// Fallback request uses same prompt but different provider — our fake matches by prompt.
-	// We'll override Execute to distinguish by provider.
+	fb := newFakeEngine()
+	fb.addResponse("primary-fail", []engine.Event{errorEvent("rate limit exceeded")})
 
 	cfg := fastConfig()
 	cfg.OpenRouterAPIKey = "sk-test"
 	rb := NewResilientBridge(fb, cfg)
 
-	req := bridge.Request{Prompt: "primary-fail", Options: bridge.RequestOptions{Provider: "kimi", Model: "kimi-k2"}}
+	req := engine.Request{Prompt: "primary-fail", Provider: "kimi", Model: "kimi-k2"}
 
-	// Override to return success when provider is openrouter
-	original := fb.executeFn
-	fb.executeFn = func(ctx context.Context, r bridge.Request) (<-chan bridge.Event, error) {
-		if r.Options.Provider == "openrouter" {
-			ch := make(chan bridge.Event, 2)
-			ch <- bridge.Event{Type: "result", Content: "fallback result"}
+	original := fb.queryFn
+	fb.queryFn = func(ctx context.Context, r engine.Request) (<-chan engine.Event, error) {
+		if r.Provider == "openrouter" {
+			ch := make(chan engine.Event, 2)
+			ch <- resultEvent("fallback result")
 			close(ch)
 			return ch, nil
 		}
@@ -234,21 +236,18 @@ func TestResilientBridge_FallbackSuccess(t *testing.T) {
 }
 
 func TestResilientBridge_AllRetriesFail(t *testing.T) {
-	fb := newFakeBridge()
-	fb.addResponse("always-fail", []bridge.Event{
-		{Type: "error", Message: "rate limit exceeded"},
-	})
+	fb := newFakeEngine()
+	fb.addResponse("always-fail", []engine.Event{errorEvent("rate limit exceeded")})
 
 	cfg := fastConfig()
 	cfg.OpenRouterAPIKey = "sk-test"
 	rb := NewResilientBridge(fb, cfg)
 
-	req := bridge.Request{Prompt: "always-fail", Options: bridge.RequestOptions{Provider: "kimi", Model: "kimi-k2"}}
+	req := engine.Request{Prompt: "always-fail", Provider: "kimi", Model: "kimi-k2"}
 
-	// Fallback also fails
-	fb.executeFn = func(ctx context.Context, r bridge.Request) (<-chan bridge.Event, error) {
-		ch := make(chan bridge.Event, 2)
-		ch <- bridge.Event{Type: "error", Message: "fallback also down"}
+	fb.queryFn = func(ctx context.Context, r engine.Request) (<-chan engine.Event, error) {
+		ch := make(chan engine.Event, 2)
+		ch <- errorEvent("fallback also down")
 		close(ch)
 		return ch, nil
 	}
@@ -263,17 +262,15 @@ func TestResilientBridge_AllRetriesFail(t *testing.T) {
 }
 
 func TestResilientBridge_CancelDuringRetry(t *testing.T) {
-	fb := newFakeBridge()
-	fb.addResponse("slow", []bridge.Event{
-		{Type: "error", Message: "rate limit exceeded"},
-	})
+	fb := newFakeEngine()
+	fb.addResponse("slow", []engine.Event{errorEvent("rate limit exceeded")})
 
 	rb := NewResilientBridge(fb, ResilientConfig{
 		MaxRetries:       3,
-		RetryBackoffBase: 10 * time.Second, // long backoff
+		RetryBackoffBase: 10 * time.Second,
 	})
 
-	req := bridge.Request{Prompt: "slow", Options: bridge.RequestOptions{Provider: "kimi", Model: "kimi-k2"}}
+	req := engine.Request{Prompt: "slow", Provider: "kimi", Model: "kimi-k2"}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -288,16 +285,15 @@ func TestResilientBridge_CancelDuringRetry(t *testing.T) {
 }
 
 func TestResilientBridge_ProcessDeathOutcome(t *testing.T) {
-	fb := newFakeBridge()
-	// Simulate process death: closed channel with no terminal event
-	fb.executeFn = func(ctx context.Context, r bridge.Request) (<-chan bridge.Event, error) {
-		ch := make(chan bridge.Event)
+	fb := newFakeEngine()
+	fb.queryFn = func(ctx context.Context, r engine.Request) (<-chan engine.Event, error) {
+		ch := make(chan engine.Event)
 		close(ch)
 		return ch, nil
 	}
 
 	rb := NewResilientBridge(fb, fastConfig())
-	req := bridge.Request{Prompt: "death", Options: bridge.RequestOptions{Provider: "kimi", Model: "kimi-k2"}}
+	req := engine.Request{Prompt: "death", Provider: "kimi", Model: "kimi-k2"}
 
 	res := rb.Execute(context.Background(), req, nil)
 	if res.Err == nil {
@@ -306,32 +302,28 @@ func TestResilientBridge_ProcessDeathOutcome(t *testing.T) {
 }
 
 func TestResilientBridge_FallbackResetsSession(t *testing.T) {
-	fb := newFakeBridge()
-	fb.addResponse("session-test", []bridge.Event{
-		{Type: "error", Message: "rate limit exceeded"},
-	})
+	fb := newFakeEngine()
+	fb.addResponse("session-test", []engine.Event{errorEvent("rate limit exceeded")})
 
 	cfg := fastConfig()
 	cfg.OpenRouterAPIKey = "sk-test"
 	rb := NewResilientBridge(fb, cfg)
 
-	req := bridge.Request{
-		Prompt: "session-test",
-		Options: bridge.RequestOptions{
-			Provider: "kimi",
-			Model:    "kimi-k2",
-			Resume:   "sess-123",
-			Continue: true,
-		},
+	req := engine.Request{
+		Prompt:     "session-test",
+		Provider:   "kimi",
+		Model:      "kimi-k2",
+		SessionKey: "sess-123",
+		Continue:   true,
 	}
 
-	var captured bridge.Request
-	original := fb.executeFn
-	fb.executeFn = func(ctx context.Context, r bridge.Request) (<-chan bridge.Event, error) {
-		if r.Options.Provider == "openrouter" {
+	var captured engine.Request
+	original := fb.queryFn
+	fb.queryFn = func(ctx context.Context, r engine.Request) (<-chan engine.Event, error) {
+		if r.Provider == "openrouter" {
 			captured = r
-			ch := make(chan bridge.Event, 2)
-			ch <- bridge.Event{Type: "result", Content: "fallback"}
+			ch := make(chan engine.Event, 2)
+			ch <- resultEvent("fallback")
 			close(ch)
 			return ch, nil
 		}
@@ -340,10 +332,10 @@ func TestResilientBridge_FallbackResetsSession(t *testing.T) {
 
 	rb.Execute(context.Background(), req, nil)
 
-	if captured.Options.Resume != "" {
-		t.Error("fallback request should clear resume")
+	if captured.SessionKey != "" {
+		t.Error("fallback request should clear session key")
 	}
-	if captured.Options.Continue {
+	if captured.Continue {
 		t.Error("fallback request should clear continue")
 	}
 }

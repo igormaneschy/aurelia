@@ -3,14 +3,14 @@ package pipeline
 import (
 	"strings"
 
-	"github.com/igormaneschy/aurelia/internal/bridge"
+	"github.com/igormaneschy/aurelia/internal/engine"
 )
 
 const maxToolSummaryChars = 2000
 
 // emptyResultHadWork returns true when the bridge result event shows evidence
 // of processor work (turns, tokens, or cost) despite having no output text.
-func emptyResultHadWork(ev bridge.Event) bool {
+func emptyResultHadWork(ev engine.Event) bool {
 	return ev.NumTurns > 0 || ev.InputTokens > 0 || ev.OutputTokens > 0 || ev.CostUSD > 0
 }
 
