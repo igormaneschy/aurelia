@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.35.0 - 2026-06-26
+
+### Added
+- **`internal/engine` package** — interface `Engine` (`Query`, `Command`, `Stats`) desacopla a pipeline do protocolo PI
+- **`PIAdapter`** — implementação em `internal/bridge/adapter.go` traduz `engine.Request`/`engine.Event` para o bridge NDJSON
+- **`NoopEngine` / `MockEngine`** — test doubles configuráveis para testes da pipeline e resilient bridge
+
+### Changed
+- **Pipeline migrada para `engine.Engine`** — `buildBridgeRequest`, `ProcessBridgeEvents`, `ResilientBridge` e lifecycle usam tipos engine em vez de `bridge.Request`/`bridge.Event`
+- **Comandos síncronos** — abort, steer, follow-up e get-state passam por `engine.Command` via `PIAdapter`
+- **`*bridge.Bridge` mantido** — apenas para APIs PI-specific (rotate, compact, cancel, model catalog, session stats)
+
 ## v0.34.0 - 2026-06-26
 
 ### Added
