@@ -46,6 +46,7 @@ type chromeModel struct {
 	streamProgress    streamProgress
 	attachProgress    attachProgress
 	animations        animState
+	activeTools       []toolInfo
 
 	styles themeStyles
 	theme  Theme

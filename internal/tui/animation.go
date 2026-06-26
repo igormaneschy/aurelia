@@ -36,6 +36,8 @@ type animState struct {
 type ModelOptions struct {
 	NoAnimations bool
 	NoMouse      bool
+	// StartupSession opens this named session on connect (empty = default DM).
+	StartupSession string
 }
 
 func animationsEnabledForTerm(term string, noAnimations bool) bool {

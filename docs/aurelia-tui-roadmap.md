@@ -1,8 +1,8 @@
 # Aurelia TUI — Plano de Implementação
 
 **Sprint:** J (pós Auto-Skills)
-**Status:** 🟢 Fases 0–4 e 4.5 concluídas e mergeadas em `main`. **Fase 5 — Polish e Distribuição** é o próximo marco.
-**Versão atual:** `v0.28.0`
+**Status:** ✅ Sprint J concluído — Fases 0–5 mergeadas em `main`.
+**Versão actual:** `v0.34.0` (Fase 5 — polish, distribuição, tool activity)
 **Depende de:** Sprint E (Project Memory), Sprint F (Wiki Memory Gateway)
 **Desbloqueia:** Interface alternativa ao Telegram, onboarding sem bot, uso em contexto de terminal/IDE
 
@@ -404,19 +404,19 @@ trabalho focado no terminal.
 Melhorias na forma como o utilizador interage com a TUI.
 
 **Tasks:**
-- [ ] **Mouse toggle (`ctrl+m`)**: ligar/desligar captura de mouse.
+- [x] **Mouse toggle (`ctrl+o`)**: ligar/desligar captura de mouse (opt-in por defeito).
   - Quando ligado: scroll no viewport funciona.
   - Quando desligado: seleção nativa de texto do terminal funciona.
   - Estado guardado na sessão atual (não persistente).
-- [ ] **Fila de mensagens**: permitir enviar uma segunda mensagem
+- [x] **Fila de mensagens**: permitir enviar uma segunda mensagem
   enquanto a primeira está em streaming.
   - Mensagens pendentes são enfileiradas no modelo da TUI.
   - Badge visual `⏳ N pending` acima do input.
   - Próxima mensagem é enviada automaticamente após `stream_end`.
   - `esc` cancela apenas o turno atual; a fila continua.
-- [ ] **Histórico persistente de input**: guardar input history em
+- [x] **Histórico persistente de input**: guardar input history em
   `~/.aurelia/tui_history.json` e carregar no startup.
-- [ ] **Auto-complete de comandos**: `tab` ou `?` mostra sugestões
+- [x] **Auto-complete de comandos**: `tab` mostra sugestões
   quando o input começa com `/`.
 
 **Critério de saída:** consegues desligar o mouse para copiar texto,
@@ -430,15 +430,15 @@ histórico de input entre execuções.
 Melhorias visuais e de descoberta de funcionalidades.
 
 **Tasks:**
-- [ ] **Tema claro/escuro**: detectar `$TERM_PROGRAM`, `$COLORTERM` e
+- [x] **Tema claro/escuro**: detectar `$TERM_PROGRAM`, `$COLORTERM` e
   preferência do sistema; permitir override via `--theme` ou config.
-- [ ] **Status bar enriquecida**: mostrar modelo ativo, estado do
+- [x] **Status bar enriquecida**: mostrar modelo ativo, estado do
   daemon, contagem de mensagens pendentes, e duração do turno.
-- [ ] **Help overlay (`?`)**: painel flutuante com keybindings e
+- [x] **Help overlay (F1)**: painel flutuante com keybindings e
   comandos, sem sair da conversa.
-- [ ] **Indicadores de estado do daemon**: transição visual clara entre
+- [x] **Indicadores de estado do daemon**: transição visual clara entre
   online/offline/reconnecting no header e na status bar.
-- [ ] **Separação visual mais forte entre mensagens**: alternância
+- [x] **Separação visual mais forte entre mensagens**: divisores subtis
   sutil de background ou bordas para facilitar leitura longa.
 
 **Critério de saída:** a TUI adapta-se ao tema do terminal, mostra
@@ -454,13 +454,13 @@ Tornar o `aurelia-tui` distribuível e fácil de instalar.
 **Tasks:**
 - [x] Mouse support (`tea.WithMouseCellMotion()` + scroll no viewport)
 - [x] Resize handling básico (terminal window resize)
-- [ ] **`--session` flag**: `aurelia-tui --session tui:work` abre
+- [x] **`--session` flag**: `aurelia-tui --session tui:work` abre
   directamente na sessão indicada, criando-a se não existir.
-- [ ] **Build targets**: `linux/amd64`, `linux/arm64`, `darwin/amd64`,
-  `darwin/arm64`.
-- [ ] **`go install`**: `go install github.com/igormaneschy/aurelia/cmd/aurelia-tui@latest`.
-- [ ] **`make tui`**: target no Makefile para build do binary TUI.
-- [ ] **Release pipeline**: produzir artifacts para as 4 arquiteturas.
+- [x] **Build targets**: `linux/amd64`, `linux/arm64`, `darwin/amd64`,
+  `darwin/arm64` (`make tui-all`).
+- [x] **`go install`**: `go install github.com/igormaneschy/aurelia/cmd/aurelia-tui@latest`.
+- [x] **`make tui`**: target no Makefile para build do binary TUI.
+- [x] **Release pipeline**: CI matrix produz artifacts para as 4 arquiteturas.
 
 **Critério de saída:** `make tui` compila o binary; `go install`
 instala; `--session tui:work` abre a sessão correcta; CI gera
@@ -489,11 +489,10 @@ Sprint J: TUI ← AQUI                        🟢 em progresso
   ├─ Fase 4.5: Image Input / Vision (3-4d)   ✅ v0.27.x → v0.28.0
   ├─ Fase 4: Painel de Estado do Projeto (3d) ✅ (este commit)
   ├─ Fase 4.6: Document Attachments (3-4d)   ✅ v0.29.0+ (feature branch)
-  └─ Fase 5: Polish + Distribuição (5-7d)    🔜
-       ├─ 5.1: Input & Interaction Polish (2-3d)
-       ├─ 5.2: Visual Polish & Theming (2-3d)
-       └─ 5.3: Distribution & Build (1-2d)
-     Total estimado restante: ~2 semanas
+  └─ Fase 5: Polish + Distribuição (5-7d)    ✅ v0.34.0
+       ├─ 5.1: Input & Interaction Polish     ✅
+       ├─ 5.2: Visual Polish & Theming          ✅
+       └─ 5.3: Distribution & Build           ✅
 ```
 
 **Nota:** A Fase 0 (Transport Abstraction) pode e deve ser feita **antes** do Sprint J — idealmente junto com o Sprint D0 ou E, porque não tem risco de regressão e a refactorização vai ser necessária de qualquer forma.
@@ -520,4 +519,4 @@ Sprint J: TUI ← AQUI                        🟢 em progresso
 - [x] Envio de imagens funciona (`/img`, `ctrl+v` clipboard, drag-drop) com modelo vision
 - [x] Nenhuma regressão no Telegram transport
 - [x] `go build ./... && go vet ./... && go test ./...` limpo
-- [ ] Funciona em macOS (darwin/arm64) e Linux (amd64/arm64)
+- [x] Funciona em macOS (darwin/arm64) e Linux (amd64/arm64)

@@ -361,6 +361,10 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.sidebarCursor >= len(m.sessions) {
 				m.sidebarCursor = maxInt(0, len(m.sessions)-1)
 			}
+			if cmd := m.startupSessionCmd(); cmd != nil {
+				m.startupSessionPending = false
+				return m, tea.Batch(unreadCmd, cmd)
+			}
 			return m, unreadCmd
 		}
 		return m, nil
@@ -1305,6 +1309,11 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
 
 	case "stream_chunk":
+		if toolName, ok := parseToolChunk(event.Body); ok {
+			m.activeTools = append(m.activeTools, toolInfo{Name: toolName, Detail: toolName})
+			vpCmd := m.updateViewport()
+			return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd(), vpCmd)
+		}
 		var animCmd tea.Cmd
 		if m.streamBuf == "" && event.Body != "" {
 			animCmd = m.animations.onStreamStart()
@@ -1329,6 +1338,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 		// Terminal event — stream complete.
 		animCmd := m.animations.onStreamEnd()
 		m.waiting = false
+		m.activeTools = nil
 		m.resetAttachProgress()
 		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
@@ -1345,6 +1355,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 	case "error":
 		// Terminal event — error.
 		m.waiting = false
+		m.activeTools = nil
 		m.resetAttachProgress()
 		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()

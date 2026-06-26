@@ -17,9 +17,18 @@ import (
 
 func main() {
 	themeFlag := flag.String("theme", "auto", "TUI theme: auto, light, or dark")
+	sessionFlag := flag.String("session", "", "Open this session on startup (e.g. work or tui:work; dm = default)")
 	noAnimations := flag.Bool("no-animations", false, "Disable TUI animations")
 	noMouse := flag.Bool("no-mouse", false, "Disable mouse interaction (Ctrl+O has no effect)")
 	flag.Parse()
+
+	startupSession := tui.ParseStartupSessionFlag(*sessionFlag)
+	if startupSession != "" {
+		if err := tui.ValidateStartupSessionName(startupSession); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: invalid --session %q: %v\n", startupSession, err)
+			os.Exit(1)
+		}
+	}
 
 	theme := tui.ParseTheme(*themeFlag)
 	switch theme {
@@ -43,8 +52,9 @@ func main() {
 	// Mouse capture is opt-in via Ctrl+O so native terminal text selection works
 	// by default.
 	m := tui.NewModelWithOptions(socketPath, theme, tui.ModelOptions{
-		NoAnimations: *noAnimations,
-		NoMouse:      *noMouse,
+		NoAnimations:   *noAnimations,
+		NoMouse:        *noMouse,
+		StartupSession: startupSession,
 	})
 	p := tea.NewProgram(m)
 
