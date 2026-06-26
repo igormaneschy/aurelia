@@ -14,7 +14,7 @@ TUI_BINARY    := $(HOME)/.aurelia/bin/aurelia-tui
 TUI_PKG       := ./cmd/aurelia-tui
 TUI_TMP       := $(TUI_BINARY).new
 
-.PHONY: help build test race vet lint sec cover check bridge install tui install-tui install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
+.PHONY: help build test race vet lint sec cover check bridge install tui tui-all install-tui install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
 
 help:
 	@echo "Common targets:"
@@ -28,6 +28,7 @@ help:
 	@echo "  make check            Run lint, security, tests, and vet"
 	@echo "  make bridge           Rebuild the TS bridge bundle"
 	@echo "  make tui              Compile the TUI binary to $(TUI_BINARY)"
+	@echo "  make tui-all          Cross-compile TUI for linux/darwin amd64+arm64"
 	@echo ""
 	@echo "Service targets:"
 	@echo "  make install-service     Auto-detect OS and install service"
@@ -65,6 +66,15 @@ install:
 tui:
 	mkdir -p $(dir $(TUI_BINARY))
 	go build -o $(TUI_BINARY) $(TUI_PKG)
+
+TUI_DIST := dist/aurelia-tui
+
+tui-all:
+	mkdir -p dist
+	GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o $(TUI_DIST)-linux-amd64 $(TUI_PKG)
+	GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o $(TUI_DIST)-linux-arm64 $(TUI_PKG)
+	GOOS=darwin GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o $(TUI_DIST)-darwin-amd64 $(TUI_PKG)
+	GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o $(TUI_DIST)-darwin-arm64 $(TUI_PKG)
 
 # Atomic build: same .new → mv pattern as install to avoid half-written files.
 install-tui:

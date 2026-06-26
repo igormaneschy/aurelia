@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.34.0 - 2026-06-26
+
+### Added
+- **TUI tool activity panel** — mostra ferramentas activas (Bash, Read, Write, etc.) durante streaming
+- **Flag `--session`** — `aurelia-tui --session work` abre ou cria sessão ao arrancar
+- **`make tui-all`** — cross-compile para linux/darwin × amd64/arm64
+- **CI artifacts TUI** — matrix GitHub Actions com binaries por arquitectura
+
+### Changed
+- **Divisores no transcript** — separação visual subtíl entre mensagens consecutivas
+- **Roadmap TUI** — Sprint J / Fase 5 marcado como concluído
+
 ## v0.33.0 - 2026-06-25
 
 ### Added

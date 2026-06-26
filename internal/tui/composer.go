@@ -53,6 +53,9 @@ func (m Model) renderInput() string {
 	if attachmentBadges != "" {
 		badgeLines = append(badgeLines, attachmentBadges)
 	}
+	if toolBar := m.renderToolActivity(); toolBar != "" {
+		badgeLines = append(badgeLines, toolBar)
+	}
 	if pendingBadge := m.renderPendingQueueBadge(); pendingBadge != "" {
 		badgeLines = append(badgeLines, pendingBadge)
 	}

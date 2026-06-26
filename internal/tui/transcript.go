@@ -144,6 +144,8 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 	for i, msg := range messages {
 		globalIndex := pageStart + i
 		if i > 0 {
+			b.WriteString("\n")
+			b.WriteString(m.styles.MessageDividerStyle.Render(strings.Repeat("·", maxInt(20, width-4))))
 			b.WriteString("\n\n")
 		}
 

@@ -84,6 +84,10 @@ type Model struct {
 	// App lifecycle
 	err   error
 	ready bool
+
+	// --session flag: open or create this session after the daemon connects.
+	startupSession        string
+	startupSessionPending bool
 }
 
 // NewModel creates a new TUI model with the given socket path and theme.
@@ -113,7 +117,7 @@ func newModel(socketPath, historyPath string, theme Theme, opts ModelOptions) Mo
 	inputHistory := loadInputHistory(historyPath)
 
 	styles := newStylesForTheme(theme)
-	return Model{
+	m := Model{
 		state:      stateLoading,
 		socketPath: socketPath,
 		ipcClient:  ipc.NewClient(socketPath),
@@ -142,6 +146,11 @@ func newModel(socketPath, historyPath string, theme Theme, opts ModelOptions) Mo
 		},
 		activeSession: ipc.ReservedTUIChatID,
 	}
+	if session := ParseStartupSessionFlag(opts.StartupSession); session != "" {
+		m.startupSession = session
+		m.startupSessionPending = true
+	}
+	return m
 }
 
 // Init implements tea.Model.
