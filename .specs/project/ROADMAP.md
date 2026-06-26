@@ -14,7 +14,7 @@ Estas features já foram implementadas ou têm validação registrada. Elas são
 | UX Polish | `.specs/features/ux-polish/` | Mostly validated | Ack, queue/status/progress polish, better errors and help |
 | **Security Guard-Rails** | `.specs/features/security-guard-rails/` | **✅ 100%** | CapabilityProfile, policy engine, bridge hooks, audit, 44 tests. Profiles: observe→privileged. Fail-closed. |
 | **Persistent Project Binding** | `.specs/features/project-binding/` | **✅ 95%** | SQLite store, `/cwd` persistente via restart, fallback tópico→grupo, pipeline resolve. Só falta integração com User Isolation. |
-| **TUI MVP** | `docs/aurelia-tui-roadmap.md` | **✅ Fase 2** | `aurelia-tui`, Unix socket IPC streaming, `/cwd`/`/status`, sidebar/status chrome e UX hardening inicial. |
+| **TUI** | `docs/aurelia-tui-roadmap.md` | **✅ Sprint J** | `aurelia-tui`, IPC peer auth, multi-sessão, vision, attachments, Charm v2, tool activity (`v0.35.0`). |
 
 ---
 
@@ -366,7 +366,7 @@ boundary established in Sprint 0 (Delegate to PI SDK).
 ## 12. TUI (Terminal User Interface)
 
 **Spec:** `docs/aurelia-tui-roadmap.md` + `.specs/features/tui-transport-abstraction/`
-**Status:** ✅ Fase 2 MVP implementada em `feature/tui-mvp`; Fases 3–5 pendentes
+**Status:** ✅ Sprint J completo — Fases 0–5 mergeadas em `main` (`v0.35.0`)
 **Depende de:** TUI — Transport Abstraction (Fase 0, ✅) + Context-Scoped Memory (Sprint E, ✅) + Memory Boundary Realignment (Sprint F, ✅) + Session/Profile Operability (Sprint G, ✅)
 
 **Problem:** o Telegram é hoje o único ponto de entrada conversacional da Aurelia. Isso cria fricção no contexto de terminal, sessões não retomáveis cross-surface e dependência de conectividade externa.
@@ -375,9 +375,10 @@ boundary established in Sprint 0 (Delegate to PI SDK).
 
 - IPC layer via Unix socket para comunicação com daemon (Fase 1);
 - TUI MVP com Bubble Tea: sidebar, viewport, input, streaming (Fase 2);
-- multi-sessão local + retomada de sessões Telegram (Fase 3);
-- painel de estado do projeto (cwd, artefatos, checkpoints) (Fase 4);
-- polish: temas, mouse, resize, flags `--session`/`--attach` (Fase 5).
+- multi-sessão local com namespace reservado (Fase 3);
+- painel de estado do projeto (cwd, memória, checkpoints) (Fase 4);
+- image input, document attachments, polish Charm v2, `--session`, tool activity (Fases 4.5–5);
+- IPC peer UID auth (`SO_PEERCRED` / `LOCAL_PEERCRED`) (Fase 1, concluída).
 
 **Decisão:** Unix socket + JSON lines no MVP; gRPC em P2. Bubble Tea/Lipgloss/Bubbles/Glamour v1 no MVP para reduzir risco de migração de module paths; migração Charm v2 fica para polish/distribuição. Binary separado `aurelia-tui`.
 
@@ -421,7 +422,7 @@ D0. Memory Contract & Spec Hygiene ✅
   11. TUI — Transport Abstraction (Fase 0) ✅
        │
        ▼
-  12. TUI (Terminal User Interface) ✅ Fase 2 / 🟡 Fases 3–5
+  12. TUI (Terminal User Interface) ✅
 ```
 
 ## Mapa de implementação por sprint
@@ -520,13 +521,14 @@ Sprint H: Learning Nudge ✅ (v0.9.0–v0.21.1)
   ├─ ✅ redaction + profile edit_project
   └─ ✅ sugestões/updates escopados; Wiki transversal só via PI + ai-memory quando configurado
 
-Sprint K: TUI
-  ├─ ✅ Fase 0: Transport Abstraction (~2d) — implementado em `feature/tui-transport-abstraction`
-  ├─ ✅ Fase 1: IPC Layer (3d) — Unix socket JSON lines em produção local
-  ├─ ✅ Fase 2: TUI MVP (5d) — `feature/tui-mvp`
-  ├─ Fase 3: Multi-sessão (4d)
-  ├─ Fase 4: Painel de Estado do Projeto (3d) - cwd, artefatos, checkpoints
-  └─ Fase 5: Polish + Distribuição (3d)
+Sprint K: TUI ✅ (v0.27.1–v0.35.0)
+  ├─ ✅ Fase 0: Transport Abstraction
+  ├─ ✅ Fase 1: IPC Layer + peer UID auth
+  ├─ ✅ Fase 2: TUI MVP
+  ├─ ✅ Fase 3: Multi-sessão local
+  ├─ ✅ Fase 4: Painel de Estado do Projeto
+  ├─ ✅ Fases 4.5–4.6: Image input + document attachments
+  └─ ✅ Fase 5: Polish Charm v2, distribuição, tool activity
 ```
 
 ## Nota de implementação incremental

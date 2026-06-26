@@ -2,7 +2,7 @@
 
 **Sprint:** J (pós Auto-Skills)
 **Status:** ✅ Sprint J concluído — Fases 0–5 mergeadas em `main`.
-**Versão actual:** `v0.34.0` (Fase 5 — polish, distribuição, tool activity)
+**Versão actual:** `v0.35.0` (Sprint J completo + IPC peer UID auth)
 **Depende de:** Sprint E (Project Memory), Sprint F (Wiki Memory Gateway)
 **Desbloqueia:** Interface alternativa ao Telegram, onboarding sem bot, uso em contexto de terminal/IDE
 
@@ -135,11 +135,11 @@ partilhados.
 *Pré-requisito para tudo. Sem esta fase, a TUI não é possível.*
 
 **Tasks:**
-- [ ] Definir `Transport` interface em `internal/transport/`
-- [ ] Refactorizar `internal/telegram/` para implementar `TelegramTransport`
-- [ ] Injectar transport no pipeline via DI (sem mudar comportamento)
-- [ ] Testes: `MockTransport` para testes de pipeline existentes
-- [ ] `go build ./... && go test ./...` limpo
+- [x] Definir `Transport` interface em `internal/transport/`
+- [x] Refactorizar `internal/telegram/` para implementar `TelegramTransport`
+- [x] Injectar transport no pipeline via DI (sem mudar comportamento)
+- [x] Testes: `MockTransport` para testes de pipeline existentes
+- [x] `go build ./... && go test ./...` limpo
 
 **Critério de saída:** pipeline funciona identicamente ao actual, Telegram ainda funciona, mas agora aceita qualquer `Transport`
 
@@ -179,7 +179,7 @@ type IPCEvent struct {
 - [x] `internal/ipc/server.go` — Unix socket listener no daemon (`~/.aurelia/aurelia.sock`)
 - [x] `internal/ipc/client.go` — cliente para a TUI usar
 - [x] Streaming de respostas (chunks SSE-like via JSON lines)
-- [ ] Auth local: verificação de `user_id` por UID do processo Unix (sem token extra) — pendente, usa permissão 0600 como barrier inicial
+- [x] Auth local: verificação de `user_id` por UID do processo Unix (`SO_PEERCRED` / `LOCAL_PEERCRED`) + socket `0600`
 
 ---
 
@@ -239,8 +239,8 @@ file PI, e histórico independentes. Um utilizador pode ter:
 
 ---
 
-### Fase 4 — Painel de Estado do Projeto (3 dias) 🔜
-*Painel informativo para o projecto activo: cwd, memória, contexto. **Próximo marco do roadmap TUI.***
+### Fase 4 — Painel de Estado do Projeto (3 dias) ✅
+*Painel informativo para o projecto activo: cwd, memória, contexto.*
 
 O Plan Mode explícito foi removido (decisão 2026-05-24). Planejamento permanece conversacional.
 Em vez de um painel de plan mode, a TUI oferece um painel de estado do projecto activo sobrepondo-se
@@ -319,8 +319,8 @@ trocando automaticamente se o modelo activo não suportar imagens.
 
 *Anexar documentos (md, docx, ppt, pdf, etc.) ao projeto ativo diretamente da TUI.*
 
-**Status:** Concluída, validada (build + vet + test + deploy) na branch `feature/tui-document-attachments` — aguarda merge em `main`.
-**Versão:** `v0.29.0+` (feature branch)
+**Status:** Concluída, validada ao vivo e mergeada em `main`.
+**Versão:** `v0.29.0`
 **Branch:** `feature/tui-document-attachments` → `stable/tui-document-attachments` → `main`
 
 **Status note:** `notes/tui-document-attachments-status.md`
