@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v0.35.1 - 2026-06-26
+
+### Added
+- **IPC peer UID auth** — verifica o UID do processo cliente via `SO_PEERCRED` (Linux) / `LOCAL_PEERCRED` (macOS) na conexão e valida `user_id` nas mensagens
+
+### Changed
+- **Roadmap TUI** — Sprint J marcado como completo (Fases 0–5 + auth IPC)
+
 ## v0.35.0 - 2026-06-26
 
 ### Added
