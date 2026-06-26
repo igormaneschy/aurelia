@@ -1053,7 +1053,7 @@ func TestServerProjectStateValidation(t *testing.T) {
 	msg := IPCMessage{
 		Type:      MsgTypeProjectState,
 		ChatID:    ReservedTUIChatID,
-		UserID:    1000,
+		UserID:    int64(os.Getuid()),
 		RequestID: "test-project-state-001",
 	}
 	data, _ := json.Marshal(msg)

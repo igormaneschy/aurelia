@@ -45,6 +45,10 @@ var writeTimeout = 10 * time.Second
 type Server struct {
 	listener net.Listener
 
+	// ownerUID is the Unix UID of the daemon process. IPC clients must connect
+	// from the same UID; claimed user_id must match the peer process UID.
+	ownerUID int
+
 	// Handler is called for every incoming IPC message and returns events
 	// to be written to the connection synchronously.
 	// If nil, the server acknowledges messages but does nothing.
@@ -96,6 +100,7 @@ func NewServer(socketPath string) (*Server, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
 		listener: listener,
+		ownerUID: os.Getuid(),
 		ctx:      ctx,
 		cancel:   cancel,
 		conns:    make(map[net.Conn]struct{}),
@@ -209,6 +214,18 @@ func (s *Server) handleConnection(conn net.Conn) {
 	connCtx, connCancel := context.WithCancel(s.ctx)
 	defer connCancel()
 
+	peerUID, err := connPeerUID(conn)
+	if err != nil {
+		slog.Warn("ipc: peer credential lookup failed", "error", err)
+		_ = writeAuthError(conn, "authentication failed: cannot verify peer identity")
+		return
+	}
+	if peerUID != s.ownerUID {
+		slog.Warn("ipc: peer uid mismatch", "peer_uid", peerUID, "owner_uid", s.ownerUID)
+		_ = writeAuthError(conn, "authentication failed: peer uid mismatch")
+		return
+	}
+
 	// Per-connection write serialisation: all writes to conn share this
 	// mutex so that error responses from the reader goroutine and emit calls
 	// from the processing loop never interleave.
@@ -273,6 +290,18 @@ func (s *Server) handleConnection(conn net.Conn) {
 				if e := writeLocked(IPCEvent{
 					Type:      EventTypeError,
 					Error:     fmt.Sprintf("invalid message: %v", err),
+					RequestID: msg.RequestID,
+				}); e != nil {
+					slog.Warn("ipc: write error", "error", e)
+				}
+				continue
+			}
+
+			if err := validatePeerAuth(msg, peerUID); err != nil {
+				slog.Warn("ipc: auth failed", "error", err, "request_id", msg.RequestID)
+				if e := writeLocked(IPCEvent{
+					Type:      EventTypeError,
+					Error:     fmt.Sprintf("authentication failed: %v", err),
 					RequestID: msg.RequestID,
 				}); e != nil {
 					slog.Warn("ipc: write error", "error", e)
@@ -455,6 +484,16 @@ func (s *Server) dispatch(ctx context.Context, msg IPCMessage) ([]IPCEvent, erro
 		}}, nil
 	}
 	return s.Handler(ctx, msg)
+}
+
+// writeAuthError writes a single authentication error event before the
+// connection handler exits.
+func writeAuthError(conn net.Conn, message string) error {
+	_ = conn.SetWriteDeadline(time.Now().Add(writeTimeout))
+	return writeBatch(conn, IPCEvent{
+		Type:  EventTypeError,
+		Error: message,
+	})
 }
 
 // writeAll writes data to w in a loop until all bytes are written or an error
