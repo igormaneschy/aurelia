@@ -129,6 +129,17 @@ func (s *Service) validateChannel(ctx context.Context, src <-chan bridge.Event) 
 			}
 			if ev.IsTerminal() {
 				if ev.Type == "error" {
+					// Drain src before returning to prevent the bridge writer
+					// from blocking on a full channel buffer.
+					go func() {
+						defer func() {
+							if r := recover(); r != nil {
+								slog.Error("query_execute: panic draining src after error", "error", r)
+							}
+						}()
+						for range src {
+						}
+					}()
 					msg := ev.Message
 					if msg == "" {
 						msg = ev.Content
@@ -159,7 +170,11 @@ func replayBuffer(buf []bridge.Event) <-chan bridge.Event {
 }
 
 func proxyChannel(prefix []bridge.Event, src <-chan bridge.Event) <-chan bridge.Event {
-	out := make(chan bridge.Event, len(prefix)+16)
+	bufSize := cap(src)
+	if bufSize < 16 {
+		bufSize = 16
+	}
+	out := make(chan bridge.Event, len(prefix)+bufSize)
 	for _, ev := range prefix {
 		out <- ev
 	}
@@ -237,13 +252,14 @@ func (s *Service) tryQueryFallback(ctx context.Context, req bridge.Request, onNo
 }
 
 func extractChatThreadUser(req bridge.Request) (chatID int64, threadID int, userID int64) {
-	if req.Options.Security != nil {
+	if req.Options.Security != nil && req.Options.Security.ChatID != 0 {
 		return req.Options.Security.ChatID, req.Options.Security.ThreadID, req.Options.Security.UserID
 	}
 	return req.Options.ChatID, req.Options.ThreadID, req.Options.UserID
 }
 
 func safeNotify(onNotify func(string), msg string) {
+
 	if onNotify == nil {
 		return
 	}

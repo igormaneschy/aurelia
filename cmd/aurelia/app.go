@@ -814,6 +814,9 @@ func findBridgeDir() string {
 }
 
 func buildTranscriber(cfg *config.AppConfig) (stt.Transcriber, error) {
+	if cfg.STTProvider != "" && cfg.STTProvider != "groq" {
+		log.Printf("Warning: STT provider %q is not supported; falling back to groq", cfg.STTProvider)
+	}
 	return stt.NewGroqTranscriber(cfg.ProviderAPIKey("groq")), nil
 }
 

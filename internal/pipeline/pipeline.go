@@ -1071,6 +1071,11 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 		log.Printf("bridge: retry with resume file=%s", filepath.Base(sid))
 	}
 
+	// Intentionally uses s.bridge.Execute (not s.executeQuery) here because
+	// process-death recovery has its own retry/fallback discipline — the bridge
+	// process was restarted by s.bridge's readLoop death callback, so a single
+	// retry suffices. Using executeQuery's retry+fallback would add latency and
+	// risk confusing the user with duplicate "reconnecting" messages.
 	ch, err = s.bridge.Execute(ctx, retryReq)
 	s.output.DeleteMessage(reconnectMsg)
 	if err != nil {
