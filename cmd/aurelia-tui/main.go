@@ -12,6 +12,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/internal/tui"
 )
 
@@ -40,7 +41,7 @@ func main() {
 	}
 
 	// Determine socket path.
-	socketPath, err := tui.DefaultSocketPath()
+	socketPath, err := ipc.DefaultSocketPath()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: cannot determine IPC socket path: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Make sure the Aurelia daemon is running.\n")

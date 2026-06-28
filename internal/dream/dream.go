@@ -231,7 +231,7 @@ func (d *Dreamer) run(userID int64) {
 			Cwd:            memoryDir,
 			AllowedTools:   []string{},
 			NoUserSettings: true,
-			PersistSession: boolPtr(false),
+			PersistSession: ptr(false),
 			ChatID:         0, // dream is background; (0,0,userID) bucket = user-scoped continuity
 			ThreadID:       0,
 			UserID:         userID,
@@ -547,3 +547,5 @@ func (d *Dreamer) nudgeGC() {
 		}
 	}
 }
+
+func ptr(b bool) *bool { return &b }

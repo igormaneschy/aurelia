@@ -5,14 +5,14 @@ import (
 	"log"
 	"time"
 
-	"github.com/igormaneschy/aurelia/internal/engine"
+	"github.com/igormaneschy/aurelia/internal/bridge"
 )
 
 // idleTimeoutWrapper wraps an events channel with an idle timeout.
 // If no event arrives within idleDuration, markTimeout and cancel are called.
 // When the input channel closes or ctx is done, the wrapper shuts down cleanly.
-func idleTimeoutWrapper(ctx context.Context, ch <-chan engine.Event, idleDuration time.Duration, cancel context.CancelFunc, markTimeout func()) <-chan engine.Event {
-	out := make(chan engine.Event, cap(ch))
+func idleTimeoutWrapper(ctx context.Context, ch <-chan bridge.Event, idleDuration time.Duration, cancel context.CancelFunc, markTimeout func()) <-chan bridge.Event {
+	out := make(chan bridge.Event, cap(ch))
 
 	go func() {
 		defer func() {

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/igormaneschy/aurelia/pkg/idgen"
 )
 
 func newTestStore(t *testing.T) *SQLiteStore {
@@ -26,7 +26,7 @@ func TestSQLiteStore_StartAndLatest(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	runID := uuid.NewString()
+	runID := idgen.New()
 	now := time.Now().UTC()
 
 	record := RunRecord{
@@ -97,7 +97,7 @@ func TestSQLiteStore_Update(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	runID := uuid.NewString()
+	runID := idgen.New()
 	record := RunRecord{
 		RunID:   runID,
 		ChatID:  100,
@@ -144,7 +144,7 @@ func TestSQLiteStore_Complete(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	runID := uuid.NewString()
+	runID := idgen.New()
 	record := RunRecord{
 		RunID:   runID,
 		ChatID:  100,
@@ -179,7 +179,7 @@ func TestSQLiteStore_Complete_WithError(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	runID := uuid.NewString()
+	runID := idgen.New()
 	record := RunRecord{
 		RunID:   runID,
 		ChatID:  100,
@@ -211,8 +211,8 @@ func TestSQLiteStore_ThreadIsolation(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	r1 := RunRecord{RunID: uuid.NewString(), ChatID: 100, ThreadID: 0, RequestID: "req-1", Prompt: "main"}
-	r2 := RunRecord{RunID: uuid.NewString(), ChatID: 100, ThreadID: 42, RequestID: "req-2", Prompt: "topic"}
+	r1 := RunRecord{RunID: idgen.New(), ChatID: 100, ThreadID: 0, RequestID: "req-1", Prompt: "main"}
+	r2 := RunRecord{RunID: idgen.New(), ChatID: 100, ThreadID: 42, RequestID: "req-2", Prompt: "topic"}
 
 	if err := s.Start(ctx, r1); err != nil {
 		t.Fatalf("Start main: %v", err)
@@ -244,14 +244,14 @@ func TestSQLiteStore_Latest_ReturnsMostRecent(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	r1 := RunRecord{RunID: uuid.NewString(), ChatID: 100, ThreadID: 0, RequestID: "req-1", Prompt: "first"}
+	r1 := RunRecord{RunID: idgen.New(), ChatID: 100, ThreadID: 0, RequestID: "req-1", Prompt: "first"}
 	if err := s.Start(ctx, r1); err != nil {
 		t.Fatalf("Start first: %v", err)
 	}
 
 	time.Sleep(10 * time.Millisecond)
 
-	r2 := RunRecord{RunID: uuid.NewString(), ChatID: 100, ThreadID: 0, RequestID: "req-2", Prompt: "second"}
+	r2 := RunRecord{RunID: idgen.New(), ChatID: 100, ThreadID: 0, RequestID: "req-2", Prompt: "second"}
 	if err := s.Start(ctx, r2); err != nil {
 		t.Fatalf("Start second: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestSQLiteStore_RestartCollision(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	r1 := RunRecord{RunID: uuid.NewString(), ChatID: 100, ThreadID: 0, RequestID: "req-1", Prompt: "first"}
+	r1 := RunRecord{RunID: idgen.New(), ChatID: 100, ThreadID: 0, RequestID: "req-1", Prompt: "first"}
 	if err := s1.Start(ctx, r1); err != nil {
 		t.Fatalf("Start first: %v", err)
 	}
@@ -290,7 +290,7 @@ func TestSQLiteStore_RestartCollision(t *testing.T) {
 		t.Fatalf("NewSQLiteStore s2 (reopen): %v", err)
 	}
 	defer s2.Close()
-	r2 := RunRecord{RunID: uuid.NewString(), ChatID: 100, ThreadID: 0, RequestID: "req-2", Prompt: "second"}
+	r2 := RunRecord{RunID: idgen.New(), ChatID: 100, ThreadID: 0, RequestID: "req-2", Prompt: "second"}
 	if err := s2.Start(ctx, r2); err != nil {
 		t.Fatalf("Start second (restart): %v", err)
 	}
@@ -322,7 +322,7 @@ func TestSQLiteStore_Reopen_PreservesData(t *testing.T) {
 		t.Fatalf("NewSQLiteStore: %v", err)
 	}
 	ctx := context.Background()
-	runID := uuid.NewString()
+	runID := idgen.New()
 	if err := s1.Start(ctx, RunRecord{
 		RunID:     runID,
 		ChatID:    100,
@@ -436,7 +436,7 @@ func TestSQLiteStore_GetRun(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	runID := uuid.NewString()
+	runID := idgen.New()
 	record := RunRecord{
 		RunID:     runID,
 		ChatID:    100,
@@ -499,9 +499,9 @@ func TestSQLiteStore_ListRuns(t *testing.T) {
 	ctx := context.Background()
 
 	// Insert runs for two different chats.
-	r1 := RunRecord{RunID: uuid.NewString(), ChatID: 100, ThreadID: 0, RequestID: "r1", Prompt: "first", UserID: 1, AgentName: "agent1"}
-	r2 := RunRecord{RunID: uuid.NewString(), ChatID: 100, ThreadID: 0, RequestID: "r2", Prompt: "second", UserID: 1, AgentName: "agent1"}
-	r3 := RunRecord{RunID: uuid.NewString(), ChatID: 200, ThreadID: 0, RequestID: "r3", Prompt: "other chat", UserID: 2, AgentName: "agent2"}
+	r1 := RunRecord{RunID: idgen.New(), ChatID: 100, ThreadID: 0, RequestID: "r1", Prompt: "first", UserID: 1, AgentName: "agent1"}
+	r2 := RunRecord{RunID: idgen.New(), ChatID: 100, ThreadID: 0, RequestID: "r2", Prompt: "second", UserID: 1, AgentName: "agent1"}
+	r3 := RunRecord{RunID: idgen.New(), ChatID: 200, ThreadID: 0, RequestID: "r3", Prompt: "other chat", UserID: 2, AgentName: "agent2"}
 
 	if err := s.Start(ctx, r1); err != nil {
 		t.Fatalf("Start r1: %v", err)
@@ -553,11 +553,11 @@ func TestSQLiteStore_Metrics(t *testing.T) {
 
 	// Seed runs with various statuses and extended fields.
 	runs := []RunRecord{
-		{RunID: uuid.NewString(), ChatID: 100, ThreadID: 0, RequestID: "r1", Prompt: "", Status: RunCompleted, StartedAt: now.Add(-10 * time.Minute), DurationMs: 5000, InputTokens: 100, OutputTokens: 20, CostUSD: 0.001, Provider: "kimi", Model: "kimi-k2", EntryPoint: "telegram", UsedFallback: false},
-		{RunID: uuid.NewString(), ChatID: 100, ThreadID: 0, RequestID: "r2", Prompt: "", Status: RunCompleted, StartedAt: now.Add(-5 * time.Minute), DurationMs: 3000, InputTokens: 200, OutputTokens: 50, CostUSD: 0.002, Provider: "kimi", Model: "kimi-k2", EntryPoint: "telegram", UsedFallback: false},
-		{RunID: uuid.NewString(), ChatID: 100, ThreadID: 0, RequestID: "r3", Prompt: "", Status: RunFailed, StartedAt: now.Add(-2 * time.Minute), DurationMs: 1000, InputTokens: 50, OutputTokens: 10, CostUSD: 0.0005, Provider: "anthropic", Model: "claude", EntryPoint: "telegram", UsedFallback: true},
-		{RunID: uuid.NewString(), ChatID: 200, ThreadID: 0, RequestID: "r4", Prompt: "", Status: RunTimedOut, StartedAt: yesterday, DurationMs: 60000, InputTokens: 500, OutputTokens: 100, CostUSD: 0.01, Provider: "kimi", Model: "kimi-k2", EntryPoint: "cron", UsedFallback: false},
-		{RunID: uuid.NewString(), ChatID: 200, ThreadID: 0, RequestID: "r5", Prompt: "", Status: RunRunning, StartedAt: now, DurationMs: 0, InputTokens: 0, OutputTokens: 0, CostUSD: 0, Provider: "", Model: "", EntryPoint: "telegram", UsedFallback: false},
+		{RunID: idgen.New(), ChatID: 100, ThreadID: 0, RequestID: "r1", Prompt: "", Status: RunCompleted, StartedAt: now.Add(-10 * time.Minute), DurationMs: 5000, InputTokens: 100, OutputTokens: 20, CostUSD: 0.001, Provider: "kimi", Model: "kimi-k2", EntryPoint: "telegram", UsedFallback: false},
+		{RunID: idgen.New(), ChatID: 100, ThreadID: 0, RequestID: "r2", Prompt: "", Status: RunCompleted, StartedAt: now.Add(-5 * time.Minute), DurationMs: 3000, InputTokens: 200, OutputTokens: 50, CostUSD: 0.002, Provider: "kimi", Model: "kimi-k2", EntryPoint: "telegram", UsedFallback: false},
+		{RunID: idgen.New(), ChatID: 100, ThreadID: 0, RequestID: "r3", Prompt: "", Status: RunFailed, StartedAt: now.Add(-2 * time.Minute), DurationMs: 1000, InputTokens: 50, OutputTokens: 10, CostUSD: 0.0005, Provider: "anthropic", Model: "claude", EntryPoint: "telegram", UsedFallback: true},
+		{RunID: idgen.New(), ChatID: 200, ThreadID: 0, RequestID: "r4", Prompt: "", Status: RunTimedOut, StartedAt: yesterday, DurationMs: 60000, InputTokens: 500, OutputTokens: 100, CostUSD: 0.01, Provider: "kimi", Model: "kimi-k2", EntryPoint: "cron", UsedFallback: false},
+		{RunID: idgen.New(), ChatID: 200, ThreadID: 0, RequestID: "r5", Prompt: "", Status: RunRunning, StartedAt: now, DurationMs: 0, InputTokens: 0, OutputTokens: 0, CostUSD: 0, Provider: "", Model: "", EntryPoint: "telegram", UsedFallback: false},
 	}
 
 	for _, r := range runs {
@@ -691,7 +691,7 @@ func TestSQLiteStore_InboundOutboundMessageIDs(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	runID := uuid.NewString()
+	runID := idgen.New()
 	record := RunRecord{
 		RunID:             runID,
 		ChatID:            100,
@@ -742,7 +742,7 @@ func TestSQLiteStore_GetLastOutboundMessage_Found(t *testing.T) {
 
 	sessionFile := "/path/to/session.json"
 	r1 := RunRecord{
-		RunID:             uuid.NewString(),
+		RunID:             idgen.New(),
 		ChatID:            100,
 		ThreadID:          0,
 		RequestID:         "req-1",
@@ -751,7 +751,7 @@ func TestSQLiteStore_GetLastOutboundMessage_Found(t *testing.T) {
 		OutboundMessageID: 10,
 	}
 	r2 := RunRecord{
-		RunID:             uuid.NewString(),
+		RunID:             idgen.New(),
 		ChatID:            200,
 		ThreadID:          5,
 		RequestID:         "req-2",
@@ -816,7 +816,7 @@ func TestSQLiteStore_GetLastOutboundMessage_SkipsZeroOutbound(t *testing.T) {
 
 	sessionFile := "/path/to/session.json"
 	r1 := RunRecord{
-		RunID:             uuid.NewString(),
+		RunID:             idgen.New(),
 		ChatID:            100,
 		ThreadID:          0,
 		RequestID:         "req-1",
@@ -825,7 +825,7 @@ func TestSQLiteStore_GetLastOutboundMessage_SkipsZeroOutbound(t *testing.T) {
 		OutboundMessageID: 0, // no message sent
 	}
 	r2 := RunRecord{
-		RunID:             uuid.NewString(),
+		RunID:             idgen.New(),
 		ChatID:            200,
 		ThreadID:          1,
 		RequestID:         "req-2",
@@ -865,7 +865,7 @@ func TestSQLiteStore_SessionFileUpdateAndOutboundLookup(t *testing.T) {
 	ctx := context.Background()
 
 	sessionFile := "/home/user/.pi/agent/sessions/sess-xyz.json"
-	runID := uuid.NewString()
+	runID := idgen.New()
 
 	// Start run
 	rec := RunRecord{
@@ -926,7 +926,7 @@ func TestSQLiteStore_SessionFileUpdateViaUpdate(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 
-	runID := uuid.NewString()
+	runID := idgen.New()
 	rec := RunRecord{
 		RunID:     runID,
 		ChatID:    400,

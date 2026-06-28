@@ -45,6 +45,14 @@ func (f *fakePersona) BuildPromptForUser(_ int64, _ persona.UserPromptResolver, 
 	return f.prompt, f.err
 }
 
+func testBridgeCronRuntime(executor *fakeBridgeExecutor, registry *fakeRegistry, p *fakePersona, memoryDir, provider, model string) *BridgeCronRuntime {
+	r := NewBridgeCronRuntime(nil, registry, p, memoryDir, provider, model)
+	if executor != nil {
+		r.execute = executor.Execute
+	}
+	return r
+}
+
 // --- tests ---
 
 func TestBridgeCronRuntime_ExecuteJob(t *testing.T) {
@@ -63,7 +71,7 @@ func TestBridgeCronRuntime_ExecuteJob(t *testing.T) {
 	}}
 	persona := &fakePersona{prompt: "I am Aurelia."}
 
-	runtime := NewBridgeCronRuntime(executor, registry, persona, "/tmp/test-memory", "", "")
+	runtime := testBridgeCronRuntime(executor, registry, persona, "/tmp/test-memory", "", "")
 
 	job := CronJob{
 		ID:           "job-1",
@@ -117,7 +125,7 @@ func TestBridgeCronRuntime_InjectsCronInstructionsForTargetChat(t *testing.T) {
 	}}
 	persona := &fakePersona{prompt: "I am Aurelia."}
 
-	runtime := NewBridgeCronRuntime(executor, registry, persona, "", "", "")
+	runtime := testBridgeCronRuntime(executor, registry, persona, "", "", "")
 	runtime.SetExePath("/opt/aurelia/bin/aurelia")
 
 	job := CronJob{
@@ -152,7 +160,7 @@ func TestBridgeCronRuntime_NoChatIDSkipsCronInstructions(t *testing.T) {
 	registry := &fakeRegistry{agents: map[string]*agents.Agent{}}
 	persona := &fakePersona{prompt: "base"}
 
-	runtime := NewBridgeCronRuntime(executor, registry, persona, "", "", "")
+	runtime := testBridgeCronRuntime(executor, registry, persona, "", "", "")
 	runtime.SetExePath("/opt/aurelia/bin/aurelia")
 
 	// TargetChatID 0 → no scheduling section (can't supply --chat-id).
@@ -174,7 +182,7 @@ func TestBridgeCronRuntime_NoAgent(t *testing.T) {
 	registry := &fakeRegistry{agents: map[string]*agents.Agent{}}
 	persona := &fakePersona{prompt: "base"}
 
-	runtime := NewBridgeCronRuntime(executor, registry, persona, "/tmp/test-memory", "", "")
+	runtime := testBridgeCronRuntime(executor, registry, persona, "/tmp/test-memory", "", "")
 
 	job := CronJob{
 		ID:     "job-2",
@@ -271,7 +279,7 @@ func TestBridgeCronRuntime_NoAgentWithCwdInPrompt(t *testing.T) {
 	registry := &fakeRegistry{agents: map[string]*agents.Agent{}}
 	persona := &fakePersona{prompt: "base"}
 
-	runtime := NewBridgeCronRuntime(executor, registry, persona, "/tmp/test-memory", "", "")
+	runtime := testBridgeCronRuntime(executor, registry, persona, "/tmp/test-memory", "", "")
 	cwd := t.TempDir()
 
 	job := CronJob{
@@ -324,7 +332,7 @@ func TestBridgeCronRuntime_UsesExplicitJobCwd(t *testing.T) {
 	executor := &fakeBridgeExecutor{result: &bridge.Event{Type: "result", Content: "ok"}}
 	registry := &fakeRegistry{agents: map[string]*agents.Agent{}}
 	persona := &fakePersona{prompt: "base"}
-	runtime := NewBridgeCronRuntime(executor, registry, persona, "", "", "")
+	runtime := testBridgeCronRuntime(executor, registry, persona, "", "", "")
 	cwd := t.TempDir()
 
 	_, err := runtime.ExecuteJob(context.Background(), CronJob{
@@ -350,7 +358,7 @@ func TestBridgeCronRuntime_InvalidLongCwdFallsBackSafely(t *testing.T) {
 	executor := &fakeBridgeExecutor{result: &bridge.Event{Type: "result", Content: "ok"}}
 	registry := &fakeRegistry{agents: map[string]*agents.Agent{}}
 	persona := &fakePersona{prompt: "base"}
-	runtime := NewBridgeCronRuntime(executor, registry, persona, "", "", "")
+	runtime := testBridgeCronRuntime(executor, registry, persona, "", "", "")
 
 	// Invalid cwd → validateCronCwd fails → cwd stripped → no agent present.
 	// Fallback chain: observe (no tools) → empty tools stripped → nil slice
@@ -382,7 +390,7 @@ func TestBridgeCronRuntime_PersistsAgentNameRuntimePath(t *testing.T) {
 		"reports": {Name: "reports", Cwd: cwd, CapabilityProfile: "execute_safe"},
 	}}
 	persona := &fakePersona{prompt: "base"}
-	runtime := NewBridgeCronRuntime(executor, registry, persona, "", "", "")
+	runtime := testBridgeCronRuntime(executor, registry, persona, "", "", "")
 
 	_, err := runtime.ExecuteJob(context.Background(), CronJob{
 		ID:        "job-agent",
@@ -411,7 +419,7 @@ func TestBridgeCronRuntime_DefaultModelFallback(t *testing.T) {
 	persona := &fakePersona{prompt: "base"}
 
 	// defaultProvider empty, defaultModel = "big-pickle"
-	runtime := NewBridgeCronRuntime(executor, registry, persona, "", "", "big-pickle")
+	runtime := testBridgeCronRuntime(executor, registry, persona, "", "", "big-pickle")
 
 	_, err := runtime.ExecuteJob(context.Background(), CronJob{
 		ID:     "job-default-model",
@@ -438,7 +446,7 @@ func TestBridgeCronRuntime_DefaultModelFallback_AgentOverrides(t *testing.T) {
 	persona := &fakePersona{prompt: "base"}
 
 	// defaultModel should NOT override agent's explicit model
-	runtime := NewBridgeCronRuntime(executor, registry, persona, "", "", "big-pickle")
+	runtime := testBridgeCronRuntime(executor, registry, persona, "", "", "big-pickle")
 
 	_, err := runtime.ExecuteJob(context.Background(), CronJob{
 		ID:        "job-agent-model",
@@ -466,7 +474,7 @@ func TestBridgeCronRuntime_BridgeError(t *testing.T) {
 	}}
 	persona := &fakePersona{prompt: "base"}
 
-	runtime := NewBridgeCronRuntime(executor, registry, persona, "/tmp/test-memory", "", "")
+	runtime := testBridgeCronRuntime(executor, registry, persona, "/tmp/test-memory", "", "")
 
 	job := CronJob{ID: "job-3", AgentName: "test", Prompt: "test"}
 
@@ -489,7 +497,7 @@ func TestBridgeCronRuntime_BridgeExecuteFailure(t *testing.T) {
 	}}
 	persona := &fakePersona{prompt: "base"}
 
-	runtime := NewBridgeCronRuntime(executor, registry, persona, "/tmp/test-memory", "", "")
+	runtime := testBridgeCronRuntime(executor, registry, persona, "/tmp/test-memory", "", "")
 
 	job := CronJob{ID: "job-4", AgentName: "test", Prompt: "test"}
 
@@ -511,7 +519,7 @@ func TestBridgeCronRuntime_PersonaError(t *testing.T) {
 	}}
 	persona := &fakePersona{err: errors.New("file not found")}
 
-	runtime := NewBridgeCronRuntime(executor, registry, persona, "/tmp/test-memory", "", "")
+	runtime := testBridgeCronRuntime(executor, registry, persona, "/tmp/test-memory", "", "")
 
 	job := CronJob{ID: "job-5", AgentName: "test", Prompt: "test"}
 
@@ -524,12 +532,14 @@ func TestBridgeCronRuntime_PersonaError(t *testing.T) {
 	}
 }
 
-func TestNotifyingRuntime_Delivers(t *testing.T) {
+func TestBridgeCronRuntime_Delivers(t *testing.T) {
 	t.Parallel()
 
-	inner := &stubRuntime{result: &ExecutionResult{Output: "hello"}, err: nil}
+	executor := &fakeBridgeExecutor{result: &bridge.Event{Type: "result", Content: "hello"}}
+	runtime := testBridgeCronRuntime(executor, &fakeRegistry{}, &fakePersona{prompt: "test"}, "", "", "")
+
 	var delivered bool
-	nr := NewNotifyingRuntime(inner, func(_ context.Context, _ CronJob, result *ExecutionResult, _ error) error {
+	runtime.SetDelivery(func(_ context.Context, _ CronJob, result *ExecutionResult, _ error) error {
 		delivered = true
 		if result.Output != "hello" {
 			t.Fatalf("unexpected output in delivery: %q", result.Output)
@@ -538,7 +548,7 @@ func TestNotifyingRuntime_Delivers(t *testing.T) {
 	})
 
 	job := CronJob{ID: "job-n1", AgentName: "test", Prompt: "test"}
-	result, err := nr.ExecuteJob(context.Background(), job)
+	result, err := runtime.ExecuteJob(context.Background(), job)
 	if err != nil {
 		t.Fatalf("ExecuteJob() error = %v", err)
 	}
@@ -550,26 +560,17 @@ func TestNotifyingRuntime_Delivers(t *testing.T) {
 	}
 }
 
-func TestNotifyingRuntime_NilInner(t *testing.T) {
+func TestBridgeCronRuntime_NilExecute(t *testing.T) {
 	t.Parallel()
 
-	nr := NewNotifyingRuntime(nil, nil)
-	_, err := nr.ExecuteJob(context.Background(), CronJob{})
+	runtime := NewBridgeCronRuntime(nil, &fakeRegistry{}, &fakePersona{prompt: "test"}, "", "", "")
+	_, err := runtime.ExecuteJob(context.Background(), CronJob{Prompt: "test"})
 	if err == nil {
-		t.Fatal("expected error for nil inner runtime")
+		t.Fatal("expected error for nil bridge execute")
 	}
 }
 
 // --- helpers ---
-
-type stubRuntime struct {
-	result *ExecutionResult
-	err    error
-}
-
-func (s *stubRuntime) ExecuteJob(_ context.Context, _ CronJob) (*ExecutionResult, error) {
-	return s.result, s.err
-}
 
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && searchString(s, substr)

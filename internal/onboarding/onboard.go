@@ -31,7 +31,6 @@ const (
 	stepAnthropicAuthMode
 	stepLLMKey
 	stepLLMModel
-	stepSTTProvider
 	stepSTTKey
 	stepTelegramToken
 	stepTelegramUsers
@@ -157,10 +156,6 @@ func RunOnboardPrompt(stdin io.Reader, stdout io.Writer, resolver *runtime.PathR
 	if config.NormalizeProvider(current.LLMProvider) == "anthropic" {
 		current.AnthropicAuthMode, _ = promptChoice(reader, stdout, "Anthropic auth mode", current.AnthropicAuthMode, []string{"api_key", "subscription"})
 	}
-	if err := writef(stdout, "STT provider [%s]: %s\n\n", current.STTProvider, "Groq"); err != nil {
-		return err
-	}
-
 	if usesAnthropicSubscription(*current) {
 		if err := writef(stdout, "Anthropic auth mode: subscription (no API key needed).\n\n"); err != nil {
 			return err

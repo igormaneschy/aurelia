@@ -12,10 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/igormaneschy/aurelia/pkg/idgen"
 	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
-	"github.com/igormaneschy/aurelia/internal/engine"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/profiles"
@@ -304,11 +303,13 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), bridgeCommandTimeout)
 		defer cancel()
-		_, err := s.engine.Command(ctx, engine.Command{
-			Name:     "abort",
-			ChatID:   chatID,
-			ThreadID: threadID,
-			UserID:   userID,
+		_, err := s.bridge.ExecuteSync(ctx, bridge.Request{
+			Command: "abort",
+			Options: bridge.RequestOptions{
+				ChatID:   chatID,
+				ThreadID: threadID,
+				UserID:   userID,
+			},
 		})
 		if err != nil {
 			log.Printf("pipeline: abort failed for chat=%d: %v", chatID, err)
@@ -327,12 +328,14 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), bridgeCommandTimeout)
 		defer cancel()
-		_, err := s.engine.Command(ctx, engine.Command{
-			Name:     "steer",
-			Payload:  text,
-			ChatID:   chatID,
-			ThreadID: threadID,
-			UserID:   userID,
+		_, err := s.bridge.ExecuteSync(ctx, bridge.Request{
+			Command: "steer",
+			Prompt:  text,
+			Options: bridge.RequestOptions{
+				ChatID:   chatID,
+				ThreadID: threadID,
+				UserID:   userID,
+			},
 		})
 		if err != nil {
 			log.Printf("pipeline: steer failed for chat=%d: %v", chatID, err)
@@ -368,12 +371,14 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 	case concurrentEnqueue:
 		ctx, cancel := context.WithTimeout(context.Background(), bridgeCommandTimeout)
 		defer cancel()
-		_, err := s.engine.Command(ctx, engine.Command{
-			Name:     "follow-up",
-			Payload:  text,
-			ChatID:   chatID,
-			ThreadID: threadID,
-			UserID:   userID,
+		_, err := s.bridge.ExecuteSync(ctx, bridge.Request{
+			Command: "follow-up",
+			Prompt:  text,
+			Options: bridge.RequestOptions{
+				ChatID:   chatID,
+				ThreadID: threadID,
+				UserID:   userID,
+			},
 		})
 		if err != nil {
 			log.Printf("pipeline: follow-up failed for chat=%d: %v", chatID, err)
@@ -386,13 +391,15 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 	case concurrentStatus:
 		ctx, cancel := context.WithTimeout(context.Background(), bridgeCommandTimeout)
 		defer cancel()
-		ev, err := s.engine.Command(ctx, engine.Command{
-			Name:     "get-state",
-			ChatID:   chatID,
-			ThreadID: threadID,
-			UserID:   userID,
+		ev, err := s.bridge.ExecuteSync(ctx, bridge.Request{
+			Command: "get-state",
+			Options: bridge.RequestOptions{
+				ChatID:   chatID,
+				ThreadID: threadID,
+				UserID:   userID,
+			},
 		})
-		if err == nil {
+		if err == nil && ev != nil {
 			var state struct {
 				IsStreaming  bool `json:"is_streaming"`
 				PendingCount int  `json:"pending_count"`
@@ -464,7 +471,7 @@ func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, rese
 
 	req := s.buildBridgeRequest(userText, systemPrompt, profile, input.chatID, input.threadID, input.userID, input.isPrivateChat)
 	req.RequestID = fmt.Sprintf("run-%d", time.Now().UnixNano())
-	req.Images = engineImagesFromBridge(input.images)
+	req.Options.Images = input.images
 	s.applyVisionFallback(reservedCtx, &req, input.images)
 
 	if lcResult := s.applyLifecycle(reservedCtx, &req, input.chatID, input.threadID, input.userID); lcResult.SkipExecution {
@@ -539,24 +546,13 @@ func (s *Service) resolveEffectiveProfile(text string, activeDefault string, isO
 	return nil, text, nil
 }
 
-func engineImagesFromBridge(images []bridge.ImageAttachment) []engine.Image {
-	if len(images) == 0 {
-		return nil
-	}
-	out := make([]engine.Image, len(images))
-	for i, img := range images {
-		out[i] = engine.Image{Data: img.Data, MediaType: img.MediaType, Path: img.Path}
-	}
-	return out
-}
-
-func (s *Service) applyVisionFallback(ctx context.Context, req *engine.Request, images []bridge.ImageAttachment) {
+func (s *Service) applyVisionFallback(ctx context.Context, req *bridge.Request, images []bridge.ImageAttachment) {
 	if len(images) == 0 || s.config == nil {
 		return
 	}
 
-	provider := req.Provider
-	model := req.Model
+	provider := req.Options.Provider
+	model := req.Options.Model
 
 	// ── Resolve the effective provider for catalog lookup ──
 
@@ -570,7 +566,7 @@ func (s *Service) applyVisionFallback(ctx context.Context, req *engine.Request, 
 			model = parts[1]
 			parsedProvider = true
 			slog.Debug("vision: parsed provider-qualified model for catalog lookup",
-				"original", req.Model, "parsed_provider", provider, "parsed_model", model)
+				"original", req.Options.Model, "parsed_provider", provider, "parsed_model", model)
 		}
 	}
 
@@ -588,8 +584,8 @@ func (s *Service) applyVisionFallback(ctx context.Context, req *engine.Request, 
 				if parsedProvider {
 					// Normalize the request: the profile set Model="provider/model"
 					// without setting Provider. The bridge expects them as separate fields.
-					req.Provider = provider
-					req.Model = model
+					req.Options.Provider = provider
+					req.Options.Model = model
 				}
 				return
 			}
@@ -626,9 +622,9 @@ func (s *Service) applyVisionFallback(ctx context.Context, req *engine.Request, 
 	if vModel, vProvider := s.config.VisionFallback(); vModel != "" {
 		slog.Info("vision: switching to fallback model",
 			"fallback_provider", vProvider, "fallback_model", vModel)
-		req.Model = vModel
+		req.Options.Model = vModel
 		if vProvider != "" {
-			req.Provider = vProvider
+			req.Options.Provider = vProvider
 		}
 		return
 	}
@@ -661,69 +657,72 @@ func (s *Service) routeAgent(text string) *agents.Agent {
 
 func (s *Service) classifyFunc() agents.ClassifyFunc {
 	return func(ctx context.Context, system, prompt string) (string, error) {
-		req := engine.Request{
-			Prompt:       prompt,
-			SystemPrompt: system,
+		req := bridge.Request{
+			Command: "query",
+			Prompt:  prompt,
+			Options: bridge.RequestOptions{
+				SystemPrompt: system,
+			},
 		}
-		s.applyConfiguredModelOptions(&req)
-		ch, err := s.engine.Query(ctx, req)
+		s.applyConfiguredModelOptions(&req.Options)
+		ch, err := s.bridge.Execute(ctx, req)
 		if err != nil {
 			return "", err
 		}
 		for ev := range ch {
-			if ev.RawType == "error" || ev.Type == engine.EventTypeError {
-				if ev.Err != nil {
-					return "", ev.Err
-				}
+			if ev.Type == "error" {
 				msg := ev.Message
 				if msg == "" {
 					msg = ev.Content
 				}
 				return "", fmt.Errorf("%s", msg)
 			}
-			if ev.RawType == "result" || ev.Type == engine.EventTypeDone {
+			if ev.Type == "result" {
 				return ev.ContentText(), nil
 			}
 		}
-		return "", fmt.Errorf("classify: no result from engine")
+		return "", fmt.Errorf("classify: no result from bridge")
 	}
 }
 
-// buildBridgeRequest assembles an engine.Request with agent overrides, session
+// buildBridgeRequest assembles a bridge.Request with agent overrides, session
 // resume, and working directory.
-func (s *Service) buildBridgeRequest(userText, systemPrompt string, pp *profiles.PromptProfile, chatID int64, threadID int, userID int64, isPrivateChat bool) engine.Request {
-	req := engine.Request{
-		Prompt:       userText,
-		SystemPrompt: systemPrompt,
-		ChatID:       chatID,
-		ThreadID:     threadID,
-		UserID:       userID,
+func (s *Service) buildBridgeRequest(userText, systemPrompt string, pp *profiles.PromptProfile, chatID int64, threadID int, userID int64, isPrivateChat bool) bridge.Request {
+	req := bridge.Request{
+		Command: "query",
+		Prompt:  userText,
+		Options: bridge.RequestOptions{
+			SystemPrompt: systemPrompt,
+			ChatID:       chatID,
+			ThreadID:     threadID,
+			UserID:       userID,
+		},
 	}
-	s.applyConfiguredModelOptions(&req)
+	s.applyConfiguredModelOptions(&req.Options)
 
 	if pp != nil {
 		if pp.Model != "" {
-			req.Model = pp.Model
+			req.Options.Model = pp.Model
 		}
 		if pp.Cwd != "" {
-			req.Cwd = pp.Cwd
+			req.Options.Cwd = pp.Cwd
 		}
 		if len(pp.AllowedTools) > 0 {
-			req.AllowedTools = pp.AllowedTools
+			req.Options.AllowedTools = pp.AllowedTools
 		}
 		if len(pp.DisallowedTools) > 0 {
-			req.DisallowedTools = pp.DisallowedTools
+			req.Options.DisallowedTools = pp.DisallowedTools
 		}
 	}
 
 	if sessionID, active := s.sessions.GetSessionWithState(chatID, threadID, userID); sessionID != "" {
-		req.SessionKey = sessionID
+		req.Options.Resume = sessionID
 		sidPreview := sessionID
 		if len(sidPreview) > 8 {
 			sidPreview = sidPreview[:8]
 		}
 		if active {
-			req.Continue = true
+			req.Options.Continue = true
 			log.Printf("bridge: resume sid=%s (continue)", sidPreview)
 		} else {
 			log.Printf("bridge: resume sid=%s (cold)", sidPreview)
@@ -732,10 +731,10 @@ func (s *Service) buildBridgeRequest(userText, systemPrompt string, pp *profiles
 
 	cwd := s.effectiveCwdForContext(pp, chatID, threadID, userID, isPrivateChat)
 	if cwd != "" {
-		req.Cwd = cwd
+		req.Options.Cwd = cwd
 	} else {
-		req.Cwd = s.botCwd
-		req.DisallowedTools = appendUniqueTools(req.DisallowedTools, chatModeDisallowedTools...)
+		req.Options.Cwd = s.botCwd
+		req.Options.DisallowedTools = appendUniqueTools(req.Options.DisallowedTools, chatModeDisallowedTools...)
 
 		// Diagnostic: log why file tools are disabled — helps debug issues where
 		// the model cannot access files despite the user asking to read/analyze code.
@@ -748,7 +747,7 @@ func (s *Service) buildBridgeRequest(userText, systemPrompt string, pp *profiles
 	}
 
 	// ── Resolve and attach security context ──
-	cwd = req.Cwd
+	cwd = req.Options.Cwd
 	capProfile := security.DefaultProfileForContext(cwd != "", false, needsWriteTools(pp))
 
 	// Allow agent-level capability_profile override
@@ -759,13 +758,13 @@ func (s *Service) buildBridgeRequest(userText, systemPrompt string, pp *profiles
 	// Intersect agent allowed_tools with profile limits
 	effectiveProfile, effectiveTools := security.ResolveProfile(
 		capProfile,
-		req.AllowedTools,
-		req.DisallowedTools,
+		req.Options.AllowedTools,
+		req.Options.DisallowedTools,
 		cwd != "",
 	)
 
 	// Replace allowed_tools with profile-limited set
-	req.AllowedTools = effectiveTools
+	req.Options.AllowedTools = effectiveTools
 
 	// Attach security context
 	secCfg := s.getSecurityConfig()
@@ -773,7 +772,7 @@ func (s *Service) buildBridgeRequest(userText, systemPrompt string, pp *profiles
 	if pp != nil {
 		agentName = pp.Name
 	}
-	req.Security = &engine.SecurityPolicy{
+	req.Options.Security = &bridge.SecurityContext{
 		Enabled:   true,
 		Profile:   string(effectiveProfile),
 		Mode:      string(secCfg.Mode),
@@ -788,22 +787,22 @@ func (s *Service) buildBridgeRequest(userText, systemPrompt string, pp *profiles
 	// If profile is privileged, check allow_privileged config
 	if effectiveProfile == security.ProfilePrivileged && !secCfg.AllowPrivilegedAgents {
 		// Downgrade to execute_safe
-		req.Security.Profile = string(security.ProfileExecuteSafe)
-		req.AllowedTools = security.ProfileTools(security.ProfileExecuteSafe)
+		req.Options.Security.Profile = string(security.ProfileExecuteSafe)
+		req.Options.AllowedTools = security.ProfileTools(security.ProfileExecuteSafe)
 	}
 
 	return req
 }
 
-func (s *Service) applyConfiguredModelOptions(req *engine.Request) {
-	if s == nil || s.config == nil || s.config.IsModelAuto() || req == nil {
+func (s *Service) applyConfiguredModelOptions(opts *bridge.RequestOptions) {
+	if s == nil || s.config == nil || s.config.IsModelAuto() || opts == nil {
 		return
 	}
 	if s.config.DefaultProvider != "" {
-		req.Provider = s.config.DefaultProvider
+		opts.Provider = s.config.DefaultProvider
 	}
 	if s.config.DefaultModel != "" {
-		req.Model = s.config.DefaultModel
+		opts.Model = s.config.DefaultModel
 	}
 }
 
@@ -846,7 +845,7 @@ func appendUniqueTools(existing []string, additions ...string) []string {
 // executeAsync runs bridge execution with typing/progress reporting.
 // warningThreshold and criticalThreshold override the global tool call limits
 // when > 0 (set by agent tool_budget). Use 0 for defaults.
-func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID int, messageID int, req engine.Request, userText string, userID int64, isPrivateChat bool, warningThreshold int, criticalThreshold int) {
+func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID int, messageID int, req bridge.Request, userText string, userID int64, isPrivateChat bool, warningThreshold int, criticalThreshold int) {
 	stopTyping := s.output.StartTyping(chatID, threadID)
 	defer stopTyping()
 
@@ -862,12 +861,14 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	steerDuringExecution := func(msg string) {
 		steerCtx, steerCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer steerCancel()
-		_, err := s.engine.Command(steerCtx, engine.Command{
-			Name:     "steer",
-			Payload:  msg,
-			ChatID:   chatID,
-			ThreadID: threadID,
-			UserID:   userID,
+		_, err := s.bridge.ExecuteSync(steerCtx, bridge.Request{
+			Command: "steer",
+			Prompt:  msg,
+			Options: bridge.RequestOptions{
+				ChatID:   chatID,
+				ThreadID: threadID,
+				UserID:   userID,
+			},
 		})
 		if err != nil {
 			log.Printf("pipeline: steer failed during execution chat=%d: %v", chatID, err)
@@ -935,9 +936,9 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	cwd := s.effectiveCwd(nil, chatID, threadID)
 	agentName := ""
 	profile := ""
-	if req.Security != nil {
-		agentName = req.Security.AgentName
-		profile = req.Security.Profile
+	if req.Options.Security != nil {
+		agentName = req.Options.Security.AgentName
+		profile = req.Options.Security.Profile
 	}
 	runLogStarted := s.startRunLog(startRunLogParams{
 		ChatID:    chatID,
@@ -948,8 +949,8 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 		Prompt:    userText,
 		UserID:    userID,
 		AgentName: agentName,
-		Provider:  req.Provider,
-		Model:     req.Model,
+		Provider:  req.Options.Provider,
+		Model:     req.Options.Model,
 		Profile:   profile,
 	})
 	var processDeathRunID string // captured before completeRunLog for retry events
@@ -958,34 +959,19 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	if runLogStarted {
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent("",
 			observability.PhaseBridgeRequestStarted,
-			fmt.Sprintf("request_id=%s provider=%s model=%s", req.RequestID, req.Provider, req.Model)))
+			fmt.Sprintf("request_id=%s provider=%s model=%s", req.RequestID, req.Options.Provider, req.Options.Model)))
 	}
 
-	var ch <-chan engine.Event
-	var err error
-
-	// usedFallback tracks whether the resilient bridge fell back to a secondary provider.
-	var usedFallback bool
-	if s.resilient != nil {
-		res := s.resilient.Execute(ctx, req, func(msg string) {
-			if _, err := s.output.SendText(chatID, threadID, msg); err != nil {
-				log.Printf("pipeline: SendText(fallback status) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
-			}
-		})
-		if res.Err != nil {
-			err = res.Err
-		} else {
-			ch = res.Events
-			usedFallback = res.UsedFallback
+	var ch <-chan bridge.Event
+	ch, usedFallback, err := s.executeQuery(ctx, req, func(msg string) {
+		if _, sendErr := s.output.SendText(chatID, threadID, msg); sendErr != nil {
+			log.Printf("pipeline: SendText(fallback status) failed for chat=%d: %v", chatID, redactSecrets(sendErr.Error()))
 		}
-		// Record fallback event if the resilient bridge used a fallback provider.
-		if usedFallback && runLogStarted {
-			s.recordPipelineEvent(chatID, threadID, userID, observability.NewWarnEvent("",
-				observability.PhaseFallbackResult,
-				fmt.Sprintf("provider=%s model=%s", req.Provider, req.Model)))
-		}
-	} else {
-		ch, err = s.engine.Query(ctx, req)
+	})
+	if usedFallback && runLogStarted {
+		s.recordPipelineEvent(chatID, threadID, userID, observability.NewWarnEvent("",
+			observability.PhaseFallbackResult,
+			fmt.Sprintf("provider=%s model=%s", req.Options.Provider, req.Options.Model)))
 	}
 
 	if ch != nil {
@@ -1021,11 +1007,6 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 					observability.PhaseBridgeExecuteError, redacted))
 				s.patchContinuityFailure(chatID, threadID, "failed", redacted, userID)
 				s.completeRunLog(chatID, threadID, userID, runlog.RunFailed, "", redacted)
-			}
-			if s.resilient == nil {
-				if err := s.output.SendError(chatID, threadID, bridgeConnectErrorMessage); err != nil {
-					log.Printf("Failed to send error to chat %d: %v", chatID, redactSecrets(err.Error()))
-				}
 			}
 			s.output.ConfirmMessage(chatID, messageID)
 			return
@@ -1083,14 +1064,19 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	}
 
 	retryReq := req
-	retryReq.Continue = false
+	retryReq.Options.Continue = false
 	retryReq.RequestID = ""
 	if sid := s.sessions.GetSession(chatID, threadID, userID); sid != "" {
-		retryReq.SessionKey = sid
+		retryReq.Options.Resume = sid
 		log.Printf("bridge: retry with resume file=%s", filepath.Base(sid))
 	}
 
-	ch, err = s.engine.Query(ctx, retryReq)
+	// Intentionally uses s.bridge.Execute (not s.executeQuery) here because
+	// process-death recovery has its own retry/fallback discipline — the bridge
+	// process was restarted by s.bridge's readLoop death callback, so a single
+	// retry suffices. Using executeQuery's retry+fallback would add latency and
+	// risk confusing the user with duplicate "reconnecting" messages.
+	ch, err = s.bridge.Execute(ctx, retryReq)
 	s.output.DeleteMessage(reconnectMsg)
 	if err != nil {
 		log.Printf("bridge: retry failed for chat=%d: %s", chatID, redactSecrets(err.Error()))
@@ -1250,7 +1236,7 @@ func heartbeatMonitor(doneCh <-chan struct{}, toolUseSignal <-chan struct{}, too
 // toolUseSignal, if non-nil, receives a signal on every tool_use event so a
 // caller can monitor thinking gaps (heartbeat).
 // toolTracker, if non-nil, is used to count tool calls and warn on explosion.
-func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int, ch <-chan engine.Event, progress ProgressReporter, userText string, toolUseSignal chan<- struct{}, userID int64, isPrivateChat bool, toolTracker *toolCallTracker, loopDetect *loopDetector) Outcome {
+func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int, ch <-chan bridge.Event, progress ProgressReporter, userText string, toolUseSignal chan<- struct{}, userID int64, isPrivateChat bool, toolTracker *toolCallTracker, loopDetect *loopDetector) Outcome {
 	var (
 		assistantText       strings.Builder
 		lastStreamFlush     = time.Now()
@@ -1258,7 +1244,7 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 	)
 
 	for ev := range ch {
-		switch ev.RawType {
+		switch ev.Type {
 		case "system":
 			s.handleSystemEvent(chatID, threadID, ev, userID)
 			if ev.SessionID != "" {
@@ -1355,7 +1341,7 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 			// Compaction events reset idle timer and provide observability.
 			if s.runLog != nil {
 				s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent("",
-					observability.PhaseBridgeSystem, fmt.Sprintf("event=%s", ev.RawType)))
+					observability.PhaseBridgeSystem, fmt.Sprintf("event=%s", ev.Type)))
 			}
 		case "turn_start":
 			// Reset loop detector so a new turn can re-trigger loop warnings.
@@ -1367,7 +1353,7 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 		case "auto_retry_start", "auto_retry_end":
 			// Retry events reset idle timer.
 			if s.runLog != nil {
-				msg := fmt.Sprintf("event=%s", ev.RawType)
+				msg := fmt.Sprintf("event=%s", ev.Type)
 				if ev.Content != "" {
 					msg += " " + ev.Content
 				}
@@ -1375,14 +1361,14 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 					observability.PhaseBridgeSystem, msg))
 			}
 		default:
-			log.Printf("Bridge event (ignored): %s", ev.RawType)
+			log.Printf("Bridge event (ignored): %s", ev.Type)
 		}
 	}
 
 	return OutcomeProcessDeath
 }
 
-func (s *Service) handleSystemEvent(chatID int64, threadID int, ev engine.Event, userID int64) {
+func (s *Service) handleSystemEvent(chatID int64, threadID int, ev bridge.Event, userID int64) {
 	if ev.SessionFile == "" {
 		return
 	}
@@ -1390,11 +1376,11 @@ func (s *Service) handleSystemEvent(chatID int64, threadID int, ev engine.Event,
 	s.patchContinuitySessionID(chatID, threadID, ev.SessionFile, userID)
 }
 
-func eventContent(ev engine.Event) string {
+func eventContent(ev bridge.Event) string {
 	return ev.ContentText()
 }
 
-func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, ev engine.Event, assistantText *strings.Builder, userText string, userID int64, isPrivateChat bool) Outcome {
+func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, ev bridge.Event, assistantText *strings.Builder, userText string, userID int64, isPrivateChat bool) Outcome {
 	content := eventContent(ev)
 	if content != "" {
 		prior := assistantText.String()
@@ -1462,7 +1448,7 @@ func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, e
 
 // handleEmptyResult handles the case where the bridge returned no text.
 // It distinguishes between "worked but empty" (tokens consumed) and "no work at all".
-func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, ev engine.Event, userText string, toolSummary string, userID int64) Outcome {
+func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, ev bridge.Event, userText string, toolSummary string, userID int64) Outcome {
 	if emptyResultHadWork(ev) {
 		log.Printf("bridge: empty result after work chat=%d thread=%d request=%s turns=%d cost=$%.4f in=%d out=%d",
 			chatID, threadID, ev.RequestID, ev.NumTurns, ev.CostUSD, ev.InputTokens, ev.OutputTokens)
@@ -1534,7 +1520,7 @@ func (s *Service) handleNormalReply(chatID int64, threadID int, messageID int, s
 
 // recordUsage logs token usage from the bridge result to the debug log.
 // PI SDK compaction (enabled in SettingsManager) handles context pruning automatically.
-func (s *Service) recordUsage(chatID int64, threadID int, ev engine.Event, userID int64) {
+func (s *Service) recordUsage(chatID int64, threadID int, ev bridge.Event, userID int64) {
 	if ev.CostUSD <= 0 && ev.NumTurns <= 0 {
 		return
 	}
@@ -1640,7 +1626,7 @@ func (s *Service) startRunLog(p startRunLogParams) bool {
 	s.runLogMu.Lock()
 	defer s.runLogMu.Unlock()
 
-	runID := uuid.NewString()
+	runID := idgen.New()
 	now := time.Now()
 	runLogCtx, runLogCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer runLogCancel()

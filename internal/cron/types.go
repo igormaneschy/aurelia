@@ -4,8 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"time"
-
-	"github.com/igormaneschy/aurelia/internal/bridge"
 )
 
 // CronJob represents a scheduled job.
@@ -71,11 +69,6 @@ type Store interface {
 	UpdateJobTx(ctx context.Context, tx *sql.Tx, job CronJob) error
 	WithTx(ctx context.Context, fn func(tx *sql.Tx) error) error
 	ListExecutionsByJob(ctx context.Context, jobID string) ([]CronExecution, error)
-}
-
-// BridgeExecutor is the interface for executing a request via the Claude Code bridge.
-type BridgeExecutor interface {
-	Execute(ctx context.Context, req bridge.Request) (*bridge.Event, error)
 }
 
 // Runtime executes a cron job and returns its result.

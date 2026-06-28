@@ -5,42 +5,41 @@ import (
 	"strings"
 	"sync"
 	"testing"
-
-	"github.com/igormaneschy/aurelia/internal/engine"
+	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/session"
 )
 
 func TestEmptyResultHadWork_NoWork_ReturnsFalse(t *testing.T) {
-	ev := engine.Event{Type: engine.EventTypeDone, RawType: "result"}
+	ev := bridge.Event{Type: "result"}
 	if emptyResultHadWork(ev) {
 		t.Fatal("expected false for zero-value event")
 	}
 }
 
 func TestEmptyResultHadWork_NumTurns_ReturnsTrue(t *testing.T) {
-	ev := engine.Event{Type: engine.EventTypeDone, RawType: "result", NumTurns: 1}
+	ev := bridge.Event{Type: "result", NumTurns: 1}
 	if !emptyResultHadWork(ev) {
 		t.Fatal("expected true when NumTurns > 0")
 	}
 }
 
 func TestEmptyResultHadWork_InputTokens_ReturnsTrue(t *testing.T) {
-	ev := engine.Event{Type: engine.EventTypeDone, RawType: "result", InputTokens: 100}
+	ev := bridge.Event{Type: "result", InputTokens: 100}
 	if !emptyResultHadWork(ev) {
 		t.Fatal("expected true when InputTokens > 0")
 	}
 }
 
 func TestEmptyResultHadWork_OutputTokens_ReturnsTrue(t *testing.T) {
-	ev := engine.Event{Type: engine.EventTypeDone, RawType: "result", OutputTokens: 50}
+	ev := bridge.Event{Type: "result", OutputTokens: 50}
 	if !emptyResultHadWork(ev) {
 		t.Fatal("expected true when OutputTokens > 0")
 	}
 }
 
 func TestEmptyResultHadWork_CostUSD_ReturnsTrue(t *testing.T) {
-	ev := engine.Event{Type: engine.EventTypeDone, RawType: "result", CostUSD: 0.01}
+	ev := bridge.Event{Type: "result", CostUSD: 0.01}
 	if !emptyResultHadWork(ev) {
 		t.Fatal("expected true when CostUSD > 0")
 	}
@@ -92,7 +91,7 @@ func TestHandleResultEvent_EmptyAfterWork_DeactivatesSession(t *testing.T) {
 		sessions: ss,
 	}
 
-	ev := engine.Event{
+	ev := bridge.Event{
 		Type:         "result",
 		Content:      "",
 		NumTurns:     5,
@@ -136,7 +135,7 @@ func TestHandleResultEvent_EmptyNoWork_UsesGenericMessage(t *testing.T) {
 		sessions: ss,
 	}
 
-	ev := engine.Event{Type: engine.EventTypeDone, RawType: "result", Content: ""}
+	ev := bridge.Event{Type: "result", Content: ""}
 	var assistantText strings.Builder
 
 	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
@@ -178,7 +177,7 @@ func TestHandleResultEvent_EmptyAfterWorkWithToolSummary_IncludesToolSummary(t *
 	state.summaryCount = 2
 	s.runLogStates[key] = state
 
-	ev := engine.Event{
+	ev := bridge.Event{
 		Type:         "result",
 		Content:      "",
 		NumTurns:     3,

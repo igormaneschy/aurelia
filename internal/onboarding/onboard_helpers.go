@@ -29,8 +29,6 @@ func nextOnboardStep(cfg config.EditableConfig, step onboardStep) onboardStep {
 	case stepLLMKey:
 		return stepLLMModel
 	case stepLLMModel:
-		return stepSTTProvider
-	case stepSTTProvider:
 		return stepSTTKey
 	case stepSTTKey:
 		return stepTelegramToken
@@ -63,10 +61,8 @@ func previousOnboardStep(cfg config.EditableConfig, step onboardStep) onboardSte
 			return stepAnthropicAuthMode
 		}
 		return stepLLMKey
-	case stepSTTProvider:
-		return stepLLMModel
 	case stepSTTKey:
-		return stepSTTProvider
+		return stepLLMModel
 	case stepTelegramToken:
 		return stepSTTKey
 	case stepTelegramUsers:
@@ -383,10 +379,7 @@ func renderSavedSummary(stdout io.Writer, resolver *runtime.PathResolver, curren
 			return err
 		}
 	}
-	if err := writef(stdout, "STT provider: %s\n", strings.ToUpper(current.STTProvider)); err != nil {
-		return err
-	}
-	if err := writef(stdout, "Groq API key: %s\n", maskSecret(current.GroqAPIKey)); err != nil {
+	if err := writef(stdout, "Groq API key (STT): %s\n", maskSecret(current.GroqAPIKey)); err != nil {
 		return err
 	}
 	if err := writef(stdout, "Telegram bot token: %s\n", maskSecret(current.TelegramBotToken)); err != nil {

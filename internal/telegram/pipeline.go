@@ -8,7 +8,6 @@ import (
 	"gopkg.in/telebot.v3"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
-	"github.com/igormaneschy/aurelia/internal/engine"
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
 	"github.com/igormaneschy/aurelia/internal/transport"
@@ -89,11 +88,11 @@ func (bc *BotController) runPipeline(chatID int64, threadID int, messageID int, 
 	return bc.ensurePipeline().Process(chatID, threadID, messageID, text, images, userID, isPrivateChat)
 }
 
-func (bc *BotController) processBridgeEventsAsync(chat *telebot.Chat, ch <-chan engine.Event, progress *progressReporter, userText string, messageID int) bridgeOutcome {
+func (bc *BotController) processBridgeEventsAsync(chat *telebot.Chat, ch <-chan bridge.Event, progress *progressReporter, userText string, messageID int) bridgeOutcome {
 	return bc.processBridgeEventsAsyncWithThread(chat, ch, progress, userText, messageID, 0, 0)
 }
 
-func (bc *BotController) processBridgeEventsAsyncWithThread(chat *telebot.Chat, ch <-chan engine.Event, progress *progressReporter, userText string, messageID int, threadID int, userID ...int64) bridgeOutcome {
+func (bc *BotController) processBridgeEventsAsyncWithThread(chat *telebot.Chat, ch <-chan bridge.Event, progress *progressReporter, userText string, messageID int, threadID int, userID ...int64) bridgeOutcome {
 	uid := int64(0)
 	if len(userID) > 0 {
 		uid = userID[0]

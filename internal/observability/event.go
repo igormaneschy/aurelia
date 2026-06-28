@@ -1,9 +1,6 @@
 package observability
 
-import (
-	"context"
-	"time"
-)
+import "time"
 
 // RunEvent represents a single point-in-time event in a run's timeline.
 // Phases are defined as constants in this package.
@@ -23,22 +20,6 @@ const (
 	EventLevelWarn  = "warn"
 	EventLevelError = "error"
 )
-
-// Recorder is the interface for persisting run lifecycle data and events.
-//
-// Implementations must be fail-open: errors are logged but never block the
-// caller. All methods should use short context timeouts (<500ms) in runtime code.
-//
-// The existing runlog.Store interface handles Start/Update/Complete/Latest.
-// Recorder adds the event timeline methods on top.
-type Recorder interface {
-	// RecordEvent persists a single run event to the timeline.
-	// Implementations should redact and truncate metadata_json before storage.
-	RecordEvent(ctx context.Context, ev RunEvent) error
-
-	// ListEvents returns all events for a run, ordered by timestamp.
-	ListEvents(ctx context.Context, runID string) ([]RunEvent, error)
-}
 
 // --- Helper to build events ---
 

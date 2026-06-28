@@ -76,8 +76,12 @@ specs/
 
 # Build output
 /build/
+/dist/
 /aurelia
 /bin/
+
+# Editor / tooling backups
+*.bak-*
 
 # Bridge bundle (built from TypeScript source, not versioned)
 internal/bridge/bundle.js
