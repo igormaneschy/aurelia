@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.36.4] - 2026-06-28
+
+### Fixed
+- TUI mouse now enabled by default (reverts `--no-mouse` to disable); shows
+  educational hint on toggle-off and status label when disabled.
+- TUI new session form now submits on Enter (huh internal messages were being
+  dropped by the key event filter).
+- TUI sidebar delete with `d` no longer targets the wrong session (bubbles v2
+  table default mapped `d` to `HalfPageDown`, moving the cursor before the
+  delete handler read it).
+- TUI new session names are monotonically increasing (`max(N)+1`) so a deleted
+  session name is never reused in the sidebar.
+- TUI race condition on delete: session is removed from the local list
+  immediately, before the async server fetch completes.
+
 ## [0.36.3] - 2026-06-28
 
 ### Fixed
