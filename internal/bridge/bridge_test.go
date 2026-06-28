@@ -443,6 +443,173 @@ func TestBridge_LongLived_MultipleRequests(t *testing.T) {
 	}
 }
 
+func TestAllowlistEnv_FiltersCorrectly(t *testing.T) {
+	t.Setenv("PATH", "/usr/bin")
+	t.Setenv("HOME", "/home/test")
+	t.Setenv("USER", "testuser")
+	t.Setenv("SHELL", "/bin/zsh")
+	t.Setenv("TMPDIR", "/tmp")
+	t.Setenv("PI_CODING_AGENT_DIR", "/home/test/.aurelia/pi-agent")
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test-anthropic")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "should-not-leak-12345")
+	t.Setenv("LC_ALL", "en_US.UTF-8")
+	t.Setenv("MY_RANDOM_SECRET", "super-secret")
+
+	env := AllowlistEnv("ANTHROPIC_API_KEY")
+
+	got := make(map[string]string)
+	for _, e := range env {
+		k, v, _ := strings.Cut(e, "=")
+		got[k] = v
+	}
+
+	// Essential vars present.
+	if got["PATH"] != "/usr/bin" {
+		t.Errorf("PATH = %q, want /usr/bin", got["PATH"])
+	}
+	if got["HOME"] != "/home/test" {
+		t.Errorf("HOME = %q, want /home/test", got["HOME"])
+	}
+	if got["USER"] != "testuser" {
+		t.Errorf("USER = %q, want testuser", got["USER"])
+	}
+	if got["SHELL"] != "/bin/zsh" {
+		t.Errorf("SHELL = %q, want /bin/zsh", got["SHELL"])
+	}
+	if got["TMPDIR"] != "/tmp" {
+		t.Errorf("TMPDIR = %q, want /tmp", got["TMPDIR"])
+	}
+	if got["PI_CODING_AGENT_DIR"] != "/home/test/.aurelia/pi-agent" {
+		t.Errorf("PI_CODING_AGENT_DIR = %q", got["PI_CODING_AGENT_DIR"])
+	}
+
+	// Provider key present.
+	if got["ANTHROPIC_API_KEY"] != "sk-test-anthropic" {
+		t.Errorf("ANTHROPIC_API_KEY = %q", got["ANTHROPIC_API_KEY"])
+	}
+
+	// Locale var present.
+	if got["LC_ALL"] != "en_US.UTF-8" {
+		t.Errorf("LC_ALL = %q", got["LC_ALL"])
+	}
+
+	// Telegram token NOT present.
+	if _, ok := got["TELEGRAM_BOT_TOKEN"]; ok {
+		t.Error("TELEGRAM_BOT_TOKEN found in allowlist, should be excluded")
+	}
+
+	// Arbitrary secret NOT present.
+	if _, ok := got["MY_RANDOM_SECRET"]; ok {
+		t.Error("MY_RANDOM_SECRET found in allowlist, should be excluded")
+	}
+}
+
+func TestBridge_SetEnvAllowlist_AppliedToCmd(t *testing.T) {
+	dir := t.TempDir()
+	b := newMockBridge(t, dir, longLivedMockJS)
+
+	allowlist := []string{"PATH=/usr/bin", "HOME=/home/test"}
+	b.SetEnvAllowlist(allowlist)
+
+	if err := b.Start(); err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+	defer b.Stop()
+
+	b.mu.Lock()
+	cmd := b.cmd
+	b.mu.Unlock()
+
+	if cmd == nil {
+		t.Fatal("cmd is nil after Start")
+	}
+	if cmd.Env == nil {
+		t.Fatal("cmd.Env is nil — allowlist not applied")
+	}
+	if len(cmd.Env) != len(allowlist) {
+		t.Fatalf("cmd.Env length = %d, want %d: %v", len(cmd.Env), len(allowlist), cmd.Env)
+	}
+	for i, e := range cmd.Env {
+		if e != allowlist[i] {
+			t.Fatalf("cmd.Env[%d] = %q, want %q", i, e, allowlist[i])
+		}
+	}
+}
+
+func TestBridge_SetEnvAllowlist_NoAllowlistInheritsEnv(t *testing.T) {
+	dir := t.TempDir()
+	b := newMockBridge(t, dir, longLivedMockJS)
+
+	// Don't call SetEnvAllowlist — should inherit os.Environ().
+	if err := b.Start(); err != nil {
+		t.Fatalf("Start() error: %v", err)
+	}
+	defer b.Stop()
+
+	b.mu.Lock()
+	cmd := b.cmd
+	b.mu.Unlock()
+
+	if cmd == nil {
+		t.Fatal("cmd is nil after Start")
+	}
+	// Without SetEnvAllowlist, cmd.Env should be nil (= inherit parent env).
+	if cmd.Env != nil {
+		t.Fatalf("cmd.Env = %v, want nil (inherit parent)", cmd.Env)
+	}
+}
+
+func TestBridge_EnvAllowlist_ExcludesSecrets(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-test-123")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "should-be-excluded")
+
+	dir := t.TempDir()
+
+	envCheckJS := `
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+rl.on('line', (line) => {
+    const req = JSON.parse(line);
+    const rid = req.request_id || "";
+    const key = req.prompt || "";
+    const val = process.env[key] || "__UNDEFINED__";
+    process.stdout.write(JSON.stringify({event:"result",request_id:rid,content:key + "=" + val}) + "\n");
+});
+rl.on('close', () => process.exit(0));
+`
+	if err := os.WriteFile(filepath.Join(dir, "env-check.js"), []byte(envCheckJS), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	b := New(dir, "")
+	b.command = "node"
+	b.args = []string{"env-check.js"}
+	t.Cleanup(func() { b.Stop() })
+
+	b.SetEnvAllowlist(AllowlistEnv("ANTHROPIC_API_KEY"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// ANTHROPIC_API_KEY should be accessible in child process.
+	ev, err := b.ExecuteSync(ctx, Request{Command: "get-env", Prompt: "ANTHROPIC_API_KEY"})
+	if err != nil {
+		t.Fatalf("ExecuteSync(ANTHROPIC_API_KEY) error: %v", err)
+	}
+	if !strings.Contains(ev.Content, "sk-test-123") {
+		t.Errorf("ANTHROPIC_API_KEY not found in child env, got: %s", ev.Content)
+	}
+
+	// TELEGRAM_BOT_TOKEN should NOT be accessible.
+	ev, err = b.ExecuteSync(ctx, Request{Command: "get-env", Prompt: "TELEGRAM_BOT_TOKEN"})
+	if err != nil {
+		t.Fatalf("ExecuteSync(TELEGRAM_BOT_TOKEN) error: %v", err)
+	}
+	if strings.Contains(ev.Content, "should-be-excluded") {
+		t.Errorf("TELEGRAM_BOT_TOKEN found in child env, should be excluded: %s", ev.Content)
+	}
+}
+
 func TestStopBeforeStart(t *testing.T) {
 	b := New("/nonexistent", "")
 	done := make(chan struct{})

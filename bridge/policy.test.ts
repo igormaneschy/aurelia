@@ -571,6 +571,137 @@ describe("redactAuditPath", () => {
   });
 });
 
+// ── WebFetch policy (SSRF prevention) ─────────────────────────────────────
+
+describe("WebFetch policy", () => {
+  const ctx = execSafeCtx();
+
+  it("allows public HTTPS URL", () => {
+    const r = evaluateToolPolicy("WebFetch", { url: "https://example.com/docs" }, ctx);
+    assert.strictEqual(r.decision, "allow");
+  });
+
+  it("allows public IPv4 URL", () => {
+    const r = evaluateToolPolicy("WebFetch", { url: "http://93.184.216.34/" }, ctx);
+    assert.strictEqual(r.decision, "allow");
+  });
+
+  it("blocks cloud metadata IP (169.254.169.254)", () => {
+    const r = evaluateToolPolicy("WebFetch", { url: "http://169.254.169.254/latest/meta-data/" }, ctx);
+    assert.strictEqual(r.decision, "block");
+    assert.match(r.reason ?? "", /link-local/i);
+  });
+
+  it("blocks loopback IPv4 (127.x.x.x)", () => {
+    for (const url of ["http://127.0.0.1/", "http://127.0.0.2/"]) {
+      const r = evaluateToolPolicy("WebFetch", { url }, ctx);
+      assert.strictEqual(r.decision, "block", `expected block for ${url}`);
+      assert.match(r.reason ?? "", /loopback/i);
+    }
+  });
+
+  it("blocks loopback IPv6 (::1)", () => {
+    const r = evaluateToolPolicy("WebFetch", { url: "http://[::1]/" }, ctx);
+    assert.strictEqual(r.decision, "block");
+    assert.match(r.reason ?? "", /loopback/i);
+  });
+
+  it("blocks private range 10.x.x.x", () => {
+    for (const url of ["http://10.0.0.5/config", "http://10.255.255.255/"]) {
+      const r = evaluateToolPolicy("WebFetch", { url }, ctx);
+      assert.strictEqual(r.decision, "block", `expected block for ${url}`);
+      assert.match(r.reason ?? "", /private/i);
+    }
+  });
+
+  it("blocks private range 172.16.0.0/12", () => {
+    for (const url of ["http://172.16.0.1/admin", "http://172.31.255.255/"]) {
+      const r = evaluateToolPolicy("WebFetch", { url }, ctx);
+      assert.strictEqual(r.decision, "block", `expected block for ${url}`);
+      assert.match(r.reason ?? "", /private/i);
+    }
+  });
+
+  it("blocks private range 192.168.x.x", () => {
+    const r = evaluateToolPolicy("WebFetch", { url: "http://192.168.1.1/" }, ctx);
+    assert.strictEqual(r.decision, "block");
+    assert.match(r.reason ?? "", /private/i);
+  });
+
+  it("blocks IPv6 ULA (fc00::/7)", () => {
+    const r = evaluateToolPolicy("WebFetch", { url: "http://[fd00::1]/" }, ctx);
+    assert.strictEqual(r.decision, "block");
+    assert.match(r.reason ?? "", /local|private/i);
+  });
+
+  it("blocks localhost hostname", () => {
+    for (const url of ["http://localhost/", "http://localhost.localdomain/"]) {
+      const r = evaluateToolPolicy("WebFetch", { url }, ctx);
+      assert.strictEqual(r.decision, "block", `expected block for ${url}`);
+      assert.match(r.reason ?? "", /loopback/i);
+    }
+  });
+
+  it("blocks missing URL", () => {
+    const r = evaluateToolPolicy("WebFetch", {}, ctx);
+    assert.strictEqual(r.decision, "block");
+    assert.match(r.reason ?? "", /no URL/i);
+  });
+
+  it("blocks empty URL string", () => {
+    const r = evaluateToolPolicy("WebFetch", { url: "" }, ctx);
+    assert.strictEqual(r.decision, "block");
+    assert.match(r.reason ?? "", /no URL/i);
+  });
+
+  it("blocks unparseable URL", () => {
+    const r = evaluateToolPolicy("WebFetch", { url: "not-a-valid-url" }, ctx);
+    assert.strictEqual(r.decision, "block");
+    assert.match(r.reason ?? "", /invalid/i);
+  });
+
+  it("warn mode returns allow with warning reason", () => {
+    const ctxWarn = execSafeCtx({ mode: "warn" });
+    const r = evaluateToolPolicy("WebFetch", { url: "http://169.254.169.254/" }, ctxWarn);
+    assert.strictEqual(r.decision, "allow");
+    assert.match(r.reason ?? "", /\[WARN\]/);
+  });
+
+  // ── Security follow-up: IPv4-mapped IPv6 & unspecified address ──────────
+
+  it("blocks IPv4-mapped IPv6 loopback ([::ffff:127.0.0.1])", () => {
+    const r = evaluateToolPolicy("WebFetch", { url: "http://[::ffff:127.0.0.1]/" }, ctx);
+    assert.strictEqual(r.decision, "block");
+    assert.match(r.reason ?? "", /loopback/i);
+  });
+
+  it("blocks unspecified address (0.0.0.0)", () => {
+    const r = evaluateToolPolicy("WebFetch", { url: "http://0.0.0.0/" }, ctx);
+    assert.strictEqual(r.decision, "block");
+    assert.match(r.reason ?? "", /unspecified/i);
+  });
+
+  it("blocks IPv4-mapped IPv6 unspecified ([::ffff:0.0.0.0])", () => {
+    const r = evaluateToolPolicy("WebFetch", { url: "http://[::ffff:0.0.0.0]/" }, ctx);
+    assert.strictEqual(r.decision, "block");
+    assert.match(r.reason ?? "", /unspecified/i);
+  });
+
+  it("blocks IPv4-mapped IPv6 private ranges", () => {
+    const cases = [
+      { url: "http://[::ffff:10.0.0.1]/",      pattern: /private/i },
+      { url: "http://[::ffff:172.16.0.1]/",    pattern: /private/i },
+      { url: "http://[::ffff:192.168.1.1]/",   pattern: /private/i },
+      { url: "http://[::ffff:169.254.169.254]/", pattern: /link-local/i },
+    ];
+    for (const { url, pattern } of cases) {
+      const r = evaluateToolPolicy("WebFetch", { url }, ctx);
+      assert.strictEqual(r.decision, "block", `expected block for ${url}`);
+      assert.match(r.reason ?? "", pattern, `expected matching reason for ${url}`);
+    }
+  });
+});
+
 // ── translateAllowedTools: profile + extension utility merging ──────────────
 //
 // Regression coverage for the bug where the bridge's allowlist filtered

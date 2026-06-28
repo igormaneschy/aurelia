@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 )
@@ -441,6 +442,71 @@ func TestComputeNextRunInLocation_ListDueJobsCompat(t *testing.T) {
 	dueCheck := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
 	if !nextRun.Before(dueCheck) && !nextRun.Equal(dueCheck) {
 		t.Errorf("nextRun %v not <= dueCheck %v", nextRun, dueCheck)
+	}
+}
+
+// M5: invalid cron expression deactivates the job and records a failed execution.
+func TestScheduler_RunDueJobs_InvalidCronDeactivatesJob(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 3, 12, 10, 0, 0, 0, time.UTC)
+
+	store := &fakeCronStore{
+		jobs: map[string]CronJob{},
+		dueJobs: []CronJob{
+			{
+				ID:           "job-bad-cron",
+				OwnerUserID:  "user-1",
+				TargetChatID: 100,
+				ScheduleType: "cron",
+				CronExpr:     "invalid * * * *",
+				Prompt:       "bad cron job",
+				Active:       true,
+				LastStatus:   "idle",
+			},
+		},
+	}
+	runtime := &fakeCronRuntime{
+		results: map[string]string{"job-bad-cron": "ran before invalid cron checked"},
+		errors:  map[string]error{"job-bad-cron": errors.New("runtime error before cron parse failure")},
+	}
+
+	scheduler, err := NewScheduler(store, runtime, staticClock{now: now}, SchedulerConfig{PollInterval: time.Minute})
+	if err != nil {
+		t.Fatalf("NewScheduler() error = %v", err)
+	}
+
+	processed, err := scheduler.RunDueJobs(context.Background())
+	if err != nil {
+		t.Fatalf("RunDueJobs() error = %v", err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected 1 processed job, got %d", processed)
+	}
+
+	job := store.jobs["job-bad-cron"]
+	if job.Active {
+		t.Fatal("expected job to be deactivated after invalid cron expression")
+	}
+	if job.NextRunAt != nil {
+		t.Fatalf("expected NextRunAt to be nil, got %#v", job.NextRunAt)
+	}
+	if job.LastStatus != "failed" {
+		t.Fatalf("expected job LastStatus=failed, got %q", job.LastStatus)
+	}
+	if len(store.executions) != 1 || store.executions[0].Status != "failed" {
+		t.Fatalf("expected one failed execution, got %#v", store.executions)
+	}
+	// Verify run error is preserved alongside the cron scheduling error.
+	exec := store.executions[0]
+	if exec.ErrorMessage == "" {
+		t.Fatal("expected error message to include both run and cron errors")
+	}
+	if !strings.Contains(exec.ErrorMessage, "runtime error before cron parse failure") {
+		t.Errorf("expected error to contain runtime error, got %q", exec.ErrorMessage)
+	}
+	if !strings.Contains(exec.ErrorMessage, "invalid cron expression") {
+		t.Errorf("expected error to contain cron parse error, got %q", exec.ErrorMessage)
 	}
 }
 

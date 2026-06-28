@@ -123,7 +123,33 @@ type Service struct {
 	// modelCataloger checks model capability (SupportsImages) via the PI model
 	// registry. Defaults to bridgeModelCataloger; overridden in tests.
 	modelCataloger ModelCataloger
+
+	// pending plan for user confirmation before execution
+	pendingMu    sync.RWMutex
+	pendingPlans map[string]*pendingPlan
 }
+
+// pendingPlan holds an execution plan awaiting user confirmation via /execute.
+type pendingPlan struct {
+	plan      *orchestrator.Plan
+	chatID    int64
+	threadID  int
+	messageID int
+	cwd       string
+	userID    int64
+	createdAt time.Time
+}
+
+const pendingPlanExpiry = 10 * time.Minute
+
+// PendingPlanResult signals what happened when trying to execute a pending plan.
+type PendingPlanResult int
+
+const (
+	PlanNotFound  PendingPlanResult = iota // no plan was stored for this session
+	PlanExecuted                           // plan was found, not expired, execution started
+	PlanExpired                            // plan was found but had expired
+)
 
 type activeToolState struct {
 	tracker  *toolCallTracker
@@ -160,6 +186,7 @@ func NewService(cfg Config) *Service {
 		usersStore:       cfg.UsersStore,
 		userResolver:     cfg.UserResolver,
 		activeToolStates: make(map[string]activeToolState),
+		pendingPlans:     make(map[string]*pendingPlan),
 	}
 
 	if cfg.Bridge != nil {
@@ -211,6 +238,77 @@ func (s *Service) Cancel(chatID int64, threadID int, userID ...int64) bool {
 	defer cancel()
 	_, err := s.bridge.ExecuteSync(ctx, scopedAbortRequest(chatID, threadID, uid))
 	return err == nil
+}
+
+// storePendingPlan saves an execution plan pending user confirmation.
+func (s *Service) storePendingPlan(chatID int64, threadID int, messageID int, cwd string, userID int64, plan *orchestrator.Plan) {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	key := sessionKey(chatID, threadID, userID)
+	s.pendingPlans[key] = &pendingPlan{
+		plan:      plan,
+		chatID:    chatID,
+		threadID:  threadID,
+		messageID: messageID,
+		cwd:       cwd,
+		userID:    userID,
+		createdAt: time.Now(),
+	}
+}
+
+// ExecutePendingPlan looks up a pending plan for this session. If found and
+// not expired, it launches ExecuteApprovedPlan in a goroutine (matching the
+// old immediate-execution contract) and removes the entry. Returns
+// PlanExecuted when execution was started, PlanExpired when the plan existed
+// but was stale, and PlanNotFound when no plan was stored.
+func (s *Service) ExecutePendingPlan(chatID int64, threadID int, userID int64) PendingPlanResult {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	key := sessionKey(chatID, threadID, userID)
+	pp, ok := s.pendingPlans[key]
+	if !ok {
+		return PlanNotFound
+	}
+	delete(s.pendingPlans, key)
+	if time.Since(pp.createdAt) > pendingPlanExpiry {
+		return PlanExpired
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("pipeline: panic in ExecuteApprovedPlan: %v", r)
+			}
+		}()
+		s.output.ExecuteApprovedPlan(pp.chatID, pp.threadID, pp.messageID, pp.cwd, pp.userID, pp.plan)
+	}()
+	return PlanExecuted
+}
+
+// ClearPendingPlan removes any pending plan for this session. Returns true
+// if a non-expired plan existed. An expired plan is treated as non-existent.
+func (s *Service) ClearPendingPlan(chatID int64, threadID int, userID int64) bool {
+	s.pendingMu.Lock()
+	defer s.pendingMu.Unlock()
+	key := sessionKey(chatID, threadID, userID)
+	pp, ok := s.pendingPlans[key]
+	if !ok {
+		return false
+	}
+	delete(s.pendingPlans, key)
+	return time.Since(pp.createdAt) <= pendingPlanExpiry
+}
+
+// HasPendingPlan returns true if a valid (non-expired) pending plan exists
+// for this session.
+func (s *Service) HasPendingPlan(chatID int64, threadID int, userID int64) bool {
+	s.pendingMu.RLock()
+	defer s.pendingMu.RUnlock()
+	key := sessionKey(chatID, threadID, userID)
+	pp, ok := s.pendingPlans[key]
+	if !ok {
+		return false
+	}
+	return time.Since(pp.createdAt) <= pendingPlanExpiry
 }
 
 // CancelAllForUser cancels all active sessions for a given user.

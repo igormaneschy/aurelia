@@ -12,6 +12,7 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
+	"github.com/igormaneschy/aurelia/internal/security"
 )
 
 // runIDCounter produces unique run identifiers for ExecutePlan worktree namespaces.
@@ -77,6 +78,34 @@ func (o *Orchestrator) ExecuteTask(
 			PersistSession:  boolPtr(false),
 		},
 	}
+
+	// ── Resolve and attach security context ──
+	capProfile := security.CapabilityProfile(cfg.CapabilityProfile)
+	if capProfile == "" {
+		// Infer profile from configured tools
+		capProfile = inferCapabilityProfile(cfg.Tools)
+	}
+
+	secCfg := security.DefaultConfig()
+	if o.config.SecurityConfig != nil {
+		secCfg = *o.config.SecurityConfig
+	}
+
+	_, effectiveTools, secCtx := bridge.BuildSecurityContext(
+		capProfile,
+		cfg.Tools,
+		cfg.DisallowedTools,
+		cwd != "",
+		&secCfg,
+		cwd,
+		nID,
+		int(nID),
+		nID,
+		task.Agent,
+		"",
+	)
+	req.Options.AllowedTools = effectiveTools
+	req.Options.Security = secCtx
 
 	ch, err := o.bridge.Execute(ctx, req)
 	if err != nil {
@@ -452,4 +481,35 @@ func planHasWorktree(waves [][]Task) bool {
 // boolPtr returns a pointer to v for use in optional bool request fields.
 func boolPtr(v bool) *bool {
 	return &v
+}
+
+// inferCapabilityProfile determines the appropriate capability profile from
+// the configured tool list. Used when no explicit profile is set on WorkerConfig.
+//
+//   - Bash present → execute_safe (governed shell)
+//   - Write/Edit present → edit_project (no shell)
+//   - Read-only tools present → read_only
+//   - No tools → observe
+func inferCapabilityProfile(tools []string) security.CapabilityProfile {
+	var hasBash, hasWriteEdit, hasRead bool
+	for _, t := range tools {
+		switch t {
+		case "Bash":
+			hasBash = true
+		case "Write", "Edit":
+			hasWriteEdit = true
+		case "Read", "Grep", "Glob", "LS":
+			hasRead = true
+		}
+	}
+	switch {
+	case hasBash:
+		return security.ProfileExecuteSafe
+	case hasWriteEdit:
+		return security.ProfileEditProject
+	case hasRead:
+		return security.ProfileReadOnly
+	default:
+		return security.ProfileObserve
+	}
 }

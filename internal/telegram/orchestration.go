@@ -43,9 +43,9 @@ func (bc *BotController) executeApprovedPlan(chat *telebot.Chat, threadID int, m
 		// shallow copy that shares the bridge; the original is not mutated.
 		runOrch = bc.orchestrator.WithRepoRoot(repoRoot)
 	} else {
-		// Fallback: use the handoff cwd directly when no orchestrator is
-		// configured (unlikely, as tryExecutePlan guards this).
-		runOrch = bc.orchestrator
+		log.Printf("PreflightExecution for chat=%d thread=%d: no orchestrator configured", chat.ID, threadID)
+		_ = SendErrorWithThread(bc.bot, chat, "No orchestrator configured. Cannot execute plan.", threadID)
+		return
 	}
 
 	// 0. Ensure CLAUDE.md and AGENTS.md exist

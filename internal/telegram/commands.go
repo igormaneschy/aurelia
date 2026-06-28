@@ -46,6 +46,8 @@ const (
 	CmdDebugErrors
 	CmdSetMode
 	CmdExplainProfile // Phase 2: /mode explain <name>, /agents explain <name>
+	CmdExecutePlan
+	CmdCancelPlan
 )
 
 // MatchedCommand represents a message that was identified as a system command.
@@ -185,6 +187,14 @@ var commandRules = []commandRule{
 	{CmdDebugErrors, []string{
 		"/debug errors",
 		"ultimos erros", "últimos erros", "debug erros",
+	}, true},
+	// execute_plan
+	{CmdExecutePlan, []string{
+		"/execute",
+	}, true},
+	// cancel_plan
+	{CmdCancelPlan, []string{
+		"/cancel",
 	}, true},
 }
 
@@ -350,6 +360,10 @@ func (bc *BotController) handleCommand(c telebot.Context, cmd *MatchedCommand) e
 		reply, err = bc.cmdDebugErrors()
 	case CmdSetMode:
 		reply, err = bc.cmdSetMode(c, cmd.Text)
+	case CmdExecutePlan:
+		reply, err = bc.cmdExecutePlan(chatID, threadID, userID)
+	case CmdCancelPlan:
+		reply, err = bc.cmdCancelPlan(chatID, threadID, userID)
 	case CmdExplainProfile:
 		reply, err = bc.cmdExplainProfile(c, cmd.Text)
 	default:

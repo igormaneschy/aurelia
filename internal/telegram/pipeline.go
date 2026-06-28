@@ -66,10 +66,13 @@ func (bc *BotController) processInputWithImages(c telebot.Context, text string, 
 		}
 	}
 
+	chatID := c.Chat().ID
+	threadID := c.Message().ThreadID
+
 	if isContinueResumeText(text) && bc.sessions != nil {
-		chatID := c.Chat().ID
-		threadID := c.Message().ThreadID
 		if sessionFile, active := bc.sessions.GetSessionWithState(chatID, threadID, senderID); sessionFile != "" && !active {
+			// Clear any pending plan before resume processing
+			bc.ensurePipeline().ClearPendingPlan(chatID, threadID, senderID)
 			if err := SendContextText(c, interruptedResumeAck(sessionFile)); err != nil {
 				return err
 			}
@@ -81,7 +84,10 @@ func (bc *BotController) processInputWithImages(c telebot.Context, text string, 
 		return bc.handleCommand(c, cmd)
 	}
 
-	return bc.runPipeline(c.Chat().ID, c.Message().ThreadID, c.Message().ID, text, images, senderID, c.Chat().Type == telebot.ChatPrivate)
+	// Non-command message — clear any pending plan before normal processing
+	bc.ensurePipeline().ClearPendingPlan(chatID, threadID, senderID)
+
+	return bc.runPipeline(chatID, threadID, c.Message().ID, text, images, senderID, c.Chat().Type == telebot.ChatPrivate)
 }
 
 func (bc *BotController) runPipeline(chatID int64, threadID int, messageID int, text string, images []bridge.ImageAttachment, userID int64, isPrivateChat bool) error {
@@ -233,6 +239,34 @@ func (o telegramPipelineOutput) ExecuteApprovedPlan(chatID int64, threadID int, 
 		return
 	}
 	o.bc.executeApprovedPlan(&telebot.Chat{ID: chatID}, threadID, messageID, cwd, userID, plan)
+}
+
+// cmdExecutePlan handles /execute: executes a pending plan if one exists.
+func (bc *BotController) cmdExecutePlan(chatID int64, threadID int, userID int64) (string, error) {
+	if bc.pipeline == nil {
+		return "Nenhum plano pendente.", nil
+	}
+	switch bc.pipeline.ExecutePendingPlan(chatID, threadID, userID) {
+	case pipelinepkg.PlanExecuted:
+		log.Printf("pipeline: executing pending plan for chat=%d thread=%d user=%d", chatID, threadID, userID)
+		return "✅ Plano aprovado! Iniciando execução...", nil
+	case pipelinepkg.PlanExpired:
+		return "⏰ O plano pendente expirou. Peça para gerar um novo plano.", nil
+	default:
+		return "Nenhum plano pendente encontrado. Peça para gerar um novo plano.", nil
+	}
+}
+
+// cmdCancelPlan handles /cancel: discards a pending plan if one exists.
+func (bc *BotController) cmdCancelPlan(chatID int64, threadID int, userID int64) (string, error) {
+	if bc.pipeline == nil {
+		return "Nenhum plano pendente.", nil
+	}
+	if bc.pipeline.ClearPendingPlan(chatID, threadID, userID) {
+		log.Printf("pipeline: cancelled pending plan for chat=%d thread=%d user=%d", chatID, threadID, userID)
+		return "🗑️ Plano descartado.", nil
+	}
+	return "Nenhum plano pendente para cancelar.", nil
 }
 
 type noopPipelineProgress struct{}

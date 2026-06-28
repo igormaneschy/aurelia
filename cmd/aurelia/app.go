@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/igormaneschy/aurelia/internal/agents"
@@ -25,6 +26,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
+	"github.com/igormaneschy/aurelia/internal/security"
 	"github.com/igormaneschy/aurelia/internal/session"
 	"github.com/igormaneschy/aurelia/internal/telegram"
 	"github.com/igormaneschy/aurelia/internal/tuisessions"
@@ -116,6 +118,8 @@ func bootstrapApp() (*app, error) {
 	}
 
 	br := setupBridge()
+	// Restrict bridge env to essential vars + known provider API keys.
+	br.SetEnvAllowlist(bridge.AllowlistEnv(knownProviderEnvVars(cfg)...))
 	personaSvc := setupPersona(resolver)
 
 	agentReg, err := agents.Load(resolver.Agents())
@@ -297,7 +301,8 @@ func bootstrapApp() (*app, error) {
 		return nil, fmt.Errorf("get current working directory: %w", err)
 	}
 	orch := orchestrator.NewOrchestrator(br, orchestrator.OrchestratorConfig{
-		RepoRoot: cwd,
+		RepoRoot:       cwd,
+		SecurityConfig: &cfg.SecurityConfig,
 	})
 	bot.SetOrchestrator(orch)
 
@@ -372,7 +377,7 @@ func bootstrapApp() (*app, error) {
 		}
 	})
 
-	scheduler, err := setupCronScheduler(cronStore, br, agentReg, personaSvc, bot, resolver.Memory(), cfg.DefaultProvider, cfg.DefaultModel, exePath, users.NewResolver(resolver.Root()))
+	scheduler, err := setupCronScheduler(cronStore, br, agentReg, personaSvc, bot, resolver.Memory(), cfg.DefaultProvider, cfg.DefaultModel, exePath, users.NewResolver(resolver.Root()), &cfg.SecurityConfig)
 	if err != nil {
 		if closeErr := onboardingStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close onboarding store: %v", closeErr)
@@ -501,6 +506,7 @@ func setupCronScheduler(
 	defaultModel string,
 	exePath string,
 	userResolver *users.Resolver,
+	secCfg *security.SecurityConfig,
 ) (*cron.Scheduler, error) {
 	if agentReg == nil {
 		return nil, nil
@@ -515,6 +521,7 @@ func setupCronScheduler(
 		defaultModel,
 	)
 	cronRuntime.SetExePath(exePath)
+	cronRuntime.SetSecurityConfig(secCfg)
 	if userResolver != nil {
 		cronRuntime.SetUserResolver(userResolver)
 	}
@@ -641,8 +648,13 @@ func (a *app) shutdown(ctx context.Context) {
 	if a.bot != nil {
 		done := make(chan struct{})
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("Panic: bot stop recovered: %v", r)
+				}
+				close(done)
+			}()
 			a.bot.Stop()
-			close(done)
 		}()
 		select {
 		case <-done:
@@ -688,6 +700,17 @@ func (a *app) close() {
 	}
 }
 
+// deriveProviderEnvName returns the conventional API key env var name for the
+// given provider. Known providers use the explicit piProviderEnvName mapping;
+// custom providers derive <UPPER>_API_KEY from the normalized name.
+func deriveProviderEnvName(provider string) string {
+	if envName := piProviderEnvName(provider); envName != "" {
+		return envName
+	}
+	normalized := config.NormalizeProvider(provider)
+	return strings.ToUpper(strings.ReplaceAll(normalized, "-", "_")) + "_API_KEY"
+}
+
 // setProviderEnv exports provider credentials as env vars consumed by PI.
 func setProviderEnv(cfg *config.AppConfig) {
 	provider := config.NormalizeProvider(cfg.DefaultProvider)
@@ -708,13 +731,14 @@ func setProviderEnv(cfg *config.AppConfig) {
 		return
 	}
 
-	apiKey := cfg.ProviderAPIKey(provider)
-	if apiKey == "" {
-		return
-	}
-
-	if envName := piProviderEnvName(provider); envName != "" {
-		_ = os.Setenv(envName, apiKey)
+	// Set env vars for all configured providers that have a non-empty API key.
+	for p, pc := range cfg.Providers {
+		if pc.APIKey == "" {
+			continue
+		}
+		if envName := deriveProviderEnvName(p); envName != "" {
+			_ = os.Setenv(envName, pc.APIKey)
+		}
 	}
 }
 
@@ -737,6 +761,35 @@ func piProviderEnvName(provider string) string {
 	default:
 		return ""
 	}
+}
+
+// knownProviderEnvVars returns all provider API key env var names that may
+// be set in the daemon environment. These are forwarded to the bridge
+// process via the environment allowlist.
+//
+// The returned list includes the hardcoded known providers as a safety net
+// plus all providers in cfg.Providers that have a non-empty API key.
+// bridge.AllowlistEnv filters the actual os.Environ() so only vars that are
+// actually set leak through.
+func knownProviderEnvVars(cfg *config.AppConfig) []string {
+	// Hardcoded safety net: providers that may be set via env but not in config.
+	known := []string{"anthropic", "kimi", "openrouter", "zai", "google", "opencode-go", "ollama"}
+	vars := make([]string, 0, len(known)+len(cfg.Providers))
+	for _, p := range known {
+		if envName := piProviderEnvName(p); envName != "" {
+			vars = append(vars, envName)
+		}
+	}
+	// Include env vars for all configured providers with a non-empty API key.
+	for p, pc := range cfg.Providers {
+		if pc.APIKey == "" {
+			continue
+		}
+		if envName := deriveProviderEnvName(p); envName != "" {
+			vars = append(vars, envName)
+		}
+	}
+	return vars
 }
 
 func hasPIAuth(provider string) bool {
