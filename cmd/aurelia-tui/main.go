@@ -50,8 +50,8 @@ func main() {
 
 	// Create and start the Bubble Tea program. The UI itself owns daemon
 	// reachability so startup stays visual even when the socket is missing.
-	// Mouse capture is opt-in via Ctrl+O so native terminal text selection works
-	// by default.
+	// Mouse capture is enabled by default so sidebar buttons and scroll work
+	// out of the box. Ctrl+O toggles it off for native terminal text selection.
 	m := tui.NewModelWithOptions(socketPath, theme, tui.ModelOptions{
 		NoAnimations:   *noAnimations,
 		NoMouse:        *noMouse,

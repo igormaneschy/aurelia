@@ -676,6 +676,191 @@ func TestRenderChatHeader_SanitizesLegacySessionNames(t *testing.T) {
 	}
 }
 
+func TestSidebarDelete_TargetsSelectedSession(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.sessions = []tuiSessionInfo{
+		{ChatID: -9000001, Name: "dm"},
+		{ChatID: -9000002, Name: "work"},
+		{ChatID: -9000003, Name: "research"},
+	}
+	m.activeSession = -9000002
+	m.sidebarCursor = 0
+	m.sidebarFocused = true
+	prepSidebarTest(&m)
+
+	if m.sidebarCursor != 0 {
+		t.Fatalf("initial sidebarCursor = %d, want 0", m.sidebarCursor)
+	}
+
+	// Navigate to index 1 (press down once).
+	updated, _ := m.handleKeyMsg(keyPress(tea.KeyDown))
+	m = updated.(Model)
+	if m.sidebarCursor != 1 {
+		t.Fatalf("after down sidebarCursor = %d, want 1", m.sidebarCursor)
+	}
+
+	// Press d to delete — cursor should remain at index 1.
+	updated, _ = m.handleKeyMsg(keyPress('d'))
+	m2 := updated.(Model)
+
+	if m2.sidebarCursor != 1 {
+		t.Errorf("sidebarCursor = %d, want 1 (should target the selected session)", m2.sidebarCursor)
+	}
+
+	// Must open the delete confirm form for the session at cursor.
+	if !m2.formOpen {
+		t.Error("expected formOpen after pressing d")
+	}
+	if m2.activeForm == nil {
+		t.Fatal("expected activeForm after pressing d")
+	}
+	if m2.activeForm.kind != formKindConfirm {
+		t.Errorf("activeForm.kind = %v, want formKindConfirm", m2.activeForm.kind)
+	}
+	if m2.activeForm.deleteChatID != m.sessions[1].ChatID {
+		t.Errorf("deleteChatID = %d, want %d (session[1])", m2.activeForm.deleteChatID, m.sessions[1].ChatID)
+	}
+}
+
+// --- nextSessionDefaultName tests ---
+
+func TestNextSessionDefaultName_Monotonic(t *testing.T) {
+	// Names are monotonically increasing: max N + 1, never backfill.
+	sessions := []tuiSessionInfo{
+		{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
+		{ChatID: -9000002, Name: "session-1"},
+		{ChatID: -9000003, Name: "session-3"},
+	}
+	name := nextSessionDefaultName(sessions)
+	if name != "session-4" {
+		t.Errorf("nextSessionDefaultName = %q, want %q", name, "session-4")
+	}
+}
+
+func TestNextSessionDefaultName_AfterDelete(t *testing.T) {
+	// session-2 was deleted; only session-1 remains. The naming is
+	// monotonically increasing (max N + 1), so the next name is "session-2".
+	sessions := []tuiSessionInfo{
+		{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
+		{ChatID: -9000002, Name: "session-1"},
+	}
+	name := nextSessionDefaultName(sessions)
+	if name != "session-2" {
+		t.Errorf("nextSessionDefaultName = %q, want %q", name, "session-2")
+	}
+}
+
+func TestNextSessionDefaultName_CustomNamesIgnored(t *testing.T) {
+	sessions := []tuiSessionInfo{
+		{ChatID: ipc.ReservedTUIChatID, Name: "DM"},
+		{ChatID: -9000002, Name: "work"},
+		{ChatID: -9000003, Name: "research"},
+	}
+	name := nextSessionDefaultName(sessions)
+	if name != "session-1" {
+		t.Errorf("nextSessionDefaultName = %q, want %q", name, "session-1")
+	}
+}
+
+func TestNextSessionDefaultName_NonNumericSuffix(t *testing.T) {
+	// "session-abc" does not match the integer pattern, so it's skipped.
+	sessions := []tuiSessionInfo{
+		{ChatID: ipc.ReservedTUIChatID, Name: "session-abc"},
+	}
+	name := nextSessionDefaultName(sessions)
+	if name != "session-1" {
+		t.Errorf("nextSessionDefaultName = %q, want %q", name, "session-1")
+	}
+}
+
+// --- sidebarCursor reposition tests ---
+
+func TestTuiSessionsMsg_RepositionsCursorToActive(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.activeSession = -9000002
+	m.sidebarCursor = 99 // stale out-of-bounds value
+
+	updated, _ := m.Update(tuiSessionsMsg{
+		sessions: []tuiSessionInfo{
+			{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
+			{ChatID: -9000002, Name: "work"},
+			{ChatID: -9000003, Name: "research"},
+		},
+	})
+	m2 := updated.(Model)
+
+	if m2.sidebarCursor != 1 {
+		t.Errorf("sidebarCursor = %d, want 1 (index of activeSession %d)",
+			m2.sidebarCursor, m2.activeSession)
+	}
+}
+
+func TestTuiSessionsMsg_RepositionsCursorToActiveAfterDelete(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	// Simulating state after active session was deleted — falls back to DM.
+	m.activeSession = ipc.ReservedTUIChatID
+	m.sidebarCursor = 5 // stale cursor from previous state
+
+	updated, _ := m.Update(tuiSessionsMsg{
+		sessions: []tuiSessionInfo{
+			{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
+			{ChatID: -9000002, Name: "work"},
+		},
+	})
+	m2 := updated.(Model)
+
+	if m2.sidebarCursor != 0 {
+		t.Errorf("sidebarCursor = %d, want 0 (index of DM / activeSession)",
+			m2.sidebarCursor)
+	}
+}
+
+func TestTuiSessionsMsg_RepositionsCursorToNewSessionAfterCreate(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	// Simulating state after tuiSessionCreatedMsg set the active session
+	// but before tuiSessionsMsg refreshed the session list.
+	m.activeSession = -9000004 // the newly created session
+	m.sidebarCursor = 0        // stale cursor pointing at DM
+
+	updated, _ := m.Update(tuiSessionsMsg{
+		sessions: []tuiSessionInfo{
+			{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
+			{ChatID: -9000002, Name: "work"},
+			{ChatID: -9000004, Name: "session-3"},
+		},
+	})
+	m2 := updated.(Model)
+
+	if m2.sidebarCursor != 2 {
+		t.Errorf("sidebarCursor = %d, want 2 (index of new session %d)",
+			m2.sidebarCursor, m2.activeSession)
+	}
+}
+
+func TestTuiSessionsMsg_CursorToZeroWhenActiveNotFound(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.activeSession = -9999999 // ID not in the session list
+	m.sidebarCursor = 3
+
+	updated, _ := m.Update(tuiSessionsMsg{
+		sessions: []tuiSessionInfo{
+			{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
+			{ChatID: -9000002, Name: "work"},
+		},
+	})
+	m2 := updated.(Model)
+
+	if m2.sidebarCursor != 0 {
+		t.Errorf("sidebarCursor = %d, want 0 (fallback when active not found)",
+			m2.sidebarCursor)
+	}
+}
+
 func containsStr(s, substr string) bool {
 	return len(s) >= len(substr) && indexOfStr(s, substr) >= 0
 }

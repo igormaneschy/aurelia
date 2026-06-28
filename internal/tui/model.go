@@ -122,6 +122,7 @@ func newModel(socketPath, historyPath string, theme Theme, opts ModelOptions) Mo
 		socketPath: socketPath,
 		ipcClient:  ipc.NewClient(socketPath),
 		chromeModel: chromeModel{
+			mouseEnabled:    !opts.NoMouse,
 			spinner:         s,
 			showSidebar:     true,
 			sidebarHoverRow: -1,

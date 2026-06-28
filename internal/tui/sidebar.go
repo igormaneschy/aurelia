@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/table"
 	"charm.land/lipgloss/v2"
 
@@ -85,6 +86,14 @@ func newSidebarTable(styles themeStyles) table.Model {
 	t.SetWidth(sidebarWidth)
 	t.SetHeight(12)
 	t.SetStyles(sidebarTableStyles(styles))
+
+	// Remove bare "d" from HalfPageDown — "d" is reserved for sidebar delete.
+	km := table.DefaultKeyMap()
+	km.HalfPageDown = key.NewBinding(
+		key.WithKeys("ctrl+d"),
+		key.WithHelp("ctrl+d", "½ page down"),
+	)
+	t.KeyMap = km
 
 	return t
 }
