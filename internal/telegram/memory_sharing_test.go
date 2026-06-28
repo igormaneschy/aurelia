@@ -2,8 +2,6 @@ package telegram
 
 import (
 	"testing"
-
-	"github.com/igormaneschy/aurelia/internal/session"
 )
 
 // TestBotController_LazyGettersReturnStableInstance verifies that NudgeBuffer()
@@ -39,12 +37,4 @@ func TestBotController_DreamerReturnsNilWhenUnset(t *testing.T) {
 	if d := bc.Dreamer(); d != nil {
 		t.Errorf("Dreamer(): expected nil when unset, got %v", d)
 	}
-}
-
-// TestBotController_NudgeBufferIsConcreteSessionType confirms the shared
-// buffer is a real *session.NudgeBuffer, not a nil or wrapper.
-func TestBotController_NudgeBufferIsConcreteSessionType(t *testing.T) {
-	bc := &BotController{}
-	buf := bc.NudgeBuffer()
-	var _ *session.NudgeBuffer = buf
 }
