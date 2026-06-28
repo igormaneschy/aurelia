@@ -4,21 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## v0.35.2 - 2026-06-28
 
 ### Removed
 - **`internal/engine` package** — interface `Engine`, `NoopEngine`, `MockEngine` removidos após migração completa da pipeline para `bridge.Bridge` directo
 - **`internal/bridge/adapter.go`** — `PIAdapter` (tradutor `engine.Request`/`engine.Event` → bridge NDJSON) eliminado
 - **`internal/pipeline/resilient_bridge.go`** — `ResilientBridge` removido; lógica de retry/fallback inlinada em `query_execute.go`
 - **`internal/pipeline/circuit_breaker.go`** — circuit breaker removido (retry com backoff suficiente)
+- **`internal/pipeline/transport_output.go`**, **`turn_context.go`** — dead code
+- **`internal/i18n` package** — strings PT-BR inlinadas no Telegram
+- **`internal/tui/ipc.go`**, **`internal/dream/helpers.go`** — re-exports e helpers de uma linha
 
 ### Added
 - **`internal/pipeline/query_execute.go`** — retry com backoff exponencial (3 tentativas) + fallback OpenRouter com snapshot de continuidade
 - **`internal/pipeline/query_execute_test.go`** — testes de retry, fallback, auth, cancelamento, process death
+- **`pkg/idgen/idgen.go`** — geração de IDs curtas, substitui `google/uuid`
 
 ### Changed
 - **Pipeline migrada para `bridge.Bridge` directo** — `buildBridgeRequest`, `ProcessBridgeEvents`, `executeAsync`, `applyVisionFallback`, `classifyFunc` usam `bridge.Request`/`bridge.Event` em vez de tipos `engine`
 - **Comandos síncronos** — abort, steer, follow-up, get-state passam por `bridge.ExecuteSync` em vez de `engine.Command`
+- **Cron colapsado** — `BridgeAdapter`/`NotifyingRuntime` → `BridgeCronRuntime` com `SetDelivery`
 
 ## v0.35.1 - 2026-06-26
 
