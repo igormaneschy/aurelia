@@ -139,6 +139,7 @@ func (m Model) scrollViewportPage(direction int) (Model, tea.Cmd) {
 	} else {
 		m.viewport.ScrollUp(lines)
 	}
+	m.followBottomIntent = m.historyNav.paginator.OnLastPage() && m.viewport.AtBottom()
 	return m, nil
 }
 
@@ -153,4 +154,5 @@ func (m *Model) updateViewportToPage() {
 	m.viewport.SetWidth(contentWidth)
 	m.viewport.SetContent(m.renderMessages(pageMsgs, contentWidth))
 	m.viewport.GotoTop()
+	m.followBottomIntent = false
 }

@@ -637,6 +637,7 @@ func TestModel_UpdateViewportPreservesScrollWhenNotAtBottom(t *testing.T) {
 	m.updateViewport()
 	m.viewport.GotoBottom()
 	m.viewport.ScrollUp(5)
+	m.followBottomIntent = false // user scrolled up, stop auto-following
 	offset := m.viewport.YOffset()
 
 	m.messages = append(m.messages, chatMessage{
@@ -680,9 +681,9 @@ func TestModel_UpdateViewportFollowsBottomWhenAlreadyAtBottom(t *testing.T) {
 	}
 }
 
-// Regression: viewport height decreases between content updates (e.g. tool
-// activity badge adding a footer line). updateViewport must auto-scroll even
-// when syncViewportDimensions changes maxYOffset before AtBottom is checked.
+// Regression: viewport height decreases between content updates (e.g. stream
+// progress bar adds a footer line). updateViewport must auto-scroll even when
+// syncViewportDimensions changes maxYOffset before AtBottom is checked.
 func TestModel_UpdateViewportFollowsBottomAfterHeightChange(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
@@ -701,12 +702,13 @@ func TestModel_UpdateViewportFollowsBottomAfterHeightChange(t *testing.T) {
 	m.viewport.GotoBottom()
 	vpHeightBefore := m.viewport.Height()
 
-	// Simulate a footer change that reduces viewport height—
-	// e.g. tool activity badge appearing during streaming.
-	m.activeTools = []toolInfo{{
-		Name:   "Bash",
-		Detail: "Bash",
-	}}
+	// Simulate a footer change that reduces viewport height —
+	// e.g. stream progress bar appearing during streaming.
+	m.waiting = true
+	m.streamProgress.active = true
+	m.streamProgress.showAfter = time.Now().Add(-time.Second)
+	m.streamProgress.tokenMax = defaultStreamTokenMax
+	m.streamProgress.bar = newStreamProgressBar(m.styles)
 
 	m.messages = append(m.messages, chatMessage{
 		Sender:    "Aurelia",
@@ -718,6 +720,40 @@ func TestModel_UpdateViewportFollowsBottomAfterHeightChange(t *testing.T) {
 	if !m.viewport.AtBottom() {
 		t.Fatalf("expected viewport to follow bottom after height change "+
 			"(vp height %d -> %d)", vpHeightBefore, m.viewport.Height())
+	}
+}
+
+func TestModel_UpdateViewportFollowsBottomAcrossHistoryPageBoundary(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.height = 20
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+	for i := 0; i < historyPageSize; i++ {
+		m.messages = append(m.messages, chatMessage{
+			Sender:    "Igor",
+			Text:      "line",
+			Timestamp: time.Now(),
+		})
+	}
+	m.updateViewport()
+	m.viewport.GotoBottom()
+	m.followBottomIntent = true
+
+	m.messages = append(m.messages, chatMessage{
+		Sender:    "Aurelia",
+		Text:      "new page response",
+		Timestamp: time.Now(),
+	})
+	m.updateViewport()
+
+	if !m.historyNav.paginator.OnLastPage() {
+		t.Fatalf("expected paginator to follow the new last page, got page %d/%d",
+			m.historyNav.paginator.Page+1, m.historyNav.paginator.TotalPages)
+	}
+	if !strings.Contains(stripANSIForTest(m.viewport.View()), "new page response") {
+		t.Fatalf("expected viewport to show new response, got:\n%s", m.viewport.View())
 	}
 }
 
@@ -740,6 +776,32 @@ func TestModel_PageUpScrollsViewport(t *testing.T) {
 	}
 	if m2.viewport.YOffset() >= bottomOffset {
 		t.Fatalf("expected page up to reduce viewport offset from %d, got %d", bottomOffset, m2.viewport.YOffset())
+	}
+	if m2.followBottomIntent {
+		t.Fatal("expected page up to clear follow-bottom intent")
+	}
+}
+
+func TestModel_PageDownToBottomRestoresFollowBottomIntent(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.height = 12
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+	m.viewport.SetContent(strings.Repeat("line\n", 40))
+	m.viewport.GotoBottom()
+	m.viewport.ScrollUp(1)
+	m.followBottomIntent = false
+
+	updated, _ := m.Update(keyPress(tea.KeyPgDown))
+	m2 := updated.(Model)
+
+	if !m2.viewport.AtBottom() {
+		t.Fatalf("expected page down to reach bottom, got offset %d", m2.viewport.YOffset())
+	}
+	if !m2.followBottomIntent {
+		t.Fatal("expected page down to bottom to restore follow-bottom intent")
 	}
 }
 

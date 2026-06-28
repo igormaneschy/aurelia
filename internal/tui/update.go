@@ -114,6 +114,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.viewportSet = true
 			m.viewport.SetContent(m.renderMessages(m.messages, contentWidth))
 			m.viewport.GotoBottom()
+			m.followBottomIntent = true
 		} else {
 			m.syncViewportDimensions()
 			m.updateViewport()
@@ -1222,6 +1223,9 @@ func (m Model) handleViewportMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
+	// Explicit viewport navigation should only auto-follow again after the user
+	// scrolls back to the bottom.
+	m.followBottomIntent = m.viewport.AtBottom()
 	return m, cmd
 }
 

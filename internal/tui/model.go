@@ -141,8 +141,9 @@ func newModel(socketPath, historyPath string, theme Theme, opts ModelOptions) Mo
 			historyPath:       historyPath,
 		},
 		transcriptModel: transcriptModel{
-			messages:   make([]chatMessage, 0),
-			historyNav: newHistoryNav(),
+			messages:            make([]chatMessage, 0),
+			historyNav:          newHistoryNav(),
+			followBottomIntent:  true,
 		},
 		activeSession: ipc.ReservedTUIChatID,
 	}
