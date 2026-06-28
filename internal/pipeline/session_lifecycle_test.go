@@ -8,7 +8,7 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
-	"github.com/igormaneschy/aurelia/internal/engine"
+	
 	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/session"
 	"github.com/igormaneschy/aurelia/internal/transport"
@@ -30,14 +30,14 @@ func TestApplyLifecycle_Disabled(t *testing.T) {
 	s := newLifecycleTestService(t)
 	s.config.SessionLifecycle = config.SessionLifecycleConfig{Enabled: false}
 
-	req := &engine.Request{Continue: true, SessionKey: "/tmp/test.jsonl"}
+	req := &bridge.Request{Command: "query", Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"}}
 
 	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
 	if result.Decision.Action != session.ActionContinue {
 		t.Fatalf("expected continue when disabled, got %s", result.Decision.Action)
 	}
-	if req.Continue != true {
+	if req.Options.Continue != true {
 		t.Fatal("request continue should remain true when disabled")
 	}
 }
@@ -47,14 +47,14 @@ func TestApplyLifecycle_HealthyContinue(t *testing.T) {
 	s.config.SessionLifecycle = config.DefaultSessionLifecycleConfig()
 	s.sessions.SetSession(1, 2, 100, "/tmp/test.jsonl")
 
-	req := &engine.Request{Continue: true, SessionKey: "/tmp/test.jsonl"}
+	req := &bridge.Request{Command: "query", Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"}}
 
 	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
 	if result.Decision.Action != session.ActionContinue {
 		t.Fatalf("expected continue for healthy session, got %s (state=%s)", result.Decision.Action, result.Decision.State)
 	}
-	if req.Continue != true {
+	if req.Options.Continue != true {
 		t.Fatal("request continue should remain true for healthy session")
 	}
 }
@@ -67,14 +67,14 @@ func TestApplyLifecycle_ColdResume(t *testing.T) {
 	s.sessions.SetSession(1, 2, 100, "/tmp/test.jsonl")
 	s.sessions.DeactivateSession(1, 2, 100)
 
-	req := &engine.Request{Continue: true, SessionKey: "/tmp/test.jsonl"}
+	req := &bridge.Request{Command: "query", Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"}}
 
 	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
 	if result.Decision.Action != session.ActionColdResume {
 		t.Fatalf("expected cold_resume for inactive session, got %s (state=%s)", result.Decision.Action, result.Decision.State)
 	}
-	if req.Continue != false {
+	if req.Options.Continue != false {
 		t.Fatal("request continue should be false for cold resume")
 	}
 }
@@ -86,7 +86,7 @@ func TestApplyLifecycle_SuspectDueToEmptyResult(t *testing.T) {
 	s.sessions.SetSession(1, 2, 100, "/tmp/test.jsonl")
 	s.sessions.MarkEmptyResult(1, 2, 100)
 
-	req := &engine.Request{Continue: true, SessionKey: "/tmp/test.jsonl"}
+	req := &bridge.Request{Command: "query", Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"}}
 
 	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
@@ -96,7 +96,7 @@ func TestApplyLifecycle_SuspectDueToEmptyResult(t *testing.T) {
 	if result.Decision.Action != session.ActionColdResume {
 		t.Fatalf("expected cold_resume after empty result, got %s (state=%s)", result.Decision.Action, result.Decision.State)
 	}
-	if req.Continue != false {
+	if req.Options.Continue != false {
 		t.Fatal("request continue should be false after empty result")
 	}
 }
@@ -108,7 +108,7 @@ func TestApplyLifecycle_SuspectDueToProcessDeath(t *testing.T) {
 	s.sessions.SetSession(1, 2, 100, "/tmp/test.jsonl")
 	s.sessions.MarkProcessDeath(1, 2, 100)
 
-	req := &engine.Request{Continue: true, SessionKey: "/tmp/test.jsonl"}
+	req := &bridge.Request{Command: "query", Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"}}
 
 	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
@@ -118,7 +118,7 @@ func TestApplyLifecycle_SuspectDueToProcessDeath(t *testing.T) {
 	if result.Decision.Action != session.ActionColdResume {
 		t.Fatalf("expected cold_resume after process death, got %s (state=%s)", result.Decision.Action, result.Decision.State)
 	}
-	if req.Continue != false {
+	if req.Options.Continue != false {
 		t.Fatal("request continue should be false")
 	}
 }
@@ -134,7 +134,7 @@ func TestApplyLifecycle_LargeTokens(t *testing.T) {
 	// covered in session.EvaluateLifecycle tests (see lifecycle_test.go).
 	s.sessions.SetSession(1, 2, 100, "/tmp/test.jsonl")
 
-	req := &engine.Request{Continue: true, SessionKey: "/tmp/test.jsonl"}
+	req := &bridge.Request{Command: "query", Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"}}
 
 	_ = s.applyLifecycle(context.Background(), req, 1, 2, 100)
 	// No assertion needed here: session.EvaluateLifecycle (unit-tested in
@@ -147,7 +147,7 @@ func TestApplyLifecycle_NoSession(t *testing.T) {
 	s.config.SessionLifecycle = config.DefaultSessionLifecycleConfig()
 
 	// No session at all — signals will be zero-valued, active=false
-	req := &engine.Request{}
+	req := &bridge.Request{Command: "query"}
 
 	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
@@ -163,14 +163,14 @@ func TestApplyLifecycle_ColdResumeThenClearFailure(t *testing.T) {
 	s.sessions.SetSession(1, 2, 100, "/tmp/test.jsonl")
 	s.sessions.MarkFailure(1, 2, 100, "timeout")
 
-	req := &engine.Request{Continue: true, SessionKey: "/tmp/test.jsonl"}
+	req := &bridge.Request{Command: "query", Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"}}
 
 	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
 	if result.Decision.Action != session.ActionColdResume {
 		t.Fatalf("expected cold_resume after failure, got %s", result.Decision.Action)
 	}
-	if req.Continue != false {
+	if req.Options.Continue != false {
 		t.Fatal("request continue should be false after failure")
 	}
 
@@ -178,7 +178,7 @@ func TestApplyLifecycle_ColdResumeThenClearFailure(t *testing.T) {
 	s.sessions.ClearFailureState(1, 2, 100)
 	s.sessions.SetSession(1, 2, 100, "/tmp/test.jsonl") // re-activate
 
-	req2 := &engine.Request{Continue: true, SessionKey: "/tmp/test.jsonl"}
+	req2 := &bridge.Request{Command: "query", Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"}}
 
 	result2 := s.applyLifecycle(context.Background(), req2, 1, 2, 100)
 
@@ -193,7 +193,7 @@ func TestApplyLifecycle_NoSessionStore(t *testing.T) {
 		sessions: nil,
 	}
 
-	req := &engine.Request{Continue: true}
+	req := &bridge.Request{Command: "query", Options: bridge.RequestOptions{Continue: true}}
 
 	// Should not panic when sessions store is nil
 	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
@@ -206,7 +206,7 @@ func TestApplyLifecycle_NoSessionStore(t *testing.T) {
 		t.Fatalf("expected cold_resume with nil store, got %s", result.Decision.Action)
 	}
 	// Continue should be forced to false
-	if req.Continue != false {
+	if req.Options.Continue != false {
 		t.Fatal("request continue should be false when lifecycle is cold")
 	}
 }
@@ -398,7 +398,7 @@ func TestApplyLifecycle_ColdStoreSendsNoRotateNotices(t *testing.T) {
 	s.sessions.SetSession(1, 2, 100, "/tmp/test.jsonl")
 	s.sessions.DeactivateSession(1, 2, 100)
 
-	req := &engine.Request{Continue: true, SessionKey: "/tmp/test.jsonl"}
+	req := &bridge.Request{Command: "query", Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"}}
 
 	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
@@ -409,7 +409,7 @@ func TestApplyLifecycle_ColdStoreSendsNoRotateNotices(t *testing.T) {
 	if result.Decision.Action != session.ActionColdResume {
 		t.Fatalf("expected cold_resume, got %s", result.Decision.Action)
 	}
-	if req.Continue != false {
+	if req.Options.Continue != false {
 		t.Fatal("request continue should be false for cold session")
 	}
 
@@ -435,7 +435,7 @@ func TestApplyLifecycle_SingleEmptyResultDoesNotRotate(t *testing.T) {
 	s.sessions.SetSession(1, 2, 100, "/tmp/test.jsonl")
 	s.sessions.MarkEmptyResult(1, 2, 100)
 
-	req := &engine.Request{Continue: true, SessionKey: "/tmp/test.jsonl"}
+	req := &bridge.Request{Command: "query", Options: bridge.RequestOptions{Continue: true, Resume: "/tmp/test.jsonl"}}
 
 	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
@@ -443,7 +443,7 @@ func TestApplyLifecycle_SingleEmptyResultDoesNotRotate(t *testing.T) {
 	if result.Decision.Action != session.ActionColdResume {
 		t.Fatalf("expected cold_resume for single empty result, got %s", result.Decision.Action)
 	}
-	if req.Continue != false {
+	if req.Options.Continue != false {
 		t.Fatal("request continue should be false for single empty result")
 	}
 

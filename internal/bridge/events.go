@@ -43,3 +43,11 @@ type Event struct {
 func (e Event) IsTerminal() bool {
 	return e.Type == "result" || e.Type == "error" || e.Type == "pong"
 }
+
+// ContentText returns the primary text payload, preferring Text over Content.
+func (e Event) ContentText() string {
+	if e.Text != "" {
+		return e.Text
+	}
+	return e.Content
+}

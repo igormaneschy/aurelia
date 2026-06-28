@@ -9,8 +9,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/continuity"
-	"github.com/igormaneschy/aurelia/internal/engine"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 )
@@ -81,13 +81,16 @@ Updated summary (max 900 chars, no preamble):`,
 	sumCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	req := engine.Request{
-		Prompt:       prompt,
-		SystemPrompt: "You are a conversation summarizer. Output ONLY the requested summary, no preamble, no explanation. Maximum 900 characters, in the same language as the conversation (Portuguese).",
+	req := bridge.Request{
+		Command: "query",
+		Prompt:  prompt,
+		Options: bridge.RequestOptions{
+			SystemPrompt: "You are a conversation summarizer. Output ONLY the requested summary, no preamble, no explanation. Maximum 900 characters, in the same language as the conversation (Portuguese).",
+		},
 	}
-	s.applyConfiguredModelOptions(&req)
+	s.applyConfiguredModelOptions(&req.Options)
 
-	ch, err := s.engine.Query(sumCtx, req)
+	ch, err := s.bridge.Execute(sumCtx, req)
 	if err != nil {
 		log.Printf("summary: failed to generate progressive summary: %v", err)
 		return ""
@@ -95,17 +98,21 @@ Updated summary (max 900 chars, no preamble):`,
 
 	var content string
 	for ev := range ch {
-		if ev.RawType == "result" || ev.Type == engine.EventTypeDone {
+		if ev.Type == "result" {
 			content = ev.ContentText()
 			break
 		}
-		if ev.RawType == "error" || ev.Type == engine.EventTypeError {
-			log.Printf("summary: engine error: %v", ev.Err)
+		if ev.Type == "error" {
+			msg := ev.Message
+			if msg == "" {
+				msg = ev.Content
+			}
+			log.Printf("summary: bridge error: %s", msg)
 			return ""
 		}
 	}
 	if content == "" {
-		log.Printf("summary: no result from engine")
+		log.Printf("summary: no result from bridge")
 		return ""
 	}
 
@@ -410,7 +417,7 @@ func classifyBridgeErrorOutcome(message string) (string, runlog.RunStatus, strin
 	return "failed", runlog.RunFailed, message
 }
 
-func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev engine.Event, userID int64) Outcome {
+func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev bridge.Event, userID int64) Outcome {
 	errMsg := ev.Message
 	if errMsg == "" {
 		errMsg = ev.Content

@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Removed
+- **`internal/engine` package** — interface `Engine`, `NoopEngine`, `MockEngine` removidos após migração completa da pipeline para `bridge.Bridge` directo
+- **`internal/bridge/adapter.go`** — `PIAdapter` (tradutor `engine.Request`/`engine.Event` → bridge NDJSON) eliminado
+- **`internal/pipeline/resilient_bridge.go`** — `ResilientBridge` removido; lógica de retry/fallback inlinada em `query_execute.go`
+- **`internal/pipeline/circuit_breaker.go`** — circuit breaker removido (retry com backoff suficiente)
+
+### Added
+- **`internal/pipeline/query_execute.go`** — retry com backoff exponencial (3 tentativas) + fallback OpenRouter com snapshot de continuidade
+- **`internal/pipeline/query_execute_test.go`** — testes de retry, fallback, auth, cancelamento, process death
+
+### Changed
+- **Pipeline migrada para `bridge.Bridge` directo** — `buildBridgeRequest`, `ProcessBridgeEvents`, `executeAsync`, `applyVisionFallback`, `classifyFunc` usam `bridge.Request`/`bridge.Event` em vez de tipos `engine`
+- **Comandos síncronos** — abort, steer, follow-up, get-state passam por `bridge.ExecuteSync` em vez de `engine.Command`
+
 ## v0.35.1 - 2026-06-26
 
 ### Added

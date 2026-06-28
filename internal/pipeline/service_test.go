@@ -72,37 +72,37 @@ func addActiveSession(s *Service, chatID int64, threadID int, userID int64) cont
 	return ctx
 }
 
-func TestScopedAbortCommand_SetsCommandAndOptions(t *testing.T) {
-	cmd := scopedAbortCommand(42, 7, 100)
+func TestScopedAbortRequest_SetsCommandAndOptions(t *testing.T) {
+	req := scopedAbortRequest(42, 7, 100)
 
-	if cmd.Name != "abort" {
-		t.Errorf("Name = %q, want %q", cmd.Name, "abort")
+	if req.Command != "abort" {
+		t.Errorf("Command = %q, want %q", req.Command, "abort")
 	}
-	if cmd.ChatID != 42 {
-		t.Errorf("ChatID = %d, want %d", cmd.ChatID, 42)
+	if req.Options.ChatID != 42 {
+		t.Errorf("ChatID = %d, want %d", req.Options.ChatID, 42)
 	}
-	if cmd.ThreadID != 7 {
-		t.Errorf("ThreadID = %d, want %d", cmd.ThreadID, 7)
+	if req.Options.ThreadID != 7 {
+		t.Errorf("ThreadID = %d, want %d", req.Options.ThreadID, 7)
 	}
-	if cmd.UserID != 100 {
-		t.Errorf("UserID = %d, want %d", cmd.UserID, 100)
+	if req.Options.UserID != 100 {
+		t.Errorf("UserID = %d, want %d", req.Options.UserID, 100)
 	}
 }
 
-func TestScopedAbortCommand_ZeroOptions(t *testing.T) {
-	cmd := scopedAbortCommand(0, 0, 0)
+func TestScopedAbortRequest_ZeroOptions(t *testing.T) {
+	req := scopedAbortRequest(0, 0, 0)
 
-	if cmd.Name != "abort" {
-		t.Errorf("Name = %q, want %q", cmd.Name, "abort")
+	if req.Command != "abort" {
+		t.Errorf("Command = %q, want %q", req.Command, "abort")
 	}
-	if cmd.ChatID != 0 {
-		t.Errorf("ChatID = %d, want 0", cmd.ChatID)
+	if req.Options.ChatID != 0 {
+		t.Errorf("ChatID = %d, want 0", req.Options.ChatID)
 	}
-	if cmd.ThreadID != 0 {
-		t.Errorf("ThreadID = %d, want 0", cmd.ThreadID)
+	if req.Options.ThreadID != 0 {
+		t.Errorf("ThreadID = %d, want 0", req.Options.ThreadID)
 	}
-	if cmd.UserID != 0 {
-		t.Errorf("UserID = %d, want 0", cmd.UserID)
+	if req.Options.UserID != 0 {
+		t.Errorf("UserID = %d, want 0", req.Options.UserID)
 	}
 }
 
