@@ -107,6 +107,48 @@ func TestHistoryNextPage_OnSinglePageScrollsViewport(t *testing.T) {
 	}
 }
 
+func TestHistoryPrevPage_ScrollUpClearsFollowBottomIntent(t *testing.T) {
+	m := testChatModel()
+	m.width = 80
+	m.height = 24
+	m.messages = []chatMessage{{Sender: "Igor", Text: strings.Repeat("scroll-line\n", 200)}}
+	m.historyNav.resetToLastPage(len(m.messages))
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+	m.updateViewport()
+	m.viewport.GotoBottom()
+	m.followBottomIntent = true
+
+	next, _ := m.historyPrevPage()
+
+	if next.followBottomIntent {
+		t.Fatal("expected ctrl+b viewport scroll to clear follow-bottom intent")
+	}
+}
+
+func TestHistoryNextPage_ScrollToBottomRestoresFollowBottomIntent(t *testing.T) {
+	m := testChatModel()
+	m.width = 80
+	m.height = 24
+	m.messages = []chatMessage{{Sender: "Igor", Text: strings.Repeat("scroll-line\n", 200)}}
+	m.historyNav.resetToLastPage(len(m.messages))
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+	m.updateViewport()
+	m.viewport.GotoBottom()
+	m.viewport.ScrollUp(1)
+	m.followBottomIntent = false
+
+	next, _ := m.historyNextPage()
+
+	if !next.viewport.AtBottom() {
+		t.Fatalf("expected ctrl+f viewport scroll to reach bottom, got offset %d", next.viewport.YOffset())
+	}
+	if !next.followBottomIntent {
+		t.Fatal("expected ctrl+f scroll to bottom to restore follow-bottom intent")
+	}
+}
+
 func TestHistoryNextPage_FromFirstReachesLast(t *testing.T) {
 	m := testChatModel()
 	m.width = 80

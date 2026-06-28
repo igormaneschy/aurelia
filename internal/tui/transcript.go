@@ -16,10 +16,18 @@ import (
 type transcriptModel struct {
 	messages []chatMessage
 
-	viewport    viewport.Model
-	viewportSet bool
-	historyNav  historyNav
+	viewport      viewport.Model
+	viewportSet   bool
+	historyNav    historyNav
 	historySearch historySearch
+
+	// followBottomIntent tracks whether the viewport should auto-scroll to show
+	// new content. It's set to true when GotoBottom is called and cleared
+	// explicitly when the user scrolls up. This is more reliable than AtBottom()
+	// because syncViewportDimensions (called by spinner ticks and other paths)
+	// changes the viewport height between content updates, making AtBottom()
+	// return false even when the user never scrolled.
+	followBottomIntent bool
 
 	streamBuf string
 
@@ -57,6 +65,7 @@ func (m *Model) ensureViewport() {
 		m.viewport.SetContent(m.renderMessages(pageMsgs, contentWidth))
 		if m.historyNav.paginator.OnLastPage() {
 			m.viewport.GotoBottom()
+			m.followBottomIntent = true
 		} else {
 			m.viewport.GotoTop()
 		}
@@ -67,17 +76,14 @@ func (m *Model) ensureViewport() {
 // Auto-scrolls to bottom only on the last history page when the user is
 // already at the bottom, so streaming does not yank the viewport on older pages.
 func (m *Model) updateViewport() tea.Cmd {
-	// Capture AtBottom BEFORE syncViewportDimensions, because SetHeight (called
-	// inside syncViewportDimensions) changes maxYOffset and can make AtBottom()
-	// return false even when the user never scrolled. This is most noticeable
-	// on the first streaming response in a new conversation, where footer
-	// elements (tool activity badge, stream progress, elapsed timer) change
-	// the viewport height between content updates.
-	wasAtBottom := m.viewportSet && m.viewport.AtBottom()
-
 	m.syncViewportDimensions()
 	prevNew := m.historyNav.hasNewBelow
+	wasOnLastPage := m.historyNav.paginator.OnLastPage()
 	m.historyNav.syncMessageCount(len(m.messages))
+	if m.followBottomIntent && wasOnLastPage && len(m.messages) > 0 {
+		m.historyNav.paginator.Page = m.historyNav.paginator.TotalPages - 1
+		m.historyNav.hasNewBelow = false
+	}
 	var pulse tea.Cmd
 	if m.historyNav.hasNewBelow && !prevNew {
 		pulse = m.animations.pulseNewMessages()
@@ -87,14 +93,20 @@ func (m *Model) updateViewport() tea.Cmd {
 		contentWidth := m.contentWidth()
 		pageMsgs := m.historyNav.pageSlice(m.messages)
 		onLastPage := m.historyNav.paginator.OnLastPage()
-		followBottom := onLastPage && wasAtBottom
+		followBottom := onLastPage && m.followBottomIntent
 		prevOffset := m.viewport.YOffset()
 		m.viewport.SetWidth(contentWidth)
 		m.viewport.SetContent(m.renderMessages(pageMsgs, contentWidth))
 		if followBottom {
 			m.viewport.GotoBottom()
+			m.followBottomIntent = true
 		} else {
 			m.viewport.SetYOffset(prevOffset)
+			// If the user wasn't at bottom and this isn't the initial viewport
+			// creation, the user scrolled up — clear the intent.
+			if m.followBottomIntent && m.viewportSet {
+				m.followBottomIntent = false
+			}
 		}
 	}
 	return pulse
