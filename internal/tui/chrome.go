@@ -95,5 +95,8 @@ func (m Model) mouseStatusLabel() string {
 	if m.mouseEnabled {
 		return "🖱️ mouse"
 	}
-	return "✋ mouse"
+	if m.noMouse {
+		return "✋ mouse"
+	}
+	return "✋ mouse (Ctrl+O)"
 }

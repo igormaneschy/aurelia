@@ -828,6 +828,7 @@ func TestModel_MouseWheelScrollsViewport(t *testing.T) {
 func TestModel_MouseDisabledIgnoresMouseWheel(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
+	m.mouseEnabled = false // explicit: test the disabled scenario
 	m.width = 100
 	m.height = 12
 	m.viewport = viewportForSize(m.contentWidth(), m.height)
@@ -847,20 +848,76 @@ func TestModel_MouseDisabledIgnoresMouseWheel(t *testing.T) {
 	}
 }
 
+func TestNewModel_MouseEnabledByDefault(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	if !m.mouseEnabled {
+		t.Fatal("expected mouseEnabled to be true by default")
+	}
+}
+
+func TestNewModel_NoMouseFlagDisablesMouse(t *testing.T) {
+	m := NewModelWithOptions("/tmp/test.sock", ThemeDark, ModelOptions{NoMouse: true})
+	if m.mouseEnabled {
+		t.Fatal("expected mouseEnabled to be false with NoMouse: true")
+	}
+}
+
+func TestToggleMouse_ShowsHintWhenDisabling(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+
+	updated, _ := m.toggleMouseCapture()
+	m2 := updated.(Model)
+	if m2.mouseEnabled {
+		t.Fatal("expected mouse to be disabled after toggle")
+	}
+	if len(m2.messages) != 1 || !strings.Contains(m2.messages[0].Text, "Mouse disabled") {
+		t.Fatal("expected hint message 'Mouse disabled. Press Ctrl+O to re-enable.'")
+	}
+}
+
+func TestToggleMouse_NoHintWhenEnabling(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+
+	// First toggle disables.
+	updated, _ := m.toggleMouseCapture()
+	m2 := updated.(Model)
+
+	// Second toggle re-enables.
+	updated, _ = m2.toggleMouseCapture()
+	m3 := updated.(Model)
+	if !m3.mouseEnabled {
+		t.Fatal("expected mouse to be enabled after second toggle")
+	}
+	// No new message appended (only the first hint remains).
+	if len(m3.messages) != len(m2.messages) {
+		t.Fatal("expected no hint message when enabling mouse")
+	}
+}
+
 func TestModel_CtrlOTogglesMouseCapture(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 
+	// First Ctrl+O disables mouse (default is enabled) and shows hint.
 	updated, _ := m.Update(keyCtrl('o'))
 	m2 := updated.(Model)
-	if !m2.mouseEnabled {
-		t.Fatal("expected ctrl+o to enable mouse")
+	if m2.mouseEnabled {
+		t.Fatal("expected ctrl+o to disable mouse (default is enabled)")
+	}
+	if len(m2.messages) == 0 || !strings.Contains(m2.messages[0].Text, "Mouse disabled") {
+		t.Fatal("expected hint message when disabling mouse")
 	}
 
+	// Second Ctrl+O re-enables mouse with no hint.
 	updated, _ = m2.Update(keyCtrl('o'))
 	m3 := updated.(Model)
-	if m3.mouseEnabled {
-		t.Fatal("expected second ctrl+o to disable mouse")
+	if !m3.mouseEnabled {
+		t.Fatal("expected second ctrl+o to enable mouse")
+	}
+	if len(m3.messages) > len(m2.messages) {
+		t.Fatal("expected no hint message when enabling mouse")
 	}
 }
 
@@ -870,13 +927,17 @@ func TestModel_CtrlOTogglesMouseCaptureWhenSidebarFocused(t *testing.T) {
 	m.sidebarFocused = true
 	m.sessions = []tuiSessionInfo{{ChatID: ipc.ReservedTUIChatID, Name: "dm"}}
 
+	// Ctrl+O disables mouse and shows hint; sidebar focus preserved.
 	updated, _ := m.Update(keyCtrl('o'))
 	m2 := updated.(Model)
-	if !m2.mouseEnabled {
-		t.Fatal("expected ctrl+o to enable mouse even when sidebar is focused")
+	if m2.mouseEnabled {
+		t.Fatal("expected ctrl+o to disable mouse even when sidebar is focused")
 	}
 	if !m2.sidebarFocused {
 		t.Fatal("expected sidebar focus to remain unchanged")
+	}
+	if len(m2.messages) == 0 || !strings.Contains(m2.messages[0].Text, "Mouse disabled") {
+		t.Fatal("expected hint message when disabling mouse from sidebar")
 	}
 }
 
@@ -1685,7 +1746,7 @@ func TestModel_StatusBarUsesCompactShortcuts(t *testing.T) {
 
 	status := stripANSIForTest(m.renderStatusBar())
 
-	for _, want := range []string{"F1 help", "↵ send", "alt+enter newline", "✋ mouse", "esc cancel", "⌃L clear", "⌃P project", "⌃S · f2 · ⌃N", "│"} {
+	for _, want := range []string{"F1 help", "↵ send", "alt+enter newline", "🖱️ mouse", "esc cancel", "⌃L clear", "⌃P project", "⌃S · f2 · ⌃N", "│"} {
 		if !strings.Contains(status, want) {
 			t.Errorf("expected status bar to contain %q, got %q", want, status)
 		}
@@ -2674,6 +2735,25 @@ func TestSameDay_DifferentMonth(t *testing.T) {
 	b := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	if sameDay(a, b) {
 		t.Error("expected sameDay=false for different month")
+	}
+}
+
+func TestMouseStatusLabel_DisabledShowsShortcut(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.mouseEnabled = false
+	m.noMouse = false
+	label := m.mouseStatusLabel()
+	if !strings.Contains(label, "Ctrl+O") {
+		t.Fatalf("expected label to contain Ctrl+O hint, got %q", label)
+	}
+}
+
+func TestMouseStatusLabel_NoMouseFlagNoShortcut(t *testing.T) {
+	m := NewModelWithOptions("/tmp/test.sock", ThemeDark, ModelOptions{NoMouse: true})
+	m.mouseEnabled = false
+	label := m.mouseStatusLabel()
+	if strings.Contains(label, "Ctrl+O") {
+		t.Fatalf("expected no Ctrl+O hint when --no-mouse is set, got %q", label)
 	}
 }
 

@@ -1008,6 +1008,14 @@ func (m Model) toggleMouseCapture() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.mouseEnabled = !m.mouseEnabled
+	if !m.mouseEnabled {
+		m.messages = append(m.messages, chatMessage{
+			Sender:    "⚠️",
+			Text:      "Mouse disabled. Press Ctrl+O to re-enable.",
+			Timestamp: time.Now(),
+		})
+		return m, m.updateViewport()
+	}
 	return m, nil
 }
 
