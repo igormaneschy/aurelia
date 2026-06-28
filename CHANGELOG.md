@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.36.3] - 2026-06-28
+
+### Fixed
+- TUI preserves auto-scroll intent during streaming, including viewport height
+  changes from the progress footer, history page boundaries, and manual
+  viewport navigation via PgUp/PgDn/Ctrl+B/Ctrl+F.
+
 ## [0.36.2] - 2026-06-28
 
 ### Fixed
