@@ -676,6 +676,53 @@ func TestRenderChatHeader_SanitizesLegacySessionNames(t *testing.T) {
 	}
 }
 
+func TestSidebarDelete_TargetsSelectedSession(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.sessions = []tuiSessionInfo{
+		{ChatID: -9000001, Name: "dm"},
+		{ChatID: -9000002, Name: "work"},
+		{ChatID: -9000003, Name: "research"},
+	}
+	m.activeSession = -9000002
+	m.sidebarCursor = 0
+	m.sidebarFocused = true
+	prepSidebarTest(&m)
+
+	if m.sidebarCursor != 0 {
+		t.Fatalf("initial sidebarCursor = %d, want 0", m.sidebarCursor)
+	}
+
+	// Navigate to index 1 (press down once).
+	updated, _ := m.handleKeyMsg(keyPress(tea.KeyDown))
+	m = updated.(Model)
+	if m.sidebarCursor != 1 {
+		t.Fatalf("after down sidebarCursor = %d, want 1", m.sidebarCursor)
+	}
+
+	// Press d to delete — cursor should remain at index 1.
+	updated, _ = m.handleKeyMsg(keyPress('d'))
+	m2 := updated.(Model)
+
+	if m2.sidebarCursor != 1 {
+		t.Errorf("sidebarCursor = %d, want 1 (should target the selected session)", m2.sidebarCursor)
+	}
+
+	// Must open the delete confirm form for the session at cursor.
+	if !m2.formOpen {
+		t.Error("expected formOpen after pressing d")
+	}
+	if m2.activeForm == nil {
+		t.Fatal("expected activeForm after pressing d")
+	}
+	if m2.activeForm.kind != formKindConfirm {
+		t.Errorf("activeForm.kind = %v, want formKindConfirm", m2.activeForm.kind)
+	}
+	if m2.activeForm.deleteChatID != m.sessions[1].ChatID {
+		t.Errorf("deleteChatID = %d, want %d (session[1])", m2.activeForm.deleteChatID, m.sessions[1].ChatID)
+	}
+}
+
 func containsStr(s, substr string) bool {
 	return len(s) >= len(substr) && indexOfStr(s, substr) >= 0
 }
