@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.36.2] - 2026-06-28
+
+### Fixed
+- TUI auto-scroll now works on the first response in a new conversation
+  when viewport height changes mid-stream (tool badge, elapsed timer).
+  Root cause: `AtBottom()` was checked after `SetHeight()` altered
+  `maxYOffset`, causing false-negative follow-bottom.
+
+### Changed
+- Trimmed `AGENTS.md` to project-specific rules only. Removed redundant
+  ai-memory/codegraph blocks (covered by global config) and generic Go
+  advice already duplicated elsewhere.
+
 ## [0.36.1] - 2026-06-28
 
 ### Fixed
