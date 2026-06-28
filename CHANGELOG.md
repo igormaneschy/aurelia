@@ -4,6 +4,24 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.36.0] - 2026-06-28
+
+### Security
+- Enforce `SecurityContext` on orchestrator worker tasks
+- Require explicit `/execute` confirmation before running LLM-generated plans
+- Block cron `privileged` profile when `AllowPrivilegedAgents` is disabled
+- Add SSRF filtering for `WebFetch` tool
+- Restrict Bridge child process environment to an explicit allowlist
+- Forward `SensitivePaths`/`AllowedOutsideCWD` and preserve `DisallowedTools` on privileged downgrade
+
+### Fixed
+- Nil orchestrator guard, shutdown recover, cron invalid-expression retry loop
+- UTF-8 truncation in tool monitoring and prompt truncation
+- PI session leaks on error paths and non-deterministic `rotate-session` sleep
+
+### Changed
+- Migrated `charmbracelet/huh` v1 → `charm.land/huh/v2`, removing Bubble Tea v1 stack duplication
+
 ## v0.35.2 - 2026-06-28
 
 ### Removed
