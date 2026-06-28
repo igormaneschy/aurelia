@@ -31,25 +31,23 @@ func newNewSessionForm(defaultName string) *huhForm {
 	return hf
 }
 
-// nextSessionDefaultName returns the smallest "session-N" name not already in
-// use by the given sessions. It scans for names matching the pattern "session-N"
-// (N >= 1) and finds the smallest N not present. Names that don't match the
-// pattern (e.g. custom names like "work") are skipped, so they don't cause
-// false collisions. A user-named session "session-abc" is also skipped because
-// the integer parse fails.
+// nextSessionDefaultName returns the next "session-N" name, always
+// monotonically increasing. It scans existing sessions for names matching the
+// pattern "session-N" (N >= 1), finds the largest N, and returns N+1. It never
+// reuses numbers from deleted sessions, so the user never sees a previously
+// deleted name reappear. Names that don't match the pattern (e.g. custom names
+// like "work" or non-integer suffixes like "session-abc") are skipped.
 func nextSessionDefaultName(sessions []tuiSessionInfo) string {
-	used := make(map[int]bool)
+	maxN := 0
 	for _, s := range sessions {
 		var n int
 		if _, err := fmt.Sscanf(s.Name, "session-%d", &n); err == nil && n >= 1 {
-			used[n] = true
+			if n > maxN {
+				maxN = n
+			}
 		}
 	}
-	for n := 1; ; n++ {
-		if !used[n] {
-			return fmt.Sprintf("session-%d", n)
-		}
-	}
+	return fmt.Sprintf("session-%d", maxN+1)
 }
 
 func (m Model) openNewSessionForm() (Model, tea.Cmd) {

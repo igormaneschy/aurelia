@@ -725,20 +725,22 @@ func TestSidebarDelete_TargetsSelectedSession(t *testing.T) {
 
 // --- nextSessionDefaultName tests ---
 
-func TestNextSessionDefaultName_NoCollisionWithExisting(t *testing.T) {
+func TestNextSessionDefaultName_Monotonic(t *testing.T) {
+	// Names are monotonically increasing: max N + 1, never backfill.
 	sessions := []tuiSessionInfo{
 		{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
 		{ChatID: -9000002, Name: "session-1"},
 		{ChatID: -9000003, Name: "session-3"},
 	}
 	name := nextSessionDefaultName(sessions)
-	if name != "session-2" {
-		t.Errorf("nextSessionDefaultName = %q, want %q", name, "session-2")
+	if name != "session-4" {
+		t.Errorf("nextSessionDefaultName = %q, want %q", name, "session-4")
 	}
 }
 
 func TestNextSessionDefaultName_AfterDelete(t *testing.T) {
-	// session-2 and session-3 were deleted; only session-1 remains.
+	// session-2 was deleted; only session-1 remains. The naming is
+	// monotonically increasing (max N + 1), so the next name is "session-2".
 	sessions := []tuiSessionInfo{
 		{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
 		{ChatID: -9000002, Name: "session-1"},
