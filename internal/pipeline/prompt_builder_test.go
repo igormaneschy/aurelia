@@ -39,7 +39,7 @@ func TestLoadMemoryContents_RespectsTotalCap(t *testing.T) {
 		}
 	}
 
-	bc := &Service{resolver: resolver, memoryCache: newMemoryCache(), sessions: session.NewStore()}
+	bc := &Service{resolver: resolver, memoryCache: NewMemoryCache(), sessions: session.NewStore()}
 	got := bc.loadMemoryContents(1, 2, 42, nil, "")
 
 	if len(got) > maxMemoryTotalChars {
@@ -203,7 +203,7 @@ func TestLoadMemoryContents_CompactModeIncludesIndexAndCurrentTask(t *testing.T)
 		}
 	}
 
-	bc := &Service{memoryDir: dir, memoryCache: newMemoryCache(), sessions: session.NewStore()}
+	bc := &Service{memoryDir: dir, memoryCache: NewMemoryCache(), sessions: session.NewStore()}
 	got := bc.loadMemoryDirCompact(dir)
 
 	if got == "" {
@@ -251,7 +251,7 @@ func TestLoadMemoryContents_CompactModeStaysUnderBudget(t *testing.T) {
 		}
 	}
 
-	bc := &Service{memoryDir: dir, memoryCache: newMemoryCache(), sessions: session.NewStore()}
+	bc := &Service{memoryDir: dir, memoryCache: NewMemoryCache(), sessions: session.NewStore()}
 	got := bc.loadMemoryDirCompact(dir)
 
 	// Compact mode should be well under maxMemoryTotalChars
@@ -311,7 +311,7 @@ func TestLoadMemoryContents_TriggersCompactModeAtThreshold(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bc := &Service{memoryDir: dir, resolver: resolver, memoryCache: newMemoryCache(), sessions: session.NewStore()}
+	bc := &Service{memoryDir: dir, resolver: resolver, memoryCache: NewMemoryCache(), sessions: session.NewStore()}
 	got := bc.loadMemoryContents(1, 2, 0, nil, "")
 
 	// Total should be within budget
@@ -376,7 +376,7 @@ func TestLoadMemoryContents_ProjectPrivateSurvivesWhenGlobalIsHuge(t *testing.T)
 
 	sessions := session.NewStore()
 	sessions.SetCwd(42, 10, cwd)
-	bc := &Service{resolver: resolver, sessions: sessions, memoryCache: newMemoryCache()}
+	bc := &Service{resolver: resolver, sessions: sessions, memoryCache: NewMemoryCache()}
 	got := bc.loadMemoryContents(42, 10, 42, nil, cwd)
 
 	// CWD overlay current_task.md must survive even when user global is huge
@@ -443,7 +443,7 @@ func TestLoadMemoryContents_IsolatesProjectPrivateByThread(t *testing.T) {
 
 	sessions := session.NewStore()
 	sessions.SetCwd(42, 10, cwd)
-	bc := &Service{resolver: resolver, sessions: sessions, memoryCache: newMemoryCache()}
+	bc := &Service{resolver: resolver, sessions: sessions, memoryCache: NewMemoryCache()}
 	got := bc.loadMemoryContents(42, 10, 0, nil, cwd)
 	if !strings.Contains(got, "thread ten cwd overlay") {
 		t.Fatalf("expected thread 10 cwd overlay memory, got %q", got)
@@ -605,7 +605,7 @@ func TestLoadMemoryDir_SkipsSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bc := &Service{memoryDir: dir, memoryCache: newMemoryCache()}
+	bc := &Service{memoryDir: dir, memoryCache: NewMemoryCache()}
 	got := bc.loadMemoryDir(dir)
 
 	if !strings.Contains(got, "real.md") {
@@ -633,7 +633,7 @@ func TestLoadMemoryDirCompact_SkipsSymlinks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bc := &Service{memoryDir: dir, memoryCache: newMemoryCache()}
+	bc := &Service{memoryDir: dir, memoryCache: NewMemoryCache()}
 	got := bc.loadMemoryDirCompact(dir)
 
 	if strings.Contains(got, "outside content") || strings.Contains(got, "evil.md") {
@@ -960,7 +960,7 @@ func TestBuildSystemPrompt_ContinuityOrdering(t *testing.T) {
 		sessions:    sessionStore,
 		runLog:      runLogStore,
 		memoryDir:   t.TempDir(), // empty dir so memory section is minimal
-		memoryCache: newMemoryCache(),
+		memoryCache: NewMemoryCache(),
 	}
 
 	// Build system prompt — should include continuity, last-run-state, and memory sections
@@ -1043,7 +1043,7 @@ func TestBuildSystemPrompt_AllSectionsPresent(t *testing.T) {
 			},
 		},
 		memoryDir:   t.TempDir(),
-		memoryCache: newMemoryCache(),
+		memoryCache: NewMemoryCache(),
 	}
 
 	prompt, err := svc.buildSystemPrompt("continua", nil, 42, 1, 0, 0, false)
@@ -1081,7 +1081,7 @@ func TestBuildSystemPrompt_NoContinuityWhenNilStore(t *testing.T) {
 		continuity:  nil,
 		sessions:    session.NewStore(),
 		memoryDir:   t.TempDir(),
-		memoryCache: newMemoryCache(),
+		memoryCache: NewMemoryCache(),
 	}
 
 	prompt, err := svc.buildSystemPrompt("hello", nil, 1, 1, 0, 0, false)
@@ -1106,7 +1106,7 @@ func TestBuildMemoryInstructions_NoAbsolutePathLeak(t *testing.T) {
 
 	bc := &Service{
 		memoryDir:   memoryDir,
-		memoryCache: newMemoryCache(),
+		memoryCache: NewMemoryCache(),
 	}
 
 	// Call buildMemoryInstructions with no project context (hasProject=false)
@@ -1132,7 +1132,7 @@ func TestBuildMemoryInstructions_NoAbsolutePathLeak(t *testing.T) {
 	bc2 := &Service{
 		memoryDir:   memoryDir,
 		resolver:    resolver,
-		memoryCache: newMemoryCache(),
+		memoryCache: NewMemoryCache(),
 		sessions:    session.NewStore(),
 	}
 	bc2.sessions.SetCwd(42, 0, cwd)
@@ -1173,7 +1173,7 @@ func TestLoadMemoryDir_SkipsOversizedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bc := &Service{memoryDir: dir, memoryCache: newMemoryCache()}
+	bc := &Service{memoryDir: dir, memoryCache: NewMemoryCache()}
 	got := bc.loadMemoryDir(dir)
 
 	// Normal file should be loaded
@@ -1201,7 +1201,7 @@ func TestLoadMemoryDirCompact_SkipsOversizedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bc := &Service{memoryDir: dir, memoryCache: newMemoryCache()}
+	bc := &Service{memoryDir: dir, memoryCache: NewMemoryCache()}
 	got := bc.loadMemoryDirCompact(dir)
 
 	// Normal file should be loaded
@@ -1225,7 +1225,7 @@ func TestLoadMemoryDir_SkipsOversizedMEMORYMd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bc := &Service{memoryDir: dir, memoryCache: newMemoryCache()}
+	bc := &Service{memoryDir: dir, memoryCache: NewMemoryCache()}
 	got := bc.loadMemoryDir(dir)
 
 	// MEMORY.md content should not appear
@@ -1271,7 +1271,7 @@ func TestLoadMemoryContents_NoCwdExcludesProjectLayers(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bc := &Service{resolver: resolver, memoryCache: newMemoryCache()}
+	bc := &Service{resolver: resolver, memoryCache: NewMemoryCache()}
 	// cwd="" means no project binding
 	got := bc.loadMemoryContents(42, 99, 42, nil, "")
 
@@ -1334,14 +1334,14 @@ func TestLoadMemoryContents_TwoUsersSameTopic(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bc := &Service{resolver: resolver, memoryCache: newMemoryCache()}
+	bc := &Service{resolver: resolver, memoryCache: NewMemoryCache()}
 
 	// User A (100) in topic (42, 99) — no /cwd
 	gotA := bc.loadMemoryContents(42, 99, 100, nil, "")
 
 	// User B (200) in same topic (42, 99) — no /cwd
 	// Reset cache to ensure fresh read for user B
-	bc.memoryCache = newMemoryCache()
+	bc.memoryCache = NewMemoryCache()
 	gotB := bc.loadMemoryContents(42, 99, 200, nil, "")
 
 	// Both should see shared topic memory
@@ -1426,10 +1426,10 @@ func TestLoadMemoryContents_TwoUsersSameTopicWithCwd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	bc := &Service{resolver: resolver, memoryCache: newMemoryCache()}
+	bc := &Service{resolver: resolver, memoryCache: NewMemoryCache()}
 
 	gotA := bc.loadMemoryContents(42, 99, 100, nil, cwd)
-	bc.memoryCache = newMemoryCache()
+	bc.memoryCache = NewMemoryCache()
 	gotB := bc.loadMemoryContents(42, 99, 200, nil, cwd)
 
 	// Both see shared layers

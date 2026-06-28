@@ -74,7 +74,7 @@ func TestCodebaseReadGuidance_InjectedWhenNoCwd(t *testing.T) {
 		config:      &config.AppConfig{DefaultProvider: "test", DefaultModel: "test"},
 		sessions:    session.NewStore(),
 		memoryDir:   t.TempDir(),
-		memoryCache: newMemoryCache(),
+		memoryCache: NewMemoryCache(),
 	}
 
 	// When user asks to read code but no cwd is set, guidance should appear
@@ -98,7 +98,7 @@ func TestCodebaseReadGuidance_SkippedWhenCwdSet(t *testing.T) {
 		config:      &config.AppConfig{DefaultProvider: "test", DefaultModel: "test"},
 		sessions:    sessions,
 		memoryDir:   t.TempDir(),
-		memoryCache: newMemoryCache(),
+		memoryCache: NewMemoryCache(),
 	}
 
 	prompt, err := svc.buildSystemPrompt("leia a code base do aurelia", nil, 42, 1, 0, 0, false)
@@ -116,7 +116,7 @@ func TestCodebaseReadGuidance_NotInjectedForNormalChat(t *testing.T) {
 		config:      &config.AppConfig{DefaultProvider: "test", DefaultModel: "test"},
 		sessions:    session.NewStore(),
 		memoryDir:   t.TempDir(),
-		memoryCache: newMemoryCache(),
+		memoryCache: NewMemoryCache(),
 	}
 
 	prompt, err := svc.buildSystemPrompt("bom dia", nil, 42, 1, 0, 0, false)
@@ -161,7 +161,7 @@ func TestCodebaseReadGuidance_IncludesKnownProjectsForUser(t *testing.T) {
 		sessions:    session.NewStore(),
 		bindings:    bindings,
 		memoryDir:   t.TempDir(),
-		memoryCache: newMemoryCache(),
+		memoryCache: NewMemoryCache(),
 	}
 
 	prompt, err := svc.buildSystemPrompt("leia a code base do aurelia", nil, 42, 1, 0, 42, false)
@@ -209,7 +209,7 @@ func TestCodebaseReadGuidance_NoCrossChatForUserIDZero(t *testing.T) {
 		sessions:    session.NewStore(),
 		bindings:    bindings,
 		memoryDir:   t.TempDir(),
-		memoryCache: newMemoryCache(),
+		memoryCache: NewMemoryCache(),
 	}
 
 	prompt, err := svc.buildSystemPrompt("leia a code base do aurelia", nil, 42, 1, 0, 0, false)
@@ -252,7 +252,7 @@ func TestGeneralCwdGuidance_IncludedWhenCwdEmptyWithKnownProjects(t *testing.T) 
 		sessions:    session.NewStore(),
 		bindings:    bindings,
 		memoryDir:   t.TempDir(),
-		memoryCache: newMemoryCache(),
+		memoryCache: NewMemoryCache(),
 	}
 
 	// Use a general chat message (NOT codebase-read) to verify broad guidance
@@ -279,7 +279,7 @@ func TestGeneralCwdGuidance_OmittedForNoKnownProjects(t *testing.T) {
 		config:      &config.AppConfig{DefaultProvider: "test", DefaultModel: "test"},
 		sessions:    session.NewStore(),
 		memoryDir:   t.TempDir(),
-		memoryCache: newMemoryCache(),
+		memoryCache: NewMemoryCache(),
 	}
 
 	// General chat, no cwd, no known projects — should NOT add known-project suggestions
@@ -321,7 +321,7 @@ func TestGeneralCwdGuidance_OmittedForUserIDZero(t *testing.T) {
 		sessions:    session.NewStore(),
 		bindings:    bindings,
 		memoryDir:   t.TempDir(),
-		memoryCache: newMemoryCache(),
+		memoryCache: NewMemoryCache(),
 	}
 
 	// userID=0 — unidentifiable sender, should NOT get cross-chat suggestions
@@ -362,7 +362,7 @@ func TestCodebaseReadGuidance_NoCrossChatForOtherUser(t *testing.T) {
 		sessions:    session.NewStore(),
 		bindings:    bindings,
 		memoryDir:   t.TempDir(),
-		memoryCache: newMemoryCache(),
+		memoryCache: NewMemoryCache(),
 	}
 
 	// User 42 has no bindings — should get standard guidance without suggestions

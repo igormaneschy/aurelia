@@ -66,6 +66,7 @@ type BotController struct {
 	continuity         continuity.Store
 	runLog             runlog.Store
 	pipeline           *pipelinepkg.Service
+	memoryCache        *pipelinepkg.MemoryCache // shared across Telegram + TUI pipeline instances
 
 	onboardingStore *users.OnboardingStore
 	userGate        *UserGate
@@ -188,9 +189,10 @@ func NewBotController(
 		Continuity:   bc.continuity,
 		UsersStore:   userStore,
 		UserResolver: userResolver,
+		NudgeBuffer:  bc.NudgeBuffer(),
+		MemoryCache:  bc.MemoryCache(),
 	})
-	// nudgeBuffer is owned by the pipeline service; bot accesses via this alias
-	// so command handlers can flush it on reset/cancel.
+	// nudgeBuffer is owned by the bot (shared with TUI); pipeline uses the same.
 	bc.nudgeBuffer = bc.pipeline.NudgeBuffer()
 
 	bc.setupRoutes()
@@ -425,4 +427,33 @@ func (bc *BotController) UserResolver() *users.Resolver {
 // Pipeline returns the pipeline service for shared use (e.g. TUI).
 func (bc *BotController) Pipeline() *pipelinepkg.Service {
 	return bc.pipeline
+}
+
+// Dreamer returns the dream/nudge system for shared use (e.g. TUI).
+// Returns nil when no dreamer is configured (nudge disabled).
+func (bc *BotController) Dreamer() pipelinepkg.Dreamer {
+	if bc.dreamer == nil {
+		return nil
+	}
+	return bc.dreamer.(pipelinepkg.Dreamer)
+}
+
+// NudgeBuffer returns the shared nudge buffer, creating it lazily on first
+// access. Shared across Telegram and TUI so turn counts accumulate across
+// both frontends and trigger nudge review at the configured threshold.
+func (bc *BotController) NudgeBuffer() *session.NudgeBuffer {
+	if bc.nudgeBuffer == nil {
+		bc.nudgeBuffer = session.NewNudgeBuffer()
+	}
+	return bc.nudgeBuffer
+}
+
+// MemoryCache returns the shared memory directory cache, creating it lazily
+// on first access. Shared across Telegram and TUI so the mtime cache
+// survives across TUI sends (TUI creates a pipeline per send).
+func (bc *BotController) MemoryCache() *pipelinepkg.MemoryCache {
+	if bc.memoryCache == nil {
+		bc.memoryCache = pipelinepkg.NewMemoryCache()
+	}
+	return bc.memoryCache
 }

@@ -10,7 +10,7 @@ import (
 func TestMemoryCache_HitAfterPut(t *testing.T) {
 	t.Parallel()
 
-	cache := newMemoryCache()
+	cache := NewMemoryCache()
 	dir := t.TempDir()
 
 	// Create a memory file
@@ -37,7 +37,7 @@ func TestMemoryCache_HitAfterPut(t *testing.T) {
 func TestMemoryCache_MissAfterMtimeChange(t *testing.T) {
 	t.Parallel()
 
-	cache := newMemoryCache()
+	cache := NewMemoryCache()
 	cache.ttl = 0 // disable TTL so mtime validation runs every get()
 	dir := t.TempDir()
 
@@ -60,7 +60,7 @@ func TestMemoryCache_MissAfterMtimeChange(t *testing.T) {
 func TestMemoryCache_InvalidateRemovesEntry(t *testing.T) {
 	t.Parallel()
 
-	cache := newMemoryCache()
+	cache := NewMemoryCache()
 	dir := t.TempDir()
 
 	writeFile(t, filepath.Join(dir, "data.md"), "content")
@@ -83,7 +83,7 @@ func TestMemoryCache_InvalidateRemovesEntry(t *testing.T) {
 func TestMemoryCache_IgnoresNonMdFiles(t *testing.T) {
 	t.Parallel()
 
-	cache := newMemoryCache()
+	cache := NewMemoryCache()
 	dir := t.TempDir()
 
 	// Only .md files should be tracked for mtime
@@ -105,7 +105,7 @@ func TestMemoryCache_IgnoresNonMdFiles(t *testing.T) {
 func TestMemoryCache_EmptyDirProducesCacheHit(t *testing.T) {
 	t.Parallel()
 
-	cache := newMemoryCache()
+	cache := NewMemoryCache()
 	dir := t.TempDir()
 
 	// Put empty content for empty dir
@@ -123,7 +123,7 @@ func TestMemoryCache_EmptyDirProducesCacheHit(t *testing.T) {
 func TestMemoryCache_MissAfterNewFileAdded(t *testing.T) {
 	t.Parallel()
 
-	cache := newMemoryCache()
+	cache := NewMemoryCache()
 	cache.ttl = 0
 	dir := t.TempDir()
 
@@ -143,7 +143,7 @@ func TestMemoryCache_MissAfterNewFileAdded(t *testing.T) {
 func TestMemoryCache_MissAfterFileDeleted(t *testing.T) {
 	t.Parallel()
 
-	cache := newMemoryCache()
+	cache := NewMemoryCache()
 	cache.ttl = 0
 	dir := t.TempDir()
 
@@ -166,7 +166,7 @@ func TestMemoryCache_MissAfterFileDeleted(t *testing.T) {
 func TestMemoryCache_TTLFreshness(t *testing.T) {
 	t.Parallel()
 
-	cache := newMemoryCache()
+	cache := NewMemoryCache()
 	cache.ttl = 50 * time.Millisecond
 	dir := t.TempDir()
 

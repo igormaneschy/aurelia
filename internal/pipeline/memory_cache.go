@@ -14,10 +14,13 @@ import (
 // reduction; explicit invalidate() calls (after writes) keep the cache correct.
 const defaultMemoryCacheTTL = 30 * time.Second
 
-// memoryCache caches pre-rendered memory directory content by mtime.
+// MemoryCache caches pre-rendered memory directory content by mtime.
 // A directory's content is re-read when any .md file's mtime changes, a new
 // .md file appears, or an existing one is deleted.
-type memoryCache struct {
+// Exported so the daemon can share one instance across Telegram and TUI
+// pipeline instances (TUI creates a pipeline per send; without a shared
+// cache every turn re-reads all memory .md files from disk).
+type MemoryCache struct {
 	mu      sync.RWMutex
 	entries map[string]memoryCacheEntry
 	ttl     time.Duration
@@ -30,8 +33,8 @@ type memoryCacheEntry struct {
 	lastValidated time.Time            // skip mtime check while within TTL
 }
 
-func newMemoryCache() *memoryCache {
-	return &memoryCache{
+func NewMemoryCache() *MemoryCache {
+	return &MemoryCache{
 		entries: make(map[string]memoryCacheEntry, 16),
 		ttl:     defaultMemoryCacheTTL,
 	}
@@ -42,7 +45,7 @@ func newMemoryCache() *memoryCache {
 // or when any change is detected. Validation is skipped entirely while the
 // entry is within memoryCacheTTL — explicit invalidate() calls after writes
 // keep things consistent across that window.
-func (c *memoryCache) get(dir string) (string, bool) {
+func (c *MemoryCache) get(dir string) (string, bool) {
 	c.mu.RLock()
 	entry, ok := c.entries[dir]
 	c.mu.RUnlock()
@@ -98,7 +101,7 @@ func (c *memoryCache) get(dir string) (string, bool) {
 // put stores pre-rendered content for dir, recording mtimes of all .md files.
 // mtimes is a map of filename → ModTime already collected by the caller to
 // avoid a redundant ReadDir. If nil, put will read the dir itself.
-func (c *memoryCache) put(dir string, content string, mtimes map[string]time.Time) {
+func (c *MemoryCache) put(dir string, content string, mtimes map[string]time.Time) {
 	if mtimes == nil {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
@@ -133,7 +136,7 @@ func (c *memoryCache) put(dir string, content string, mtimes map[string]time.Tim
 }
 
 // invalidate removes the cached entry for dir, forcing a re-read on next access.
-func (c *memoryCache) invalidate(dir string) {
+func (c *MemoryCache) invalidate(dir string) {
 	c.mu.Lock()
 	delete(c.entries, dir)
 	c.mu.Unlock()

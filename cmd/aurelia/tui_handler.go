@@ -384,6 +384,11 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 		pipeCfg.Persona = a.bot.PersonaService()
 		pipeCfg.UsersStore = a.bot.UserStore()
 		pipeCfg.UserResolver = a.bot.UserResolver()
+		// Share dreamer + nudge buffer + memory cache with Telegram so TUI
+		// turns accumulate into nudge review and reuse the mtime cache.
+		pipeCfg.Dreamer = a.bot.Dreamer()
+		pipeCfg.NudgeBuffer = a.bot.NudgeBuffer()
+		pipeCfg.MemoryCache = a.bot.MemoryCache()
 	}
 	pipeSvc := pipeline.NewService(pipeCfg)
 
