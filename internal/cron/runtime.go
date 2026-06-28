@@ -18,8 +18,11 @@ import (
 
 // BridgeCronRuntime executes cron jobs via the Claude Code bridge,
 // resolving agent config from the registry and injecting persona prompt.
+type bridgeSyncFunc func(ctx context.Context, req bridge.Request) (*bridge.Event, error)
+
 type BridgeCronRuntime struct {
-	bridge          BridgeExecutor
+	execute         bridgeSyncFunc
+	deliver         DeliveryFunc
 	agents          AgentRegistry
 	persona         PersonaBuilder
 	memoryDir       string
@@ -43,21 +46,29 @@ type PersonaBuilder interface {
 // NewBridgeCronRuntime creates a runtime that executes jobs via Bridge
 // with agent config and persona prompt.
 func NewBridgeCronRuntime(
-	b BridgeExecutor,
+	b *bridge.Bridge,
 	ag AgentRegistry,
 	p PersonaBuilder,
 	memoryDir string,
 	defaultProvider string,
 	defaultModel string,
 ) *BridgeCronRuntime {
-	return &BridgeCronRuntime{
-		bridge:          b,
+	r := &BridgeCronRuntime{
 		agents:          ag,
 		persona:         p,
 		memoryDir:       memoryDir,
 		defaultProvider: defaultProvider,
 		defaultModel:    defaultModel,
 	}
+	if b != nil {
+		r.execute = b.ExecuteSync
+	}
+	return r
+}
+
+// SetDelivery configures a callback invoked after each job execution.
+func (r *BridgeCronRuntime) SetDelivery(fn DeliveryFunc) {
+	r.deliver = fn
 }
 
 // SetExePath configures the path to the aurelia binary used in the cron
@@ -149,6 +160,19 @@ func validateCronCwd(raw string) (string, error) {
 // ExecuteJob builds the system prompt with persona, agent, scheduling
 // instructions and global memory, then executes via Bridge.
 func (r *BridgeCronRuntime) ExecuteJob(ctx context.Context, job CronJob) (*ExecutionResult, error) {
+	result, err := r.runJob(ctx, job)
+	if r.deliver != nil {
+		if deliverErr := r.deliver(ctx, job, result, err); deliverErr != nil {
+			return result, deliverErr
+		}
+	}
+	return result, err
+}
+
+func (r *BridgeCronRuntime) runJob(ctx context.Context, job CronJob) (*ExecutionResult, error) {
+	if r.execute == nil {
+		return nil, fmt.Errorf("bridge is required")
+	}
 	var basePrompt string
 	var err error
 	if r.userResolver != nil && job.OwnerUserID != "" {
@@ -336,7 +360,7 @@ func (r *BridgeCronRuntime) ExecuteJob(ctx context.Context, job CronJob) (*Execu
 	opts.UserID = ownerNumeric
 	opts.AllowedTools = allowedTools
 
-	ev, err := r.bridge.Execute(ctx, bridge.Request{
+	ev, err := r.execute(ctx, bridge.Request{
 		Command: "query",
 		Prompt:  scrubbedPrompt,
 		Options: opts,
@@ -451,44 +475,5 @@ func cap8k(s string, n int) string {
 	return s[:n] + "\n\n[...truncado]"
 }
 
-// BridgeAdapter wraps *bridge.Bridge to satisfy BridgeExecutor.
-type BridgeAdapter struct {
-	B *bridge.Bridge
-}
-
-// Execute calls bridge.ExecuteSync and returns the terminal event.
-func (a *BridgeAdapter) Execute(ctx context.Context, req bridge.Request) (*bridge.Event, error) {
-	return a.B.ExecuteSync(ctx, req)
-}
-
 // DeliveryFunc is called after a job completes to deliver its output.
 type DeliveryFunc func(ctx context.Context, job CronJob, result *ExecutionResult, execErr error) error
-
-// NotifyingRuntime wraps a Runtime and delivers results after execution.
-type NotifyingRuntime struct {
-	inner   Runtime
-	deliver DeliveryFunc
-}
-
-// NewNotifyingRuntime wraps an inner runtime with delivery notification.
-func NewNotifyingRuntime(inner Runtime, deliver DeliveryFunc) *NotifyingRuntime {
-	return &NotifyingRuntime{
-		inner:   inner,
-		deliver: deliver,
-	}
-}
-
-// ExecuteJob runs the inner runtime and delivers the result.
-func (r *NotifyingRuntime) ExecuteJob(ctx context.Context, job CronJob) (*ExecutionResult, error) {
-	if r.inner == nil {
-		return nil, fmt.Errorf("inner runtime is required")
-	}
-
-	result, err := r.inner.ExecuteJob(ctx, job)
-	if r.deliver != nil {
-		if deliverErr := r.deliver(ctx, job, result, err); deliverErr != nil {
-			return result, deliverErr
-		}
-	}
-	return result, err
-}

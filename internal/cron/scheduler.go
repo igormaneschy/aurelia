@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/igormaneschy/aurelia/pkg/idgen"
 	robfigcron "github.com/robfig/cron/v3"
 )
 
@@ -95,7 +95,7 @@ func (s *Scheduler) runSingleJob(ctx context.Context, now time.Time, job CronJob
 	finishedAt := s.clock.Now().UTC()
 
 	exec := CronExecution{
-		ID:         uuid.NewString(),
+		ID:         idgen.New(),
 		JobID:      job.ID,
 		StartedAt:  startedAt,
 		FinishedAt: &finishedAt,

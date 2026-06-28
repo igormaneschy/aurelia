@@ -235,8 +235,8 @@ func TestOnboardingUI_ModelSelectionPersistsChoice(t *testing.T) {
 	if ui.cfg.LLMModel != "moonshot-v1-32k" {
 		t.Fatalf("LLMModel = %q", ui.cfg.LLMModel)
 	}
-	if ui.step != stepSTTProvider {
-		t.Fatalf("step = %v, want %v", ui.step, stepSTTProvider)
+	if ui.step != stepSTTKey {
+		t.Fatalf("step = %v, want %v", ui.step, stepSTTKey)
 	}
 }
 

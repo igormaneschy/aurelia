@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/igormaneschy/aurelia/pkg/idgen"
 	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/engine"
@@ -1640,7 +1640,7 @@ func (s *Service) startRunLog(p startRunLogParams) bool {
 	s.runLogMu.Lock()
 	defer s.runLogMu.Unlock()
 
-	runID := uuid.NewString()
+	runID := idgen.New()
 	now := time.Now()
 	runLogCtx, runLogCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer runLogCancel()

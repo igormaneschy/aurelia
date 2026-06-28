@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/igormaneschy/aurelia/pkg/idgen"
 )
 
 type Service struct {
@@ -33,7 +33,7 @@ func (s *Service) CreateJob(ctx context.Context, job CronJob) (string, error) {
 		job.Cwd = extractCwdFromPrompt(job.Prompt)
 	}
 	if job.ID == "" {
-		job.ID = uuid.NewString()
+		job.ID = idgen.New()
 	}
 	if job.LastStatus == "" {
 		job.LastStatus = "idle"
@@ -141,7 +141,7 @@ func (s *Service) DeleteJob(ctx context.Context, jobID string) error {
 // AddRecurringJob creates a cron-scheduled job for the given chat/thread.
 func (s *Service) AddRecurringJob(ctx context.Context, userID string, chatID int64, threadID int, expr, prompt, cwd, tzName string) (string, error) {
 	return s.CreateJob(ctx, CronJob{
-		ID:             uuid.NewString(),
+		ID:             idgen.New(),
 		OwnerUserID:    userID,
 		TargetChatID:   chatID,
 		TargetThreadID: threadID,
@@ -160,7 +160,7 @@ func (s *Service) AddOnceJob(ctx context.Context, userID string, chatID int64, t
 		return "", fmt.Errorf("invalid timestamp %q: %w", timestamp, err)
 	}
 	return s.CreateJob(ctx, CronJob{
-		ID:             uuid.NewString(),
+		ID:             idgen.New(),
 		OwnerUserID:    userID,
 		TargetChatID:   chatID,
 		TargetThreadID: threadID,

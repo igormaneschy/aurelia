@@ -507,7 +507,7 @@ func setupCronScheduler(
 	}
 
 	cronRuntime := cron.NewBridgeCronRuntime(
-		&cron.BridgeAdapter{B: br},
+		br,
 		agentReg,
 		personaSvc,
 		memoryDir,
@@ -520,12 +520,11 @@ func setupCronScheduler(
 	}
 
 	delivery := cron.NewTelegramDelivery(bot.ChatSender())
-	deliverFn := func(ctx context.Context, job cron.CronJob, result *cron.ExecutionResult, execErr error) error {
+	cronRuntime.SetDelivery(func(ctx context.Context, job cron.CronJob, result *cron.ExecutionResult, execErr error) error {
 		return delivery.Deliver(ctx, job, result, execErr)
-	}
+	})
 
-	notifyingRuntime := cron.NewNotifyingRuntime(cronRuntime, deliverFn)
-	scheduler, err := cron.NewScheduler(cronStore, notifyingRuntime, nil, cron.SchedulerConfig{
+	scheduler, err := cron.NewScheduler(cronStore, cronRuntime, nil, cron.SchedulerConfig{
 		PollInterval: 15 * time.Second,
 	})
 	if err != nil {
@@ -815,12 +814,7 @@ func findBridgeDir() string {
 }
 
 func buildTranscriber(cfg *config.AppConfig) (stt.Transcriber, error) {
-	switch cfg.STTProvider {
-	case "", "groq":
-		return stt.NewGroqTranscriber(cfg.ProviderAPIKey("groq")), nil
-	default:
-		return nil, fmt.Errorf("unsupported stt provider %q", cfg.STTProvider)
-	}
+	return stt.NewGroqTranscriber(cfg.ProviderAPIKey("groq")), nil
 }
 
 // registerScheduledAgents syncs agent schedules into the cron store.

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
+	"github.com/igormaneschy/aurelia/pkg/idgen"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 )
@@ -339,7 +339,7 @@ func TestRecordToolUse_NoDeadlockWithCompleteRunLog(t *testing.T) {
 	}
 
 	// Simulate startRunLog by creating a minimal state
-	runID := uuid.NewString()
+	runID := idgen.New()
 	key := runLogKey(42, 7, 100)
 	s.runLogMu.Lock()
 	s.runLogStates[key] = &runLogState{
@@ -443,7 +443,7 @@ func TestUpdateRunLogSessionFile_PersistsSessionFile(t *testing.T) {
 		runLogMu:     sync.Mutex{},
 	}
 
-	runID := uuid.NewString()
+	runID := idgen.New()
 	key := runLogKey(42, 7, 100)
 	s.runLogMu.Lock()
 	s.runLogStates[key] = &runLogState{runID: runID}
@@ -553,7 +553,7 @@ func TestRecordPipelineEvent_DropsEventWithoutRunID(t *testing.T) {
 // event is recorded even after state deletion.
 func TestHandleContextOutcome_CancelledCapturesRunID(t *testing.T) {
 	spy := &spyRunLogStore{}
-	runID := uuid.NewString()
+	runID := idgen.New()
 	s := &Service{
 		runLog: spy,
 		runLogStates: map[string]*runLogState{

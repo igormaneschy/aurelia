@@ -1,8 +1,6 @@
 // Package observability provides a local-first observability layer for Aurelia.
 //
-// It defines the correlation model (RunContext), structured logging setup,
-// phase event constants, and the Recorder interface for persisting run
-// metadata and event timelines.
+// It defines phase event constants for the run lifecycle timeline.
 //
 // Stable field names (lowercase snake_case) shared across logs, SQLite,
 // and JSON output:
@@ -14,8 +12,6 @@
 //	duration_ms, input_tokens, output_tokens, cost_usd,
 //	used_fallback, session_file
 package observability
-
-import "time"
 
 // EntryPoint enumerates the known run origins.
 const (
@@ -76,22 +72,3 @@ const (
 	PhaseOrchCommitted        = "orchestration_committed"
 	PhaseOrchCompleted        = "orchestration_completed"
 )
-
-// RunContext carries the correlation context for a single run.
-// RunID is created once per user turn, before Bridge execution.
-// All fields are populated as early as possible in the pipeline.
-type RunContext struct {
-	RunID      string
-	EntryPoint string
-	RequestID  string
-	ChatID     int64
-	ThreadID   int
-	UserID     int64
-	MessageID  int
-	CWD        string
-	AgentName  string
-	Provider   string
-	Model      string
-	Profile    string // capability_profile
-	StartedAt  time.Time
-}

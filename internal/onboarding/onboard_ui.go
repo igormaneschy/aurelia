@@ -82,11 +82,6 @@ func (u *onboardingUI) View(resolver *runtime.PathResolver) string {
 		} else {
 			b.WriteString("\nUse right to cycle capability filters. Use arrows and Enter. Use left to go back.\n")
 		}
-	case stepSTTProvider:
-		b.WriteString("STT Provider\n")
-		b.WriteString("Select the speech-to-text provider.\n\n")
-		b.WriteString(renderMenu([]string{"Groq"}, u.menuIndex))
-		b.WriteString("\nUse arrows and Enter. Use left to go back.\n")
 	case stepSTTKey:
 		b.WriteString(u.renderInputStep("Groq API key", "Used for speech transcription.", true))
 	case stepTelegramToken:
@@ -110,8 +105,7 @@ func (u *onboardingUI) View(resolver *runtime.PathResolver) string {
 		} else {
 			_, _ = fmt.Fprintf(&b, "%s: %s\n", llmKeyLabel(u.cfg.LLMProvider), maskSecret(currentLLMKey(u.cfg)))
 		}
-		_, _ = fmt.Fprintf(&b, "STT provider: %s\n", strings.ToUpper(u.cfg.STTProvider))
-		_, _ = fmt.Fprintf(&b, "Groq API key: %s\n", maskSecret(u.cfg.GroqAPIKey))
+		_, _ = fmt.Fprintf(&b, "Groq API key (STT): %s\n", maskSecret(u.cfg.GroqAPIKey))
 		_, _ = fmt.Fprintf(&b, "Telegram bot token: %s\n", maskSecret(u.cfg.TelegramBotToken))
 		_, _ = fmt.Fprintf(&b, "Telegram allowed user IDs: %s\n", formatInt64List(u.cfg.TelegramAllowedUserIDs))
 		_, _ = fmt.Fprintf(&b, "Max iterations: %d\n", u.cfg.MaxIterations)
@@ -160,8 +154,6 @@ func (u *onboardingUI) HandleKey(ev keyEvent) (saved bool, cancelled bool, err e
 		return u.handleAnthropicAuthModeMenuKey(ev)
 	case stepLLMModel:
 		return u.handleModelMenuKey(ev)
-	case stepSTTProvider:
-		return u.handleMenuKey(ev, []string{"groq"}, stepSTTKey, stepLLMModel)
 	case stepReview:
 		return u.handleReviewKey(ev)
 	default:
@@ -209,8 +201,6 @@ func (u *onboardingUI) handleMenuKey(ev keyEvent, values []string, next onboardS
 		case stepLLMProvider:
 			u.cfg.LLMProvider = values[u.menuIndex]
 			targetStep = nextOnboardStep(u.cfg, stepLLMProvider)
-		case stepSTTProvider:
-			u.cfg.STTProvider = values[u.menuIndex]
 		}
 		u.setStep(targetStep)
 	case keyLeft:
@@ -271,7 +261,7 @@ func (u *onboardingUI) handleModelMenuKey(ev keyEvent) (bool, bool, error) {
 			return false, false, nil
 		}
 		u.cfg.LLMModel = u.modelOptions[u.menuIndex].ID
-		u.setStep(stepSTTProvider)
+		u.setStep(stepSTTKey)
 	case keyLeft:
 		u.setStep(previousOnboardStep(u.cfg, stepLLMModel))
 	case keyQuit:
