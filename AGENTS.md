@@ -105,18 +105,9 @@ This uses `make install` (build → `.new` → `mv` — never corrupts a running
 
 ## Rules
 
-- **Branch discipline**: All implementations in `feature/*` branches. Only
-  `stable/*` branches are deployed for live testing. Only user-approved
-  `stable/*` branches merge into `main`. Never commit directly to `main`.
 - Service layer for business logic — never in handlers or entrypoints
-- Errors treated explicitly — no silent swallowing
 - `context.Context` with timeout on external operations
-- Secrets never in repository — use `~/.aurelia/config/app.json`
-- Tests required before marking work complete
-- No new dependencies without justification
-- Prefer editing over rewriting
-- Keep interfaces small
-- Update docs when behavior changes
+- Secrets via `~/.aurelia/config/app.json`
 
 ## Key Packages
 
