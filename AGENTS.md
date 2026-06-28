@@ -298,3 +298,25 @@ Both are idempotent: re-runs replace the block bracketed by
 `<!-- ai-memory:start -->` / `<!-- ai-memory:end -->` markers
 without disturbing the rest of the file.
 <!-- ai-memory:end -->
+
+## codegraph (MCP tools)
+
+This project has codegraph registered as an MCP server.
+The graph indexes symbols and call edges. Prefer these tools
+over grepping + reading whole files — they cost 1 tool call
+vs 10+ for blind exploration.
+
+### Quick start
+- `get_architecture` — orientação inicial (chame PRIMEIRO em repo desconhecido)
+- `search` — busca de símbolos (BM25, melhor que grep)
+- `callers`/`callees` — quem chama / o que esta função chama
+- `neighbors` — ambos os lados de uma função
+- `similar` — código duplicado / near-clones
+- `dead_code` — candidatos a função não utilizada
+- `snippet` — ler código fonte (só quando precisar ver o código)
+- `detect_changes` — verificar se o grafo está desatualizado
+
+### Dica
+Passe o `qualified_name` retornado por `search` ou `get_architecture`
+diretamente para `callers`/`callees`/`neighbors`.
+
