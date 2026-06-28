@@ -353,12 +353,9 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Ensure the active session is in the list (the default DM
 			// always exists implicitly even if not in the store).
 			m.ensureDefaultSessionInList()
+			m.repositionCursorToActive()
 			unreadCmd := m.applySessionsUnread(m.sessions)
 			m.syncSidebarRows()
-			// Clamp sidebar cursor to valid range.
-			if m.sidebarCursor >= len(m.sessions) {
-				m.sidebarCursor = maxInt(0, len(m.sessions)-1)
-			}
 			if cmd := m.startupSessionCmd(); cmd != nil {
 				m.startupSessionPending = false
 				return m, tea.Batch(unreadCmd, cmd)
@@ -570,6 +567,18 @@ func (m Model) updateError(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// repositionCursorToActive moves the sidebar cursor to the index of the
+// currently active session, or to 0 if the active session is not found.
+func (m *Model) repositionCursorToActive() {
+	for i, s := range m.sessions {
+		if s.ChatID == m.activeSession {
+			m.sidebarCursor = i
+			return
+		}
+	}
+	m.sidebarCursor = 0
 }
 
 // ensureDefaultSessionInList adds the default DM session to the list if
@@ -1096,8 +1105,7 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.warnSessionChangeWhileStreaming() {
 			return m, nil
 		}
-		// Create a new session — use a default name based on count.
-		name := fmt.Sprintf("session-%d", len(m.sessions))
+		name := nextSessionDefaultName(m.sessions)
 		return m, createTUISession(m.ipcClient, name)
 
 	case "d":

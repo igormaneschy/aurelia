@@ -723,6 +723,142 @@ func TestSidebarDelete_TargetsSelectedSession(t *testing.T) {
 	}
 }
 
+// --- nextSessionDefaultName tests ---
+
+func TestNextSessionDefaultName_NoCollisionWithExisting(t *testing.T) {
+	sessions := []tuiSessionInfo{
+		{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
+		{ChatID: -9000002, Name: "session-1"},
+		{ChatID: -9000003, Name: "session-3"},
+	}
+	name := nextSessionDefaultName(sessions)
+	if name != "session-2" {
+		t.Errorf("nextSessionDefaultName = %q, want %q", name, "session-2")
+	}
+}
+
+func TestNextSessionDefaultName_AfterDelete(t *testing.T) {
+	// session-2 and session-3 were deleted; only session-1 remains.
+	sessions := []tuiSessionInfo{
+		{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
+		{ChatID: -9000002, Name: "session-1"},
+	}
+	name := nextSessionDefaultName(sessions)
+	if name != "session-2" {
+		t.Errorf("nextSessionDefaultName = %q, want %q", name, "session-2")
+	}
+}
+
+func TestNextSessionDefaultName_CustomNamesIgnored(t *testing.T) {
+	sessions := []tuiSessionInfo{
+		{ChatID: ipc.ReservedTUIChatID, Name: "DM"},
+		{ChatID: -9000002, Name: "work"},
+		{ChatID: -9000003, Name: "research"},
+	}
+	name := nextSessionDefaultName(sessions)
+	if name != "session-1" {
+		t.Errorf("nextSessionDefaultName = %q, want %q", name, "session-1")
+	}
+}
+
+func TestNextSessionDefaultName_NonNumericSuffix(t *testing.T) {
+	// "session-abc" does not match the integer pattern, so it's skipped.
+	sessions := []tuiSessionInfo{
+		{ChatID: ipc.ReservedTUIChatID, Name: "session-abc"},
+	}
+	name := nextSessionDefaultName(sessions)
+	if name != "session-1" {
+		t.Errorf("nextSessionDefaultName = %q, want %q", name, "session-1")
+	}
+}
+
+// --- sidebarCursor reposition tests ---
+
+func TestTuiSessionsMsg_RepositionsCursorToActive(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.activeSession = -9000002
+	m.sidebarCursor = 99 // stale out-of-bounds value
+
+	updated, _ := m.Update(tuiSessionsMsg{
+		sessions: []tuiSessionInfo{
+			{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
+			{ChatID: -9000002, Name: "work"},
+			{ChatID: -9000003, Name: "research"},
+		},
+	})
+	m2 := updated.(Model)
+
+	if m2.sidebarCursor != 1 {
+		t.Errorf("sidebarCursor = %d, want 1 (index of activeSession %d)",
+			m2.sidebarCursor, m2.activeSession)
+	}
+}
+
+func TestTuiSessionsMsg_RepositionsCursorToActiveAfterDelete(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	// Simulating state after active session was deleted — falls back to DM.
+	m.activeSession = ipc.ReservedTUIChatID
+	m.sidebarCursor = 5 // stale cursor from previous state
+
+	updated, _ := m.Update(tuiSessionsMsg{
+		sessions: []tuiSessionInfo{
+			{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
+			{ChatID: -9000002, Name: "work"},
+		},
+	})
+	m2 := updated.(Model)
+
+	if m2.sidebarCursor != 0 {
+		t.Errorf("sidebarCursor = %d, want 0 (index of DM / activeSession)",
+			m2.sidebarCursor)
+	}
+}
+
+func TestTuiSessionsMsg_RepositionsCursorToNewSessionAfterCreate(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	// Simulating state after tuiSessionCreatedMsg set the active session
+	// but before tuiSessionsMsg refreshed the session list.
+	m.activeSession = -9000004 // the newly created session
+	m.sidebarCursor = 0        // stale cursor pointing at DM
+
+	updated, _ := m.Update(tuiSessionsMsg{
+		sessions: []tuiSessionInfo{
+			{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
+			{ChatID: -9000002, Name: "work"},
+			{ChatID: -9000004, Name: "session-3"},
+		},
+	})
+	m2 := updated.(Model)
+
+	if m2.sidebarCursor != 2 {
+		t.Errorf("sidebarCursor = %d, want 2 (index of new session %d)",
+			m2.sidebarCursor, m2.activeSession)
+	}
+}
+
+func TestTuiSessionsMsg_CursorToZeroWhenActiveNotFound(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.activeSession = -9999999 // ID not in the session list
+	m.sidebarCursor = 3
+
+	updated, _ := m.Update(tuiSessionsMsg{
+		sessions: []tuiSessionInfo{
+			{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
+			{ChatID: -9000002, Name: "work"},
+		},
+	})
+	m2 := updated.(Model)
+
+	if m2.sidebarCursor != 0 {
+		t.Errorf("sidebarCursor = %d, want 0 (fallback when active not found)",
+			m2.sidebarCursor)
+	}
+}
+
 func containsStr(s, substr string) bool {
 	return len(s) >= len(substr) && indexOfStr(s, substr) >= 0
 }
