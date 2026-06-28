@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/huh/v2"
 )
@@ -123,6 +124,9 @@ func (m Model) updateActiveForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !m.formOpen || m.activeForm == nil {
 		return m, nil
 	}
+
+	var extraCmds []tea.Cmd
+
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -139,9 +143,12 @@ func (m Model) updateActiveForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if next, cmd, handled := m.handleFormKey(msg); handled {
 			return next, cmd
 		}
-	default:
-		return m, nil
+	case spinner.TickMsg:
+		var spinCmd tea.Cmd
+		m.spinner, spinCmd = m.spinner.Update(msg)
+		extraCmds = append(extraCmds, spinCmd)
 	}
+
 	cmd := m.activeForm.update(msg)
 	if m.activeForm.completed() {
 		return m.advanceForm(m.activeForm)
@@ -150,7 +157,8 @@ func (m Model) updateActiveForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m = m.closeForm()
 		return m, nil
 	}
-	return m, cmd
+	extraCmds = append(extraCmds, cmd)
+	return m, tea.Batch(extraCmds...)
 }
 
 func (m Model) renderFormOverlay(bg string) string {

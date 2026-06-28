@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/huh/v2"
 
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
@@ -168,6 +169,111 @@ func TestOpenFormForCommand_RoutesBareCommands(t *testing.T) {
 	next, cmd, handled = m.openFormForCommand("/status")
 	if !handled || cmd == nil || !next.projectPanelOpen {
 		t.Fatalf("/status handled=%v projectPanelOpen=%v cmd=%v", handled, next.projectPanelOpen, cmd)
+	}
+}
+
+func TestUpdateChat_RoutesAllMessagesToFormWhenOpen(t *testing.T) {
+	m := testChatModel()
+	m.formOpen = true
+	m.activeForm = newNewSessionForm("test")
+
+	// Before the fix, updateChat only routed tea.KeyMsg and tea.WindowSizeMsg
+	// to updateActiveForm. Any other message type (including huh's internal
+	// nextFieldMsg, nextGroupMsg) was silently dropped.
+	type unknownMsg struct{}
+	gotI, cmd := m.updateChat(unknownMsg{})
+	got := gotI.(Model)
+	if !got.formOpen {
+		t.Fatal("unknown message was dropped — form should still be open")
+	}
+	if cmd != nil {
+		t.Fatalf("expected nil cmd for unknown message, got %v", cmd)
+	}
+}
+
+func TestUpdateActiveForm_DoesNotDropUnknownMessages(t *testing.T) {
+	m := testChatModel()
+	m.formOpen = true
+	m.activeForm = newNewSessionForm("test-name")
+
+	// Before the fix, updateActiveForm had a default: return m, nil that
+	// dropped any message type that wasn't tea.KeyMsg or tea.WindowSizeMsg.
+	type customMsg struct{}
+	gotI, cmd := m.updateActiveForm(customMsg{})
+	got := gotI.(Model)
+	if !got.formOpen {
+		t.Fatal("custom message was dropped by updateActiveForm — form should still be open")
+	}
+	if cmd != nil {
+		t.Fatalf("expected nil cmd for custom message, got %v", cmd)
+	}
+}
+
+func TestFormCompletion_DetectedAfterNextFieldMsg(t *testing.T) {
+	m := testChatModel()
+	m.width = 100
+	m.height = 40
+
+	m, _ = m.openNewSessionForm()
+	m.activeForm.sessionName = "test-session"
+
+	// Send WindowSizeMsg so the form has dimensions
+	iface, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = iface.(Model)
+
+	// Send a KeyPressMsg for Enter — this should produce nextFieldMsg cmd
+	iface, cmd1 := m.Update(keyPress(tea.KeyEnter))
+	m = iface.(Model)
+	if cmd1 == nil {
+		t.Fatal("Enter should produce a command (nextFieldMsg)")
+	}
+
+	// Execute the cmd to get the message.
+	// In bubbletea v2, a batch of cmds returns BatchMsg ([]Cmd).
+	msg1 := cmd1()
+	if batch, ok := msg1.(tea.BatchMsg); ok {
+		for _, sub := range batch {
+			if sub == nil {
+				continue
+			}
+			if next := sub(); next != nil {
+				iface, _ = m.Update(next)
+				m = iface.(Model)
+			}
+		}
+	} else if msg1 != nil {
+		iface, _ = m.Update(msg1)
+		m = iface.(Model)
+	}
+
+	// Now send NextField() (exported huh function that returns nextFieldMsg).
+	// This simulates what would happen when bubbletea dispatches the cmd.
+	iface, cmd2 := m.Update(huh.NextField())
+	m = iface.(Model)
+	if cmd2 == nil {
+		t.Fatal("nextFieldMsg should produce a command")
+	}
+
+	// Execute the returned cmd to get nextGroupMsg
+	msg2 := cmd2()
+	if batch, ok := msg2.(tea.BatchMsg); ok {
+		for _, sub := range batch {
+			if sub == nil {
+				continue
+			}
+			if next := sub(); next != nil {
+				iface, _ = m.Update(next)
+				m = iface.(Model)
+			}
+		}
+	} else if msg2 != nil {
+		iface, _ = m.Update(msg2)
+		m = iface.(Model)
+	}
+
+	// After sending the messages, the form should have reached StateCompleted.
+	if m.formOpen {
+		t.Fatal("form should be closed after submission")
 	}
 }
 
