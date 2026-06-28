@@ -10,6 +10,7 @@ import (
 	"github.com/igormaneschy/aurelia/pkg/idgen"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/runlog"
+	"github.com/igormaneschy/aurelia/internal/session"
 )
 
 func TestParseSessionKey_Valid(t *testing.T) {
@@ -592,5 +593,39 @@ func TestHandleContextOutcome_CancelledCapturesRunID(t *testing.T) {
 	s.runLogMu.Unlock()
 	if exists {
 		t.Error("runLogState was not cleaned up by completeRunLog")
+	}
+}
+
+// TestNewService_SharesInjectedNudgeBufferAndMemoryCache verifies that when
+// Config provides NudgeBuffer and MemoryCache, NewService reuses them instead
+// of creating fresh instances. This is the wiring that lets Telegram (singleton
+// pipeline) and TUI (per-send pipeline) share state across frontends.
+func TestNewService_SharesInjectedNudgeBufferAndMemoryCache(t *testing.T) {
+	sharedBuffer := session.NewNudgeBuffer()
+	sharedCache := NewMemoryCache()
+
+	svc := NewService(Config{
+		NudgeBuffer: sharedBuffer,
+		MemoryCache: sharedCache,
+	})
+
+	if svc.NudgeBuffer() != sharedBuffer {
+		t.Error("NudgeBuffer(): injected instance not retained (sharing broken)")
+	}
+	if svc.MemoryCache() != sharedCache {
+		t.Error("MemoryCache(): injected instance not retained (sharing broken)")
+	}
+}
+
+// TestNewService_CreatesFreshWhenNotInjected verifies backward compat:
+// when Config leaves NudgeBuffer/MemoryCache nil, NewService creates fresh ones.
+func TestNewService_CreatesFreshWhenNotInjected(t *testing.T) {
+	svc := NewService(Config{})
+
+	if svc.NudgeBuffer() == nil {
+		t.Error("NudgeBuffer(): nil when not injected, expected fresh instance")
+	}
+	if svc.MemoryCache() == nil {
+		t.Error("MemoryCache(): nil when not injected, expected fresh instance")
 	}
 }

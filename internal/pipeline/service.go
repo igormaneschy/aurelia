@@ -75,6 +75,13 @@ type Config struct {
 	Continuity   continuity.Store
 	UsersStore   *users.Store
 	UserResolver *users.Resolver
+	// NudgeBuffer, when set, is shared across pipeline instances (e.g. TUI
+	// creates a pipeline per send). When nil, NewService creates a fresh one.
+	NudgeBuffer *session.NudgeBuffer
+	// MemoryCache, when set, is shared across pipeline instances so the TUI
+	// (which creates a pipeline per send) reuses the mtime cache between turns.
+	// When nil, NewService creates a fresh one.
+	MemoryCache *MemoryCache
 }
 
 // Service owns the LLM/message pipeline independent from Telegram routing.
@@ -103,7 +110,7 @@ type Service struct {
 	orchestrator    *orchestrator.Orchestrator
 	dreamer         Dreamer
 	nudgeBuffer     *session.NudgeBuffer
-	memoryCache     *memoryCache
+	memoryCache     *MemoryCache
 	projectIndex    *runtime.ProjectIndex
 	bindings        projectbinding.Store
 	bridgeFailures  FailureTracker
@@ -174,8 +181,8 @@ func NewService(cfg Config) *Service {
 		output:           cfg.Output,
 		orchestrator:     cfg.Orchestrator,
 		dreamer:          cfg.Dreamer,
-		nudgeBuffer:      session.NewNudgeBuffer(),
-		memoryCache:      newMemoryCache(),
+		nudgeBuffer:      cfg.NudgeBuffer,
+		memoryCache:      cfg.MemoryCache,
 		projectIndex:     cfg.ProjectIndex,
 		bindings:         cfg.Bindings,
 		runLog:           cfg.RunLog,
@@ -187,6 +194,14 @@ func NewService(cfg Config) *Service {
 		userResolver:     cfg.UserResolver,
 		activeToolStates: make(map[string]activeToolState),
 		pendingPlans:     make(map[string]*pendingPlan),
+	}
+
+	// Backward compat: create fresh instances when not injected by the caller.
+	if s.nudgeBuffer == nil {
+		s.nudgeBuffer = session.NewNudgeBuffer()
+	}
+	if s.memoryCache == nil {
+		s.memoryCache = NewMemoryCache()
 	}
 
 	if cfg.Bridge != nil {
@@ -451,6 +466,13 @@ func (s *Service) SetContinuity(cs continuity.Store) {
 // NudgeBuffer returns the per-service nudge buffer for command-triggered flushes.
 func (s *Service) NudgeBuffer() *session.NudgeBuffer {
 	return s.nudgeBuffer
+}
+
+// MemoryCache returns the memory directory cache. Exposed so callers can
+// verify sharing across pipeline instances (e.g. Telegram singleton vs TUI
+// per-send pipelines should hold the same cache pointer).
+func (s *Service) MemoryCache() *MemoryCache {
+	return s.memoryCache
 }
 
 // getSecurityConfig returns the security configuration from AppConfig,
