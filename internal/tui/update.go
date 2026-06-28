@@ -442,6 +442,10 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.updateViewport()
 			return m, nil
 		}
+		// Remove the deleted session from the local list immediately so no
+		// subsequent user action (e.g. pressing "n" to create) sees stale data
+		// before the server fetch completes.
+		m.removeSessionFromList(msg.chatID)
 		// If the active session was deleted, fall back to the default DM.
 		if m.activeSession == msg.chatID {
 			m.activeSession = ipc.ReservedTUIChatID
@@ -455,6 +459,8 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 				fetchTUIStatus(m.ipcClient, m.activeSession),
 			)
 		}
+		m.repositionCursorToActive()
+		m.syncSidebarRows()
 		return m, fetchTUISessions(m.ipcClient)
 
 	case tuiSessionRenamedMsg:
@@ -567,6 +573,18 @@ func (m Model) updateError(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 
 	return m, nil
+}
+
+// removeSessionFromList removes the session with the given chatID from the
+// local sessions slice. This is used in the delete handler so the sidebar
+// reflects the change before the server fetch completes.
+func (m *Model) removeSessionFromList(chatID int64) {
+	for i, s := range m.sessions {
+		if s.ChatID == chatID {
+			m.sessions = append(m.sessions[:i], m.sessions[i+1:]...)
+			return
+		}
+	}
 }
 
 // repositionCursorToActive moves the sidebar cursor to the index of the
