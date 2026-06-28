@@ -9,6 +9,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/persona"
+	"github.com/igormaneschy/aurelia/internal/security"
 )
 
 // --- fakes ---
@@ -567,6 +568,257 @@ func TestBridgeCronRuntime_NilExecute(t *testing.T) {
 	_, err := runtime.ExecuteJob(context.Background(), CronJob{Prompt: "test"})
 	if err == nil {
 		t.Fatal("expected error for nil bridge execute")
+	}
+}
+
+func TestBridgeCronRuntime_PrivilegedProfile_DowngradedWhenNotAllowed(t *testing.T) {
+	t.Parallel()
+
+	executor := &fakeBridgeExecutor{
+		result: &bridge.Event{Type: "result", Content: "ok"},
+	}
+	registry := &fakeRegistry{agents: map[string]*agents.Agent{
+		"priv-agent": {
+			Name:              "priv-agent",
+			Cwd:               t.TempDir(),
+			CapabilityProfile: "privileged",
+			AllowedTools:      []string{"Bash", "Read", "Write", "Edit", "Glob", "Grep", "LS"},
+		},
+	}}
+	persona := &fakePersona{prompt: "base"}
+
+	// SecurityConfig with AllowPrivilegedAgents=false (downgrade)
+	cfg := &security.SecurityConfig{AllowPrivilegedAgents: false}
+	runtime := testBridgeCronRuntime(executor, registry, persona, "", "", "")
+	runtime.SetSecurityConfig(cfg)
+
+	_, err := runtime.ExecuteJob(context.Background(), CronJob{
+		ID:        "job-priv",
+		AgentName: "priv-agent",
+		Prompt:    "run privileged task",
+	})
+	if err != nil {
+		t.Fatalf("ExecuteJob() error = %v", err)
+	}
+
+	req := executor.lastReq
+	if req.Options.Security.Profile != "execute_safe" {
+		t.Fatalf("Security.Profile = %q, want %q", req.Options.Security.Profile, "execute_safe")
+	}
+
+	// Downgrade must respect the agent's AllowedTools intersection with execute_safe.
+	// The agent defined AllowedTools without WebSearch/WebSearchPremium/WebFetch,
+	// so the downgraded set must NOT include tools the agent never allowed.
+	forbidden := []string{"WebSearch", "WebSearchPremium", "WebFetch"}
+	for _, tool := range forbidden {
+		for _, got := range req.Options.AllowedTools {
+			if got == tool {
+				t.Fatalf("downgraded AllowedTools must not include %q (agent never allowed it)", tool)
+			}
+		}
+	}
+
+	// But must include the core tools the agent did allow and that are in execute_safe.
+	required := []string{"Read", "Write", "Edit", "Bash", "Grep", "Glob", "LS"}
+	for _, tool := range required {
+		found := false
+		for _, got := range req.Options.AllowedTools {
+			if got == tool {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("downgraded AllowedTools must include %q (agent allowed it)", tool)
+		}
+	}
+}
+
+func TestBridgeCronRuntime_PrivilegedProfile_StaysWhenAllowed(t *testing.T) {
+	t.Parallel()
+
+	executor := &fakeBridgeExecutor{
+		result: &bridge.Event{Type: "result", Content: "ok"},
+	}
+	registry := &fakeRegistry{agents: map[string]*agents.Agent{
+		"priv-agent": {
+			Name:              "priv-agent",
+			Cwd:               t.TempDir(),
+			CapabilityProfile: "privileged",
+			AllowedTools:      []string{"Bash", "Read", "Write", "Edit", "Glob", "Grep", "LS"},
+		},
+	}}
+	persona := &fakePersona{prompt: "base"}
+
+	// SecurityConfig with AllowPrivilegedAgents=true (allow)
+	cfg := &security.SecurityConfig{AllowPrivilegedAgents: true}
+	runtime := testBridgeCronRuntime(executor, registry, persona, "", "", "")
+	runtime.SetSecurityConfig(cfg)
+
+	_, err := runtime.ExecuteJob(context.Background(), CronJob{
+		ID:        "job-priv-allowed",
+		AgentName: "priv-agent",
+		Prompt:    "run privileged task",
+	})
+	if err != nil {
+		t.Fatalf("ExecuteJob() error = %v", err)
+	}
+
+	req := executor.lastReq
+	if req.Options.Security.Profile != "privileged" {
+		t.Fatalf("Security.Profile = %q, want %q", req.Options.Security.Profile, "privileged")
+	}
+}
+
+func TestBridgeCronRuntime_PrivilegedProfile_DowngradedWhenNoConfig(t *testing.T) {
+	t.Parallel()
+
+	executor := &fakeBridgeExecutor{
+		result: &bridge.Event{Type: "result", Content: "ok"},
+	}
+	registry := &fakeRegistry{agents: map[string]*agents.Agent{
+		"priv-agent": {
+			Name:              "priv-agent",
+			Cwd:               t.TempDir(),
+			CapabilityProfile: "privileged",
+			AllowedTools:      []string{"Bash", "Read", "Write", "Edit", "Glob", "Grep", "LS"},
+		},
+	}}
+	persona := &fakePersona{prompt: "base"}
+
+	// No SetSecurityConfig call → secCfg is nil → downgrade to safe
+	runtime := testBridgeCronRuntime(executor, registry, persona, "", "", "")
+
+	_, err := runtime.ExecuteJob(context.Background(), CronJob{
+		ID:        "job-priv-nocfg",
+		AgentName: "priv-agent",
+		Prompt:    "run privileged task",
+	})
+	if err != nil {
+		t.Fatalf("ExecuteJob() error = %v", err)
+	}
+
+	req := executor.lastReq
+	if req.Options.Security.Profile != "execute_safe" {
+		t.Fatalf("Security.Profile = %q, want %q", req.Options.Security.Profile, "execute_safe")
+	}
+}
+
+func TestBridgeCronRuntime_DowngradeRespectsDisallowedTools(t *testing.T) {
+	t.Parallel()
+
+	executor := &fakeBridgeExecutor{
+		result: &bridge.Event{Type: "result", Content: "ok"},
+	}
+	registry := &fakeRegistry{agents: map[string]*agents.Agent{
+		"priv-agent": {
+			Name:              "priv-agent",
+			Cwd:               t.TempDir(),
+			CapabilityProfile: "privileged",
+			AllowedTools:      []string{"Read", "Write", "Edit", "Bash", "Grep", "Glob", "LS"},
+			DisallowedTools:   []string{"Edit"},
+		},
+	}}
+	persona := &fakePersona{prompt: "base"}
+
+	cfg := &security.SecurityConfig{AllowPrivilegedAgents: false}
+	runtime := testBridgeCronRuntime(executor, registry, persona, "", "", "")
+	runtime.SetSecurityConfig(cfg)
+
+	_, err := runtime.ExecuteJob(context.Background(), CronJob{
+		ID:        "job-disallowed",
+		AgentName: "priv-agent",
+		Prompt:    "run",
+	})
+	if err != nil {
+		t.Fatalf("ExecuteJob() error = %v", err)
+	}
+
+	req := executor.lastReq
+	if req.Options.Security.Profile != "execute_safe" {
+		t.Fatalf("Security.Profile = %q, want execute_safe", req.Options.Security.Profile)
+	}
+
+	// DisallowedTools must survive the downgrade
+	for _, tool := range req.Options.AllowedTools {
+		if tool == "Edit" {
+			t.Fatal("Edit must not be in AllowedTools after downgrade (agent disallowed it)")
+		}
+	}
+}
+
+func TestBridgeCronRuntime_ForwardsSensitivePathsAndAllowedOutsideCWD(t *testing.T) {
+	t.Parallel()
+
+	executor := &fakeBridgeExecutor{
+		result: &bridge.Event{Type: "result", Content: "ok"},
+	}
+	registry := &fakeRegistry{agents: map[string]*agents.Agent{}}
+	persona := &fakePersona{prompt: "base"}
+
+	cfg := &security.SecurityConfig{
+		Mode:                  security.PolicyWarn,
+		SensitivePathPatterns: []string{".env", "secret"},
+		AllowedOutsideCWDPaths: []string{"/tmp/external"},
+	}
+	runtime := testBridgeCronRuntime(executor, registry, persona, "", "", "")
+	runtime.SetSecurityConfig(cfg)
+
+	_, err := runtime.ExecuteJob(context.Background(), CronJob{
+		ID:     "job-cfg-fwd",
+		Prompt: "run task",
+	})
+	if err != nil {
+		t.Fatalf("ExecuteJob() error = %v", err)
+	}
+
+	req := executor.lastReq
+	if req.Options.Security == nil {
+		t.Fatal("SecurityContext is nil")
+	}
+	if req.Options.Security.Mode != "warn" {
+		t.Errorf("Security.Mode = %q, want warn", req.Options.Security.Mode)
+	}
+	if len(req.Options.Security.SensitivePaths) != 2 {
+		t.Fatalf("SensitivePaths length = %d, want 2:\n%v", len(req.Options.Security.SensitivePaths), req.Options.Security.SensitivePaths)
+	}
+	if req.Options.Security.SensitivePaths[0] != ".env" {
+		t.Errorf("SensitivePaths[0] = %q, want .env", req.Options.Security.SensitivePaths[0])
+	}
+	if len(req.Options.Security.AllowedOutsideCWD) != 1 {
+		t.Fatalf("AllowedOutsideCWD length = %d, want 1:\n%v", len(req.Options.Security.AllowedOutsideCWD), req.Options.Security.AllowedOutsideCWD)
+	}
+	if req.Options.Security.AllowedOutsideCWD[0] != "/tmp/external" {
+		t.Errorf("AllowedOutsideCWD[0] = %q, want /tmp/external", req.Options.Security.AllowedOutsideCWD[0])
+	}
+}
+
+func TestBridgeCronRuntime_DefaultModeIsBlock(t *testing.T) {
+	t.Parallel()
+
+	executor := &fakeBridgeExecutor{
+		result: &bridge.Event{Type: "result", Content: "ok"},
+	}
+	registry := &fakeRegistry{agents: map[string]*agents.Agent{}}
+	persona := &fakePersona{prompt: "base"}
+
+	// No SetSecurityConfig → defaults → Mode should be "block"
+	runtime := testBridgeCronRuntime(executor, registry, persona, "", "", "")
+
+	_, err := runtime.ExecuteJob(context.Background(), CronJob{
+		ID:     "job-default-mode",
+		Prompt: "run",
+	})
+	if err != nil {
+		t.Fatalf("ExecuteJob() error = %v", err)
+	}
+
+	req := executor.lastReq
+	if req.Options.Security == nil {
+		t.Fatal("SecurityContext is nil")
+	}
+	if req.Options.Security.Mode != "block" {
+		t.Errorf("Security.Mode = %q, want block (default)", req.Options.Security.Mode)
 	}
 }
 

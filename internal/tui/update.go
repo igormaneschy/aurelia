@@ -91,7 +91,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	if m.formOpen {
 		switch msg.(type) {
-		case tea.KeyMsg, tea.WindowSizeMsg, formInternalMsg:
+		case tea.KeyMsg, tea.WindowSizeMsg:
 			return m.updateActiveForm(msg)
 		}
 	}

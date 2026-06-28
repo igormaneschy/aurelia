@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	tea1 "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
 
@@ -12,7 +12,7 @@ func initModelFormView(hf *huhForm) string {
 	if cmd := hf.init(); cmd != nil {
 		cmd()
 	}
-	_, _ = hf.form.Update(tea1.WindowSizeMsg{Width: 60, Height: 20})
+	_, _ = hf.form.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
 	return hf.view()
 }
 

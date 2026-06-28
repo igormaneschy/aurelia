@@ -755,41 +755,27 @@ func (s *Service) buildBridgeRequest(userText, systemPrompt string, pp *profiles
 		capProfile = security.CapabilityProfile(pp.CapabilityProfile)
 	}
 
-	// Intersect agent allowed_tools with profile limits
-	effectiveProfile, effectiveTools := security.ResolveProfile(
-		capProfile,
-		req.Options.AllowedTools,
-		req.Options.DisallowedTools,
-		cwd != "",
-	)
-
-	// Replace allowed_tools with profile-limited set
-	req.Options.AllowedTools = effectiveTools
-
-	// Attach security context
 	secCfg := s.getSecurityConfig()
 	agentName := ""
 	if pp != nil {
 		agentName = pp.Name
 	}
-	req.Options.Security = &bridge.SecurityContext{
-		Enabled:   true,
-		Profile:   string(effectiveProfile),
-		Mode:      string(secCfg.Mode),
-		Cwd:       cwd,
-		ChatID:    chatID,
-		ThreadID:  threadID,
-		UserID:    userID,
-		AgentName: agentName,
-		RequestID: req.RequestID,
-	}
 
-	// If profile is privileged, check allow_privileged config
-	if effectiveProfile == security.ProfilePrivileged && !secCfg.AllowPrivilegedAgents {
-		// Downgrade to execute_safe
-		req.Options.Security.Profile = string(security.ProfileExecuteSafe)
-		req.Options.AllowedTools = security.ProfileTools(security.ProfileExecuteSafe)
-	}
+	_, effectiveTools, secCtx := bridge.BuildSecurityContext(
+		capProfile,
+		req.Options.AllowedTools,
+		req.Options.DisallowedTools,
+		cwd != "",
+		&secCfg,
+		cwd,
+		chatID,
+		threadID,
+		userID,
+		agentName,
+		req.RequestID,
+	)
+	req.Options.AllowedTools = effectiveTools
+	req.Options.Security = secCtx
 
 	return req
 }
@@ -1570,14 +1556,11 @@ func (s *Service) tryExecutePlan(chatID int64, threadID int, messageID int, fina
 		return true, OutcomeSuccess
 	}
 
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("pipeline: panic in ExecuteApprovedPlan: %v", r)
-			}
-		}()
-		s.output.ExecuteApprovedPlan(chatID, threadID, messageID, cwd, userID, plan)
-	}()
+	// Store plan as pending — user must confirm with /execute
+	s.storePendingPlan(chatID, threadID, messageID, cwd, userID, plan)
+	if _, err := s.output.SendReply(chatID, threadID, "✅ **Plano de execução detectado!**\n\nUse /execute para confirmar a execução ou /cancel para descartar.\n\nO plano expira em 10 minutos."); err != nil {
+		log.Printf("pipeline: SendReply(plan confirmation) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
+	}
 	return true, OutcomeSuccess
 }
 
@@ -1929,19 +1912,7 @@ func buildCheckpoint(status runlog.RunStatus, checkpoint, toolSummary, errMsg st
 func truncatePrompt(prompt string) string {
 	const maxPromptBytes = 500
 	if len(prompt) > maxPromptBytes {
-		// Use rune-aware truncation to avoid splitting multi-byte characters.
-		trimmed := prompt
-		for len(trimmed) > maxPromptBytes {
-			trimmed = trimmed[:len(trimmed)-1]
-		}
-		// Ensure valid UTF-8 at the boundary.
-		for i := 0; i < 4 && len(trimmed) > 0; i++ {
-			if trimmed[len(trimmed)-1]&0xC0 != 0x80 {
-				break
-			}
-			trimmed = trimmed[:len(trimmed)-1]
-		}
-		return trimmed + "..."
+		return truncateRunes(prompt, maxPromptBytes)
 	}
 	return prompt
 }

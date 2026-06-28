@@ -4,6 +4,10 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/igormaneschy/aurelia/internal/orchestrator"
+
+	"gopkg.in/telebot.v3"
 )
 
 func TestLoadFeatureDocs_UsesPlanFeature(t *testing.T) {
@@ -58,4 +62,24 @@ func TestLoadFeatureDocs_MissingDir(t *testing.T) {
 	if design != "" {
 		t.Errorf("expected empty design for missing dir, got %q", design)
 	}
+}
+
+// M4: nil orchestrator guard — executeApprovedPlan returns without panic.
+func TestExecuteApprovedPlan_NilOrchestrator(t *testing.T) {
+	bot, err := telebot.NewBot(telebot.Settings{Offline: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bc := &BotController{
+		bot:          bot,
+		orchestrator: nil,
+	}
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("executeApprovedPlan panicked with nil orchestrator: %v", r)
+		}
+	}()
+
+	bc.executeApprovedPlan(&telebot.Chat{ID: 1, Type: telebot.ChatPrivate}, 0, 0, t.TempDir(), 42, &orchestrator.Plan{})
 }

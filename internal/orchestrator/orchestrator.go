@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
+	"github.com/igormaneschy/aurelia/internal/security"
 )
 
 // BridgeExecutor is the interface the orchestrator needs from the bridge.
@@ -35,6 +36,7 @@ type OrchestratorConfig struct {
 	MaxValidationRetries int           // default: 3
 	RepoRoot             string        // project root path
 	VerifyTimeout        time.Duration // default: 2m
+	SecurityConfig       *security.SecurityConfig // nil → use DefaultConfig()
 }
 
 // Orchestrator coordinates the plan→execute→validate→consolidate cycle.

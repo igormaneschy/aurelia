@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -62,6 +63,10 @@ type Bridge struct {
 
 	// droppedEvents counts events dropped due to slow consumers.
 	droppedEvents atomic.Uint64
+
+	// envAllowlist restricts the child process environment. When nil, the bridge
+	// inherits os.Environ() (insecure — leaks daemon secrets).
+	envAllowlist []string
 }
 
 // New creates a Bridge that runs in bridgeDir.
@@ -94,6 +99,15 @@ func (b *Bridge) SetOnDeath(fn func()) {
 	b.onDeath = fn
 }
 
+// SetEnvAllowlist restricts the bridge process environment to the given
+// "KEY=VALUE" pairs. When not set (or nil), the bridge inherits the full
+// daemon environment. Call this once after New and before Start.
+func (b *Bridge) SetEnvAllowlist(env []string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.envAllowlist = env
+}
+
 // Start launches the bridge process. Safe to call multiple times — no-op if
 // already running.
 func (b *Bridge) Start() error {
@@ -109,6 +123,9 @@ func (b *Bridge) startLocked() error {
 
 	cmd := exec.Command(b.command, b.args...)
 	cmd.Dir = b.bridgeDir
+	if b.envAllowlist != nil {
+		cmd.Env = b.envAllowlist
+	}
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
@@ -731,4 +748,39 @@ func (b *Bridge) ListModels(ctx context.Context, refresh bool) ([]ModelInfo, err
 		return nil, fmt.Errorf("bridge: list-models parse: %w", err)
 	}
 	return models, nil
+}
+
+// AllowlistEnv builds an environment allowlist for the bridge process from
+// the current process environment. It keeps essential vars (PATH, HOME, USER,
+// SHELL, TMPDIR, PI_CODING_AGENT_DIR), locale vars (LC_*, LANG), and any
+// extra named vars (such as provider API keys).
+//
+// The returned slice is suitable for passing to Bridge.SetEnvAllowlist.
+// When no extra keys are needed, callers may also pass a manually constructed
+// slice of "KEY=VALUE" pairs.
+//
+// Example:
+//
+//	bridge.SetEnvAllowlist(bridge.AllowlistEnv("ANTHROPIC_API_KEY"))
+func AllowlistEnv(extraKeys ...string) []string {
+	keep := map[string]bool{
+		"PATH":                true,
+		"HOME":                true,
+		"USER":                true,
+		"SHELL":               true,
+		"TMPDIR":              true,
+		"PI_CODING_AGENT_DIR": true,
+	}
+	for _, k := range extraKeys {
+		keep[k] = true
+	}
+
+	var env []string
+	for _, e := range os.Environ() {
+		key, _, _ := strings.Cut(e, "=")
+		if keep[key] || strings.HasPrefix(key, "LC_") || key == "LANG" {
+			env = append(env, e)
+		}
+	}
+	return env
 }

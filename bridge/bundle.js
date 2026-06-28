@@ -303027,6 +303027,88 @@ function isPathInsideCwd(path16, cwd, allowedOutside) {
   }
   return true;
 }
+function isBlockedWebFetchURL(urlString) {
+  let url2;
+  try {
+    url2 = new URL(urlString);
+  } catch {
+    return { blocked: true, reason: "URL is invalid or unparseable" };
+  }
+  const hostname2 = url2.hostname;
+  if (!hostname2) {
+    return { blocked: true, reason: "URL has no hostname" };
+  }
+  const lower2 = hostname2.toLowerCase();
+  if (lower2 === "localhost" || lower2 === "localhost.localdomain" || lower2 === "localhost6" || lower2 === "localhost6.localdomain6") {
+    return { blocked: true, reason: "URL targets loopback address" };
+  }
+  const checkIPv4 = (octets) => {
+    if (octets[0] === 0) {
+      return { blocked: true, reason: "URL targets unspecified address" };
+    }
+    if (octets[0] === 127) {
+      return { blocked: true, reason: "URL targets loopback address" };
+    }
+    if (octets[0] === 169 && octets[1] === 254) {
+      return { blocked: true, reason: "URL targets link-local address" };
+    }
+    if (octets[0] === 10) {
+      return { blocked: true, reason: "URL targets private IP address" };
+    }
+    if (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) {
+      return { blocked: true, reason: "URL targets private IP address" };
+    }
+    if (octets[0] === 192 && octets[1] === 168) {
+      return { blocked: true, reason: "URL targets private IP address" };
+    }
+    return null;
+  };
+  const ipv4Match = hostname2.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (ipv4Match) {
+    const octets = ipv4Match.slice(1).map(Number);
+    if (octets.some((o) => o > 255)) {
+      return { blocked: true, reason: "URL has invalid IP address" };
+    }
+    const blocked = checkIPv4(octets);
+    if (blocked) return blocked;
+    return { blocked: false };
+  }
+  if (hostname2.includes(":")) {
+    const ipv63 = hostname2.toLowerCase().replace(/^\[|\]$/g, "");
+    if (ipv63 === "::1" || ipv63 === "0:0:0:0:0:0:0:1") {
+      return { blocked: true, reason: "URL targets loopback address" };
+    }
+    if (ipv63.startsWith("fc") || ipv63.startsWith("fd")) {
+      return { blocked: true, reason: "URL targets unique local address (ULA)" };
+    }
+    let embeddedOctets = null;
+    const ipv4MappedHex = ipv63.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (ipv4MappedHex) {
+      const hi2 = parseInt(ipv4MappedHex[1], 16);
+      const lo = parseInt(ipv4MappedHex[2], 16);
+      embeddedOctets = [
+        hi2 >> 8 & 255,
+        hi2 & 255,
+        lo >> 8 & 255,
+        lo & 255
+      ];
+    } else {
+      const ipv4MappedMixed = ipv63.match(
+        /^::ffff:(\d+)\.(\d+)\.(\d+)\.(\d+)$/
+      );
+      if (ipv4MappedMixed) {
+        embeddedOctets = ipv4MappedMixed.slice(1).map(Number);
+      }
+    }
+    if (embeddedOctets) {
+      const blocked = checkIPv4(embeddedOctets);
+      if (blocked) return blocked;
+      return { blocked: false };
+    }
+    return { blocked: false };
+  }
+  return { blocked: false };
+}
 function evaluateToolPolicy(toolName, input, security) {
   const cfg = security;
   const mode = cfg.mode || "block";
@@ -303114,6 +303196,21 @@ function evaluateToolPolicy(toolName, input, security) {
       }
       if (cfg.profile === "execute_safe") {
         const reason = `command not on allowlist: ${redactedCommandExcerpt(command, 120)}`;
+        if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
+        return { decision: "block", reason };
+      }
+      return { decision: "allow" };
+    }
+    case "WebFetch": {
+      const url2 = input.url || "";
+      if (!url2) {
+        const reason = "WebFetch blocked: no URL provided";
+        if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
+        return { decision: "block", reason };
+      }
+      const check2 = isBlockedWebFetchURL(url2);
+      if (check2.blocked) {
+        const reason = `WebFetch blocked: ${check2.reason}`;
         if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
         return { decision: "block", reason };
       }
@@ -303753,8 +303850,9 @@ async function handleGetState(req) {
 async function handleGetSessionStats(req) {
   const reqId = req.request_id || "";
   const emitReq = (obj) => emit({ ...obj, request_id: reqId });
+  let piSession;
   try {
-    const piSession = await createPiSession(req.options);
+    piSession = await createPiSession(req.options);
     const session = piSession.session;
     const stats = session.getSessionStats();
     const usage = stats.contextUsage;
@@ -303777,11 +303875,17 @@ async function handleGetSessionStats(req) {
         context_usage_pct: usage?.percent ?? 0
       })
     });
-    session.dispose();
   } catch (err2) {
     const errMsg = err2 instanceof Error ? err2.message : String(err2);
     redactedLog(`get-session-stats error: rid=${reqId} ${errMsg}`);
     emitReq({ event: "error", message: redactSDKError(errMsg) });
+  } finally {
+    if (piSession) {
+      try {
+        piSession.session.dispose();
+      } catch {
+      }
+    }
   }
 }
 async function handleGetSessionHistory(req) {
@@ -303820,11 +303924,13 @@ async function handleGetSessionHistory(req) {
 async function handleCompactSession(req) {
   const reqId = req.request_id || "";
   const emitReq = (obj) => emit({ ...obj, request_id: reqId });
+  let piSession;
+  let unsub;
   try {
-    const piSession = await createPiSession(req.options);
+    piSession = await createPiSession(req.options);
     const session = piSession.session;
     let terminalEmitted = false;
-    const unsub = session.subscribe((event) => {
+    unsub = session.subscribe((event) => {
       if (terminalEmitted) return;
       if (event.type === "compaction_start") {
         emitReq({ event: "compaction_start", reason: event.reason });
@@ -303860,20 +303966,38 @@ async function handleCompactSession(req) {
         })
       });
     }
-    unsub();
-    session.dispose();
   } catch (err2) {
     const errMsg = err2 instanceof Error ? err2.message : String(err2);
     redactedLog(`compact-session error: rid=${reqId} ${errMsg}`);
     emitReq({ event: "error", message: redactSDKError(errMsg) });
+  } finally {
+    if (unsub) try {
+      unsub();
+    } catch {
+    }
+    if (piSession) {
+      try {
+        piSession.session.dispose();
+      } catch {
+      }
+    }
+  }
+}
+async function waitForPendingMessageCount(session, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (session.pendingMessageCount > 0) {
+    if (Date.now() >= deadline) break;
+    await new Promise((resolve16) => setTimeout(resolve16, 50));
   }
 }
 async function handleRotateSession(req) {
   const reqId = req.request_id || "";
   const opts = req.options;
   const emitReq = (obj) => emit({ ...obj, request_id: reqId });
+  let oldPiSession;
+  let newPiSession;
   try {
-    const oldPiSession = await createPiSession(opts);
+    oldPiSession = await createPiSession(opts);
     const oldSession = oldPiSession.session;
     const stats = oldSession.getSessionStats();
     const compactionResult = await oldSession.compact(
@@ -303885,11 +304009,12 @@ async function handleRotateSession(req) {
     redactedLog(`rotate: old session id=${sessionId} file=${oldFile} tokens=${stats.tokens.total}`);
     emitReq({ event: "system", message: "Generating session summary..." });
     oldSession.dispose();
+    oldPiSession = void 0;
     const newOpts = { ...opts };
     newOpts.resume = void 0;
     newOpts.continue = false;
     newOpts.persist_session = true;
-    const newPiSession = await createPiSession(newOpts);
+    newPiSession = await createPiSession(newOpts);
     const newSession = newPiSession.session;
     const newFile = newSession.sessionFile;
     const newId = newSession.sessionId;
@@ -303898,7 +304023,7 @@ async function handleRotateSession(req) {
 ${summary}
 </previous_session_summary_untrusted>`;
     await newSession.sendUserMessage([{ type: "text", text: summaryBlock }]);
-    await new Promise((resolve16) => setTimeout(resolve16, 500));
+    await waitForPendingMessageCount(newSession, 5e3);
     emitReq({
       event: "result",
       content: JSON.stringify({
@@ -303912,10 +304037,24 @@ ${summary}
       })
     });
     newSession.dispose();
+    newPiSession = void 0;
   } catch (err2) {
     const errMsg = err2 instanceof Error ? err2.message : String(err2);
     redactedLog(`rotate-session error: rid=${reqId} ${errMsg}`);
     emitReq({ event: "error", message: redactSDKError(errMsg) });
+  } finally {
+    if (oldPiSession) {
+      try {
+        oldPiSession.session.dispose();
+      } catch {
+      }
+    }
+    if (newPiSession) {
+      try {
+        newPiSession.session.dispose();
+      } catch {
+      }
+    }
   }
 }
 async function handleRequest(line) {
@@ -304080,7 +304219,8 @@ export {
   redactAuditPath,
   redactSDKError,
   redactedCommandExcerpt,
-  translateAllowedTools
+  translateAllowedTools,
+  waitForPendingMessageCount
 };
 /*! Bundled license information:
 

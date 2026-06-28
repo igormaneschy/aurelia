@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
+	"github.com/igormaneschy/aurelia/internal/security"
 )
 
 // fakeBridge implements BridgeExecutor for tests.
@@ -671,6 +672,311 @@ func TestExecutePlan_MergesWaveSerially(t *testing.T) {
 	matches, _ := filepath.Glob(filepath.Join(repoDir, ".worktrees", "worker-*"))
 	if len(matches) > 0 {
 		t.Errorf("expected all worktrees cleaned up after successful merge, found %v", matches)
+	}
+}
+
+func TestExecuteTask_SecurityContext_WithProfile(t *testing.T) {
+	fb := newFakeBridge()
+	fb.SetDefault(&bridge.Event{Type: "result", Content: "ok"})
+
+	o := NewOrchestrator(fb, OrchestratorConfig{
+		RepoRoot: t.TempDir(),
+		SecurityConfig: &security.SecurityConfig{
+			Mode:                  security.PolicyBlock,
+			AllowPrivilegedAgents: false,
+		},
+	})
+
+	result := o.ExecuteTask(
+		context.Background(),
+		Task{ID: "1", Prompt: "test", Agent: "test-agent"},
+		WorkerConfig{
+			Model:             "sonnet",
+			CapabilityProfile: "execute_safe",
+			Tools:             []string{"Read", "Write", "Edit", "Bash"},
+		},
+		"/tmp",
+		"prompt",
+		func(ev WorkerEvent) {},
+	)
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Error)
+	}
+
+	req := fb.LastRequest()
+	if req.Options.Security == nil {
+		t.Fatal("SecurityContext is nil")
+	}
+	if !req.Options.Security.Enabled {
+		t.Error("Security.Enabled = false, want true")
+	}
+	if req.Options.Security.Profile != "execute_safe" {
+		t.Errorf("Security.Profile = %q, want %q", req.Options.Security.Profile, "execute_safe")
+	}
+	if req.Options.Security.Mode != "block" {
+		t.Errorf("Security.Mode = %q, want %q", req.Options.Security.Mode, "block")
+	}
+	if req.Options.Security.Cwd != "/tmp" {
+		t.Errorf("Security.Cwd = %q, want %q", req.Options.Security.Cwd, "/tmp")
+	}
+	if req.Options.Security.ChatID >= 0 {
+		t.Errorf("Security.ChatID = %d, want negative (synthetic)", req.Options.Security.ChatID)
+	}
+	if req.Options.Security.ThreadID >= 0 {
+		t.Errorf("Security.ThreadID = %d, want negative (synthetic)", req.Options.Security.ThreadID)
+	}
+	if req.Options.Security.UserID >= 0 {
+		t.Errorf("Security.UserID = %d, want negative (synthetic)", req.Options.Security.UserID)
+	}
+	if req.Options.Security.AgentName != "test-agent" {
+		t.Errorf("Security.AgentName = %q, want %q", req.Options.Security.AgentName, "test-agent")
+	}
+}
+
+func TestExecuteTask_SecurityContext_InferredProfile(t *testing.T) {
+	fb := newFakeBridge()
+	fb.SetDefault(&bridge.Event{Type: "result", Content: "ok"})
+
+	o := NewOrchestrator(fb, OrchestratorConfig{RepoRoot: t.TempDir()})
+
+	// Tools include Bash → should infer execute_safe
+	result := o.ExecuteTask(
+		context.Background(),
+		Task{ID: "1", Prompt: "test", Agent: "agent"},
+		WorkerConfig{
+			Model: "sonnet",
+			Tools: []string{"Read", "Bash"},
+		},
+		"/tmp",
+		"prompt",
+		func(ev WorkerEvent) {},
+	)
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Error)
+	}
+
+	req := fb.LastRequest()
+	if req.Options.Security == nil {
+		t.Fatal("SecurityContext is nil")
+	}
+	if req.Options.Security.Profile != "execute_safe" {
+		t.Errorf("Security.Profile = %q, want %q (inferred from Bash)", req.Options.Security.Profile, "execute_safe")
+	}
+}
+
+func TestExecuteTask_SecurityContext_PrivilegedDowngraded(t *testing.T) {
+	fb := newFakeBridge()
+	fb.SetDefault(&bridge.Event{Type: "result", Content: "ok"})
+
+	o := NewOrchestrator(fb, OrchestratorConfig{
+		RepoRoot: t.TempDir(),
+		SecurityConfig: &security.SecurityConfig{
+			Mode:                   security.PolicyBlock,
+			AllowPrivilegedAgents:  false,
+			SensitivePathPatterns:  []string{".env"},
+			AllowedOutsideCWDPaths: []string{"/backup"},
+		},
+	})
+
+	result := o.ExecuteTask(
+		context.Background(),
+		Task{ID: "1", Prompt: "test", Agent: "agent"},
+		WorkerConfig{
+			Model:             "sonnet",
+			CapabilityProfile: "privileged",
+		},
+		"/tmp",
+		"prompt",
+		func(ev WorkerEvent) {},
+	)
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Error)
+	}
+
+	req := fb.LastRequest()
+	if req.Options.Security == nil {
+		t.Fatal("SecurityContext is nil")
+	}
+	if req.Options.Security.Profile != "execute_safe" {
+		t.Errorf("Security.Profile = %q, want %q (downgraded)", req.Options.Security.Profile, "execute_safe")
+	}
+
+	// AllowedTools should also be downgraded to execute_safe set
+	toolsSet := make(map[string]bool, len(req.Options.AllowedTools))
+	for _, t := range req.Options.AllowedTools {
+		toolsSet[t] = true
+	}
+	if !toolsSet["Bash"] {
+		t.Error("downgraded profile should include Bash (part of execute_safe)")
+	}
+	if toolsSet["List"] {
+		t.Error("downgraded profile should NOT include List (privileged-only)")
+	}
+
+	// SensitivePaths and AllowedOutsideCWD must be forwarded from config
+	if len(req.Options.Security.SensitivePaths) == 0 {
+		t.Error("SensitivePaths must be forwarded from SecurityConfig")
+	} else if req.Options.Security.SensitivePaths[0] != ".env" {
+		t.Errorf("SensitivePaths[0] = %q, want .env", req.Options.Security.SensitivePaths[0])
+	}
+	if len(req.Options.Security.AllowedOutsideCWD) == 0 {
+		t.Error("AllowedOutsideCWD must be forwarded from SecurityConfig")
+	} else if req.Options.Security.AllowedOutsideCWD[0] != "/backup" {
+		t.Errorf("AllowedOutsideCWD[0] = %q, want /backup", req.Options.Security.AllowedOutsideCWD[0])
+	}
+}
+
+func TestExecuteTask_SecurityContext_DisallowedToolsSurviveDowngrade(t *testing.T) {
+	fb := newFakeBridge()
+	fb.SetDefault(&bridge.Event{Type: "result", Content: "ok"})
+
+	o := NewOrchestrator(fb, OrchestratorConfig{
+		RepoRoot: t.TempDir(),
+		SecurityConfig: &security.SecurityConfig{
+			Mode:                  security.PolicyBlock,
+			AllowPrivilegedAgents: false,
+		},
+	})
+
+	result := o.ExecuteTask(
+		context.Background(),
+		Task{ID: "1", Prompt: "test", Agent: "agent"},
+		WorkerConfig{
+			Model:             "sonnet",
+			CapabilityProfile: "privileged",
+			Tools:             []string{"Read", "Write", "Edit", "Bash", "Grep", "Glob", "LS"},
+			DisallowedTools:   []string{"Edit"},
+		},
+		"/tmp",
+		"prompt",
+		func(ev WorkerEvent) {},
+	)
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Error)
+	}
+
+	req := fb.LastRequest()
+	if req.Options.Security == nil {
+		t.Fatal("SecurityContext is nil")
+	}
+	// Profile must be downgraded
+	if req.Options.Security.Profile != "execute_safe" {
+		t.Errorf("Security.Profile = %q, want execute_safe (downgraded)", req.Options.Security.Profile)
+	}
+
+	// DisallowedTools must survive the downgrade
+	for _, tool := range req.Options.AllowedTools {
+		if tool == "Edit" {
+			t.Fatal("Edit must not be in AllowedTools after downgrade (agent disallowed it)")
+		}
+	}
+}
+
+func TestExecuteTask_SecurityContext_ForwardsSensitivePathsAndAllowedOutsideCWD(t *testing.T) {
+	fb := newFakeBridge()
+	fb.SetDefault(&bridge.Event{Type: "result", Content: "ok"})
+
+	o := NewOrchestrator(fb, OrchestratorConfig{
+		RepoRoot: t.TempDir(),
+		SecurityConfig: &security.SecurityConfig{
+			Mode:                   security.PolicyWarn,
+			SensitivePathPatterns:  []string{".env", "secret"},
+			AllowedOutsideCWDPaths: []string{"/tmp/external"},
+		},
+	})
+
+	result := o.ExecuteTask(
+		context.Background(),
+		Task{ID: "1", Prompt: "test", Agent: "agent"},
+		WorkerConfig{
+			Model:             "sonnet",
+			CapabilityProfile: "execute_safe",
+			Tools:             []string{"Read", "Write", "Edit", "Bash"},
+		},
+		"/tmp",
+		"prompt",
+		func(ev WorkerEvent) {},
+	)
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Error)
+	}
+
+	req := fb.LastRequest()
+	if req.Options.Security == nil {
+		t.Fatal("SecurityContext is nil")
+	}
+	if req.Options.Security.Mode != "warn" {
+		t.Errorf("Security.Mode = %q, want warn", req.Options.Security.Mode)
+	}
+	if len(req.Options.Security.SensitivePaths) != 2 {
+		t.Fatalf("SensitivePaths = %v, want [.env secret]", req.Options.Security.SensitivePaths)
+	}
+	if req.Options.Security.SensitivePaths[0] != ".env" {
+		t.Errorf("SensitivePaths[0] = %q, want .env", req.Options.Security.SensitivePaths[0])
+	}
+	if len(req.Options.Security.AllowedOutsideCWD) != 1 {
+		t.Fatalf("AllowedOutsideCWD = %v, want [/tmp/external]", req.Options.Security.AllowedOutsideCWD)
+	}
+}
+
+func TestExecuteTask_SecurityContext_DefaultConfigWhenNotSet(t *testing.T) {
+	fb := newFakeBridge()
+	fb.SetDefault(&bridge.Event{Type: "result", Content: "ok"})
+
+	// No SecurityConfig set → DefaultConfig() used → Mode is "block"
+	o := NewOrchestrator(fb, OrchestratorConfig{RepoRoot: t.TempDir()})
+
+	result := o.ExecuteTask(
+		context.Background(),
+		Task{ID: "1", Prompt: "test", Agent: "agent"},
+		DefaultWorkerConfig,
+		"/tmp",
+		"prompt",
+		func(ev WorkerEvent) {},
+	)
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Error)
+	}
+
+	req := fb.LastRequest()
+	if req.Options.Security == nil {
+		t.Fatal("SecurityContext is nil")
+	}
+	if req.Options.Security.Mode != "block" {
+		t.Errorf("Security.Mode = %q, want %q (default)", req.Options.Security.Mode, "block")
+	}
+	// DefaultWorkerConfig has CapabilityProfile "execute_safe"
+	if req.Options.Security.Profile != "execute_safe" {
+		t.Errorf("Security.Profile = %q, want %q", req.Options.Security.Profile, "execute_safe")
+	}
+}
+
+func TestExecuteTask_SecurityContext_EmptyCwdDowngrades(t *testing.T) {
+	fb := newFakeBridge()
+	fb.SetDefault(&bridge.Event{Type: "result", Content: "ok"})
+
+	o := NewOrchestrator(fb, OrchestratorConfig{RepoRoot: t.TempDir()})
+
+	// cwd is empty → ResolveProfile downgrades write/bash profiles to read_only
+	result := o.ExecuteTask(
+		context.Background(),
+		Task{ID: "1", Prompt: "test", Agent: "agent"},
+		DefaultWorkerConfig,
+		"", // empty cwd
+		"prompt",
+		func(ev WorkerEvent) {},
+	)
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Error)
+	}
+
+	req := fb.LastRequest()
+	if req.Options.Security == nil {
+		t.Fatal("SecurityContext is nil")
+	}
+	// Profile should be downgraded to read_only by ResolveProfile
+	if req.Options.Security.Profile != "read_only" {
+		t.Errorf("Security.Profile = %q, want %q (downgraded from empty cwd)", req.Options.Security.Profile, "read_only")
 	}
 }
 

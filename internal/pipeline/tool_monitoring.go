@@ -309,7 +309,7 @@ func fingerprintInput(input any) string {
 	}
 	s := string(b)
 	if len(s) > 200 {
-		s = s[:200]
+		s = truncateRunes(s, 200)
 	}
 	return s
 }

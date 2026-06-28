@@ -127,9 +127,23 @@ func (s *Scheduler) runSingleJob(ctx context.Context, now time.Time, job CronJob
 	} else if strings.EqualFold(job.ScheduleType, "cron") {
 		nextRunAt, err := computeNextRunInLocation(job.CronExpr, finishedAt, job.Timezone)
 		if err != nil {
-			return err
+			slog.Error("cron.scheduler: invalid cron expression, deactivating job",
+				"job_id", job.ID, "error", err)
+			job.Active = false
+			job.NextRunAt = nil
+			exec.Status = "failed"
+			// Preserve any run error and append the scheduling error.
+			schedErr := fmt.Sprintf("invalid cron expression: %v", err)
+			if exec.ErrorMessage != "" {
+				exec.ErrorMessage = exec.ErrorMessage + "; " + schedErr
+			} else {
+				exec.ErrorMessage = schedErr
+			}
+			job.LastStatus = "failed"
+			job.LastError = exec.ErrorMessage
+		} else {
+			job.NextRunAt = &nextRunAt
 		}
-		job.NextRunAt = &nextRunAt
 	} else {
 		slog.Warn("cron.scheduler: unknown schedule type, deactivating", "type", job.ScheduleType, "job_id", job.ID)
 		job.Active = false

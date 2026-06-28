@@ -695,6 +695,140 @@ function isPathInsideCwd(path: string, cwd: string, allowedOutside: string[]): b
   return true;
 }
 
+// ── WebFetch URL policy (SSRF prevention) ────────────────────────────────────
+//
+// Checks a URL for known private/internal IP ranges to prevent Server-Side
+// Request Forgery (SSRF) via the WebFetch tool. Uses native URL parsing and
+// string/number checks — no external dependencies.
+//
+// Residual risk: DNS rebinding (a domain resolving to an internal IP after the
+// URL-string check) and redirect-based SSRF (a public server redirecting to an
+// internal IP after the initial check) are not mitigated here — those require
+// runtime DNS resolution and redirect-following policy at the network layer.
+function isBlockedWebFetchURL(
+  urlString: string,
+): { blocked: true; reason: string } | { blocked: false } {
+  let url: URL;
+  try {
+    url = new URL(urlString);
+  } catch {
+    return { blocked: true, reason: "URL is invalid or unparseable" };
+  }
+
+  const hostname = url.hostname;
+  if (!hostname) {
+    return { blocked: true, reason: "URL has no hostname" };
+  }
+
+  // Well-known loopback hostnames.
+  const lower = hostname.toLowerCase();
+  if (
+    lower === "localhost" ||
+    lower === "localhost.localdomain" ||
+    lower === "localhost6" ||
+    lower === "localhost6.localdomain6"
+  ) {
+    return { blocked: true, reason: "URL targets loopback address" };
+  }
+
+  // Shared check for IPv4 octets: returns a blocked result if the address
+  // is private/reserved, or null to let the caller continue.
+  const checkIPv4 = (
+    octets: number[],
+  ): { blocked: true; reason: string } | null => {
+    // 0.0.0.0/8 — "this network" (RFC 1122), non-routable.
+    if (octets[0] === 0) {
+      return { blocked: true, reason: "URL targets unspecified address" };
+    }
+    // 127.0.0.0/8 — loopback.
+    if (octets[0] === 127) {
+      return { blocked: true, reason: "URL targets loopback address" };
+    }
+    // 169.254.0.0/16 — link-local (includes cloud metadata 169.254.169.254).
+    if (octets[0] === 169 && octets[1] === 254) {
+      return { blocked: true, reason: "URL targets link-local address" };
+    }
+    // 10.0.0.0/8 — private.
+    if (octets[0] === 10) {
+      return { blocked: true, reason: "URL targets private IP address" };
+    }
+    // 172.16.0.0/12 — private.
+    if (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) {
+      return { blocked: true, reason: "URL targets private IP address" };
+    }
+    // 192.168.0.0/16 — private.
+    if (octets[0] === 192 && octets[1] === 168) {
+      return { blocked: true, reason: "URL targets private IP address" };
+    }
+    return null;
+  };
+
+  // IPv4 literal check.
+  const ipv4Match = hostname.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (ipv4Match) {
+    const octets = ipv4Match.slice(1).map(Number);
+    if (octets.some((o) => o > 255)) {
+      return { blocked: true, reason: "URL has invalid IP address" };
+    }
+    const blocked = checkIPv4(octets);
+    if (blocked) return blocked;
+    // Public IPv4 — allow.
+    return { blocked: false };
+  }
+
+  // IPv6 literal check.
+  // Also catches IPv4-mapped IPv6 (e.g. [::ffff:127.0.0.1]).
+  if (hostname.includes(":")) {
+    const ipv6 = hostname.toLowerCase().replace(/^\[|\]$/g, "");
+
+    // ::1 — loopback.
+    if (ipv6 === "::1" || ipv6 === "0:0:0:0:0:0:0:1") {
+      return { blocked: true, reason: "URL targets loopback address" };
+    }
+
+    // fc00::/7 — unique local address (ULA).
+    if (ipv6.startsWith("fc") || ipv6.startsWith("fd")) {
+      return { blocked: true, reason: "URL targets unique local address (ULA)" };
+    }
+
+    // IPv4-mapped IPv6 (e.g. [::ffff:127.0.0.1]).
+    // Node's URL class serializes the embedded IPv4 as hex groups
+    // (::ffff:7f00:1) rather than dotted-decimal (::ffff:127.0.0.1),
+    // so we try both forms.
+    let embeddedOctets: number[] | null = null;
+    const ipv4MappedHex = ipv6.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+    if (ipv4MappedHex) {
+      const hi = parseInt(ipv4MappedHex[1], 16);
+      const lo = parseInt(ipv4MappedHex[2], 16);
+      embeddedOctets = [
+        (hi >> 8) & 0xff,
+        hi & 0xff,
+        (lo >> 8) & 0xff,
+        lo & 0xff,
+      ];
+    } else {
+      const ipv4MappedMixed = ipv6.match(
+        /^::ffff:(\d+)\.(\d+)\.(\d+)\.(\d+)$/,
+      );
+      if (ipv4MappedMixed) {
+        embeddedOctets = ipv4MappedMixed.slice(1).map(Number);
+      }
+    }
+    if (embeddedOctets) {
+      const blocked = checkIPv4(embeddedOctets);
+      if (blocked) return blocked;
+      // Embedded public IPv4 — allow via IPv6.
+      return { blocked: false };
+    }
+
+    // Any other IPv6 — allow (public range).
+    return { blocked: false };
+  }
+
+  // DNS hostname (not localhost, not an IP literal) — allow.
+  return { blocked: false };
+}
+
 export function evaluateToolPolicy(
   toolName: string,
   input: Record<string, unknown>,
@@ -830,6 +964,24 @@ export function evaluateToolPolicy(
       //    command reaching here is a single command with no shell chaining.
       if (cfg.profile === "execute_safe") {
         const reason = `command not on allowlist: ${redactedCommandExcerpt(command, 120)}`;
+        if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
+        return { decision: "block", reason };
+      }
+
+      return { decision: "allow" };
+    }
+
+    case "WebFetch": {
+      const url = (input.url as string) || "";
+      if (!url) {
+        const reason = "WebFetch blocked: no URL provided";
+        if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
+        return { decision: "block", reason };
+      }
+
+      const check = isBlockedWebFetchURL(url);
+      if (check.blocked) {
+        const reason = `WebFetch blocked: ${check.reason}`;
         if (mode === "warn") return { decision: "allow", reason: "[WARN] " + reason };
         return { decision: "block", reason };
       }
@@ -1644,9 +1796,10 @@ async function handleGetSessionStats(req: Request): Promise<void> {
   const reqId = req.request_id || "";
   const emitReq = (obj: OutEvent) => emit({ ...obj, request_id: reqId });
 
+  let piSession: Awaited<ReturnType<typeof createPiSession>> | undefined;
   try {
     // Open or resolve session temporarily; do not retain in chatSessions.
-    const piSession = await createPiSession(req.options);
+    piSession = await createPiSession(req.options);
     const session = piSession.session;
 
     const stats = session.getSessionStats();
@@ -1671,13 +1824,15 @@ async function handleGetSessionStats(req: Request): Promise<void> {
         context_usage_pct: usage?.percent ?? 0,
       }),
     });
-
-    // Dispose of the temporary session immediately (never stored in chatSessions).
-    session.dispose();
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
     redactedLog(`get-session-stats error: rid=${reqId} ${errMsg}`);
     emitReq({ event: "error", message: redactSDKError(errMsg) });
+  } finally {
+    // Dispose of the temporary session even on error paths.
+    if (piSession) {
+      try { piSession.session.dispose(); } catch { /* ignore */ }
+    }
   }
 }
 
@@ -1722,14 +1877,16 @@ async function handleCompactSession(req: Request): Promise<void> {
   const reqId = req.request_id || "";
   const emitReq = (obj: OutEvent) => emit({ ...obj, request_id: reqId });
 
+  let piSession: Awaited<ReturnType<typeof createPiSession>> | undefined;
+  let unsub: (() => void) | undefined;
   try {
-    const piSession = await createPiSession(req.options);
+    piSession = await createPiSession(req.options);
     const session = piSession.session;
 
     let terminalEmitted = false;
 
     // Subscribe to compaction events and forward them
-    const unsub = session.subscribe((event) => {
+    unsub = session.subscribe((event) => {
       if (terminalEmitted) return;
       if (event.type === "compaction_start") {
         emitReq({ event: "compaction_start", reason: event.reason });
@@ -1771,13 +1928,37 @@ async function handleCompactSession(req: Request): Promise<void> {
         }),
       });
     }
-
-    unsub();
-    session.dispose();
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
     redactedLog(`compact-session error: rid=${reqId} ${errMsg}`);
     emitReq({ event: "error", message: redactSDKError(errMsg) });
+  } finally {
+    if (unsub) try { unsub(); } catch { /* ignore */ }
+    if (piSession) {
+      try { piSession.session.dispose(); } catch { /* ignore */ }
+    }
+  }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Poll pendingMessageCount until it drops to 0, capped at timeoutMs.
+ *
+ * Exported for testing. Not part of the protocol API.
+ *
+ * ponytail: ceiling — uses polling because the SDK provides no completion
+ * event for session persistence. In practice sendUserMessage resolves after
+ * the message is appended to state; this poll is a safety net. Upgrade to
+ * an SDK-level persistence signal when one is available.
+ */
+export async function waitForPendingMessageCount(
+  session: { readonly pendingMessageCount: number },
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (session.pendingMessageCount > 0) {
+    if (Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
   }
 }
 
@@ -1788,9 +1969,11 @@ async function handleRotateSession(req: Request): Promise<void> {
   const opts = req.options;
   const emitReq = (obj: OutEvent) => emit({ ...obj, request_id: reqId });
 
+  let oldPiSession: Awaited<ReturnType<typeof createPiSession>> | undefined;
+  let newPiSession: Awaited<ReturnType<typeof createPiSession>> | undefined;
   try {
     // 1. Open current session to get stats and generate summary
-    const oldPiSession = await createPiSession(opts);
+    oldPiSession = await createPiSession(opts);
     const oldSession = oldPiSession.session;
 
     // Get stats for summary context
@@ -1813,6 +1996,7 @@ async function handleRotateSession(req: Request): Promise<void> {
 
     // Dispose old session (don't need to keep it alive after compaction)
     oldSession.dispose();
+    oldPiSession = undefined; // Mark as disposed for the finally block
 
     // 2. Create a new fresh session with same options (cwd, model, tools, security)
     // Force no-resume by clearing resume/continue
@@ -1821,7 +2005,7 @@ async function handleRotateSession(req: Request): Promise<void> {
     newOpts.continue = false;
     newOpts.persist_session = true;
 
-    const newPiSession = await createPiSession(newOpts);
+    newPiSession = await createPiSession(newOpts);
     const newSession = newPiSession.session;
     const newFile = newSession.sessionFile;
     const newId = newSession.sessionId;
@@ -1833,11 +2017,12 @@ async function handleRotateSession(req: Request): Promise<void> {
 ${summary}
 </previous_session_summary_untrusted>`;
 
-    // Send as initial user message so the agent has context
+    // Send as initial user message so the agent has context.
+    // sendUserMessage resolves after the message is appended to session state.
     await newSession.sendUserMessage([{ type: "text", text: summaryBlock }]);
 
-    // Wait briefly for the message to be processed
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    // Wait for pending message count to settle (safety net — should be 0 already).
+    await waitForPendingMessageCount(newSession, 5000);
 
     emitReq({
       event: "result",
@@ -1855,10 +2040,19 @@ ${summary}
     // Dispose the new session — the Go side will store the new file path
     // and the bridge will open it fresh on the next query.
     newSession.dispose();
+    newPiSession = undefined; // Mark as disposed for the finally block
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
     redactedLog(`rotate-session error: rid=${reqId} ${errMsg}`);
     emitReq({ event: "error", message: redactSDKError(errMsg) });
+  } finally {
+    // Clean up any session that wasn't disposed on the happy path.
+    if (oldPiSession) {
+      try { oldPiSession.session.dispose(); } catch { /* ignore */ }
+    }
+    if (newPiSession) {
+      try { newPiSession.session.dispose(); } catch { /* ignore */ }
+    }
   }
 }
 

@@ -30,6 +30,7 @@ type BridgeCronRuntime struct {
 	defaultModel    string
 	exePath         string // path to the aurelia binary for CLI instructions
 	userResolver    persona.UserPromptResolver
+	secCfg          *security.SecurityConfig
 }
 
 // AgentRegistry resolves agent definitions by name.
@@ -81,6 +82,12 @@ func (r *BridgeCronRuntime) SetExePath(path string) {
 // SetUserResolver configures the user path resolver for per-user persona support.
 func (r *BridgeCronRuntime) SetUserResolver(ur persona.UserPromptResolver) {
 	r.userResolver = ur
+}
+
+// SetSecurityConfig sets the security policy config used to enforce profile
+// downgrades. If unset, privileged profiles are downgraded to execute_safe.
+func (r *BridgeCronRuntime) SetSecurityConfig(cfg *security.SecurityConfig) {
+	r.secCfg = cfg
 }
 
 const maxCronCwdChars = 1024
@@ -345,15 +352,38 @@ func (r *BridgeCronRuntime) runJob(ctx context.Context, job CronJob) (*Execution
 		profileStr = string(security.ProfileReadOnly)
 	}
 
+	// Resolve effective security config (nil-safe).
+	secCfg := r.secCfg
+	if secCfg == nil {
+		def := security.DefaultConfig()
+		secCfg = &def
+	}
+
+	// Downgrade privileged profile if not explicitly allowed.
+	// Uses ResolveProfile so DisallowedTools are respected.
+	if !secCfg.AllowPrivilegedAgents {
+		if security.CapabilityProfile(profileStr) == security.ProfilePrivileged {
+			profileStr = string(security.ProfileExecuteSafe)
+			_, allowedTools = security.ResolveProfile(
+				security.ProfileExecuteSafe,
+				allowedTools,
+				opts.DisallowedTools,
+				cwd != "",
+			)
+		}
+	}
+
 	opts.Security = &bridge.SecurityContext{
-		Enabled:   true,
-		Profile:   profileStr,
-		Mode:      "block",
-		Cwd:       cwd,
-		ChatID:    job.TargetChatID,
-		ThreadID:  job.TargetThreadID,
-		UserID:    ownerNumeric,
-		AgentName: job.AgentName,
+		Enabled:           true,
+		Profile:           profileStr,
+		Mode:              string(secCfg.Mode),
+		Cwd:               cwd,
+		SensitivePaths:    secCfg.SensitivePathPatterns,
+		AllowedOutsideCWD: secCfg.AllowedOutsideCWDPaths,
+		ChatID:            job.TargetChatID,
+		ThreadID:          job.TargetThreadID,
+		UserID:            ownerNumeric,
+		AgentName:         job.AgentName,
 	}
 	opts.ChatID = job.TargetChatID
 	opts.ThreadID = job.TargetThreadID
