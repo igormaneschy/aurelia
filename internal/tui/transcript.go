@@ -67,6 +67,14 @@ func (m *Model) ensureViewport() {
 // Auto-scrolls to bottom only on the last history page when the user is
 // already at the bottom, so streaming does not yank the viewport on older pages.
 func (m *Model) updateViewport() tea.Cmd {
+	// Capture AtBottom BEFORE syncViewportDimensions, because SetHeight (called
+	// inside syncViewportDimensions) changes maxYOffset and can make AtBottom()
+	// return false even when the user never scrolled. This is most noticeable
+	// on the first streaming response in a new conversation, where footer
+	// elements (tool activity badge, stream progress, elapsed timer) change
+	// the viewport height between content updates.
+	wasAtBottom := m.viewportSet && m.viewport.AtBottom()
+
 	m.syncViewportDimensions()
 	prevNew := m.historyNav.hasNewBelow
 	m.historyNav.syncMessageCount(len(m.messages))
@@ -79,7 +87,7 @@ func (m *Model) updateViewport() tea.Cmd {
 		contentWidth := m.contentWidth()
 		pageMsgs := m.historyNav.pageSlice(m.messages)
 		onLastPage := m.historyNav.paginator.OnLastPage()
-		followBottom := onLastPage && m.viewport.AtBottom()
+		followBottom := onLastPage && wasAtBottom
 		prevOffset := m.viewport.YOffset()
 		m.viewport.SetWidth(contentWidth)
 		m.viewport.SetContent(m.renderMessages(pageMsgs, contentWidth))

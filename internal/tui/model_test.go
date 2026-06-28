@@ -680,6 +680,47 @@ func TestModel_UpdateViewportFollowsBottomWhenAlreadyAtBottom(t *testing.T) {
 	}
 }
 
+// Regression: viewport height decreases between content updates (e.g. tool
+// activity badge adding a footer line). updateViewport must auto-scroll even
+// when syncViewportDimensions changes maxYOffset before AtBottom is checked.
+func TestModel_UpdateViewportFollowsBottomAfterHeightChange(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.height = 12
+	m.viewport = viewportForSize(m.contentWidth(), m.height)
+	m.viewportSet = true
+	for i := 0; i < 40; i++ {
+		m.messages = append(m.messages, chatMessage{
+			Sender:    "Igor",
+			Text:      "line",
+			Timestamp: time.Now(),
+		})
+	}
+	m.updateViewport()
+	m.viewport.GotoBottom()
+	vpHeightBefore := m.viewport.Height()
+
+	// Simulate a footer change that reduces viewport height—
+	// e.g. tool activity badge appearing during streaming.
+	m.activeTools = []toolInfo{{
+		Name:   "Bash",
+		Detail: "Bash",
+	}}
+
+	m.messages = append(m.messages, chatMessage{
+		Sender:    "Aurelia",
+		Text:      "chunk",
+		Timestamp: time.Now(),
+	})
+	m.updateViewport()
+
+	if !m.viewport.AtBottom() {
+		t.Fatalf("expected viewport to follow bottom after height change "+
+			"(vp height %d -> %d)", vpHeightBefore, m.viewport.Height())
+	}
+}
+
 func TestModel_PageUpScrollsViewport(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
