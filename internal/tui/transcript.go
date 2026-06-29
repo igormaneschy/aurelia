@@ -177,6 +177,7 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 			bodyText = highlightSearchText(bodyText, globalIndex, activeMatch, m.historySearch.matches, m.styles.SearchHighlightStyle)
 		}
 		bodyWidth := messageBodyWidth(width)
+		userBodyWidth := m.userMessageWrapWidth(width)
 
 		switch msg.Sender {
 		case "Igor":
@@ -185,7 +186,7 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 			b.WriteString("\n")
 			b.WriteString(m.styles.MessageSeparatorStyle.Render(strings.Repeat("─", maxInt(20, width-4))))
 			b.WriteString("\n")
-			b.WriteString(wrapPlainText(bodyText, bodyWidth))
+			b.WriteString(wrapPlainText(bodyText, userBodyWidth))
 			b.WriteString("\n")
 		case "Aurelia":
 			header := formatMessageHeader("Aurelia", timestamp)

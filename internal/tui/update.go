@@ -940,8 +940,15 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.rememberInput(text)
 		m.textarea.Reset()
 
-		// Build display text with image and attachment badges.
+		isCommand := strings.HasPrefix(text, "/")
+
+		// Build display text with image and attachment badges. Materialize the
+		// same soft-wrap width as the composer so long single-line prompts
+		// break in the transcript the way they appeared while typing.
 		displayText := text
+		if !isCommand {
+			displayText = materializeSoftWraps(text, m.userMessageWrapWidth(m.contentWidth()))
+		}
 		var badgeLines []string
 		if badges := m.pendingImageBadges(); badges != "" {
 			badgeLines = append(badgeLines, badges)
@@ -964,7 +971,6 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			Timestamp: time.Now(),
 		})
 
-		isCommand := strings.HasPrefix(text, "/")
 		queued := queuedMessage{
 			chatID:         m.activeSession,
 			text:           text,
