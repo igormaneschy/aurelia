@@ -98,3 +98,6 @@
 ## Change ux-model-persistence-fixes (2026-06-03)
 - [anti-pattern] test-config-isolation
 - [pattern] model-selection-fail-closed
+
+## Change sidebar-delete-bug-fix (2026-06-28)
+- [anti-pattern] library-default-keymap-collision
