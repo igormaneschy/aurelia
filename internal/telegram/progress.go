@@ -31,11 +31,14 @@ func newProgressReporterWithThread(bot *telebot.Bot, chat *telebot.Chat, threadI
 	return &progressReporter{bot: bot, chat: chat, threadID: threadID, startTime: time.Now()}
 }
 
-func (p *progressReporter) ReportTool(toolName string) {
+func (p *progressReporter) ReportTool(toolName, detail string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	label := toolDisplayName(toolName)
+	if detail != "" {
+		label += " · " + truncateProgressDetail(detail)
+	}
 	p.tools = append(p.tools, label)
 
 	text := p.buildDisplay()
@@ -207,6 +210,18 @@ func (p *progressReporter) Delete() {
 		_ = p.bot.Delete(p.msg)
 		p.msg = nil
 	}
+}
+
+func truncateProgressDetail(detail string) string {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return ""
+	}
+	runes := []rune(detail)
+	if len(runes) <= 40 {
+		return detail
+	}
+	return string(runes[:37]) + "..."
 }
 
 func toolDisplayName(name string) string {

@@ -42,7 +42,7 @@ func (m Model) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.textarea.SetWidth(inputTextareaWidth(msg.Width))
+		m.syncTextareaDimensions()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -89,6 +89,16 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.toggleMouseCapture()
 	}
 
+	// Async catalog fetch completes after the wizard opens; handle it before form
+	// delegation so huh does not swallow tuiModelsMsg.
+	if modelsMsg, ok := msg.(tuiModelsMsg); ok {
+		if m.formOpen && m.activeForm != nil && m.activeForm.isModelForm() {
+			m = m.applyWizardCatalog(modelsMsg)
+			return m, m.initActiveForm()
+		}
+		return m, nil
+	}
+
 	if m.formOpen {
 		return m.updateActiveForm(msg)
 	}
@@ -104,7 +114,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.textarea.SetWidth(inputTextareaWidth(msg.Width))
+		m.syncTextareaDimensions()
 		contentWidth := m.contentWidth()
 		if !m.viewportSet {
 			m.viewport = m.newViewport(contentWidth)
@@ -225,13 +235,6 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.activeModel = msg.model
 			m.syncSidebarRows()
-		}
-		return m, nil
-
-	case tuiModelsMsg:
-		if m.formOpen && m.activeForm != nil && m.activeForm.isModelForm() {
-			m = m.applyWizardCatalog(msg)
-			return m, m.initActiveForm()
 		}
 		return m, nil
 
@@ -620,7 +623,7 @@ func (m Model) updateModalOverlay(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.textarea.SetWidth(inputTextareaWidth(msg.Width))
+		m.syncTextareaDimensions()
 		contentWidth := m.contentWidth()
 		if m.viewportSet {
 			m.viewport.SetWidth(contentWidth)
@@ -646,6 +649,14 @@ func (m Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	if msg.String() == "ctrl+o" {
 		return m.toggleMouseCapture()
+	}
+	if isThemeToggleKey(msg) {
+		(&m).cycleTheme()
+		return m, nil
+	}
+	if isTransparencyToggleKey(msg) {
+		(&m).toggleTransparency()
+		return m, nil
 	}
 
 	if m.helpVisible() {
@@ -688,6 +699,15 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if msg.String() == "ctrl+o" {
 		return m.toggleMouseCapture()
+	}
+
+	if isThemeToggleKey(msg) {
+		(&m).cycleTheme()
+		return m, nil
+	}
+	if isTransparencyToggleKey(msg) {
+		(&m).toggleTransparency()
+		return m, nil
 	}
 
 	// Sidebar-focused mode: intercept navigation keys.
@@ -763,6 +783,8 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case isSidebarToggleKey(msg):
 		m.showSidebar = !m.showSidebar
+		m.syncTextareaDimensions()
+		m.syncViewportDimensions()
 		m.updateViewport()
 		return m, nil
 
@@ -940,8 +962,15 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.rememberInput(text)
 		m.textarea.Reset()
 
-		// Build display text with image and attachment badges.
+		isCommand := strings.HasPrefix(text, "/")
+
+		// Build display text with image and attachment badges. Materialize the
+		// same soft-wrap width as the composer so long single-line prompts
+		// break in the transcript the way they appeared while typing.
 		displayText := text
+		if !isCommand {
+			displayText = materializeSoftWraps(text, m.userMessageWrapWidth(m.contentWidth()))
+		}
 		var badgeLines []string
 		if badges := m.pendingImageBadges(); badges != "" {
 			badgeLines = append(badgeLines, badges)
@@ -964,7 +993,6 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			Timestamp: time.Now(),
 		})
 
-		isCommand := strings.HasPrefix(text, "/")
 		queued := queuedMessage{
 			chatID:         m.activeSession,
 			text:           text,
@@ -1112,6 +1140,8 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.String() == "tab" || msg.String() == "ctrl+i" || msg.String() == "\t" {
 			// Tab also toggles sidebar visibility.
 			m.showSidebar = !m.showSidebar
+			m.syncTextareaDimensions()
+			m.syncViewportDimensions()
 			m.updateViewport()
 		}
 		return m, nil
@@ -1237,6 +1267,8 @@ func (m Model) delegateKeyToTextarea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
+	m.syncTextareaDimensions()
+	m.syncViewportDimensions()
 	m.clearAutocomplete()
 	return m, cmd
 }
@@ -1344,8 +1376,18 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
 
 	case "stream_chunk":
-		if toolName, ok := parseToolChunk(event.Body); ok {
-			m.activeTools = append(m.activeTools, toolInfo{Name: toolName, Detail: toolName})
+		if parseToolDone(event.Body) {
+			if n := len(m.activeTools); n > 0 {
+				m.activeTools[n-1].Done = true
+			}
+			vpCmd := m.updateViewport()
+			return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd(), vpCmd)
+		}
+		if toolName, detail, ok := parseToolChunk(event.Body); ok {
+			if detail == "" {
+				detail = toolName
+			}
+			m.activeTools = append(m.activeTools, toolInfo{Name: toolName, Detail: detail})
 			vpCmd := m.updateViewport()
 			return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd(), vpCmd)
 		}

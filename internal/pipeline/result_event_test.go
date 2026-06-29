@@ -62,7 +62,7 @@ func (f *fakeOutput) ExecuteApprovedPlan(_ int64, threadID int, _ int, cwd strin
 
 type fakeProgress struct{}
 
-func (fakeProgress) ReportTool(_ string)       {}
+func (fakeProgress) ReportTool(_, _ string)    {}
 func (fakeProgress) ReportToolResult(_ string) {}
 func (fakeProgress) ReportText(_ string)       {}
 func (fakeProgress) Delete()                   {}

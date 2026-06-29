@@ -31,6 +31,8 @@ type keyMap struct {
 	HistoryPrev  key.Binding
 	HistorySearch key.Binding
 	NewSession   key.Binding
+	ThemeToggle  key.Binding
+	TransparencyToggle key.Binding
 	Tab          key.Binding
 
 	CmdHelp         key.Binding
@@ -103,6 +105,14 @@ func defaultKeyMap() keyMap {
 		NewSession: key.NewBinding(
 			key.WithKeys("ctrl+n"),
 			key.WithHelp("Ctrl+N", "New session (form)"),
+		),
+		ThemeToggle: key.NewBinding(
+			key.WithKeys("ctrl+t"),
+			key.WithHelp("Ctrl+T", "Cycle theme (dark/light/auto)"),
+		),
+		TransparencyToggle: key.NewBinding(
+			key.WithKeys("f3"),
+			key.WithHelp("F3", "Toggle transparent background"),
 		),
 		Help: key.NewBinding(
 			key.WithKeys("f1"),
@@ -210,6 +220,8 @@ func (k keyMap) FullHelp() [][]key.Binding {
 			k.ProjectPanel,
 			k.SidebarFocus,
 			k.HistorySearch,
+			k.ThemeToggle,
+			k.TransparencyToggle,
 			k.Clear,
 			k.CopyTranscript,
 			k.CopyResponse,

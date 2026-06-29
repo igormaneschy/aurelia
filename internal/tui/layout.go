@@ -22,7 +22,8 @@ func (m Model) sidebarTableHeightForBody() int {
 	if !m.shouldShowSidebarTable() {
 		return sidebarTableHeightForTerminal(m.height)
 	}
-	h := m.chatBodyHeight() - m.sidebarChromeLineCount()
+	// Reserve two lines for the sidebar's top/bottom rounded border.
+	h := m.chatBodyHeight() - m.sidebarChromeLineCount() - 2
 	if h < 4 {
 		return 4
 	}
@@ -70,6 +71,7 @@ func (m *Model) syncViewportDimensions() {
 	if m.height <= 0 {
 		return
 	}
+	m.syncTextareaDimensions()
 	m.resizeSidebarTable()
 	if !m.viewportSet {
 		return

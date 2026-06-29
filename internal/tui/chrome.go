@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/table"
+	"charm.land/lipgloss/v2"
 
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
@@ -48,8 +50,9 @@ type chromeModel struct {
 	animations        animState
 	activeTools       []toolInfo
 
-	styles themeStyles
-	theme  Theme
+	styles      themeStyles
+	theme       Theme
+	transparent bool
 }
 
 // shouldShowSidebar returns true when sidebar is enabled and the terminal is
@@ -64,6 +67,39 @@ func (m Model) contentWidth() int {
 		return maxInt(40, m.width-sidebarWidth-5)
 	}
 	return maxInt(40, m.width)
+}
+
+// composerColumnWidth is the width available for input, tool activity, and
+// footer chrome in the main chat column.
+func (m Model) composerColumnWidth() int {
+	if m.shouldShowSidebar() {
+		return maxInt(20, m.contentWidth())
+	}
+	return inputBoxContentWidth(m.width)
+}
+
+// sidebarColumnWidth returns the rendered outer width of the sidebar panel.
+func (m Model) sidebarColumnWidth() int {
+	if !m.shouldShowSidebar() {
+		return 0
+	}
+	rendered := m.styles.SidebarStyle.Render(m.renderSidebarTable())
+	lines := strings.Split(rendered, "\n")
+	if len(lines) == 0 || lines[0] == "" {
+		return sidebarWidth + 4
+	}
+	return lipgloss.Width(lines[0])
+}
+
+// alignToChatColumn places footer content in the main chat column when the
+// sidebar is visible, so tool activity does not appear under sidebar Actions.
+func (m Model) alignToChatColumn(content string) string {
+	if content == "" || !m.shouldShowSidebar() {
+		return content
+	}
+	spacer := lipgloss.NewStyle().Width(m.sidebarColumnWidth()).Render("")
+	column := lipgloss.NewStyle().Width(m.composerColumnWidth()).Render(content)
+	return lipgloss.JoinHorizontal(lipgloss.Top, spacer, column)
 }
 
 func (m Model) chromeState() string {

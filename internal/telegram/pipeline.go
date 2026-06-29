@@ -273,7 +273,7 @@ func (bc *BotController) cmdCancelPlan(chatID int64, threadID int, userID int64)
 
 type noopPipelineProgress struct{}
 
-func (noopPipelineProgress) ReportTool(string)       {}
+func (noopPipelineProgress) ReportTool(_, _ string)  {}
 func (noopPipelineProgress) ReportToolResult(string) {}
 func (noopPipelineProgress) ReportText(string)       {}
 func (noopPipelineProgress) Delete()                 {}

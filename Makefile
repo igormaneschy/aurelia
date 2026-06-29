@@ -14,7 +14,7 @@ TUI_BINARY    := $(HOME)/.aurelia/bin/aurelia-tui
 TUI_PKG       := ./cmd/aurelia-tui
 TUI_TMP       := $(TUI_BINARY).new
 
-.PHONY: help build test race vet lint sec cover check bridge install tui tui-all install-tui install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
+.PHONY: help build test race vet lint sec cover check bridge install tui tui-all install-tui install-path install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
 
 help:
 	@echo "Common targets:"
@@ -60,6 +60,7 @@ install:
 	go build -o $(TMP_BINARY) $(PKG)
 	mv $(TMP_BINARY) $(BINARY)
 	$(MAKE) sign
+	$(MAKE) install-path
 
 # --- TUI Build ---
 
@@ -77,10 +78,14 @@ tui-all:
 	GOOS=darwin GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o $(TUI_DIST)-darwin-arm64 $(TUI_PKG)
 
 # Atomic build: same .new → mv pattern as install to avoid half-written files.
-install-tui:
+install-tui: install-path
 	mkdir -p $(dir $(TUI_BINARY))
 	go build -o $(TUI_TMP) $(TUI_PKG)
 	mv $(TUI_TMP) $(TUI_BINARY)
+
+install-path:
+	@chmod +x scripts/install-path.sh
+	@./scripts/install-path.sh
 
 test:
 	go test ./... -short -count=1

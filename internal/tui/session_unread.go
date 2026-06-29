@@ -67,7 +67,7 @@ func (m Model) sessionUnreadBadge(chatID int64) string {
 		return ""
 	}
 	if n > 99 {
-		return "[99+]"
+		return "99+"
 	}
-	return "[" + strconv.Itoa(n) + "]"
+	return strconv.Itoa(n)
 }

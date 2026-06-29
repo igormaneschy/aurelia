@@ -1181,16 +1181,16 @@ func TestModel_CtrlJInsertsNewline(t *testing.T) {
 	}
 }
 
-func TestInputTextareaWidthLeavesRoomForPrompt(t *testing.T) {
-	terminalWidth := 80
-	got := inputTextareaWidth(terminalWidth)
-	boxWidth := inputBoxContentWidth(terminalWidth)
+func TestComposerTextareaWidthLeavesRoomForPrompt(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.width = 80
+	m.showSidebar = false
+	got := m.composerTextareaWidth()
+	boxWidth := m.composerColumnWidth()
 
-	if got >= boxWidth {
-		t.Fatalf("expected textarea width %d to be less than box width %d", got, boxWidth)
-	}
-	if got >= terminalWidth-4 {
-		t.Fatalf("expected textarea width %d to be narrower than old terminal-based width", got)
+	inner := boxWidth - inputBoxChromeWidth
+	if got > inner-composerPromptRunes {
+		t.Fatalf("expected textarea width %d to fit inside box inner %d", got, inner)
 	}
 }
 

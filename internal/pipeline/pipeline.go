@@ -1260,7 +1260,7 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 				if text := strings.TrimSpace(assistantText.String()); text != "" {
 					progress.ReportText(text)
 				}
-				progress.ReportTool(toolName)
+				progress.ReportTool(toolName, SummarizeToolInput(toolName, ev.Input))
 			}
 			lastStreamFlush = time.Now()
 			s.recordToolUse(chatID, threadID, userID, toolName)

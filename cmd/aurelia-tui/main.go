@@ -17,7 +17,13 @@ import (
 )
 
 func main() {
-	themeFlag := flag.String("theme", "auto", "TUI theme: auto, light, or dark")
+	prefs := tui.LoadTUIPrefs()
+	themeDefault := string(tui.ThemeAuto)
+	if prefs.Theme != "" {
+		themeDefault = string(prefs.Theme)
+	}
+	themeFlag := flag.String("theme", themeDefault, "TUI theme: auto, light, or dark")
+	transparentFlag := flag.Bool("transparent", prefs.Transparent, "Use transparent backgrounds (terminal must support it)")
 	sessionFlag := flag.String("session", "", "Open this session on startup (e.g. work or tui:work; dm = default)")
 	noAnimations := flag.Bool("no-animations", false, "Disable TUI animations")
 	noMouse := flag.Bool("no-mouse", false, "Disable mouse interaction (Ctrl+O has no effect)")
@@ -55,6 +61,7 @@ func main() {
 	m := tui.NewModelWithOptions(socketPath, theme, tui.ModelOptions{
 		NoAnimations:   *noAnimations,
 		NoMouse:        *noMouse,
+		Transparent:    *transparentFlag,
 		StartupSession: startupSession,
 	})
 	p := tea.NewProgram(m)

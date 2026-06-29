@@ -131,7 +131,7 @@ func (m Model) updateActiveForm(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.textarea.SetWidth(inputTextareaWidth(msg.Width))
+		m.syncTextareaDimensions()
 		contentWidth := m.contentWidth()
 		if m.viewportSet {
 			m.viewport.SetWidth(contentWidth)

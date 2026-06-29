@@ -110,6 +110,62 @@ func TestHandleSidebarMouse_ClickOpensSession(t *testing.T) {
 	}
 }
 
+func TestRenderSidebarFramed_PreservesBottomBorder(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 120
+	m.height = 30
+	m.showSidebar = true
+	m.sessions = []tuiSessionInfo{
+		{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
+		{ChatID: -2, Name: "Trade"},
+		{ChatID: -3, Name: "ChatGeral"},
+	}
+	m.sessionUnread = map[int64]int{-2: 99}
+	prepSidebarTest(&m)
+
+	height := m.chatBodyHeight()
+	framed := m.renderSidebarFramed(height)
+	lines := strings.Split(framed, "\n")
+	if len(lines) < height-1 || len(lines) > height+1 {
+		t.Fatalf("framed sidebar lines=%d want ~%d", len(lines), height)
+	}
+	last := lines[len(lines)-1]
+	for i := len(lines) - 1; i >= 0 && strings.TrimSpace(last) == ""; i-- {
+		last = lines[i]
+	}
+	if !strings.ContainsAny(last, "╯┘") {
+		t.Fatalf("expected bottom border on last line, got %q", last)
+	}
+}
+
+func TestSyncSidebarRows_LongNameWithUnreadBadge(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.activeSession = ipc.ReservedTUIChatID
+	m.sessions = []tuiSessionInfo{
+		{ChatID: ipc.ReservedTUIChatID, Name: "dm"},
+		{ChatID: -2, Name: "Trade"},
+	}
+	m.sessionUnread = map[int64]int{-2: 6}
+	prepSidebarTest(&m)
+
+	view := stripANSIForTest(m.sidebarTable.View())
+	if !strings.Contains(view, "Trade") {
+		t.Fatalf("expected session name, got:\n%s", view)
+	}
+	if !strings.Contains(view, "6") {
+		t.Fatalf("expected unread badge, got:\n%s", view)
+	}
+	for _, line := range strings.Split(view, "\n") {
+		if strings.Contains(line, "Trade") && strings.Contains(line, "6") {
+			// Name and badge may share a row but must not be concatenated.
+			if strings.Contains(line, "Trade 6") || strings.Contains(line, "Trade6") {
+				t.Fatalf("name and badge should not be concatenated: %q", line)
+			}
+		}
+	}
+}
+
 func TestHandleSidebarMouse_MotionSetsHoverRow(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.sessions = []tuiSessionInfo{{ChatID: ipc.ReservedTUIChatID, Name: "dm"}, {ChatID: -9000002, Name: "work"}}

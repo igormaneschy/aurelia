@@ -7,6 +7,37 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+const (
+	composerPromptRunes        = 2 // "> " or "… "
+	inputBoxChromeWidth        = 4 // rounded border + horizontal padding
+	composerTextareaMinHeight  = 2
+	composerTextareaMaxHeight  = 6
+)
+
+// composerTextareaWidth is the bubbles textarea wrap width inside the bordered
+// input box, accounting for the external prompt and box chrome.
+func (m Model) composerTextareaWidth() int {
+	inner := m.composerColumnWidth() - inputBoxChromeWidth
+	w := inner - composerPromptRunes
+	return maxInt(10, w)
+}
+
+// composerTextareaLineCount sizes the visible input area to the wrapped content.
+func (m Model) composerTextareaLineCount() int {
+	text := m.textarea.Value()
+	if text == "" {
+		return composerTextareaMinHeight
+	}
+	wrapped := materializeSoftWraps(text, m.composerTextareaWidth())
+	lines := strings.Count(wrapped, "\n") + 1
+	return clampInt(lines, composerTextareaMinHeight, composerTextareaMaxHeight)
+}
+
+func (m *Model) syncTextareaDimensions() {
+	m.textarea.SetWidth(m.composerTextareaWidth())
+	m.textarea.SetHeight(m.composerTextareaLineCount())
+}
+
 func (m Model) composerPlaceholder() string {
 	if m.waiting {
 		return "Aurelia a pensar…"
@@ -22,29 +53,50 @@ func (m Model) composerPlaceholder() string {
 }
 
 func (m Model) shouldShowComposerHints() bool {
+	return !m.modalOpen() && !m.waiting
+}
+
+func (m Model) renderComposerSpacer() string {
 	if m.modalOpen() {
-		return false
+		return ""
 	}
-	return strings.TrimSpace(m.textarea.Value()) == ""
+	w := m.composerColumnWidth()
+	rule := m.styles.ComposerSpacerStyle.Render(strings.Repeat("·", maxInt(16, w-8)))
+	return lipgloss.NewStyle().Width(w).Render(rule)
 }
 
 func (m Model) renderComposerHints() string {
 	if !m.shouldShowComposerHints() {
 		return ""
 	}
-	left := m.styles.SidebarMutedStyle.Render("/help · /cwd · /model")
-	right := m.styles.SidebarMutedStyle.Render("F1 · ↵ send")
-	width := inputBoxContentWidth(m.width)
-	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
-	if gap < 2 {
-		return left + "  " + right
+	width := m.composerColumnWidth()
+	sendHint := m.styles.SidebarMutedStyle.Render("↵ send")
+
+	if strings.TrimSpace(m.textarea.Value()) == "" {
+		left := m.styles.SidebarMutedStyle.Render("/help · /cwd · /model")
+		right := m.styles.SidebarMutedStyle.Render("F1 · ↵ send")
+		gap := width - lipgloss.Width(left) - lipgloss.Width(right)
+		if gap < 2 {
+			return left + "  " + right
+		}
+		return left + strings.Repeat(" ", gap) + right
 	}
-	return left + strings.Repeat(" ", gap) + right
+
+	gap := width - lipgloss.Width(sendHint)
+	if gap < 0 {
+		gap = 0
+	}
+	return strings.Repeat(" ", gap) + sendHint
 }
 
 func (m Model) renderInput() string {
 	imageBadges := m.renderPendingImageBadges()
 	attachmentBadges := m.renderPendingAttachmentBadges()
+
+	var sections []string
+	if spacer := m.renderComposerSpacer(); spacer != "" {
+		sections = append(sections, spacer)
+	}
 
 	var badgeLines []string
 	if imageBadges != "" {
@@ -73,7 +125,7 @@ func (m Model) renderInput() string {
 	prompt := m.styles.InputPromptStyle.Render(promptText)
 	input := renderPromptedTextarea(prompt, promptText, m.textarea.View())
 
-	boxWidth := inputBoxContentWidth(m.width)
+	boxWidth := m.composerColumnWidth()
 	style := m.styles.InputBoxStyle
 	switch {
 	case m.waiting:
@@ -89,5 +141,6 @@ func (m Model) renderInput() string {
 	if len(badgeLines) > 0 {
 		content = strings.Join(badgeLines, "\n") + "\n" + content
 	}
-	return content
+	sections = append(sections, content)
+	return strings.Join(sections, "\n")
 }

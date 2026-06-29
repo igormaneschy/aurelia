@@ -176,6 +176,8 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 		if m.historySearch.active && m.historySearch.query != "" {
 			bodyText = highlightSearchText(bodyText, globalIndex, activeMatch, m.historySearch.matches, m.styles.SearchHighlightStyle)
 		}
+		bodyWidth := messageBodyWidth(width)
+		userBodyWidth := m.userMessageWrapWidth(width)
 
 		switch msg.Sender {
 		case "Igor":
@@ -184,7 +186,7 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 			b.WriteString("\n")
 			b.WriteString(m.styles.MessageSeparatorStyle.Render(strings.Repeat("─", maxInt(20, width-4))))
 			b.WriteString("\n")
-			b.WriteString(bodyText)
+			b.WriteString(wrapPlainText(bodyText, userBodyWidth))
 			b.WriteString("\n")
 		case "Aurelia":
 			header := formatMessageHeader("Aurelia", timestamp)
@@ -196,14 +198,25 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 			b.WriteString("\n")
 			searching := m.historySearch.active && m.historySearch.query != "" &&
 				messageHasSearchMatch(globalIndex, m.historySearch.matches)
+			alerts, markdownSource := splitAlertLines(msg.Text)
 			if searching {
 				// Plain highlighted text so matches stay visible (glamour strips ANSI).
-				b.WriteString(bodyText)
+				for _, alert := range alerts {
+					b.WriteString(m.renderAlertLine(alert))
+					b.WriteString("\n")
+				}
+				b.WriteString(wrapPlainText(bodyText, bodyWidth))
 				b.WriteString("\n")
 			} else {
-				rendered, err := renderer.Render(msg.Text)
+				for _, alert := range alerts {
+					b.WriteString(m.renderAlertLine(alert))
+					b.WriteString("\n")
+				}
+				rendered, err := renderer.Render(markdownSource)
 				if err != nil || rendered == "" {
-					b.WriteString(bodyText)
+					if markdownSource != "" {
+						b.WriteString(markdownSource)
+					}
 				} else {
 					out := strings.TrimSpace(rendered)
 					if i == len(messages)-1 && m.waiting && m.animations.enabled {
@@ -217,7 +230,7 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 			header := formatMessageHeader(msg.Sender, timestamp)
 			b.WriteString(m.styles.ErrorStyle.Render(header))
 			b.WriteString("\n")
-			b.WriteString(bodyText)
+			b.WriteString(wrapPlainText(bodyText, bodyWidth))
 			b.WriteString("\n")
 		}
 	}
