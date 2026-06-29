@@ -47,11 +47,45 @@ func TestRenderToolActivity_ShowsTools(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.width = 80
 	m.activeTools = []toolInfo{{Name: "Bash", Detail: "Bash"}}
-	got := m.renderToolActivity()
+	got := stripANSIForTest(m.renderToolActivity())
 	if got == "" {
 		t.Fatal("expected non-empty tool activity panel")
 	}
-	if !strings.Contains(got, "⚡") || !strings.Contains(got, "Bash") {
-		t.Errorf("expected Bash tool line, got %q", got)
+	if !strings.Contains(got, "Running") {
+		t.Errorf("expected Running label, got %q", got)
+	}
+	if !strings.Contains(got, "⚡") || !strings.Contains(got, "bash") {
+		t.Errorf("expected bash tool chip, got %q", got)
+	}
+}
+
+func TestAlignToChatColumn_IndentsToolActivity(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 120
+	m.height = 30
+	m.showSidebar = true
+	m.sessions = []tuiSessionInfo{{ChatID: -2, Name: "DM"}}
+	m.activeTools = []toolInfo{{Name: "Write", Detail: "Write"}}
+	m.ensureViewport()
+
+	layout := m.renderChatBaseLayout()
+	lines := strings.Split(layout, "\n")
+	sidebarW := m.sidebarColumnWidth()
+
+	var toolLine string
+	for _, line := range lines {
+		plain := stripANSIForTest(line)
+		if strings.Contains(plain, "Running") && strings.Contains(plain, "write") {
+			toolLine = line
+			break
+		}
+	}
+	if toolLine == "" {
+		t.Fatalf("expected tool activity line in layout, got last lines:\n%s", strings.Join(lines[maxInt(0, len(lines)-8):], "\n"))
+	}
+	idx := strings.Index(stripANSIForTest(toolLine), "Running")
+	if idx < m.mainPaneStartX()-2 {
+		t.Fatalf("tool line should start in chat column (idx=%d mainPaneStartX=%d sidebarW=%d): %q", idx, m.mainPaneStartX(), sidebarW, stripANSIForTest(toolLine))
 	}
 }

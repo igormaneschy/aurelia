@@ -92,8 +92,9 @@ func (m Model) renderStatusBar() string {
 	}
 
 	content := strings.Join(parts, statusBarSegmentSep)
-	border := m.styles.MessageSeparatorStyle.Render(strings.Repeat("─", maxInt(20, m.width)))
-	return border + "\n" + m.styles.StatusBarStyle.Width(maxInt(20, m.width)).Render(content)
+	width := m.composerColumnWidth()
+	border := m.styles.MessageSeparatorStyle.Render(strings.Repeat("─", maxInt(20, width)))
+	return border + "\n" + m.styles.StatusBarStyle.Width(maxInt(20, width)).Render(content)
 }
 
 // pendingCountLabel returns the pending count badge for the status bar.

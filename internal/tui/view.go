@@ -122,11 +122,11 @@ func (m Model) renderChatBaseLayout() string {
 	}
 	body = clipLines(body, contentH)
 
-	chatFooter := []string{inputBar}
+	chatFooter := []string{m.alignToChatColumn(inputBar)}
 	if progressBar != "" {
-		chatFooter = append(chatFooter, progressBar)
+		chatFooter = append(chatFooter, m.alignToChatColumn(progressBar))
 	}
-	chatFooter = append(chatFooter, statusBar)
+	chatFooter = append(chatFooter, m.alignToChatColumn(statusBar))
 	return lipgloss.JoinVertical(lipgloss.Left, m.renderTopMargin(), body, strings.Join(chatFooter, "\n"))
 }
 

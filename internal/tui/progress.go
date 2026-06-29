@@ -149,11 +149,12 @@ func (m *Model) tickAttachProgress() {
 }
 
 func (m Model) footerProgressBar() string {
+	width := m.composerColumnWidth()
 	if m.showAttachProgress() {
-		return m.renderAttachProgress(m.width)
+		return m.renderAttachProgress(width)
 	}
 	if m.showStreamProgress() {
-		return m.renderStreamProgress(m.width)
+		return m.renderStreamProgress(width)
 	}
 	return ""
 }

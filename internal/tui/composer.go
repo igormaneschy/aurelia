@@ -34,7 +34,7 @@ func (m Model) renderComposerHints() string {
 	}
 	left := m.styles.SidebarMutedStyle.Render("/help · /cwd · /model")
 	right := m.styles.SidebarMutedStyle.Render("F1 · ↵ send")
-	width := inputBoxContentWidth(m.width)
+	width := m.composerColumnWidth()
 	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 2 {
 		return left + "  " + right
@@ -73,7 +73,7 @@ func (m Model) renderInput() string {
 	prompt := m.styles.InputPromptStyle.Render(promptText)
 	input := renderPromptedTextarea(prompt, promptText, m.textarea.View())
 
-	boxWidth := inputBoxContentWidth(m.width)
+	boxWidth := m.composerColumnWidth()
 	style := m.styles.InputBoxStyle
 	switch {
 	case m.waiting:

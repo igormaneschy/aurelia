@@ -7,7 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-const maxToolActivityLines = 4
+const maxToolActivityChips = 3
 
 // toolInfo represents an active tool execution during a streaming response.
 type toolInfo struct {
@@ -52,32 +52,39 @@ func toolIcon(name string) string {
 	}
 }
 
-// renderToolActivity renders the tool execution activity panel shown during
-// streaming responses. Each active tool gets a compact line with icon + name.
+func formatToolChip(styles themeStyles, t toolInfo, active bool) string {
+	label := fmt.Sprintf("%s %s", toolIcon(t.Name), strings.ToLower(t.Name))
+	if active && !t.Done {
+		return styles.StatusBusyStyle.Render(label + " …")
+	}
+	if t.Done {
+		return styles.ChipStyle.Render(label + " ✓")
+	}
+	return styles.ChipStyle.Render(label)
+}
+
+// renderToolActivity renders a compact tool strip above the composer during
+// streaming. It stays in the chat column and reads as activity, not sidebar
+// actions.
 func (m Model) renderToolActivity() string {
 	if len(m.activeTools) == 0 {
 		return ""
 	}
 
 	tools := m.activeTools
-	if len(tools) > maxToolActivityLines {
-		tools = tools[len(tools)-maxToolActivityLines:]
+	if len(tools) > maxToolActivityChips {
+		tools = tools[len(tools)-maxToolActivityChips:]
 	}
 
-	var lines []string
-	for _, t := range tools {
-		icon := toolIcon(t.Name)
-		marker := "…"
-		if t.Done {
-			marker = "✓"
-		}
-		lines = append(lines, fmt.Sprintf(" %s %s %s", icon, t.Detail, marker))
+	chips := make([]string, len(tools))
+	for i, t := range tools {
+		chips[i] = formatToolChip(m.styles, t, i == len(tools)-1)
 	}
 
-	style := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("243")).
-		Width(inputBoxContentWidth(m.width)).
-		MaxHeight(maxToolActivityLines)
+	label := m.styles.SidebarSectionStyle.Render("Running")
+	line := label + "  " + strings.Join(chips, "  ")
 
-	return style.Render(strings.Join(lines, "\n"))
+	return lipgloss.NewStyle().
+		Width(m.composerColumnWidth()).
+		Render(line)
 }
