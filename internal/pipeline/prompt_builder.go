@@ -361,7 +361,7 @@ func (bc *Service) buildProjectMemoryInstructions(chatID int64, threadID int, pr
 		topicAlias := fmt.Sprintf("topic://chat_%d/thread_%d", chatID, threadID)
 		sb.WriteString("| **Topic** | `" + topicAlias + "` | Facts specific to this forum topic — isolated from other topics |\n")
 	}
-	sb.WriteString("| **CWD Overlay** | `~/.aurelia/topics/chat_<id>/thread_<id>/cwd_overlay/` | Work context, session notes, decisions for project \"" + projectName + "\" in this topic — Aurelia is a personal assistant |\n")
+	sb.WriteString("| **CWD Overlay** | `~/.aurelia/projects/<slug>/cwd_overlay/` | Project-scoped memory — shared across all conversations with this /cwd. Architecture, patterns, project decisions |\n")
 
 	sb.WriteString("\n### Saving memory\n")
 	sb.WriteString("When something meaningful happens, save it using the Write tool to the correct layer:\n")
@@ -458,8 +458,9 @@ func (bc *Service) loadMemoryContents(chatID int64, threadID int, userID int64, 
 	}
 
 	// Layer 3: CWD overlay — only when /cwd is active
+	// Project-scoped: independent of chat/thread, shared across all frontends
 	if hasProject {
-		cwdOverlayDir := bc.resolver.TopicCwdOverlayDir(chatID, threadID)
+		cwdOverlayDir := bc.resolver.ProjectCwdOverlayDir(cwd)
 		if cwdOverlayDir != "" {
 			projectName := filepath.Base(cwd)
 			header := fmt.Sprintf("#### %s (cwd overlay)\n\n", projectName)

@@ -358,8 +358,8 @@ func (d *Dreamer) buildNudgePrompt(cwd string, chatID int64, threadID int, userI
 		return buf.String()
 	}
 
-	// Project context — use canonical paths
-	data.CwdOverlayDir = d.resolver.TopicCwdOverlayDir(chatID, threadID)
+	// Project context — use canonical paths (project-scoped, independent of chat/thread)
+	data.CwdOverlayDir = d.resolver.ProjectCwdOverlayDir(cwd)
 
 	tmpl := template.Must(template.New("nudge_project").ParseFS(nudgeTemplateFS, "prompts/nudge_project.tmpl"))
 	var buf strings.Builder

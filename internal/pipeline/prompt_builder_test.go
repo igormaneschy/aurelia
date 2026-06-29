@@ -346,8 +346,8 @@ func TestLoadMemoryContents_ProjectPrivateSurvivesWhenGlobalIsHuge(t *testing.T)
 		t.Fatal(err)
 	}
 	cwd := "/repo/aurelia"
-	// CWD overlay directory for the topic (requires threadID > 0)
-	cwdOverlay := resolver.TopicCwdOverlayDir(42, 10)
+	// CWD overlay directory (project-scoped)
+	cwdOverlay := resolver.ProjectCwdOverlayDir(cwd)
 	if err := os.MkdirAll(cwdOverlay, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -427,17 +427,12 @@ func TestLoadMemoryContents_IsolatesProjectPrivateByThread(t *testing.T) {
 		t.Fatal(err)
 	}
 	cwd := "/repo/aurelia"
-	cwdOverlay10 := resolver.TopicCwdOverlayDir(42, 10)
-	cwdOverlay20 := resolver.TopicCwdOverlayDir(42, 20)
-	for _, dir := range []string{cwdOverlay10, cwdOverlay20} {
-		if err := os.MkdirAll(dir, 0700); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := os.WriteFile(filepath.Join(cwdOverlay10, "note.md"), []byte("thread ten cwd overlay"), 0600); err != nil {
+	// CWD overlay is project-scoped — both threads with the same cwd share it
+	cwdOverlay := resolver.ProjectCwdOverlayDir(cwd)
+	if err := os.MkdirAll(cwdOverlay, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cwdOverlay20, "note.md"), []byte("thread twenty cwd overlay"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(cwdOverlay, "note.md"), []byte("project-scoped cwd overlay"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
@@ -445,8 +440,8 @@ func TestLoadMemoryContents_IsolatesProjectPrivateByThread(t *testing.T) {
 	sessions.SetCwd(42, 10, cwd)
 	bc := &Service{resolver: resolver, sessions: sessions, memoryCache: NewMemoryCache()}
 	got := bc.loadMemoryContents(42, 10, 0, nil, cwd)
-	if !strings.Contains(got, "thread ten cwd overlay") {
-		t.Fatalf("expected thread 10 cwd overlay memory, got %q", got)
+	if !strings.Contains(got, "project-scoped cwd overlay") {
+		t.Fatalf("expected project-scoped cwd overlay memory, got %q", got)
 	}
 	if strings.Contains(got, "thread twenty cwd overlay") {
 		t.Fatalf("thread 20 cwd overlay leaked into thread 10: %q", got)
@@ -1391,15 +1386,15 @@ func TestLoadMemoryContents_TwoUsersSameTopicWithCwd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cwdOverlayA := resolver.TopicCwdOverlayDir(42, 99)
-	if err := os.MkdirAll(cwdOverlayA, 0700); err != nil {
+	cwdOverlay := resolver.ProjectCwdOverlayDir(cwd)
+	if err := os.MkdirAll(cwdOverlay, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(cwdOverlayA, "work.md"), []byte("Alice: implemented auth module"), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(cwdOverlay, "work.md"), []byte("Alice: implemented auth module"), 0600); err != nil {
 		t.Fatal(err)
 	}
 
-	// User B: global + same cwd_overlay dir (shared by topic)
+	// User B: global + same cwd_overlay dir (shared by project)
 	userBDir := resolver.UserMemoryDir(200)
 	if err := os.MkdirAll(userBDir, 0700); err != nil {
 		t.Fatal(err)

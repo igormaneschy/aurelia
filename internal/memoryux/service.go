@@ -61,11 +61,11 @@ func (s *Service) topicMemoryDir(chatID int64, threadID int) string {
 	return filepath.Join(s.Resolver.Root(), "topics", fmt.Sprintf("chat_%d", chatID), fmt.Sprintf("thread_%d", threadID))
 }
 
-func (s *Service) cwdOverlayDir(chatID int64, threadID int) string {
+func (s *Service) cwdOverlayDir(cwd string) string {
 	if s.Resolver == nil {
 		return ""
 	}
-	return s.Resolver.TopicCwdOverlayDir(chatID, threadID)
+	return s.Resolver.ProjectCwdOverlayDir(cwd)
 }
 
 // Status returns the current memory layer status without creating anything.
@@ -80,9 +80,9 @@ func (s *Service) Status(chatID int64, threadID int, cwd string) (Status, error)
 		layers = append(layers, s.layerInfo("Topic", "topic", s.topicMemoryDir(chatID, threadID)))
 	}
 
-	// CWD Overlay: only when cwd is set
+	// CWD Overlay: only when cwd is set — project-scoped, independent of chat/thread
 	if cwd != "" && s.Resolver != nil {
-		dir := s.cwdOverlayDir(chatID, threadID)
+		dir := s.cwdOverlayDir(cwd)
 		layers = append(layers, s.layerInfo("CWD Overlay", "cwd_overlay", dir))
 	}
 
@@ -149,7 +149,7 @@ func (s *Service) layerInfo(name, scope, dir string) LayerInfo {
 // Priority: cwd_overlay > topic > global.
 func (s *Service) checkpointTarget(cwd string, chatID int64, threadID int) (string, string) {
 	if cwd != "" && s.Resolver != nil {
-		dir := s.cwdOverlayDir(chatID, threadID)
+		dir := s.cwdOverlayDir(cwd)
 		if dir != "" {
 			return "cwd_overlay", dir
 		}

@@ -43,8 +43,8 @@ func BootstrapProjectMemory(r *PathResolver, cwd string) error {
 	return nil
 }
 
-// BootstrapConversationProjectMemory ensures context-scoped memory directories
-// exist for the bound project: cwd overlay (topic-scoped) only.
+// BootstrapConversationProjectMemory ensures project-scoped memory directories
+// exist for the bound project: cwd overlay only.
 // Project team memory removed in v0.31.0 — redundant with cwd_overlay.
 func BootstrapConversationProjectMemory(r *PathResolver, cwd string, chatID int64, threadID int) error {
 	if strings.TrimSpace(cwd) == "" {
@@ -52,7 +52,7 @@ func BootstrapConversationProjectMemory(r *PathResolver, cwd string, chatID int6
 	}
 
 	dirs := []string{
-		r.TopicCwdOverlayDir(chatID, threadID),
+		r.ProjectCwdOverlayDir(cwd),
 	}
 	for _, dir := range dirs {
 		if dir == "" {
