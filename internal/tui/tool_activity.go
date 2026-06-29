@@ -7,27 +7,43 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-const maxToolActivityChips = 3
+const (
+	maxToolActivityLines  = 3
+	maxToolSummaryDisplay = 48
+)
 
 // toolInfo represents an active tool execution during a streaming response.
 type toolInfo struct {
 	Name   string // Bash, Read, Write, Edit, Grep, etc.
-	Detail string // display label (usually same as Name)
-	Done   bool   // true when tool_result received (reserved for future use)
+	Detail string // short summary (command, path, pattern)
+	Done   bool
 }
 
 // parseToolChunk detects tool activity indicators in stream chunks.
-// The daemon sends "\n🔧 ToolName...\n" as stream_chunk text.
-func parseToolChunk(body string) (string, bool) {
+// Format: "🔧 ToolName" or "🔧 ToolName|summary".
+func parseToolChunk(body string) (name, detail string, ok bool) {
 	trimmed := strings.TrimSpace(body)
 	if !strings.HasPrefix(trimmed, "🔧 ") {
-		return "", false
+		return "", "", false
 	}
-	name := strings.TrimSuffix(strings.TrimPrefix(trimmed, "🔧 "), "...")
-	if name == "" {
-		return "", false
+	rest := strings.TrimSpace(strings.TrimPrefix(trimmed, "🔧 "))
+	if rest == "" {
+		return "", "", false
 	}
-	return name, true
+	if idx := strings.Index(rest, "|"); idx >= 0 {
+		name = strings.TrimSpace(rest[:idx])
+		detail = strings.TrimSpace(rest[idx+1:])
+		return name, detail, name != ""
+	}
+	rest = strings.TrimSuffix(rest, "...")
+	if rest == "" {
+		return "", "", false
+	}
+	return rest, "", true
+}
+
+func parseToolDone(body string) bool {
+	return strings.TrimSpace(body) == "✅ tool_done"
 }
 
 // toolIcon returns an emoji icon for the given tool name.
@@ -52,39 +68,49 @@ func toolIcon(name string) string {
 	}
 }
 
-func formatToolChip(styles themeStyles, t toolInfo, active bool) string {
-	label := fmt.Sprintf("%s %s", toolIcon(t.Name), strings.ToLower(t.Name))
-	if active && !t.Done {
-		return styles.StatusBusyStyle.Render(label + " …")
+func formatToolActivityLine(styles themeStyles, t toolInfo, active bool) string {
+	summary := strings.TrimSpace(t.Detail)
+	if summary == "" {
+		summary = strings.ToLower(t.Name)
 	}
-	if t.Done {
-		return styles.ChipStyle.Render(label + " ✓")
+	summary = truncateMiddle(summary, maxToolSummaryDisplay)
+
+	var line string
+	if strings.EqualFold(summary, t.Name) || strings.EqualFold(summary, strings.ToLower(t.Name)) {
+		line = fmt.Sprintf(" %s %s", toolIcon(t.Name), summary)
+	} else {
+		line = fmt.Sprintf(" %s %s · %s", toolIcon(t.Name), strings.ToLower(t.Name), summary)
 	}
-	return styles.ChipStyle.Render(label)
+
+	switch {
+	case active && !t.Done:
+		return styles.StatusBusyStyle.Render(line + " …")
+	case t.Done:
+		return styles.ChipStyle.Render(line + " ✓")
+	default:
+		return styles.ChipStyle.Render(line)
+	}
 }
 
-// renderToolActivity renders a compact tool strip above the composer during
-// streaming. It stays in the chat column and reads as activity, not sidebar
-// actions.
+// renderToolActivity renders a compact activity panel above the composer.
 func (m Model) renderToolActivity() string {
 	if len(m.activeTools) == 0 {
 		return ""
 	}
 
 	tools := m.activeTools
-	if len(tools) > maxToolActivityChips {
-		tools = tools[len(tools)-maxToolActivityChips:]
+	if len(tools) > maxToolActivityLines {
+		tools = tools[len(tools)-maxToolActivityLines:]
 	}
 
-	chips := make([]string, len(tools))
+	lines := make([]string, len(tools))
 	for i, t := range tools {
-		chips[i] = formatToolChip(m.styles, t, i == len(tools)-1)
+		lines[i] = formatToolActivityLine(m.styles, t, i == len(tools)-1)
 	}
 
-	label := m.styles.SidebarSectionStyle.Render("Running")
-	line := label + "  " + strings.Join(chips, "  ")
-
+	header := m.styles.SidebarSectionStyle.Render("Running")
+	body := strings.Join(lines, "\n")
 	return lipgloss.NewStyle().
 		Width(m.composerColumnWidth()).
-		Render(line)
+		Render(header + "\n" + body)
 }

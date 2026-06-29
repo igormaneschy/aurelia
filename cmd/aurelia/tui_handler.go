@@ -117,15 +117,16 @@ func (p *tuiProgress) ReportText(text string) {
 	p.lastText = text
 }
 
-func (p *tuiProgress) ReportTool(toolName string) {
-	_ = p.out.send(ipc.IPCEvent{
-		Type: ipc.EventTypeStreamChunk,
-		Body: fmt.Sprintf("\n🔧 %s...\n", toolName),
-	})
+func (p *tuiProgress) ReportTool(toolName, detail string) {
+	body := fmt.Sprintf("\n🔧 %s\n", toolName)
+	if detail != "" {
+		body = fmt.Sprintf("\n🔧 %s|%s\n", toolName, detail)
+	}
+	_ = p.out.send(ipc.IPCEvent{Type: ipc.EventTypeStreamChunk, Body: body})
 }
 
 func (p *tuiProgress) ReportToolResult(_ string) {
-	// No-op: do not leak raw tool result data.
+	_ = p.out.send(ipc.IPCEvent{Type: ipc.EventTypeStreamChunk, Body: "\n✅ tool_done\n"})
 }
 
 func (p *tuiProgress) Delete() {}

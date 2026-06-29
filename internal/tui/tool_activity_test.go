@@ -7,23 +7,31 @@ import (
 
 func TestParseToolChunk(t *testing.T) {
 	tests := []struct {
-		body    string
-		want    string
-		wantOK  bool
+		body       string
+		wantName   string
+		wantDetail string
+		wantOK     bool
 	}{
-		{"🔧 Bash...", "Bash", true},
-		{"\n🔧 Read...\n", "Read", true},
-		{"  🔧 Grep...  ", "Grep", true},
-		{"Hello world", "", false},
-		{"🔧 ", "", false},
-		{"🔧 ...", "", false},
-		{"not a tool", "", false},
+		{"🔧 Bash...", "Bash", "", true},
+		{"🔧 Bash|go test ./...", "Bash", "go test ./...", true},
+		{"\n🔧 Read|internal/tui/view.go\n", "Read", "internal/tui/view.go", true},
+		{"  🔧 Grep|pattern  ", "Grep", "pattern", true},
+		{"Hello world", "", "", false},
+		{"🔧 ", "", "", false},
+		{"🔧 ...", "", "", false},
 	}
 	for _, tt := range tests {
-		got, ok := parseToolChunk(tt.body)
-		if ok != tt.wantOK || got != tt.want {
-			t.Errorf("parseToolChunk(%q) = (%q, %v), want (%q, %v)", tt.body, got, ok, tt.want, tt.wantOK)
+		gotName, gotDetail, ok := parseToolChunk(tt.body)
+		if ok != tt.wantOK || gotName != tt.wantName || gotDetail != tt.wantDetail {
+			t.Errorf("parseToolChunk(%q) = (%q, %q, %v), want (%q, %q, %v)",
+				tt.body, gotName, gotDetail, ok, tt.wantName, tt.wantDetail, tt.wantOK)
 		}
+	}
+}
+
+func TestParseToolDone(t *testing.T) {
+	if !parseToolDone("\n✅ tool_done\n") {
+		t.Fatal("expected tool_done marker")
 	}
 }
 
@@ -43,19 +51,16 @@ func TestRenderToolActivity_Empty(t *testing.T) {
 	}
 }
 
-func TestRenderToolActivity_ShowsTools(t *testing.T) {
+func TestRenderToolActivity_ShowsSummary(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
-	m.width = 80
-	m.activeTools = []toolInfo{{Name: "Bash", Detail: "Bash"}}
+	m.width = 120
+	m.activeTools = []toolInfo{{Name: "Bash", Detail: "go test ./internal/tui/..."}}
 	got := stripANSIForTest(m.renderToolActivity())
-	if got == "" {
-		t.Fatal("expected non-empty tool activity panel")
-	}
 	if !strings.Contains(got, "Running") {
-		t.Errorf("expected Running label, got %q", got)
+		t.Fatalf("expected Running header, got %q", got)
 	}
-	if !strings.Contains(got, "⚡") || !strings.Contains(got, "bash") {
-		t.Errorf("expected bash tool chip, got %q", got)
+	if !strings.Contains(got, "bash") || !strings.Contains(got, "go test") {
+		t.Errorf("expected bash summary, got %q", got)
 	}
 }
 
@@ -66,17 +71,16 @@ func TestAlignToChatColumn_IndentsToolActivity(t *testing.T) {
 	m.height = 30
 	m.showSidebar = true
 	m.sessions = []tuiSessionInfo{{ChatID: -2, Name: "DM"}}
-	m.activeTools = []toolInfo{{Name: "Write", Detail: "Write"}}
+	m.activeTools = []toolInfo{{Name: "Write", Detail: "tool_activity.go"}}
 	m.ensureViewport()
 
 	layout := m.renderChatBaseLayout()
 	lines := strings.Split(layout, "\n")
-	sidebarW := m.sidebarColumnWidth()
 
 	var toolLine string
 	for _, line := range lines {
 		plain := stripANSIForTest(line)
-		if strings.Contains(plain, "Running") && strings.Contains(plain, "write") {
+		if strings.Contains(plain, "write") && strings.Contains(plain, "tool_activity.go") {
 			toolLine = line
 			break
 		}
@@ -84,8 +88,11 @@ func TestAlignToChatColumn_IndentsToolActivity(t *testing.T) {
 	if toolLine == "" {
 		t.Fatalf("expected tool activity line in layout, got last lines:\n%s", strings.Join(lines[maxInt(0, len(lines)-8):], "\n"))
 	}
-	idx := strings.Index(stripANSIForTest(toolLine), "Running")
+	idx := strings.Index(stripANSIForTest(toolLine), "✏️")
+	if idx < 0 {
+		idx = strings.Index(stripANSIForTest(toolLine), "write")
+	}
 	if idx < m.mainPaneStartX()-2 {
-		t.Fatalf("tool line should start in chat column (idx=%d mainPaneStartX=%d sidebarW=%d): %q", idx, m.mainPaneStartX(), sidebarW, stripANSIForTest(toolLine))
+		t.Fatalf("tool line should start in chat column (idx=%d mainPaneStartX=%d): %q", idx, m.mainPaneStartX(), stripANSIForTest(toolLine))
 	}
 }

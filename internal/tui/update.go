@@ -1350,8 +1350,18 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
 
 	case "stream_chunk":
-		if toolName, ok := parseToolChunk(event.Body); ok {
-			m.activeTools = append(m.activeTools, toolInfo{Name: toolName, Detail: toolName})
+		if parseToolDone(event.Body) {
+			if n := len(m.activeTools); n > 0 {
+				m.activeTools[n-1].Done = true
+			}
+			vpCmd := m.updateViewport()
+			return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd(), vpCmd)
+		}
+		if toolName, detail, ok := parseToolChunk(event.Body); ok {
+			if detail == "" {
+				detail = toolName
+			}
+			m.activeTools = append(m.activeTools, toolInfo{Name: toolName, Detail: detail})
 			vpCmd := m.updateViewport()
 			return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd(), vpCmd)
 		}
