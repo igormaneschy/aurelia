@@ -128,6 +128,9 @@ type tuiProjectStateMsg struct {
 // panel is open.
 type projectStatePollTickMsg struct{}
 
+// toolActivityTickMsg re-renders tool activity after the post-done dwell time.
+type toolActivityTickMsg struct{}
+
 // contextWithTimeout is a test-accessible timeout helper.
 var contextWithTimeout = func(d time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), d)
