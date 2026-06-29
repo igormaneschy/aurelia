@@ -89,6 +89,16 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.toggleMouseCapture()
 	}
 
+	// Async catalog fetch completes after the wizard opens; handle it before form
+	// delegation so huh does not swallow tuiModelsMsg.
+	if modelsMsg, ok := msg.(tuiModelsMsg); ok {
+		if m.formOpen && m.activeForm != nil && m.activeForm.isModelForm() {
+			m = m.applyWizardCatalog(modelsMsg)
+			return m, m.initActiveForm()
+		}
+		return m, nil
+	}
+
 	if m.formOpen {
 		return m.updateActiveForm(msg)
 	}
@@ -225,13 +235,6 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.activeModel = msg.model
 			m.syncSidebarRows()
-		}
-		return m, nil
-
-	case tuiModelsMsg:
-		if m.formOpen && m.activeForm != nil && m.activeForm.isModelForm() {
-			m = m.applyWizardCatalog(msg)
-			return m, m.initActiveForm()
 		}
 		return m, nil
 

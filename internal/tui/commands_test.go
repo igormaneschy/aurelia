@@ -191,6 +191,28 @@ func TestRefreshModelSelectForm_PreservesProviderSelection(t *testing.T) {
 	}
 }
 
+func TestUpdateChat_TuiModelsMsgWhileFormOpen_UpdatesCatalog(t *testing.T) {
+	m := testChatModel()
+	m.formOpen = true
+	m.activeForm = newModelProviderForm(catalogFromModels(modelFallbackList("Qwen3.6-35B")), "Qwen3.6-35B")
+	if m.activeForm.catalog.providerCount() != 1 {
+		t.Fatalf("fallback providers=%d, want 1 (other)", m.activeForm.catalog.providerCount())
+	}
+
+	full := catalogFromDaemonText("openai:\n  `gpt-5.1`\nanthropic:\n  `claude-sonnet-4-6`\n")
+	next, cmd := m.updateChat(tuiModelsMsg{catalog: full})
+	nm := next.(Model)
+	if !nm.formOpen || nm.activeForm == nil {
+		t.Fatal("model wizard should stay open")
+	}
+	if nm.activeForm.catalog.providerCount() < 2 {
+		t.Fatalf("providers=%d after updateChat, want full catalog", nm.activeForm.catalog.providerCount())
+	}
+	if cmd == nil {
+		t.Fatal("expected initActiveForm after catalog update")
+	}
+}
+
 func TestApplyWizardCatalog_FailedReloadKeepsExistingCatalog(t *testing.T) {
 	catalog := catalogFromDaemonText("openai:\n  `gpt-5.1`\nanthropic:\n  `claude-sonnet-4-6`\n")
 	m := testChatModel()
