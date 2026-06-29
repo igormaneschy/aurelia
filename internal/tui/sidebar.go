@@ -26,6 +26,14 @@ const (
 
 const sidebarModelPlaceholder = "—"
 
+const (
+	// sidebarInnerWidth is the table width inside the bordered sidebar panel.
+	sidebarInnerWidth    = 20
+	sidebarColNavWidth   = 4
+	sidebarColNameWidth  = 10
+	sidebarColBadgeWidth = 6
+)
+
 func sidebarTableFirstRowY() int {
 	return topMarginHeight + sidebarBorderLines + sidebarTitleLines + sidebarSectionRuleLines + sidebarSectionHeader + sidebarTableHeaderLines
 }
@@ -72,9 +80,9 @@ func clampInt(v, low, high int) int {
 // newSidebarTable creates a table.Model for the session sidebar.
 func newSidebarTable(styles themeStyles) table.Model {
 	cols := []table.Column{
-		{Title: "", Width: 5},
-		{Title: "Session", Width: 14},
-		{Title: "Model", Width: 0},
+		{Title: "", Width: sidebarColNavWidth},
+		{Title: "Session", Width: sidebarColNameWidth},
+		{Title: "", Width: sidebarColBadgeWidth},
 	}
 
 	t := table.New(
@@ -83,7 +91,7 @@ func newSidebarTable(styles themeStyles) table.Model {
 		table.WithHeight(12),
 	)
 
-	t.SetWidth(sidebarWidth)
+	t.SetWidth(sidebarInnerWidth)
 	t.SetHeight(12)
 	t.SetStyles(sidebarTableStyles(styles))
 
@@ -100,9 +108,9 @@ func newSidebarTable(styles themeStyles) table.Model {
 
 func sidebarTableStyles(styles themeStyles) table.Styles {
 	s := table.DefaultStyles()
-	s.Header = styles.SidebarMutedStyle.Bold(true).Padding(0, 1)
-	s.Cell = styles.SidebarMutedStyle.Padding(0, 1)
-	s.Selected = styles.SidebarHoverStyle.Padding(0, 1)
+	s.Header = styles.SidebarMutedStyle.Bold(true).Padding(0, 0)
+	s.Cell = styles.SidebarMutedStyle.Padding(0, 0)
+	s.Selected = styles.SidebarHoverStyle.Padding(0, 0)
 	return s
 }
 
@@ -123,7 +131,7 @@ func (m *Model) resizeSidebarTable() {
 	if !m.shouldShowSidebarTable() {
 		return
 	}
-	m.sidebarTable.SetWidth(sidebarWidth)
+	m.sidebarTable.SetWidth(sidebarInnerWidth)
 	m.sidebarTable.SetHeight(m.sidebarTableHeightForBody())
 	m.syncSidebarRows()
 }
@@ -168,9 +176,7 @@ func (m *Model) syncSidebarRows() {
 		if s.ChatID == ipc.ReservedTUIChatID {
 			label = "DM"
 		}
-		if badge := m.sessionUnreadBadge(s.ChatID); badge != "" {
-			label = truncateMiddle(label, 9) + " " + m.styles.SidebarUnreadStyle.Render(badge)
-		}
+		label = truncateMiddle(label, sidebarColNameWidth)
 
 		icon := m.sessionNavIcon(i, s) + " " + m.sessionEmoji(s)
 		if s.ChatID == m.activeSession &&
@@ -179,7 +185,7 @@ func (m *Model) syncSidebarRows() {
 			icon = m.styles.SidebarActiveStyle.Render(icon)
 		}
 
-		rows = append(rows, table.Row{icon, label, m.sessionModelLabel(s)})
+		rows = append(rows, table.Row{icon, label, formatSidebarBadgeCell(m.styles, m.sessionUnreadBadge(s.ChatID))})
 	}
 
 	m.sidebarTable.SetRows(rows)
@@ -262,6 +268,36 @@ func (m Model) renderSidebarFocusHints() string {
 		m.styles.SidebarMutedStyle.Render("d delete"),
 		m.styles.SidebarMutedStyle.Render("esc exit"),
 	)
+}
+
+func formatSidebarBadgeCell(styles themeStyles, badge string) string {
+	if badge == "" {
+		return ""
+	}
+	rendered := styles.SidebarUnreadStyle.Render(badge)
+	pad := sidebarColBadgeWidth - lipgloss.Width(rendered)
+	if pad > 0 {
+		rendered = strings.Repeat(" ", pad) + rendered
+	}
+	return rendered
+}
+
+// renderSidebarFramed renders the sidebar inside its bordered panel with a
+// fixed height so the bottom border is never clipped by the chat layout.
+func (m Model) renderSidebarFramed(height int) string {
+	if height < 3 {
+		height = 3
+	}
+	inner := m.renderSidebarTable()
+	// Rounded border consumes two lines (top + bottom).
+	maxInner := height - 2
+	if maxInner < 1 {
+		maxInner = 1
+	}
+	inner = clipLines(inner, maxInner)
+	return m.styles.SidebarStyle.
+		Height(height).
+		Render(inner)
 }
 
 // renderSidebarTable renders the sidebar in Sessions · Context · Actions panels.

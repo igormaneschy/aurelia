@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
 
@@ -72,8 +73,22 @@ func TestApplySessionsUnread_UpdatesSidebar(t *testing.T) {
 	m.applySessionsUnread(m.sessions)
 	m.syncSidebarRows()
 
-	view := m.sidebarTable.View()
+	view := stripANSIForTest(m.sidebarTable.View())
 	if !strings.Contains(view, "[3]") {
 		t.Fatalf("sidebar should show unread badge, got:\n%s", view)
+	}
+	if strings.Contains(view, "work [3]") || strings.Contains(view, "work[3]") {
+		t.Fatalf("badge should be in its own column, got:\n%s", view)
+	}
+}
+
+func TestFormatSidebarBadgeCell_RightAligns(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	got := stripANSIForTest(formatSidebarBadgeCell(m.styles, "[6]"))
+	if !strings.HasSuffix(strings.TrimSpace(got), "[6]") {
+		t.Fatalf("expected right-aligned badge, got %q", got)
+	}
+	if lipgloss.Width(got) > sidebarColBadgeWidth {
+		t.Fatalf("badge cell too wide: %d", lipgloss.Width(got))
 	}
 }

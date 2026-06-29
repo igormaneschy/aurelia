@@ -110,17 +110,12 @@ func (m Model) renderChatBaseLayout() string {
 
 	var body string
 	if m.shouldShowSidebar() {
-		sidebar := m.renderSidebarTable()
+		sidebar := m.renderSidebarFramed(contentH)
 		viewContent := m.renderMainPane(contentH, m.contentWidth())
-		body = lipgloss.JoinHorizontal(
-			lipgloss.Top,
-			m.styles.SidebarStyle.Render(sidebar),
-			viewContent,
-		)
+		body = lipgloss.JoinHorizontal(lipgloss.Top, sidebar, viewContent)
 	} else {
 		body = m.renderMainPane(contentH, m.width)
 	}
-	body = clipLines(body, contentH)
 
 	chatFooter := []string{m.alignToChatColumn(inputBar)}
 	if progressBar != "" {
