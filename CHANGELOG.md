@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.37.1] - 2026-06-29
+
+### Added
+- TUI compact tool activity panel during streaming: short redacted summaries
+  aligned with the chat column, with completed steps collapsed into `+N done`.
+- TUI theme shortcuts: **Ctrl+T** cycles dark/light/auto, **F3** toggles
+  transparent glass mode; preferences persist in `~/.aurelia/tui_prefs.json`.
+- TUI layout polish: composer spacer, `↵ send` hint while typing, yellow
+  chips for `Alerta:` / `Alert:` lines in assistant messages.
+- `scripts/install-path.sh` — `make install-tui` / `make install` add
+  `~/.aurelia/bin` to PATH via `~/.aurelia/env` (no manual `export`).
+
+### Changed
+- TUI user messages wrap at a readable width (80 cols) in the transcript.
+- TUI composer wraps to the chat column width with dynamic height (2–6 lines).
+- TUI sidebar: dedicated unread badge column, fixed framed panel height,
+  compact `6` / `99+` badges.
+
+### Fixed
+- TUI tool activity shows for actual execution duration (no fixed post-done timer).
+- TUI `/model` wizard now receives the full provider catalog from the daemon
+  (async `tuiModelsMsg` was swallowed while the huh form was open).
+- Pipeline `SummarizeToolInput` for bash commands uses `summarizeCommand`
+  (whitespace normalization + redaction).
+
 ## [0.37.0] - 2026-06-29
 
 ### Added
