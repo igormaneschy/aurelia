@@ -3,7 +3,6 @@ package tui
 import (
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestParseToolChunk(t *testing.T) {
@@ -47,35 +46,35 @@ func TestToolIcon(t *testing.T) {
 
 func TestToolActivityDisplay_ActiveTool(t *testing.T) {
 	tools := []toolInfo{
-		{Name: "Bash", Detail: "go test", Done: true, doneAt: time.Now()},
+		{Name: "Bash", Detail: "go test", Done: true},
 		{Name: "Write", Detail: "wrap.go"},
 	}
-	show, active, done := toolActivityDisplay(tools, time.Now())
+	show, active, done := toolActivityDisplay(tools)
 	if show == nil || show.Name != "Write" || !active || done != 1 {
 		t.Fatalf("got show=%v active=%v done=%d", show, active, done)
 	}
 }
 
-func TestToolActivityDisplay_PostDoneDwell(t *testing.T) {
-	now := time.Now()
+func TestToolActivityDisplay_LastDoneStaysVisible(t *testing.T) {
 	tools := []toolInfo{
-		{Name: "Bash", Detail: "go test", Done: true, doneAt: now.Add(-500 * time.Millisecond)},
+		{Name: "Bash", Detail: "go test", Done: true},
 	}
-	show, active, done := toolActivityDisplay(tools, now)
+	show, active, done := toolActivityDisplay(tools)
 	if show == nil || show.Name != "Bash" || active || done != 0 {
-		t.Fatalf("expected recent done tool to stay visible, got show=%v active=%v done=%d", show, active, done)
+		t.Fatalf("expected last done tool to stay visible, got show=%v active=%v done=%d", show, active, done)
 	}
 }
 
-func TestToolActivityDisplay_CollapsedAfterDwell(t *testing.T) {
-	now := time.Now()
+func TestToolActivityDisplay_OnlyCounterWhenNoLine(t *testing.T) {
+	// When all tools are done and collapsed into counter only — not applicable
+	// with current model; the last tool always shows. Multiple done tools:
 	tools := []toolInfo{
-		{Name: "Bash", Detail: "go test", Done: true, doneAt: now.Add(-3 * time.Second)},
-		{Name: "Write", Detail: "wrap.go", Done: true, doneAt: now.Add(-3 * time.Second)},
+		{Name: "Bash", Detail: "go test", Done: true},
+		{Name: "Write", Detail: "wrap.go", Done: true},
 	}
-	show, active, done := toolActivityDisplay(tools, now)
-	if show != nil || active || done != 2 {
-		t.Fatalf("expected only counter, got show=%v active=%v done=%d", show, active, done)
+	show, active, done := toolActivityDisplay(tools)
+	if show == nil || show.Name != "Write" || active || done != 1 {
+		t.Fatalf("expected last done tool visible with prior collapsed, got show=%v active=%v done=%d", show, active, done)
 	}
 }
 
@@ -103,8 +102,8 @@ func TestRenderToolActivity_CollapsesDoneTools(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.width = 120
 	m.activeTools = []toolInfo{
-		{Name: "Bash", Detail: "go test ./...", Done: true, doneAt: time.Now().Add(-3 * time.Second)},
-		{Name: "Read", Detail: "view.go", Done: true, doneAt: time.Now().Add(-3 * time.Second)},
+		{Name: "Bash", Detail: "go test ./...", Done: true},
+		{Name: "Read", Detail: "view.go", Done: true},
 		{Name: "Write", Detail: "tool_activity.go"},
 	}
 	got := stripANSIForTest(m.renderToolActivity())
@@ -124,34 +123,18 @@ func TestRenderToolActivity_CollapsesDoneTools(t *testing.T) {
 	}
 }
 
-func TestRenderToolActivity_AllDoneShowsCounterOnly(t *testing.T) {
+func TestRenderToolActivity_LastDoneShowsCheckmark(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.width = 120
 	m.activeTools = []toolInfo{
-		{Name: "Bash", Detail: "go test", Done: true, doneAt: time.Now().Add(-3 * time.Second)},
-		{Name: "Write", Detail: "wrap.go", Done: true, doneAt: time.Now().Add(-3 * time.Second)},
-	}
-	got := stripANSIForTest(m.renderToolActivity())
-	if !strings.Contains(got, "+2 done") {
-		t.Fatalf("expected done counter, got %q", got)
-	}
-	if strings.Contains(got, "write") || strings.Contains(got, "bash") {
-		t.Fatalf("expected no active tool line when all done, got %q", got)
-	}
-}
-
-func TestRenderToolActivity_RecentDoneShowsCheckmark(t *testing.T) {
-	m := NewModel("/tmp/test.sock", ThemeDark)
-	m.width = 120
-	m.activeTools = []toolInfo{
-		{Name: "Write", Detail: "wrap.go", Done: true, doneAt: time.Now()},
+		{Name: "Write", Detail: "wrap.go", Done: true},
 	}
 	got := stripANSIForTest(m.renderToolActivity())
 	if !strings.Contains(got, "write") || !strings.Contains(got, "wrap.go") {
-		t.Fatalf("expected recently finished tool to remain visible, got %q", got)
+		t.Fatalf("expected finished tool to remain visible, got %q", got)
 	}
 	if strings.Contains(got, "+1 done") {
-		t.Fatalf("expected no counter during dwell, got %q", got)
+		t.Fatalf("expected no counter for single finished tool, got %q", got)
 	}
 }
 

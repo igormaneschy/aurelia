@@ -260,9 +260,6 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncSidebarRows()
 		return m, tea.Batch(m.animations.step(), vpCmd)
 
-	case toolActivityTickMsg:
-		return m, nil
-
 	case daemonErrorMsg:
 		if msg.streamID != 0 && msg.streamID != m.streamID {
 			return m, nil
@@ -1354,14 +1351,11 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 
 	case "stream_chunk":
 		if parseToolDone(event.Body) {
-			var refreshCmd tea.Cmd
 			if n := len(m.activeTools); n > 0 {
 				m.activeTools[n-1].Done = true
-				m.activeTools[n-1].doneAt = time.Now()
-				refreshCmd = toolActivityRefreshCmd()
 			}
 			vpCmd := m.updateViewport()
-			return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd(), vpCmd, refreshCmd)
+			return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd(), vpCmd)
 		}
 		if toolName, detail, ok := parseToolChunk(event.Body); ok {
 			if detail == "" {

@@ -3,23 +3,17 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
 
-const (
-	maxToolSummaryDisplay   = 56
-	toolPostDoneDisplay     = 2 * time.Second
-)
+const maxToolSummaryDisplay = 56
 
 // toolInfo represents an active tool execution during a streaming response.
 type toolInfo struct {
 	Name   string // Bash, Read, Write, Edit, Grep, etc.
 	Detail string // short summary (command, path, pattern)
 	Done   bool
-	doneAt time.Time
 }
 
 // parseToolChunk detects tool activity indicators in stream chunks.
@@ -96,40 +90,20 @@ func formatToolActivityLine(styles themeStyles, t toolInfo, active bool) string 
 }
 
 // toolActivityDisplay picks the tool line to show and how many earlier steps
-// collapsed into +N done. A just-finished tool stays visible briefly before
-// collapsing unless a newer tool is already running.
-func toolActivityDisplay(tools []toolInfo, now time.Time) (show *toolInfo, active bool, doneCount int) {
+// collapsed into +N done. The latest tool stays visible for its whole execution
+// (active …) and remains with ✓ until a newer tool starts or the stream ends.
+func toolActivityDisplay(tools []toolInfo) (show *toolInfo, active bool, doneCount int) {
 	if len(tools) == 0 {
 		return nil, false, 0
 	}
 
-	showIdx := -1
-	for i := len(tools) - 1; i >= 0; i-- {
-		if !tools[i].Done {
-			showIdx = i
-			active = true
-			break
+	last := &tools[len(tools)-1]
+	for i := 0; i < len(tools)-1; i++ {
+		if tools[i].Done {
+			doneCount++
 		}
 	}
-	if showIdx < 0 {
-		for i := len(tools) - 1; i >= 0; i-- {
-			t := &tools[i]
-			if t.Done && !t.doneAt.IsZero() && now.Sub(t.doneAt) < toolPostDoneDisplay {
-				showIdx = i
-				break
-			}
-		}
-	}
-	if showIdx >= 0 {
-		show = &tools[showIdx]
-	}
-	for i, t := range tools {
-		if !t.Done || i == showIdx {
-			continue
-		}
-		doneCount++
-	}
-	return show, active, doneCount
+	return last, !last.Done, doneCount
 }
 
 func formatToolDoneBadge(styles themeStyles, doneCount int) string {
@@ -154,14 +128,14 @@ func joinToolActivityLine(styles themeStyles, width int, line, badge string) str
 }
 
 // renderToolActivity renders a compact activity panel above the composer.
-// The active (or just-finished) tool is the primary line; earlier steps
-// collapse into a right-aligned +N done badge on the same row.
+// The current tool is the primary line; earlier finished steps collapse into
+// a right-aligned +N done badge on the same row.
 func (m Model) renderToolActivity() string {
 	if len(m.activeTools) == 0 {
 		return ""
 	}
 
-	show, active, doneCount := toolActivityDisplay(m.activeTools, time.Now())
+	show, active, doneCount := toolActivityDisplay(m.activeTools)
 	width := m.composerColumnWidth()
 	badge := formatToolDoneBadge(m.styles, doneCount)
 
@@ -176,10 +150,4 @@ func (m Model) renderToolActivity() string {
 	}
 
 	return lipgloss.NewStyle().Width(width).Render(content)
-}
-
-func toolActivityRefreshCmd() tea.Cmd {
-	return tea.Tick(toolPostDoneDisplay, func(time.Time) tea.Msg {
-		return toolActivityTickMsg{}
-	})
 }
