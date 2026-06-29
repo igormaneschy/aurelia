@@ -64,6 +64,42 @@ func TestRenderToolActivity_ShowsSummary(t *testing.T) {
 	}
 }
 
+func TestRenderToolActivity_CollapsesDoneTools(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.width = 120
+	m.activeTools = []toolInfo{
+		{Name: "Bash", Detail: "go test ./...", Done: true},
+		{Name: "Read", Detail: "view.go", Done: true},
+		{Name: "Write", Detail: "tool_activity.go"},
+	}
+	got := stripANSIForTest(m.renderToolActivity())
+	if !strings.Contains(got, "+2 done") {
+		t.Fatalf("expected collapsed done count, got %q", got)
+	}
+	if strings.Count(got, "bash") != 0 || strings.Count(got, "read") != 0 {
+		t.Fatalf("expected only active tool detail, got %q", got)
+	}
+	if !strings.Contains(got, "write") || !strings.Contains(got, "tool_activity.go") {
+		t.Fatalf("expected active write summary, got %q", got)
+	}
+}
+
+func TestRenderToolActivity_AllDoneShowsCounterOnly(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.width = 120
+	m.activeTools = []toolInfo{
+		{Name: "Bash", Detail: "go test", Done: true},
+		{Name: "Write", Detail: "wrap.go", Done: true},
+	}
+	got := stripANSIForTest(m.renderToolActivity())
+	if !strings.Contains(got, "+2 done") {
+		t.Fatalf("expected done counter, got %q", got)
+	}
+	if strings.Contains(got, "write") || strings.Contains(got, "bash") {
+		t.Fatalf("expected no active tool line when all done, got %q", got)
+	}
+}
+
 func TestAlignToChatColumn_IndentsToolActivity(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat

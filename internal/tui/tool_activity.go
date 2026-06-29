@@ -7,10 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-const (
-	maxToolActivityLines  = 3
-	maxToolSummaryDisplay = 48
-)
+const maxToolSummaryDisplay = 56
 
 // toolInfo represents an active tool execution during a streaming response.
 type toolInfo struct {
@@ -92,25 +89,43 @@ func formatToolActivityLine(styles themeStyles, t toolInfo, active bool) string 
 	}
 }
 
+func countDoneTools(tools []toolInfo) int {
+	n := 0
+	for _, t := range tools {
+		if t.Done {
+			n++
+		}
+	}
+	return n
+}
+
+func renderToolActivityHeader(styles themeStyles, doneCount int) string {
+	header := styles.SidebarSectionStyle.Render("Running")
+	if doneCount > 0 {
+		badge := styles.SidebarMutedStyle.Render(fmt.Sprintf("+%d done", doneCount))
+		header += "  " + badge
+	}
+	return header
+}
+
 // renderToolActivity renders a compact activity panel above the composer.
+// Only the active tool is shown in detail; completed steps collapse into +N done.
 func (m Model) renderToolActivity() string {
 	if len(m.activeTools) == 0 {
 		return ""
 	}
 
-	tools := m.activeTools
-	if len(tools) > maxToolActivityLines {
-		tools = tools[len(tools)-maxToolActivityLines:]
+	doneCount := countDoneTools(m.activeTools)
+	last := m.activeTools[len(m.activeTools)-1]
+
+	var body strings.Builder
+	body.WriteString(renderToolActivityHeader(m.styles, doneCount))
+	if !last.Done {
+		body.WriteString("\n")
+		body.WriteString(formatToolActivityLine(m.styles, last, true))
 	}
 
-	lines := make([]string, len(tools))
-	for i, t := range tools {
-		lines[i] = formatToolActivityLine(m.styles, t, i == len(tools)-1)
-	}
-
-	header := m.styles.SidebarSectionStyle.Render("Running")
-	body := strings.Join(lines, "\n")
 	return lipgloss.NewStyle().
 		Width(m.composerColumnWidth()).
-		Render(header + "\n" + body)
+		Render(body.String())
 }
