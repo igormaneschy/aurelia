@@ -7,6 +7,37 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+const (
+	composerPromptRunes        = 2 // "> " or "… "
+	inputBoxChromeWidth        = 4 // rounded border + horizontal padding
+	composerTextareaMinHeight  = 2
+	composerTextareaMaxHeight  = 6
+)
+
+// composerTextareaWidth is the bubbles textarea wrap width inside the bordered
+// input box, accounting for the external prompt and box chrome.
+func (m Model) composerTextareaWidth() int {
+	inner := m.composerColumnWidth() - inputBoxChromeWidth
+	w := inner - composerPromptRunes
+	return maxInt(10, w)
+}
+
+// composerTextareaLineCount sizes the visible input area to the wrapped content.
+func (m Model) composerTextareaLineCount() int {
+	text := m.textarea.Value()
+	if text == "" {
+		return composerTextareaMinHeight
+	}
+	wrapped := materializeSoftWraps(text, m.composerTextareaWidth())
+	lines := strings.Count(wrapped, "\n") + 1
+	return clampInt(lines, composerTextareaMinHeight, composerTextareaMaxHeight)
+}
+
+func (m *Model) syncTextareaDimensions() {
+	m.textarea.SetWidth(m.composerTextareaWidth())
+	m.textarea.SetHeight(m.composerTextareaLineCount())
+}
+
 func (m Model) composerPlaceholder() string {
 	if m.waiting {
 		return "Aurelia a pensar…"

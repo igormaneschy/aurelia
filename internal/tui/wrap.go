@@ -25,7 +25,7 @@ func messageBodyWidth(viewportWidth int) int {
 // the composer textarea, and stays readable on wide terminals.
 func (m Model) userMessageWrapWidth(viewportWidth int) int {
 	chatW := messageBodyWidth(viewportWidth)
-	inputW := inputTextareaWidth(m.width)
+	inputW := m.composerTextareaWidth()
 	w := chatW
 	if inputW < w {
 		w = inputW

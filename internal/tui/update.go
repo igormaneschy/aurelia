@@ -42,7 +42,7 @@ func (m Model) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.textarea.SetWidth(inputTextareaWidth(msg.Width))
+		m.syncTextareaDimensions()
 		return m, nil
 
 	case tea.KeyMsg:
@@ -104,7 +104,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.textarea.SetWidth(inputTextareaWidth(msg.Width))
+		m.syncTextareaDimensions()
 		contentWidth := m.contentWidth()
 		if !m.viewportSet {
 			m.viewport = m.newViewport(contentWidth)
@@ -620,7 +620,7 @@ func (m Model) updateModalOverlay(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.textarea.SetWidth(inputTextareaWidth(msg.Width))
+		m.syncTextareaDimensions()
 		contentWidth := m.contentWidth()
 		if m.viewportSet {
 			m.viewport.SetWidth(contentWidth)
@@ -763,6 +763,8 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case isSidebarToggleKey(msg):
 		m.showSidebar = !m.showSidebar
+		m.syncTextareaDimensions()
+		m.syncViewportDimensions()
 		m.updateViewport()
 		return m, nil
 
@@ -1118,6 +1120,8 @@ func (m Model) handleSidebarKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if msg.String() == "tab" || msg.String() == "ctrl+i" || msg.String() == "\t" {
 			// Tab also toggles sidebar visibility.
 			m.showSidebar = !m.showSidebar
+			m.syncTextareaDimensions()
+			m.syncViewportDimensions()
 			m.updateViewport()
 		}
 		return m, nil
@@ -1243,6 +1247,8 @@ func (m Model) delegateKeyToTextarea(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.textarea, cmd = m.textarea.Update(msg)
+	m.syncTextareaDimensions()
+	m.syncViewportDimensions()
 	m.clearAutocomplete()
 	return m, cmd
 }

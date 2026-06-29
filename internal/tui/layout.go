@@ -71,6 +71,7 @@ func (m *Model) syncViewportDimensions() {
 	if m.height <= 0 {
 		return
 	}
+	m.syncTextareaDimensions()
 	m.resizeSidebarTable()
 	if !m.viewportSet {
 		return
