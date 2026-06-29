@@ -375,13 +375,6 @@ func (d *Dreamer) TopicMemoryDir(chatID int64, threadID int) string {
 	return d.resolver.TopicMemoryDir(chatID, threadID)
 }
 
-func (d *Dreamer) TopicCwdOverlayDir(chatID int64, threadID int) string {
-	if d.resolver == nil {
-		return ""
-	}
-	return d.resolver.TopicCwdOverlayDir(chatID, threadID)
-}
-
 func (d *Dreamer) ProjectCwdOverlayDir(cwd string) string {
 	if d.resolver == nil {
 		return ""

@@ -38,7 +38,6 @@ type safeMemoryWriter struct {
 type memoryDirResolver interface {
 	Root() string
 	TopicMemoryDir(chatID int64, threadID int) string
-	TopicCwdOverlayDir(chatID int64, threadID int) string
 	ProjectCwdOverlayDir(cwd string) string
 	TeamMemoryDir(cwd string) string
 }
