@@ -619,12 +619,20 @@ func TestResolveRealPath_SameDirDifferentCasing(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Check if the filesystem is case-insensitive by testing if the
+	// lowercased path also exists.
+	lowerPath := filepath.Join(realDir, "myproject")
+	_, statErr := os.Stat(lowerPath)
+	if statErr != nil {
+		t.Skipf("case-insensitive test skipped: filesystem is case-sensitive (%s)", statErr)
+	}
+
 	// Different casings should resolve to the SAME path (on case-insensitive fs).
 	got1, err := resolveRealPath(filepath.Join(realDir, "MyProject"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	got2, err := resolveRealPath(filepath.Join(realDir, "myproject"))
+	got2, err := resolveRealPath(lowerPath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -640,7 +648,7 @@ func TestResolveRealPath_SameDirDifferentCasing(t *testing.T) {
 	t.Logf("✓ All casings resolve to: %s", got1)
 }
 
-func TestResolveProjectCwd_CaseNormalization(t *testing.T) {
+func TestResolveProjectCwd_RealPath(t *testing.T) {
 	// Create a temp project directory with known casing.
 	dir := t.TempDir()
 	realDir, err := filepath.EvalSymlinks(dir)
@@ -648,31 +656,42 @@ func TestResolveProjectCwd_CaseNormalization(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	projectDir := filepath.Join(realDir, "AutoTradersOMQS-GO")
+	projectDir := filepath.Join(realDir, "MyProject")
 	if err := os.MkdirAll(projectDir, 0755); err != nil {
 		t.Fatal(err)
 	}
 
-	// Resolve with different casing — should return canonical form with
-	// the on-disk casing (AutoTradersOMQS-GO).
-	lowerPath := filepath.Join(realDir, "autotradersomqs-go")
-	got, err := ResolveProjectCwd(lowerPath)
+	// Resolve with the same casing — should always work (Linux and macOS).
+	got, err := ResolveProjectCwd(projectDir)
 	if err != nil {
-		t.Fatalf("ResolveProjectCwd(%q) error: %v", lowerPath, err)
+		t.Fatalf("ResolveProjectCwd(%q) error: %v", projectDir, err)
 	}
-
-	// On macOS APFS case-insensitive, this normalizes to the on-disk casing.
-	// On Linux case-sensitive, the input casing is preserved.
-	if got != filepath.Clean(projectDir) && got != filepath.Clean(lowerPath) {
-		t.Errorf("ResolveProjectCwd(%q) = %q, expected either %q or %q",
-			lowerPath, got, filepath.Clean(projectDir), filepath.Clean(lowerPath))
+	if got != filepath.Clean(projectDir) {
+		t.Errorf("ResolveProjectCwd(%q) = %q, want %q", projectDir, got, filepath.Clean(projectDir))
 	}
-	t.Logf("Resolved %q -> %q", lowerPath, got)
+	t.Logf("Resolved %q -> %q", projectDir, got)
 
-	// Verify SanitizeCwd produces the same slug for the canonical path.
+	// Verify SanitizeCwd produces a non-empty slug.
 	slug := SanitizeCwd(got)
 	if slug == "" {
 		t.Errorf("SanitizeCwd(%q) returned empty slug", got)
 	}
 	t.Logf("slug=%q", slug)
+
+	// Test that resolveRealPath normalizes casing where possible.
+	// On case-insensitive fs (macOS), lowercased input resolves to the
+	// on-disk casing (MyProject). On case-sensitive (Linux), EvalSymlinks
+	// would fail since the path doesn't exist with that casing, so we
+	// skip that assertion and just test resolveRealPath's fallback.
+	lowerPath := filepath.Join(realDir, "myproject")
+	resolved, rErr := resolveRealPath(lowerPath)
+	if rErr != nil {
+		t.Fatalf("resolveRealPath(%q) error: %v", lowerPath, rErr)
+	}
+	gotWant := filepath.Join(realDir, "MyProject")
+	if resolved != gotWant && resolved != filepath.Clean(lowerPath) {
+		t.Errorf("resolveRealPath(%q) = %q, expected either %q or %q (on-disk vs input)",
+			lowerPath, resolved, gotWant, filepath.Clean(lowerPath))
+	}
+	t.Logf("resolveRealPath(%q) = %q", lowerPath, resolved)
 }
