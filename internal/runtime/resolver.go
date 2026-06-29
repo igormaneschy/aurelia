@@ -69,6 +69,84 @@ func SanitizeCwd(cwd string) string {
 	return strings.ReplaceAll(filepath.ToSlash(filepath.Clean(cwd)), "/", "-")
 }
 
+// resolveRealPath resolves the on-disk casing of each path component by
+// walking the filesystem. On case-insensitive filesystems (macOS APFS, Windows NTFS),
+// this ensures that two paths with different casing for the same directory produce
+// the same canonical path. Symlinks are resolved first via filepath.EvalSymlinks.
+//
+// If the path doesn't exist or a component can't be read, the original component
+// name is preserved (best-effort normalization).
+func resolveRealPath(path string) (string, error) {
+	// Resolve symlinks first to get the real path.
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		// If path doesn't exist, return the cleaned absolute form.
+		abs, aErr := filepath.Abs(path)
+		if aErr != nil {
+			return "", fmt.Errorf("resolve real path %q: %w", path, aErr)
+		}
+		return filepath.Clean(abs), nil
+	}
+
+	// Walk each component to find the actual on-disk casing.
+	abs := filepath.Clean(resolved)
+	parts := strings.Split(abs, string(filepath.Separator))
+
+	var result strings.Builder
+	start := 0
+
+	// Handle Windows drive letter prefix (e.g., "C:\")
+	if len(parts) > 0 && strings.HasSuffix(parts[0], ":") {
+		result.WriteString(parts[0])
+		result.WriteByte(filepath.Separator)
+		start = 1
+	} else if strings.HasPrefix(abs, string(filepath.Separator)) {
+		// Preserve leading separator for absolute Unix paths.
+		result.WriteByte(filepath.Separator)
+	}
+
+	for i, part := range parts[start:] {
+		if part == "" {
+			continue
+		}
+
+		parent := result.String()
+		if parent == "" {
+			parent = string(filepath.Separator)
+		}
+
+		entries, err := os.ReadDir(parent)
+		if err != nil {
+			// Can't read directory, keep original component.
+			if i > 0 || result.Len() > 0 {
+				result.WriteByte(filepath.Separator)
+			}
+			result.WriteString(part)
+			continue
+		}
+
+		found := false
+		for _, e := range entries {
+			if strings.EqualFold(e.Name(), part) {
+				if i > 0 || result.Len() > 1 {
+					result.WriteByte(filepath.Separator)
+				}
+				result.WriteString(e.Name())
+				found = true
+				break
+			}
+		}
+		if !found {
+			if i > 0 || result.Len() > 1 {
+				result.WriteByte(filepath.Separator)
+			}
+			result.WriteString(part)
+		}
+	}
+
+	return filepath.Clean(result.String()), nil
+}
+
 // normalizeProjectCwdInput normalizes a raw user-supplied path before resolution.
 // It removes common Telegram/Markdown wrappers and expands ~.
 func normalizeProjectCwdInput(raw string) (string, error) {
@@ -129,6 +207,12 @@ func ResolveProjectCwd(path string) (string, error) {
 	resolved, err := filepath.EvalSymlinks(clean)
 	if err != nil {
 		return "", fmt.Errorf("resolve cwd symlinks %q: %w", clean, err)
+	}
+	// Resolve on-disk casing so equivalent paths with different casing
+	// (e.g. on macOS APFS case-insensitive) produce the same canonical path.
+	resolved, err = resolveRealPath(resolved)
+	if err != nil {
+		return "", fmt.Errorf("resolve real path %q: %w", resolved, err)
 	}
 	info, err := os.Stat(resolved)
 	if err != nil {
