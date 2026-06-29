@@ -9,11 +9,12 @@ import (
 
 // testResolver implements memoryDirResolver for tests.
 type testResolver struct {
-	memoryDir      string
-	topicDir       string
-	cwdOverlayDir  string
-	teamDir        string
-	root           string // instance root for containment boundary
+	memoryDir           string
+	topicDir            string
+	cwdOverlayDir       string
+	projectCwdOverlay   string
+	teamDir             string
+	root                string // instance root for containment boundary
 }
 
 func (r *testResolver) Root() string {
@@ -29,6 +30,10 @@ func (r *testResolver) TopicMemoryDir(chatID int64, threadID int) string {
 
 func (r *testResolver) TopicCwdOverlayDir(chatID int64, threadID int) string {
 	return r.cwdOverlayDir
+}
+
+func (r *testResolver) ProjectCwdOverlayDir(cwd string) string {
+	return r.projectCwdOverlay
 }
 
 func (r *testResolver) TeamMemoryDir(cwd string) string {
@@ -461,7 +466,7 @@ func TestSafeWriter_TopicLayerRejectsPersonas(t *testing.T) {
 func TestSafeWriter_ProjectLayerWritesFiles(t *testing.T) {
 	dir := t.TempDir()
 	cwdOverlayDir := filepath.Join(dir, "projects", "my-project", "conversations", "chat_1", "thread_1")
-	resolver := &testResolver{memoryDir: dir, cwdOverlayDir: cwdOverlayDir}
+	resolver := &testResolver{memoryDir: dir, cwdOverlayDir: cwdOverlayDir, projectCwdOverlay: cwdOverlayDir}
 	w, err := newSafeMemoryWriter(dir, resolver)
 	if err != nil {
 		t.Fatal(err)
@@ -486,7 +491,7 @@ func TestSafeWriter_ProjectLayerWritesFiles(t *testing.T) {
 func TestSafeWriter_TeamLayerRedirectsToCwdOverlay(t *testing.T) {
 	dir := t.TempDir()
 	cwdOverlayDir := filepath.Join(dir, "topics", "chat_1", "thread_1", "cwd_overlay")
-	resolver := &testResolver{memoryDir: dir, cwdOverlayDir: cwdOverlayDir, root: dir}
+	resolver := &testResolver{memoryDir: dir, cwdOverlayDir: cwdOverlayDir, projectCwdOverlay: cwdOverlayDir, root: dir}
 	w, err := newSafeMemoryWriter(dir, resolver)
 	if err != nil {
 		t.Fatal(err)
@@ -516,7 +521,7 @@ func TestSafeWriter_ProjectLayerOutsideGlobalRoot(t *testing.T) {
 	cwdOverlayDir := t.TempDir() // unrelated temp dir, NOT under memoryDir
 	// cwd_overlay layer uses instance root as containment boundary.
 	// Set root to a common ancestor of both dirs.
-	resolver := &testResolver{memoryDir: memoryDir, cwdOverlayDir: cwdOverlayDir, root: "/"}
+	resolver := &testResolver{memoryDir: memoryDir, cwdOverlayDir: cwdOverlayDir, projectCwdOverlay: cwdOverlayDir, root: "/"}
 	w, err := newSafeMemoryWriter(memoryDir, resolver)
 	if err != nil {
 		t.Fatal(err)
@@ -543,7 +548,7 @@ func TestSafeWriter_TeamLayerRedirectsWhenOutsideGlobalRoot(t *testing.T) {
 	memoryDir := t.TempDir()
 	cwdOverlayDir := t.TempDir() // unrelated temp dir, NOT under memoryDir
 	// cwd_overlay layer uses instance root as containment boundary.
-	resolver := &testResolver{memoryDir: memoryDir, cwdOverlayDir: cwdOverlayDir, root: "/"}
+	resolver := &testResolver{memoryDir: memoryDir, cwdOverlayDir: cwdOverlayDir, projectCwdOverlay: cwdOverlayDir, root: "/"}
 	w, err := newSafeMemoryWriter(memoryDir, resolver)
 	if err != nil {
 		t.Fatal(err)
@@ -610,7 +615,7 @@ func TestSafeWriter_TeamLayerRejectsSymlinkEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	resolver := &testResolver{memoryDir: memoryDir, cwdOverlayDir: cwdOverlayDir, root: cwdOverlayDir}
+	resolver := &testResolver{memoryDir: memoryDir, cwdOverlayDir: cwdOverlayDir, projectCwdOverlay: cwdOverlayDir, root: cwdOverlayDir}
 	w, err := newSafeMemoryWriter(memoryDir, resolver)
 	if err != nil {
 		t.Fatal(err)
