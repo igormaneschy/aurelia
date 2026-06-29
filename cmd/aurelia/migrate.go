@@ -10,10 +10,12 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/cron"
+	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/users"
 )
@@ -799,6 +801,334 @@ func runEnsureContextMemoryLayout(args []string) error {
 	fmt.Printf("✅ Context-scoped memory layout activated for user %d.\n", userID)
 	fmt.Printf("   Marker: %s\n", ctxMemMarker)
 	return nil
+}
+
+// ─── CWD Overlay Path Migration (Project-Scoped Memory) ────────────────────
+
+const cwdOverlayMigratedMarker = ".cwd-overlay-migrated"
+
+type cwdOverlayMigratedMarkerData struct {
+	MigratedAt   time.Time `json:"migrated_at"`
+	DirsFound    int       `json:"dirs_found"`
+	DirsMigrated int       `json:"dirs_migrated"`
+	FilesCopied  int       `json:"files_copied"`
+	DirsSkipped  int       `json:"dirs_skipped"`
+}
+
+// cwdOverlaySource represents one source cwd_overlay directory found on disk.
+type cwdOverlaySource struct {
+	chatID    int64
+	threadID  int
+	path      string
+	files     []string // .md filenames
+}
+
+func runMigrateCwdOverlayPaths(args []string) error {
+	var dryRun bool
+	for _, a := range args {
+		switch a {
+		case "--dry-run":
+			dryRun = true
+		default:
+			return fmt.Errorf("unknown flag: %s", a)
+		}
+	}
+
+	resolver, err := runtime.New()
+	if err != nil {
+		return fmt.Errorf("resolve instance root: %w", err)
+	}
+	root := resolver.Root()
+	topicsDir := filepath.Join(root, "topics")
+
+	// 1. Discover all cwd_overlay dirs.
+	sources, err := discoverCwdOverlayDirs(topicsDir)
+	if err != nil {
+		return fmt.Errorf("discover cwd_overlay dirs: %w", err)
+	}
+
+	if len(sources) == 0 {
+		fmt.Println("No cwd_overlay directories found under topics/.")
+		return nil
+	}
+
+	// 2. Open bindings DB to resolve (chatID, threadID) → (cwd, slug).
+	dbPath := resolver.DBPath("project_bindings.db")
+	store, err := projectbinding.NewSQLiteStore(dbPath)
+	if err != nil {
+		return fmt.Errorf("open project bindings: %w", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	ctx := context.Background()
+
+	var (
+		dirsMigrated int
+		filesCopied  int
+		dirsSkipped  int
+	)
+
+	for _, src := range sources {
+		// Try exact (chatID, threadID), then fallback to (chatID, 0).
+		key := projectbinding.ConversationKey{ChatID: src.chatID, ThreadID: src.threadID}
+		binding, err := store.Get(ctx, key)
+		if err != nil {
+			return fmt.Errorf("lookup binding for %s: %w", key, err)
+		}
+		if binding == nil && src.threadID > 0 {
+			// Fallback to group-level binding.
+			groupKey := projectbinding.ConversationKey{ChatID: src.chatID, ThreadID: 0}
+			binding, err = store.Get(ctx, groupKey)
+			if err != nil {
+				return fmt.Errorf("lookup group binding for %s: %w", key, err)
+			}
+		}
+
+		if binding == nil {
+			fmt.Printf("⚠️  SKIP %s: no project binding for %s\n", relTopicsPath(root, src.path), key)
+			dirsSkipped++
+			continue
+		}
+
+		dst := resolver.ProjectCwdOverlayDir(binding.CWD)
+		if dst == "" {
+			fmt.Printf("⚠️  SKIP %s: empty project cwd overlay dir for cwd=%q\n", relTopicsPath(root, src.path), binding.CWD)
+			dirsSkipped++
+			continue
+		}
+
+		if dryRun {
+			fmt.Printf("  📂 %s → %s\n", relTopicsPath(root, src.path), relHome(dst, root))
+			for _, f := range src.files {
+				fmt.Printf("     📄 %s\n", f)
+			}
+			dirsMigrated++
+			filesCopied += len(src.files)
+			continue
+		}
+
+		// Merge files.
+		if err := os.MkdirAll(dst, 0700); err != nil {
+			return fmt.Errorf("create destination dir %s: %w", dst, err)
+		}
+
+		for _, f := range src.files {
+			srcPath := filepath.Join(src.path, f)
+			dstPath := filepath.Join(dst, f)
+
+			if err := mergeCwdOverlayFile(srcPath, dstPath); err != nil {
+				return fmt.Errorf("merge %s → %s: %w", srcPath, dstPath, err)
+			}
+			filesCopied++
+		}
+
+		// Update MEMORY.md index in destination.
+		if err := rebuildMemoryIndex(dst); err != nil {
+			return fmt.Errorf("rebuild index in %s: %w", dst, err)
+		}
+
+		// Remove source directory after successful migration.
+		if err := os.RemoveAll(src.path); err != nil {
+			return fmt.Errorf("remove source %s: %w", src.path, err)
+		}
+		// Clean up empty parent chain (topics/chat_X/thread_Y/ → topics/chat_X/ → topics/ if empty).
+		_ = cleanEmptyParent(src.path)
+
+		fmt.Printf("  ✅ %s → %s (%d files)\n", relTopicsPath(root, src.path), relHome(dst, root), len(src.files))
+		dirsMigrated++
+	}
+
+	// Write marker.
+	if !dryRun {
+		marker := cwdOverlayMigratedMarkerData{
+			MigratedAt:   time.Now().UTC(),
+			DirsFound:    len(sources),
+			DirsMigrated: dirsMigrated,
+			FilesCopied:  filesCopied,
+			DirsSkipped:  dirsSkipped,
+		}
+		markerPath := filepath.Join(root, cwdOverlayMigratedMarker)
+		data, err := json.MarshalIndent(marker, "", "  ")
+		if err != nil {
+			return fmt.Errorf("marshal marker: %w", err)
+		}
+		data = append(data, '\n')
+		if err := os.WriteFile(markerPath, data, 0600); err != nil {
+			return fmt.Errorf("write marker: %w", err)
+		}
+	}
+
+	fmt.Println()
+	fmt.Printf("Summary: %d dirs found, %d migrated, %d files copied, %d skipped\n", len(sources), dirsMigrated, filesCopied, dirsSkipped)
+	return nil
+}
+
+// discoverCwdOverlayDirs walks topics/ and returns all cwd_overlay directories.
+func discoverCwdOverlayDirs(topicsDir string) ([]cwdOverlaySource, error) {
+	var sources []cwdOverlaySource
+
+	err := filepath.WalkDir(topicsDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		if filepath.Base(path) != "cwd_overlay" {
+			return nil
+		}
+
+		// Parse chatID and threadID from the path:
+		//   topics/chat_-1003748894639/cwd_overlay/
+		//   topics/chat_-1003748894639/thread_2/cwd_overlay/
+		//   topics/chat_50929027/cwd_overlay/
+		parent := filepath.Dir(path)
+		grandparent := filepath.Dir(parent)
+
+		var chatID int64
+		var threadID int
+
+		base := filepath.Base(parent)
+		if strings.HasPrefix(base, "chat_") {
+			// parent is chat_X, we are at chat_X/cwd_overlay
+			chatID, _ = strconv.ParseInt(base[5:], 10, 64)
+		} else if strings.HasPrefix(base, "thread_") {
+			// parent is thread_Y
+			tid, err := strconv.Atoi(base[7:])
+			if err != nil {
+				return fmt.Errorf("parse thread id from %s: %w", parent, err)
+			}
+			threadID = tid
+			// grandparent should be chat_X
+			gpBase := filepath.Base(grandparent)
+			if strings.HasPrefix(gpBase, "chat_") {
+				chatID, _ = strconv.ParseInt(gpBase[5:], 10, 64)
+			}
+		} else {
+			// Unknown structure — skip.
+			return nil
+		}
+
+		// Collect .md files.
+		entries, err := os.ReadDir(path)
+		if err != nil {
+			return fmt.Errorf("read cwd_overlay dir %s: %w", path, err)
+		}
+		var files []string
+		for _, e := range entries {
+			if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
+				files = append(files, e.Name())
+			}
+		}
+
+		if len(files) > 0 {
+			sources = append(sources, cwdOverlaySource{
+				chatID:   chatID,
+				threadID: threadID,
+				path:     path,
+				files:    files,
+			})
+		}
+		return nil
+	})
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	return sources, err
+}
+
+// mergeCwdOverlayFile merges a file from a source cwd_overlay into a destination.
+// If the destination file already exists, facts are merged uniquely.
+func mergeCwdOverlayFile(srcPath, dstPath string) error {
+	srcData, err := os.ReadFile(srcPath)
+	if err != nil {
+		return err
+	}
+
+	dstData, err := os.ReadFile(dstPath)
+	if err != nil {
+		// Destination doesn't exist — simple copy.
+		return os.WriteFile(dstPath, srcData, 0600)
+	}
+
+	// Both exist — merge unique lines.
+	srcLines := parseLines(string(srcData))
+	dstLines := parseLines(string(dstData))
+	dstSet := make(map[string]bool, len(dstLines))
+	for _, l := range dstLines {
+		dstSet[l] = true
+	}
+
+	var merged []string
+	merged = append(merged, dstLines...)
+	for _, l := range srcLines {
+		if !dstSet[l] {
+			merged = append(merged, l)
+		}
+	}
+
+	// Preserve header if first line is a Markdown heading.
+	content := strings.Join(merged, "\n")
+	if !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	return os.WriteFile(dstPath, []byte(content), 0600)
+}
+
+// rebuildMemoryIndex scans .md files in dir and rewrites MEMORY.md.
+func rebuildMemoryIndex(dir string) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+
+	var index []string
+	index = append(index, "# Memory Index", "")
+
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		if e.Name() == "MEMORY.md" {
+			continue
+		}
+		title := strings.TrimSuffix(e.Name(), ".md")
+		index = append(index, fmt.Sprintf("- [%s](%s)", title, e.Name()))
+	}
+
+	content := strings.Join(index, "\n") + "\n"
+	return os.WriteFile(filepath.Join(dir, "MEMORY.md"), []byte(content), 0600)
+}
+
+// parseLines splits content into non-empty trimmed lines.
+func parseLines(content string) []string {
+	var result []string
+	for _, line := range strings.Split(content, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+// cleanEmptyParent removes parent dirs if they're empty after source removal.
+func cleanEmptyParent(path string) error {
+	for i := 0; i < 3; i++ { // topics/chat_X/cwd_overlay or topics/chat_X/thread_Y/cwd_overlay
+		path = filepath.Dir(path)
+		if err := os.Remove(path); err != nil {
+			return err // not empty or doesn't exist — stop
+		}
+	}
+	return nil
+}
+
+func relTopicsPath(root, path string) string {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return path
+	}
+	return rel
 }
 
 // ─── Boot check ─────────────────────────────────────────────────────────────
