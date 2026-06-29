@@ -254,9 +254,27 @@ func (r *PathResolver) TopicMemoryDir(chatID int64, threadID int) string {
 	return filepath.Join(r.root, "topics", fmt.Sprintf("chat_%d", chatID), fmt.Sprintf("thread_%d", threadID))
 }
 
+// ProjectCwdOverlayDir returns the project-scoped CWD overlay memory directory:
+// ~/.aurelia/projects/<sanitized-cwd>/cwd_overlay/
+//
+// Unlike TopicCwdOverlayDir, this path is independent of chat/thread — all
+// conversations with the same /cwd share the same cwd_overlay memory.
+// This is the canonical path for project-scoped memory.
+//
+// Returns empty string when cwd is empty.
+func (r *PathResolver) ProjectCwdOverlayDir(cwd string) string {
+	if strings.TrimSpace(cwd) == "" {
+		return ""
+	}
+	return filepath.Join(r.root, "projects", ProjectSlug(cwd), "cwd_overlay")
+}
+
 // TopicCwdOverlayDir returns the cwd overlay memory directory for a topic.
 // ~/.aurelia/topics/chat_<chatID>/thread_<threadID>/cwd_overlay/
 // For private chats (threadID == 0), returns ~/.aurelia/topics/chat_<chatID>/cwd_overlay/
+//
+// Deprecated: Use ProjectCwdOverlayDir(cwd) instead. Topic-scoped cwd_overlay
+// fragments project memory across frontends (TUI vs Telegram).
 //
 // Caller is responsible for verifying that /cwd is actually active for the
 // chat/topic before using the returned path. This method only computes the

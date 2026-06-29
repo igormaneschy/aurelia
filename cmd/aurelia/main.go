@@ -42,6 +42,11 @@ func main() {
 				log.Fatalf("Context-memory migration failed: %v", err)
 			}
 			return
+		case "migrate-cwd-overlay":
+			if err := runMigrateCwdOverlayPaths(os.Args[2:]); err != nil {
+				log.Fatalf("CWD overlay migration failed: %v", err)
+			}
+			return
 		case "version":
 			fmt.Println(version.BuildInfo())
 			return

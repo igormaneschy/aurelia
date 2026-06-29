@@ -313,7 +313,7 @@ func TestCheckpoint_MEMORYIndexPermissions(t *testing.T) {
 	}
 
 	// Verify MEMORY.md exists and has correct permissions
-	projectDir := resolver.TopicCwdOverlayDir(42, 0)
+	projectDir := resolver.ProjectCwdOverlayDir("/tmp/proj")
 	memoryIndexPath := filepath.Join(projectDir, "MEMORY.md")
 
 	info, err := os.Stat(memoryIndexPath)
@@ -352,8 +352,8 @@ func TestCheckpoint_SymlinkEscapeRejected(t *testing.T) {
 
 	svc := New(resolver.Memory(), resolver)
 
-	// Create the checkpoint directory first
-	targetDir := resolver.TopicCwdOverlayDir(42, 0)
+	// Create the checkpoint directory first (project-scoped)
+	targetDir := resolver.ProjectCwdOverlayDir("/tmp/proj")
 	if err := os.MkdirAll(targetDir, 0700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -369,8 +369,8 @@ func TestCheckpoint_SymlinkEscapeRejected(t *testing.T) {
 		t.Fatalf("create symlink: %v", err)
 	}
 
-	// Now try to write — should reject symlink escape
-	_, err = svc.WriteCheckpoint(42, 0, "/tmp/proj-escape", "should fail")
+	// Now try to write — should reject symlink escape (same cwd, file is symlink)
+	_, err = svc.WriteCheckpoint(42, 0, "/tmp/proj", "should fail")
 	if err == nil {
 		t.Fatal("expected error for symlink escape, got nil")
 	}
@@ -394,8 +394,8 @@ func TestCheckpoint_MEMORYIndexSymlinkEscapeRejected(t *testing.T) {
 
 	svc := New(resolver.Memory(), resolver)
 
-	// Create the checkpoint directory
-	targetDir := resolver.TopicCwdOverlayDir(42, 0)
+	// Create the checkpoint directory (project-scoped)
+	targetDir := resolver.ProjectCwdOverlayDir("/tmp/proj")
 	if err := os.MkdirAll(targetDir, 0700); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}
@@ -410,8 +410,8 @@ func TestCheckpoint_MEMORYIndexSymlinkEscapeRejected(t *testing.T) {
 		t.Fatalf("create MEMORY.md symlink: %v", err)
 	}
 
-	// Should reject
-	_, err = svc.WriteCheckpoint(42, 0, "/tmp/proj-escape-idx", "should fail")
+	// Should reject (same cwd, MEMORY.md is symlink)
+	_, err = svc.WriteCheckpoint(42, 0, "/tmp/proj", "should fail")
 	if err == nil {
 		t.Fatal("expected error for MEMORY.md symlink escape, got nil")
 	}

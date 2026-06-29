@@ -166,11 +166,10 @@ func (bc *Service) InvalidateMemoryDirs(chatID int64, threadID int, userID int64
 	}
 
 	if cwd != "" && bc.resolver != nil {
-		// CWD overlay — scoped by (chat_id, thread_id) already
-		if overlayDir := bc.resolver.TopicCwdOverlayDir(chatID, threadID); overlayDir != "" {
+		// CWD overlay — project-scoped, independent of chat/thread
+		if overlayDir := bc.resolver.ProjectCwdOverlayDir(cwd); overlayDir != "" {
 			bc.memoryCache.invalidate(overlayDir)
 		}
-		// project_team: removed — redundant with cwd_overlay
 	}
 }
 

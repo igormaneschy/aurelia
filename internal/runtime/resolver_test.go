@@ -425,6 +425,38 @@ func TestTopicMemoryDir(t *testing.T) {
 	})
 }
 
+func TestProjectCwdOverlayDir(t *testing.T) {
+	r := &PathResolver{root: "/tmp/aurelia"}
+
+	t.Run("valid cwd", func(t *testing.T) {
+		got := r.ProjectCwdOverlayDir("/home/user/myproject")
+		want := filepath.Join("/tmp/aurelia", "projects", "-home-user-myproject", "cwd_overlay")
+		if got != want {
+			t.Errorf("ProjectCwdOverlayDir() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("empty cwd returns empty", func(t *testing.T) {
+		if got := r.ProjectCwdOverlayDir(""); got != "" {
+			t.Errorf("ProjectCwdOverlayDir(\"\") = %q, want empty", got)
+		}
+	})
+
+	t.Run("indepentent of chat and thread", func(t *testing.T) {
+		cwd := "/Volumes/Dados/Workspaces/MyProject"
+		dir1 := r.ProjectCwdOverlayDir(cwd)
+		dir2 := r.ProjectCwdOverlayDir(cwd)
+		if dir1 != dir2 {
+			t.Errorf("same cwd should produce same dir: %q != %q", dir1, dir2)
+		}
+		// Different cwds produce different dirs
+		dir3 := r.ProjectCwdOverlayDir("/other/project")
+		if dir1 == dir3 {
+			t.Errorf("different cwds should produce different dirs")
+		}
+	})
+}
+
 func TestTopicCwdOverlayDir(t *testing.T) {
 	r := &PathResolver{root: "/tmp/aurelia"}
 

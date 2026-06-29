@@ -38,7 +38,7 @@ type safeMemoryWriter struct {
 type memoryDirResolver interface {
 	Root() string
 	TopicMemoryDir(chatID int64, threadID int) string
-	TopicCwdOverlayDir(chatID int64, threadID int) string
+	ProjectCwdOverlayDir(cwd string) string
 	TeamMemoryDir(cwd string) string
 }
 
@@ -82,9 +82,9 @@ func (w *safeMemoryWriter) resolveLayerTarget(layer string, chatID int64, thread
 		if cwd == "" || w.resolver == nil {
 			return layerTarget{}, fmt.Errorf("cwd_overlay layer requires /cwd active")
 		}
-		dir := w.resolver.TopicCwdOverlayDir(chatID, threadID)
+		dir := w.resolver.ProjectCwdOverlayDir(cwd)
 		if dir == "" {
-			return layerTarget{}, fmt.Errorf("cwd_overlay directory not available (no /cwd or threadID <= 0)")
+			return layerTarget{}, fmt.Errorf("cwd_overlay directory not available (no /cwd)")
 		}
 		instanceRoot := w.resolver.Root()
 		return layerTarget{base: dir, root: instanceRoot, blocksPersonas: true}, nil
@@ -94,9 +94,9 @@ func (w *safeMemoryWriter) resolveLayerTarget(layer string, chatID int64, thread
 		if cwd == "" || w.resolver == nil {
 			return layerTarget{}, fmt.Errorf("project_team layer deprecated: requires cwd, redirecting to cwd_overlay")
 		}
-		dir := w.resolver.TopicCwdOverlayDir(chatID, threadID)
+		dir := w.resolver.ProjectCwdOverlayDir(cwd)
 		if dir == "" {
-			return layerTarget{}, fmt.Errorf("cwd_overlay directory not available (no /cwd or threadID <= 0)")
+			return layerTarget{}, fmt.Errorf("cwd_overlay directory not available (no /cwd)")
 		}
 		instanceRoot := w.resolver.Root()
 		return layerTarget{base: dir, root: instanceRoot, blocksPersonas: true}, nil

@@ -121,17 +121,13 @@ func TestBootstrapConversationProjectMemory_CreatesCwdOverlayIndex(t *testing.T)
 		t.Fatalf("BootstrapConversationProjectMemory() error: %v", err)
 	}
 
-	// Only cwd_overlay is created; project_team removed in v0.31.0.
-	dirs := []string{
-		r.TopicCwdOverlayDir(42, 99),
+	// cwd_overlay is project-scoped: projects/<slug>/cwd_overlay/
+	dir := r.ProjectCwdOverlayDir(cwd)
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		t.Fatalf("directory not created: %s err=%v", dir, err)
 	}
-	for _, dir := range dirs {
-		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
-			t.Fatalf("directory not created: %s err=%v", dir, err)
-		}
-		if _, err := os.Stat(filepath.Join(dir, "MEMORY.md")); err != nil {
-			t.Fatalf("MEMORY.md not created in %s: %v", dir, err)
-		}
+	if _, err := os.Stat(filepath.Join(dir, "MEMORY.md")); err != nil {
+		t.Fatalf("MEMORY.md not created in %s: %v", dir, err)
 	}
 
 	// Verify team dir is NOT created (project_team removed).

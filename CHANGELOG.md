@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.37.0] - 2026-06-29
+
+### Added
+- Project-scoped CWD overlay memory: `cwd_overlay` agora é armazenado em
+  `~/.aurelia/projects/<slug>/cwd_overlay/` em vez de ser scoped por
+  chat/thread. Isto permite que TUI, Telegram DM e grupos que partilham
+  o mesmo `/cwd` vejam a mesma memória de overlay.
+- Comando `migrate-cwd-overlay` para migrar dados existentes de
+  `topics/*/cwd_overlay/` para o novo esquema project-scoped.
+- `resolveRealPath()` no PathResolver: normaliza capitalização de paths
+  em sistemas de ficheiros case-insensitive (macOS APFS) para que
+  `/path/AutoTraders` e `/path/autotraders` resolvam para o mesmo slug.
+
+### Changed
+- `ProjectCwdOverlayDir(cwd)` substitui `TopicCwdOverlayDir(chatID, threadID)`
+  como método canónico para path de overlay de projeto.
+- `ResolveProjectCwd()` agora resolve o casing real no disco, garantindo
+  que bindings com capitalização inconsistente produzem o mesmo slug.
+
+### Removed
+- `TopicCwdOverlayDir` removido da interface interna (substituído por
+  `ProjectCwdOverlayDir` que é independente de chat/thread).
+
 ## [0.36.4] - 2026-06-28
 
 ### Fixed
