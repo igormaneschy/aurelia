@@ -43,12 +43,28 @@ func TestComposerHints_WhenEmpty(t *testing.T) {
 	}
 }
 
-func TestComposerHints_HiddenWhenTyping(t *testing.T) {
+func TestComposerHints_ShowsSendWhileTyping(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
+	m.width = 100
 	m.textarea.SetValue("hello")
-	if m.renderComposerHints() != "" {
-		t.Fatal("expected no hints while typing")
+	got := m.renderComposerHints()
+	if !strings.Contains(got, "send") {
+		t.Fatalf("expected send hint while typing, got %q", got)
+	}
+	if strings.Contains(got, "/help") {
+		t.Fatalf("expected only send hint while typing, got %q", got)
+	}
+}
+
+func TestRenderInput_IncludesComposerSpacer(t *testing.T) {
+	m := NewModel("/tmp/test.sock", ThemeDark)
+	m.state = stateChat
+	m.width = 100
+	m.height = 24
+	rendered := stripANSIForTest(m.renderInput())
+	if !strings.Contains(rendered, "···") && !strings.Contains(rendered, "·") {
+		t.Fatalf("expected composer spacer dots, got:\n%s", rendered)
 	}
 }
 

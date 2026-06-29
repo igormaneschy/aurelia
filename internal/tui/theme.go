@@ -49,6 +49,10 @@ type themeStyles struct {
 	HeaderMetaStyle  lipgloss.Style
 	HeaderRuleStyle  lipgloss.Style
 
+	// Transcript alerts and composer chrome.
+	AlertChipStyle     lipgloss.Style
+	ComposerSpacerStyle lipgloss.Style
+
 	ProgressBarStyle lipgloss.Style
 	ProgressFullColor string
 	ProgressEmptyColor string
@@ -242,8 +246,7 @@ func newDarkStyles() themeStyles {
 			Bold(true),
 
 		SidebarUnreadStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("214")).
-			Bold(true),
+			Foreground(lipgloss.Color("244")),
 
 		HeaderTitleStyle: lipgloss.NewStyle().
 			Bold(true).
@@ -254,6 +257,14 @@ func newDarkStyles() themeStyles {
 
 		HeaderRuleStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("238")),
+
+		AlertChipStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("226")).
+			Background(lipgloss.Color("237")).
+			Padding(0, 1),
+
+		ComposerSpacerStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("236")),
 
 		MessageSeparatorStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("238")),
@@ -359,8 +370,7 @@ func newLightStyles() themeStyles {
 			Bold(true),
 
 		SidebarUnreadStyle: lipgloss.NewStyle().
-			Foreground(lipgloss.Color("130")).
-			Bold(true),
+			Foreground(lipgloss.Color("245")),
 
 		HeaderTitleStyle: lipgloss.NewStyle().
 			Bold(true).
@@ -371,6 +381,14 @@ func newLightStyles() themeStyles {
 
 		HeaderRuleStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("248")),
+
+		AlertChipStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("130")).
+			Background(lipgloss.Color("254")).
+			Padding(0, 1),
+
+		ComposerSpacerStyle: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("250")),
 
 		MessageSeparatorStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("248")),

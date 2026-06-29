@@ -30,8 +30,8 @@ const (
 	// sidebarInnerWidth is the table width inside the bordered sidebar panel.
 	sidebarInnerWidth    = 20
 	sidebarColNavWidth   = 4
-	sidebarColNameWidth  = 10
-	sidebarColBadgeWidth = 6
+	sidebarColNameWidth  = 12
+	sidebarColBadgeWidth = 4
 )
 
 func sidebarTableFirstRowY() int {

@@ -198,14 +198,25 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 			b.WriteString("\n")
 			searching := m.historySearch.active && m.historySearch.query != "" &&
 				messageHasSearchMatch(globalIndex, m.historySearch.matches)
+			alerts, markdownSource := splitAlertLines(msg.Text)
 			if searching {
 				// Plain highlighted text so matches stay visible (glamour strips ANSI).
+				for _, alert := range alerts {
+					b.WriteString(m.renderAlertLine(alert))
+					b.WriteString("\n")
+				}
 				b.WriteString(wrapPlainText(bodyText, bodyWidth))
 				b.WriteString("\n")
 			} else {
-				rendered, err := renderer.Render(msg.Text)
+				for _, alert := range alerts {
+					b.WriteString(m.renderAlertLine(alert))
+					b.WriteString("\n")
+				}
+				rendered, err := renderer.Render(markdownSource)
 				if err != nil || rendered == "" {
-					b.WriteString(bodyText)
+					if markdownSource != "" {
+						b.WriteString(markdownSource)
+					}
 				} else {
 					out := strings.TrimSpace(rendered)
 					if i == len(messages)-1 && m.waiting && m.animations.enabled {

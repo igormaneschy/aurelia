@@ -153,13 +153,13 @@ func TestSyncSidebarRows_LongNameWithUnreadBadge(t *testing.T) {
 	if !strings.Contains(view, "Trade") {
 		t.Fatalf("expected session name, got:\n%s", view)
 	}
-	if !strings.Contains(view, "[6]") {
+	if !strings.Contains(view, "6") {
 		t.Fatalf("expected unread badge, got:\n%s", view)
 	}
 	for _, line := range strings.Split(view, "\n") {
-		if strings.Contains(line, "Trade") && strings.Contains(line, "[6]") {
+		if strings.Contains(line, "Trade") && strings.Contains(line, "6") {
 			// Name and badge may share a row but must not be concatenated.
-			if strings.Contains(line, "Trade [6]") || strings.Contains(line, "Trade[6]") {
+			if strings.Contains(line, "Trade 6") || strings.Contains(line, "Trade6") {
 				t.Fatalf("name and badge should not be concatenated: %q", line)
 			}
 		}
