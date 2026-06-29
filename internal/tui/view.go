@@ -600,7 +600,7 @@ func (m Model) renderHelpPanel() string {
 	b.WriteString(m.styles.HeaderMetaStyle.Render("Images: /img <path>, Ctrl+V paste · Docs: /attach <path>"))
 	if m.uiContext() == uiContextChat {
 		b.WriteString("\n\n")
-		b.WriteString(m.styles.HeaderMetaStyle.Render("Theme: --theme auto|light|dark · --no-mouse · --no-animations"))
+		b.WriteString(m.styles.HeaderMetaStyle.Render("Theme: Ctrl+T cycle · F3 transparent · --theme · --transparent"))
 	}
 
 	return b.String()

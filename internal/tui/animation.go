@@ -36,6 +36,7 @@ type animState struct {
 type ModelOptions struct {
 	NoAnimations bool
 	NoMouse      bool
+	Transparent  bool
 	// StartupSession opens this named session on connect (empty = default DM).
 	StartupSession string
 }

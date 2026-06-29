@@ -37,6 +37,7 @@ func (m Model) statusBarSegments() []statusBarSegment {
 		}
 	}
 
+	segments = append(segments, statusBarSegment{label: m.themeStatusLabel(), hit: statusBarHitNone})
 	segments = append(segments, statusBarSegment{label: m.helpStatusLabel(), hit: statusBarHitHelp})
 	segments = append(segments, statusBarSegment{label: m.mouseStatusLabel(), hit: statusBarHitNone})
 

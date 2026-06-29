@@ -50,8 +50,9 @@ type chromeModel struct {
 	animations        animState
 	activeTools       []toolInfo
 
-	styles themeStyles
-	theme  Theme
+	styles      themeStyles
+	theme       Theme
+	transparent bool
 }
 
 // shouldShowSidebar returns true when sidebar is enabled and the terminal is

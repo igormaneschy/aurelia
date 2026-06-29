@@ -647,6 +647,14 @@ func (m Model) handleModalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+o" {
 		return m.toggleMouseCapture()
 	}
+	if isThemeToggleKey(msg) {
+		(&m).cycleTheme()
+		return m, nil
+	}
+	if isTransparencyToggleKey(msg) {
+		(&m).toggleTransparency()
+		return m, nil
+	}
 
 	if m.helpVisible() {
 		switch {
@@ -688,6 +696,15 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if msg.String() == "ctrl+o" {
 		return m.toggleMouseCapture()
+	}
+
+	if isThemeToggleKey(msg) {
+		(&m).cycleTheme()
+		return m, nil
+	}
+	if isTransparencyToggleKey(msg) {
+		(&m).toggleTransparency()
+		return m, nil
 	}
 
 	// Sidebar-focused mode: intercept navigation keys.

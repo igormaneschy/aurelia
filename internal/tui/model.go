@@ -116,7 +116,7 @@ func newModel(socketPath, historyPath string, theme Theme, opts ModelOptions) Mo
 
 	inputHistory := loadInputHistory(historyPath)
 
-	styles := newStylesForTheme(theme)
+	styles := stylesForAppearance(theme, opts.Transparent)
 	m := Model{
 		state:      stateLoading,
 		socketPath: socketPath,
@@ -130,6 +130,7 @@ func newModel(socketPath, historyPath string, theme Theme, opts ModelOptions) Mo
 			cwdPath:         "not set",
 			styles:          styles,
 			theme:           theme,
+			transparent:     opts.Transparent,
 			sidebarTable:    newSidebarTable(styles),
 			helpModel:       newHelpModel(styles, theme),
 			noMouse:         opts.NoMouse,
