@@ -810,20 +810,13 @@ func TestCmdListAgents_ShowsActiveProfileOnce(t *testing.T) {
 func TestCmdListAgents_VerboseOwnerPrivate(t *testing.T) {
 	t.Parallel()
 
-	resolver := buildTestProfileResolver(t, map[string]testProfileFile{
-		"coder": {
-			Description: "Writes code",
-			Public:      true,
-			Prompt:      "coder body",
-		},
-	})
 	// Inject model via rewriting file with richer frontmatter
 	dir := t.TempDir()
 	content := "---\nname: coder\ndescription: Writes code\nmodel: claude-sonnet\npublic: true\ncapability_profile: execute_safe\ntags: [code]\n---\ncoder body"
 	if err := writeTestFile(filepath.Join(dir, "coder.md"), content); err != nil {
 		t.Fatal(err)
 	}
-	resolver = profiles.NewResolverFromRegistry(nil, dir, "")
+	resolver := profiles.NewResolverFromRegistry(nil, dir, "")
 
 	bc := &BotController{
 		config:   &config.AppConfig{DefaultOwnerUserID: 1, Providers: map[string]config.ProviderConfig{}},

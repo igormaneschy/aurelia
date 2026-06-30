@@ -244,19 +244,17 @@ func (r *Resolver) ListForUser(userID int64) []*PromptProfile {
 		}
 	}
 
-	if userProfiles != nil {
-		for key, up := range userProfiles {
-			if seen[key] {
-				for i, p := range result {
-					if strings.ToLower(p.Name) == key {
-						result[i] = up
-						break
-					}
+	for key, up := range userProfiles {
+		if seen[key] {
+			for i, p := range result {
+				if strings.ToLower(p.Name) == key {
+					result[i] = up
+					break
 				}
-			} else {
-				seen[key] = true
-				result = append(result, up)
 			}
+		} else {
+			seen[key] = true
+			result = append(result, up)
 		}
 	}
 

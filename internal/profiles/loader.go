@@ -56,7 +56,7 @@ func LoadCanonical(dir string) map[string]*PromptProfile {
 			continue
 		}
 
-		pp, err := parseProfileFile(data, path, KindGlobal, true)
+		pp, err := parseCanonicalFile(data, path)
 		if err != nil {
 			slog.Warn("profiles: skipping canonical profile due to parse error", "file", entry.Name(), "err", err)
 			continue
