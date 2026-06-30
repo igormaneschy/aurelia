@@ -48,7 +48,6 @@ func (s *requestStream) deliver(ev Event) bool {
 func (s *requestStream) evictOneForTerminal() (dropped Event, didEvict bool) {
 	select {
 	case evicted := <-s.ch:
-		didEvict = true
 		s.mu.Lock()
 		if len(s.overflow) < eventOverflowBuffer {
 			s.overflow = append(s.overflow, evicted)
