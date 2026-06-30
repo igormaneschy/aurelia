@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.38.0] - 2026-06-30
+
+### Removed
+- Planning mode and Aurelia-side orchestration: deleted `internal/orchestrator/`
+  (plan→workers→validate→git/PR cycle), pipeline `aurelia-plan` interception,
+  pending plans, and Telegram `/execute` + `/cancel` commands.
+- `ExecuteApprovedPlan` on the pipeline `Output` interface and all orchestrator
+  wiring in `cmd/aurelia/app.go`.
+
+### Changed
+- Pipeline result handling: bridge `result` text is delivered to the user as-is;
+  no plan detection, sanitization, or handoff to a separate execution path.
+- Agentic execution (reasoning, tools, multi-step work, human approvals) is
+  owned entirely by the PI SDK.
+
+### Documentation
+- README, `AGENTS.md`, and `CLAUDE.md` state explicitly: no planning mode, no
+  orchestrator — do not reintroduce.
+- ai-memory pinned decision: `decisions/no-planning-mode-or-orchestrator.md`.
+
 ## [0.37.8] - 2026-06-30
 
 ### Added
