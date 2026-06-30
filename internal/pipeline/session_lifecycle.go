@@ -88,8 +88,25 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 	}
 	signals = s.enrichLifecycleSignals(ctx, req, signals)
 
-	// Evaluate
+	// Evaluate base lifecycle, then apply token guard for active large sessions.
 	dec := session.EvaluateLifecycle(signals, policy)
+	sessionKey := session.SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID}
+
+	if dec.Action == session.ActionContinue && signals.Active && signals.InputTokens > 0 {
+		if warnAt := session.WarnInputTokensThreshold(policy); signals.InputTokens >= warnAt {
+			log.Printf("lifecycle: WARN high input_tokens=%d chat=%d thread=%d user=%d (warn_threshold=%d)",
+				signals.InputTokens, chatID, threadID, userID, warnAt)
+		}
+		if guardDec, escalated := s.tokenGuard.Evaluate(sessionKey, signals.InputTokens, policy); escalated {
+			dec = guardDec
+			log.Printf("lifecycle: token guard escalation chat=%d thread=%d user=%d action=%s reason=%q",
+				chatID, threadID, userID, dec.Action, dec.Reason)
+		}
+	}
+
+	if dec.Action == session.ActionColdResume && s.tokenGuard != nil {
+		s.tokenGuard.Reset(sessionKey)
+	}
 
 	log.Printf("lifecycle: chat=%d thread=%d user=%d state=%s action=%s reason=%q",
 		chatID, threadID, userID, dec.State, dec.Action, dec.Reason)
@@ -151,6 +168,9 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 		}
 
 		log.Printf("lifecycle: compaction succeeded for chat=%d tokens_before=%d", chatID, result.TokensBefore)
+		if s.tokenGuard != nil {
+			s.tokenGuard.Reset(sessionKey)
+		}
 
 		// After compaction, the session is healthy enough to continue
 		if result.SessionFile != "" {
@@ -163,9 +183,8 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 		}
 
 	case session.ActionRotate:
-		// Automatic token-based rotation is intentionally disabled in
-		// EvaluateLifecycle. This branch is kept for explicit/emergency recovery
-		// paths only; normal continuity and compaction belong to the PI SDK.
+		// Rotation is triggered by the token guard when input tokens exceed
+		// rotate_after or PI compaction fails to bound growth in time.
 		// Notify user about session rotation (per Long Flow UX v2, avoid
 		// technical terms and old lifecycle language in user-facing messages).
 		s.sendLifecycleNotice(chatID, threadID, lifecycleRotateMessage)
@@ -213,6 +232,9 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 
 		log.Printf("lifecycle: rotation succeeded for chat=%d old=%s new=%s",
 			chatID, filepath.Base(result.OldSessionFile), filepath.Base(result.NewSessionFile))
+		if s.tokenGuard != nil {
+			s.tokenGuard.Reset(sessionKey)
+		}
 
 		s.sendLifecycleNotice(chatID, threadID, lifecycleRotateSuccessMessage)
 
@@ -247,14 +269,23 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 // into store-derived signals. Stats failures are non-fatal: lifecycle still
 // protects known cold/suspect sessions from the store metadata.
 func (s *Service) enrichLifecycleSignals(ctx context.Context, req *bridge.Request, signals session.HealthSignals) session.HealthSignals {
-	if s == nil || s.bridge == nil || req == nil || req.Options.Resume == "" {
+	if s == nil || req == nil || req.Options.Resume == "" {
+		return signals
+	}
+	if s.testSessionStats == nil && s.bridge == nil {
 		return signals
 	}
 
 	statsCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	stats, err := s.bridge.GetSessionStats(statsCtx, req.Options)
+	var stats *bridge.SessionStats
+	var err error
+	if s.testSessionStats != nil {
+		stats, err = s.testSessionStats(statsCtx, req.Options)
+	} else {
+		stats, err = s.bridge.GetSessionStats(statsCtx, req.Options)
+	}
 	if err != nil {
 		log.Printf("lifecycle: get-session-stats failed for session=%s: %s", filepath.Base(req.Options.Resume), redactSecrets(err.Error()))
 		return signals
@@ -273,6 +304,9 @@ func (s *Service) enrichLifecycleSignals(ctx context.Context, req *bridge.Reques
 
 // rotateSession runs the rotate-session bridge command with a timeout.
 func (s *Service) rotateSession(ctx context.Context, chatID int64, threadID int, userID int64, opts bridge.RequestOptions) (*bridge.RotateSessionResult, error) {
+	if s.testRotateSession != nil {
+		return s.testRotateSession(ctx, chatID, threadID, userID, opts)
+	}
 	if s.bridge == nil {
 		return nil, fmt.Errorf("bridge not available")
 	}
@@ -293,6 +327,9 @@ func (s *Service) rotateSession(ctx context.Context, chatID int64, threadID int,
 
 // compactSession runs the compact-session bridge command with a timeout.
 func (s *Service) compactSession(ctx context.Context, chatID int64, threadID int, userID int64, opts bridge.RequestOptions) (*bridge.CompactSessionResult, error) {
+	if s.testCompactSession != nil {
+		return s.testCompactSession(ctx, chatID, threadID, userID, opts)
+	}
 	if s.bridge == nil {
 		return nil, fmt.Errorf("bridge not available")
 	}

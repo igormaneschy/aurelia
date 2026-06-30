@@ -97,7 +97,10 @@ type Service struct {
 	// The callback must be fast and fail-open. May be nil.
 	OnEvent func(chatID int64, threadID int, userID int64, phase, level, message string)
 	// testBridgeQuery overrides bridge.Execute in tests when set.
-	testBridgeQuery func(ctx context.Context, req bridge.Request) (<-chan bridge.Event, error)
+	testBridgeQuery  func(ctx context.Context, req bridge.Request) (<-chan bridge.Event, error)
+	testSessionStats  func(ctx context.Context, opts bridge.RequestOptions) (*bridge.SessionStats, error)
+	testCompactSession func(ctx context.Context, chatID int64, threadID int, userID int64, opts bridge.RequestOptions) (*bridge.CompactSessionResult, error)
+	testRotateSession  func(ctx context.Context, chatID int64, threadID int, userID int64, opts bridge.RequestOptions) (*bridge.RotateSessionResult, error)
 	agents          *agents.Registry
 	profiles        *profiles.Resolver // Phase 1: canonical profile resolver
 	persona         *persona.CanonicalIdentityService
@@ -121,6 +124,7 @@ type Service struct {
 	continuity      continuity.Store
 	summaryCounter  *summaryCounter
 	summaryInterval int
+	tokenGuard      *session.TokenGuard
 	usersStore      *users.Store
 	userResolver    *users.Resolver
 	// active tool monitoring state — set/cleared per-run for /status.
@@ -190,6 +194,7 @@ func NewService(cfg Config) *Service {
 		continuity:       cfg.Continuity,
 		summaryCounter:   &summaryCounter{counts: make(map[continuity.ConversationKey]int)},
 		summaryInterval:  defaultSummaryInterval,
+		tokenGuard:       session.NewTokenGuard(),
 		usersStore:       cfg.UsersStore,
 		userResolver:     cfg.UserResolver,
 		activeToolStates: make(map[string]activeToolState),

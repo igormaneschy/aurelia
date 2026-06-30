@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.37.2] - 2026-06-30
+
+### Fixed
+- Session token guard: automatic compact/rotate escalation when PI SDK does not
+  reduce input tokens on its own — rotate at 500k input tokens, compact after
+  three consecutive large turns without ≥5% reduction, WARN log at high token
+  counts; guard resets on cold resume and successful compact/rotate.
+
 ## [0.37.1] - 2026-06-29
 
 ### Added
