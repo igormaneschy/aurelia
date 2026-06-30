@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.37.5] - 2026-06-30
+
+### Added
+- Memory cache observability: log `cache hit/miss` per directory; early-exit and
+  cache empty dirs; compact-mode entries under a separate `:compact` key.
+- TUI parity: `/cwd` bootstraps project memory and invalidates overlay cache;
+  `/reset` flushes nudge, invalidates user/topic cache, and cancels in-flight runs
+  (shared `ResetSession` with Telegram).
+
+### Changed
+- Memory cache invalidation is selective instead of wiping all layers every turn:
+  invalidate on Write/Edit only; nudge/dream invalidate dirs they wrote; `/cwd`
+  clears overlay only; session reset clears user + topic only.
+
 ## [0.37.4] - 2026-06-30
 
 ### Added
