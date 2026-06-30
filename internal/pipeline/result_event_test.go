@@ -159,3 +159,24 @@ func TestHandleResultEvent_TextContent_ReturnsSuccess(t *testing.T) {
 		t.Fatalf("expected reply %q, got %q", "Resposta via campo Text.", fo.lastReply)
 	}
 }
+
+func TestHandleResultEvent_DeliversResultTextAsIs(t *testing.T) {
+	fo := &fakeOutput{}
+	s := newTestService(fo)
+
+	content := "Vou executar.\n\n```aurelia-plan\n{\"tasks\":[{\"id\":\"T1\",\"prompt\":\"internal prompt\"}]}\n```"
+	ev := bridge.Event{Type: "result", Content: content}
+	var assistantText strings.Builder
+
+	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
+
+	if outcome != OutcomeSuccess {
+		t.Fatalf("expected OutcomeSuccess, got %v", outcome)
+	}
+	if fo.lastReply != content {
+		t.Fatalf("expected passthrough reply, got %q", fo.lastReply)
+	}
+	if !fo.confirmCalled {
+		t.Fatal("expected ConfirmMessage to be called")
+	}
+}

@@ -42,7 +42,7 @@ Tools / filesystem / web / APIs / projects
 | Cron Scheduling | Persistent schedule store, cron CLI, Telegram delivery | `internal/cron/` — Scheduler, Store, Runtime |
 | Project Binding | `/cwd` persistence, project slug resolution | `internal/projectbinding/` — SQLite store |
 | Audit & Observability | Run journal, event timeline, metrics, debug commands | `internal/runlog/`, structured slog logging |
-| Orchestration | Plan → workers → validate → commit/PR cycle | `internal/orchestrator/` — ExecutionContext, worktrees |
+| Agentic execution | Reasoning, planning, tools, multi-step work, human approvals | PI SDK agent runtime (not Aurelia — removed v0.38.0) |
 | Security Governance | Capability profiles, access control, redaction | `internal/security/` — policy engine, bridge hooks |
 | Continuity | Durable conversation state recovery | `internal/continuity/` — state store, formatting |
 | Path Resolution | Canonical runtime paths for all memory layers | `internal/runtime/` — PathResolver |
