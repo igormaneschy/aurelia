@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/security"
 	"github.com/igormaneschy/aurelia/internal/session"
@@ -60,6 +61,13 @@ type ProviderConfig struct {
 	APIKey   string `json:"api_key"`
 	BaseURL  string `json:"base_url,omitempty"`
 	AuthMode string `json:"auth_mode,omitempty"`
+}
+
+// ObservabilityConfig controls runlog retention and related observability settings.
+type ObservabilityConfig struct {
+	// RetentionDays sets how long terminal runs are kept before automatic pruning.
+	// nil = default (30 days). Explicit 0 disables automatic pruning.
+	RetentionDays *int `json:"retention_days,omitempty"`
 }
 
 // SessionLifecycleConfig controls automatic session health management.
@@ -196,6 +204,18 @@ type AppConfig struct {
 
 	// SessionLifecycleConfig controls automatic session health management.
 	SessionLifecycle SessionLifecycleConfig `json:"session_lifecycle,omitempty"`
+
+	// Observability controls runlog retention and related settings.
+	Observability ObservabilityConfig `json:"observability,omitempty"`
+}
+
+// RunlogRetentionDays returns the configured runlog retention window in days.
+// Unset config defaults to runlog.DefaultRetentionDays (30). Explicit 0 disables pruning.
+func (c *AppConfig) RunlogRetentionDays() int {
+	if c == nil || c.Observability.RetentionDays == nil {
+		return runlog.DefaultRetentionDays
+	}
+	return *c.Observability.RetentionDays
 }
 
 // DefaultOwnerUserIDOrFallback returns the configured DefaultOwnerUserID, or the
@@ -312,6 +332,8 @@ type fileConfig struct {
 
 	// SessionLifecycleConfig controls automatic session health management.
 	SessionLifecycle SessionLifecycleConfig `json:"session_lifecycle,omitempty"`
+
+	Observability ObservabilityConfig `json:"observability,omitempty"`
 }
 
 // ValidateConfig checks the full fileConfig for consistency.
@@ -569,6 +591,7 @@ func toAppConfig(cfg fileConfig) *AppConfig {
 		SummaryInterval:         cfg.SummaryInterval,
 		DefaultOwnerUserID:      cfg.DefaultOwnerUserID,
 		SessionLifecycle:        cfg.SessionLifecycle,
+		Observability:           cfg.Observability,
 	}
 	applyEnvOverrides(app)
 	return app

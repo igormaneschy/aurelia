@@ -923,8 +923,12 @@ type fakeRunLog struct {
 
 func (f *fakeRunLog) Start(ctx context.Context, record runlog.RunRecord) error  { return nil }
 func (f *fakeRunLog) Update(ctx context.Context, update runlog.RunUpdate) error { return nil }
-func (f *fakeRunLog) Complete(ctx context.Context, runID string, status runlog.RunStatus, checkpoint, errMsg string) error {
+func (f *fakeRunLog) Complete(ctx context.Context, runID string, status runlog.RunStatus, checkpoint, errMsg, toolSummary string) error {
 	return nil
+}
+func (f *fakeRunLog) RecordEvents(_ context.Context, _ []runlog.RunEvent) error { return nil }
+func (f *fakeRunLog) Prune(_ context.Context, _ runlog.PruneOptions) (runlog.PruneResult, error) {
+	return runlog.PruneResult{}, nil
 }
 func (f *fakeRunLog) Latest(ctx context.Context, chatID int64, threadID int) (*runlog.RunRecord, error) {
 	if f.latest == nil || f.latest.ChatID != chatID || f.latest.ThreadID != threadID {

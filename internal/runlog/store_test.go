@@ -156,7 +156,7 @@ func TestSQLiteStore_Complete(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	if err := s.Complete(ctx, runID, RunCompleted, "done", ""); err != nil {
+	if err := s.Complete(ctx, runID, RunCompleted, "done", "", ""); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 
@@ -191,7 +191,7 @@ func TestSQLiteStore_Complete_WithError(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 
-	if err := s.Complete(ctx, runID, RunFailed, "", "bridge error: timeout"); err != nil {
+	if err := s.Complete(ctx, runID, RunFailed, "", "bridge error: timeout", ""); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 
@@ -332,7 +332,7 @@ func TestSQLiteStore_Reopen_PreservesData(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if err := s1.Complete(ctx, runID, RunCompleted, "done", ""); err != nil {
+	if err := s1.Complete(ctx, runID, RunCompleted, "done", "", ""); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 	s1.Close()
@@ -899,7 +899,7 @@ func TestSQLiteStore_SessionFileUpdateAndOutboundLookup(t *testing.T) {
 	}
 
 	// Complete the run
-	if err := s.Complete(ctx, runID, RunCompleted, "done", ""); err != nil {
+	if err := s.Complete(ctx, runID, RunCompleted, "done", "", ""); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 
@@ -963,5 +963,145 @@ func TestSQLiteStore_SessionFileUpdateViaUpdate(t *testing.T) {
 	}
 	if got.OutboundMessageID != 0 {
 		t.Errorf("OutboundMessageID = %d, want 0 (not set)", got.OutboundMessageID)
+	}
+}
+
+func TestSQLiteStore_RecordEvents(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	runID := idgen.New()
+	if err := s.Start(ctx, RunRecord{
+		RunID: runID, ChatID: 1, ThreadID: 0, RequestID: "req", Prompt: "test",
+	}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	now := time.Now().UTC().Unix()
+	events := []RunEvent{
+		{RunID: runID, Timestamp: now, Phase: "bridge_request_started", Message: "start"},
+		{RunID: runID, Timestamp: now + 1, Phase: "bridge_tool_use", Message: "tool=Read"},
+		{RunID: runID, Timestamp: now + 2, Phase: "run_completed", Message: "done"},
+	}
+	if err := s.RecordEvents(ctx, events); err != nil {
+		t.Fatalf("RecordEvents: %v", err)
+	}
+
+	got, err := s.ListEvents(ctx, runID)
+	if err != nil {
+		t.Fatalf("ListEvents: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("ListEvents len = %d, want 3", len(got))
+	}
+	if got[0].Phase != "bridge_request_started" || got[2].Phase != "run_completed" {
+		t.Fatalf("unexpected event order/phases: %+v", got)
+	}
+}
+
+func TestSQLiteStore_RecordEvents_Empty(t *testing.T) {
+	s := newTestStore(t)
+	if err := s.RecordEvents(context.Background(), nil); err != nil {
+		t.Fatalf("RecordEvents(nil): %v", err)
+	}
+}
+
+func TestSQLiteStore_Complete_ToolSummary(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	runID := idgen.New()
+	if err := s.Start(ctx, RunRecord{
+		RunID: runID, ChatID: 1, ThreadID: 0, RequestID: "req", Prompt: "test",
+	}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := s.Complete(ctx, runID, RunCompleted, "done", "", "Read, Write"); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	got, err := s.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got.ToolSummary != "Read, Write" {
+		t.Fatalf("ToolSummary = %q, want Read, Write", got.ToolSummary)
+	}
+}
+
+func TestSQLiteStore_Prune(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	oldStart := time.Now().Add(-40 * 24 * time.Hour).UTC()
+	recentStart := time.Now().Add(-2 * 24 * time.Hour).UTC()
+	cutoff := time.Now().Add(-30 * 24 * time.Hour)
+
+	oldCompleted := idgen.New()
+	oldRunning := idgen.New()
+	recentCompleted := idgen.New()
+
+	for _, spec := range []struct {
+		runID   string
+		started time.Time
+		status  RunStatus
+	}{
+		{oldCompleted, oldStart, RunCompleted},
+		{oldRunning, oldStart, RunRunning},
+		{recentCompleted, recentStart, RunCompleted},
+	} {
+		if err := s.Start(ctx, RunRecord{
+			RunID: spec.runID, ChatID: 1, ThreadID: 0, RequestID: "req",
+			Prompt: "test", StartedAt: spec.started,
+		}); err != nil {
+			t.Fatalf("Start %s: %v", spec.runID, err)
+		}
+		if spec.status != RunRunning {
+			if err := s.Complete(ctx, spec.runID, spec.status, "", "", ""); err != nil {
+				t.Fatalf("Complete %s: %v", spec.runID, err)
+			}
+		}
+		if err := s.RecordEvent(ctx, RunEvent{
+			RunID: spec.runID, Phase: "test_event", Message: spec.runID,
+		}); err != nil {
+			t.Fatalf("RecordEvent %s: %v", spec.runID, err)
+		}
+	}
+
+	dry, err := s.Prune(ctx, PruneOptions{OlderThan: cutoff, DryRun: true})
+	if err != nil {
+		t.Fatalf("Prune dry-run: %v", err)
+	}
+	if dry.RunsDeleted != 1 {
+		t.Fatalf("dry-run RunsDeleted = %d, want 1", dry.RunsDeleted)
+	}
+	if dry.EventsDeleted != 1 {
+		t.Fatalf("dry-run EventsDeleted = %d, want 1", dry.EventsDeleted)
+	}
+
+	result, err := s.Prune(ctx, PruneOptions{OlderThan: cutoff})
+	if err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	if result.RunsDeleted != 1 || result.EventsDeleted != 1 {
+		t.Fatalf("Prune result = %+v, want 1 run and 1 event deleted", result)
+	}
+
+	if got, _ := s.GetRun(ctx, oldCompleted); got != nil {
+		t.Fatal("old completed run should be pruned")
+	}
+	if got, _ := s.GetRun(ctx, oldRunning); got == nil {
+		t.Fatal("old running run should be preserved")
+	}
+	if got, _ := s.GetRun(ctx, recentCompleted); got == nil {
+		t.Fatal("recent completed run should be preserved")
+	}
+
+	events, err := s.ListEvents(ctx, oldRunning)
+	if err != nil {
+		t.Fatalf("ListEvents oldRunning: %v", err)
+	}
+	if len(events) != 1 {
+		t.Fatalf("old running events len = %d, want 1", len(events))
 	}
 }

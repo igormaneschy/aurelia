@@ -571,6 +571,7 @@ func (a *app) start() {
 
 	// Reconcile stale run_journal rows from before this process start
 	go a.reconcileStaleRuns()
+	go a.pruneRunlogOnStartup()
 }
 
 // goSafe launches fn in a new goroutine with a top-level defer recover().
@@ -606,6 +607,35 @@ func (a *app) reconcileStaleRuns() {
 		if err := a.continuity.MarkColdForSessions(ctx, "daemon restarted/deployed"); err != nil {
 			log.Printf("Warning: failed to mark continuity cold on startup: %v", err)
 		}
+	}
+}
+
+func (a *app) pruneRunlogOnStartup() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("panic in pruneRunlogOnStartup: %v", r)
+		}
+	}()
+
+	if a.runLog == nil || a.config == nil {
+		return
+	}
+	days := a.config.RunlogRetentionDays()
+	if days <= 0 {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	result, err := a.runLog.Prune(ctx, runlog.PruneOptions{OlderThan: cutoff})
+	if err != nil {
+		log.Printf("Warning: runlog prune failed: %v", err)
+		return
+	}
+	if result.RunsDeleted > 0 || result.EventsDeleted > 0 {
+		log.Printf("runlog: pruned %d runs and %d events (retention=%d days)", result.RunsDeleted, result.EventsDeleted, days)
 	}
 }
 

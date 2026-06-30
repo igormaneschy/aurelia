@@ -10,6 +10,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 )
@@ -18,7 +19,7 @@ import (
 // Subcommands: last, run, errors, metrics.
 func debugCommand(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: aurelia debug <last|run|errors|metrics> [options]")
+		return fmt.Errorf("usage: aurelia debug <last|run|errors|metrics|prune> [options]")
 	}
 
 	sub := args[0]
@@ -68,8 +69,19 @@ func debugCommand(args []string) error {
 			return err
 		}
 		return debugMetrics(ctx, store, days, useJSON)
+	case "prune":
+		days := 0
+		dryRun := false
+		fs := flag.NewFlagSet("prune", flag.ContinueOnError)
+		fs.IntVar(&days, "days", 0, "delete runs older than N days (default: from config or 30)")
+		fs.BoolVar(&dryRun, "dry-run", false, "report counts without deleting")
+		fs.BoolVar(&useJSON, "json", false, "JSON output")
+		if err := fs.Parse(subArgs); err != nil {
+			return err
+		}
+		return debugPrune(ctx, resolver, store, days, dryRun, useJSON)
 	default:
-		return fmt.Errorf("unknown debug subcommand: %s (use: last, run, errors, metrics)", sub)
+		return fmt.Errorf("unknown debug subcommand: %s (use: last, run, errors, metrics, prune)", sub)
 	}
 }
 
@@ -183,6 +195,52 @@ func debugErrors(ctx context.Context, store *runlog.SQLiteStore, limit int, json
 // ---------------------------------------------------------------------------
 // debug metrics
 // ---------------------------------------------------------------------------
+
+func debugPrune(ctx context.Context, resolver *runtime.PathResolver, store *runlog.SQLiteStore, days int, dryRun, jsonOut bool) error {
+	if days <= 0 {
+		cfg, err := config.Load(resolver)
+		if err != nil {
+			return fmt.Errorf("load config: %w", err)
+		}
+		days = cfg.RunlogRetentionDays()
+	}
+	if days <= 0 {
+		return fmt.Errorf("runlog pruning is disabled (observability.retention_days=0); pass --days N to override")
+	}
+
+	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
+	result, err := store.Prune(ctx, runlog.PruneOptions{
+		OlderThan: cutoff,
+		DryRun:    dryRun,
+	})
+	if err != nil {
+		return fmt.Errorf("prune: %w", err)
+	}
+
+	if jsonOut {
+		return printJSON(struct {
+			Days          int                `json:"days"`
+			Cutoff        time.Time          `json:"cutoff"`
+			DryRun        bool               `json:"dry_run"`
+			RunsDeleted   int64              `json:"runs_deleted"`
+			EventsDeleted int64              `json:"events_deleted"`
+		}{
+			Days:          days,
+			Cutoff:        cutoff,
+			DryRun:        dryRun,
+			RunsDeleted:   result.RunsDeleted,
+			EventsDeleted: result.EventsDeleted,
+		})
+	}
+
+	action := "Removidos"
+	if dryRun {
+		action = "Seriam removidos"
+	}
+	fmt.Printf("🧹 Runlog prune (%d dias, cutoff=%s)\n", days, cutoff.Format(time.RFC3339))
+	fmt.Printf("  %s: %d runs, %d events\n", action, result.RunsDeleted, result.EventsDeleted)
+	return nil
+}
 
 func debugMetrics(ctx context.Context, store *runlog.SQLiteStore, days int, jsonOut bool) error {
 	now := time.Now()

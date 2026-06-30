@@ -482,8 +482,17 @@ func (s *spyRunLogStore) Update(_ context.Context, u runlog.RunUpdate) error {
 	s.updates = append(s.updates, u)
 	return nil
 }
-func (s *spyRunLogStore) Complete(_ context.Context, _ string, _ runlog.RunStatus, _, _ string) error {
+func (s *spyRunLogStore) Complete(_ context.Context, _ string, _ runlog.RunStatus, _, _, _ string) error {
 	return nil
+}
+func (s *spyRunLogStore) RecordEvents(_ context.Context, events []runlog.RunEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.events = append(s.events, events...)
+	return nil
+}
+func (s *spyRunLogStore) Prune(_ context.Context, _ runlog.PruneOptions) (runlog.PruneResult, error) {
+	return runlog.PruneResult{}, nil
 }
 func (s *spyRunLogStore) Latest(_ context.Context, _ int64, _ int) (*runlog.RunRecord, error) {
 	return nil, nil

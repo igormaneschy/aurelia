@@ -10,8 +10,17 @@ type Store interface {
 	// Update applies partial updates to an existing run by RunID.
 	Update(ctx context.Context, update RunUpdate) error
 
-	// Complete transitions a run to a terminal status, persisting checkpoint and error.
-	Complete(ctx context.Context, runID string, status RunStatus, checkpoint, errMsg string) error
+	// Complete transitions a run to a terminal status, persisting checkpoint,
+	// error, and optional tool_summary in a single write.
+	Complete(ctx context.Context, runID string, status RunStatus, checkpoint, errMsg, toolSummary string) error
+
+	// RecordEvents persists multiple timeline events in one transaction.
+	// Best-effort: errors are logged by callers, never block the pipeline.
+	RecordEvents(ctx context.Context, events []RunEvent) error
+
+	// Prune deletes terminal runs older than opts.OlderThan and their events.
+	// Running runs are preserved regardless of age.
+	Prune(ctx context.Context, opts PruneOptions) (PruneResult, error)
 
 	// Latest returns the most recent run for a given chat/thread, or nil if none.
 	Latest(ctx context.Context, chatID int64, threadID int) (*RunRecord, error)
