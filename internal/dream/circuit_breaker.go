@@ -48,12 +48,6 @@ func (d *Dreamer) backgroundCircuitCooldown() time.Duration {
 	return defaultBackgroundCircuitCooldown
 }
 
-func (d *Dreamer) backgroundCircuitIsOpen() bool {
-	d.bgCircuitMu.Lock()
-	defer d.bgCircuitMu.Unlock()
-	return !d.bgCircuitOpenUntil.IsZero() && time.Now().Before(d.bgCircuitOpenUntil)
-}
-
 // backgroundCircuitSkip returns true when dream/nudge should not call the bridge.
 func (d *Dreamer) backgroundCircuitSkip(component string) bool {
 	d.bgCircuitMu.Lock()
