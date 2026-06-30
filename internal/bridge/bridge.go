@@ -45,8 +45,8 @@ type Bridge struct {
 	stdin  io.WriteCloser
 	reader *bufio.Reader
 
-	// pending maps request_id → channel for routing events.
-	pending   map[string]chan Event
+	// pending maps request_id → stream for routing events.
+	pending   map[string]*requestStream
 	pendingMu sync.Mutex
 
 	started  bool
@@ -88,7 +88,7 @@ func New(bridgeDir string, bundlePath string) *Bridge {
 		bridgeDir: bridgeDir,
 		command:   cmd,
 		args:      args,
-		pending:   make(map[string]chan Event),
+		pending:   make(map[string]*requestStream),
 		done:      done,
 		slots:     newRequestSlotTracker(),
 	}
@@ -190,27 +190,22 @@ func (b *Bridge) readLoop() {
 		rid := ev.RequestID
 
 		b.pendingMu.Lock()
-		ch, ok := b.pending[rid]
+		stream, ok := b.pending[rid]
 		b.pendingMu.Unlock()
 
 		if ok {
 			if ev.IsTerminal() {
-				b.sendTerminalEvent(ch, ev, rid)
-			} else {
-				// Non-blocking send — channel has buffer.
-				select {
-				case ch <- ev:
-				default:
-					b.droppedEvents.Add(1)
-					slog.Warn("bridge: dropped event", "type", ev.Type, "rid", rid)
-				}
+				b.sendTerminalEvent(stream, ev, rid)
+			} else if !stream.deliver(ev) {
+				b.droppedEvents.Add(1)
+				slog.Warn("bridge: dropped event", "type", ev.Type, "rid", rid)
 			}
 
 			if ev.IsTerminal() {
 				b.pendingMu.Lock()
 				delete(b.pending, rid)
 				b.pendingMu.Unlock()
-				safeClose(ch)
+				stream.close()
 			}
 		}
 	}
@@ -239,10 +234,10 @@ func (b *Bridge) readLoop() {
 		}()
 	}
 
-	// Process exited or stdout closed — close all pending channels.
+	// Process exited or stdout closed — close all pending streams.
 	b.pendingMu.Lock()
-	for rid, ch := range b.pending {
-		safeClose(ch)
+	for rid, stream := range b.pending {
+		stream.close()
 		delete(b.pending, rid)
 	}
 	b.pendingMu.Unlock()
@@ -284,27 +279,24 @@ func (b *Bridge) readLoop() {
 	}
 }
 
-func (b *Bridge) sendTerminalEvent(ch chan Event, ev Event, rid string) {
-	select {
-	case ch <- ev:
+func (b *Bridge) sendTerminalEvent(stream *requestStream, ev Event, rid string) {
+	if stream.deliver(ev) {
 		return
-	default:
 	}
 
 	// Preserve terminal delivery by evicting one buffered non-terminal event
-	// instead of dropping result/error and making the consumer think the bridge died.
-	select {
-	case <-ch:
-		b.droppedEvents.Add(1)
-		slog.Warn("bridge: dropped buffered event to deliver terminal", "type", ev.Type, "rid", rid)
-	default:
+	// into overflow when possible instead of dropping result/error.
+	if dropped, ok := stream.evictOneForTerminal(); ok {
+		if dropped.Type != "" {
+			b.droppedEvents.Add(1)
+			slog.Warn("bridge: dropped buffered event to deliver terminal", "type", dropped.Type, "rid", rid)
+		}
+		if stream.deliver(ev) {
+			return
+		}
 	}
-	select {
-	case ch <- ev:
-	default:
-		b.droppedEvents.Add(1)
-		slog.Error("bridge: terminal event could not be delivered", "type", ev.Type, "rid", rid)
-	}
+	b.droppedEvents.Add(1)
+	slog.Error("bridge: terminal event could not be delivered", "type", ev.Type, "rid", rid)
 }
 
 // Stop kills the bridge process. Safe to call multiple times.
@@ -366,7 +358,7 @@ func (b *Bridge) Stop() {
 	b.stdin = nil
 	b.reader = nil
 	b.pendingMu.Lock()
-	b.pending = make(map[string]chan Event)
+	b.pending = make(map[string]*requestStream)
 	b.pendingMu.Unlock()
 	b.mu.Unlock()
 }
@@ -376,8 +368,8 @@ func (b *Bridge) Stop() {
 // panics unexpectedly.
 func (b *Bridge) cleanupAfterPanic() {
 	b.pendingMu.Lock()
-	for rid, ch := range b.pending {
-		safeClose(ch)
+	for rid, stream := range b.pending {
+		stream.close()
 		delete(b.pending, rid)
 	}
 	b.pendingMu.Unlock()
@@ -460,10 +452,10 @@ func (b *Bridge) Execute(ctx context.Context, req Request) (<-chan Event, error)
 		return nil, fmt.Errorf("bridge: marshal request: %w", err)
 	}
 
-	ch := make(chan Event, eventChannelBuffer)
+	stream := newRequestStream(eventChannelBuffer)
 
 	b.pendingMu.Lock()
-	b.pending[req.RequestID] = ch
+	b.pending[req.RequestID] = stream
 	b.pendingMu.Unlock()
 
 	priority := effectivePriority(req)
@@ -473,7 +465,7 @@ func (b *Bridge) Execute(ctx context.Context, req Request) (<-chan Event, error)
 			b.pendingMu.Lock()
 			delete(b.pending, req.RequestID)
 			b.pendingMu.Unlock()
-			safeClose(ch)
+			stream.close()
 			return nil, err
 		}
 	}
@@ -488,7 +480,7 @@ func (b *Bridge) Execute(ctx context.Context, req Request) (<-chan Event, error)
 		b.pendingMu.Lock()
 		delete(b.pending, req.RequestID)
 		b.pendingMu.Unlock()
-		safeClose(ch)
+		stream.close()
 		return nil, fmt.Errorf("bridge: process died before write")
 	}
 	_, err = b.stdin.Write(append(payload, '\n'))
@@ -501,7 +493,7 @@ func (b *Bridge) Execute(ctx context.Context, req Request) (<-chan Event, error)
 		b.pendingMu.Lock()
 		delete(b.pending, req.RequestID)
 		b.pendingMu.Unlock()
-		safeClose(ch)
+		stream.close()
 		return nil, fmt.Errorf("bridge: write request: %w", err)
 	}
 
@@ -531,16 +523,63 @@ func (b *Bridge) Execute(ctx context.Context, req Request) (<-chan Event, error)
 		timer := time.NewTimer(30 * time.Minute)
 		defer timer.Stop()
 
-		for {
+		forward := func(ev Event) bool {
 			select {
-			case ev, ok := <-ch:
+			case out <- ev:
+				return true
+			case <-ctx.Done():
+				cleanupPending()
+				return false
+			case <-timer.C:
+				slog.Error("bridge: Execute proxy goroutine timed out after 30 minutes",
+					"request_id", req.RequestID)
+				cleanupPending()
+				return false
+			}
+		}
+
+		drainOverflow := func() {
+			for {
+				if ov, has := stream.dequeueOverflow(); has {
+					if !forward(ov) {
+						return
+					}
+					continue
+				}
+				return
+			}
+		}
+
+		for {
+			// Prefer the fast channel so events keep FIFO order (overflow only
+			// holds spillover after the channel buffer fills).
+			select {
+			case ev, ok := <-stream.ch:
 				if !ok {
+					drainOverflow()
 					return
 				}
-				select {
-				case out <- ev:
-				case <-ctx.Done():
-					cleanupPending()
+				if !forward(ev) {
+					return
+				}
+				continue
+			default:
+			}
+
+			if ev, ok := stream.dequeueOverflow(); ok {
+				if !forward(ev) {
+					return
+				}
+				continue
+			}
+
+			select {
+			case ev, ok := <-stream.ch:
+				if !ok {
+					drainOverflow()
+					return
+				}
+				if !forward(ev) {
 					return
 				}
 			case <-ctx.Done():
