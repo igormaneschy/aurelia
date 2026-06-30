@@ -813,7 +813,7 @@ func (bc *BotController) cmdListAgents(c telebot.Context) (string, error) {
 	// Use profiles resolver for canonical list (includes legacy agents + builtins + canonical).
 	var all []*profiles.PromptProfile
 	if bc.profiles != nil {
-		all = bc.profiles.ListVisible(isOwner)
+		all = bc.profiles.ListVisibleForUser(userID, isOwner)
 	} else if bc.agents != nil {
 		// Fallback: legacy agents only when resolver not available.
 		for _, a := range bc.agents.Agents() {
@@ -1303,7 +1303,7 @@ func (bc *BotController) cmdSetMode(c telebot.Context, text string) (string, err
 	// Set mode. Builtin aliases are normalized; canonical/legacy profiles may
 	// also be used when visible to this user.
 	normalized := normalizeProfileSelection(modeText)
-	selected := bc.getVisibleProfile(normalized, bc.isOwner(c))
+	selected := bc.getVisibleProfileForUser(normalized, userID, bc.isOwner(c))
 	if selected == nil {
 		return fmt.Sprintf("Perfil %q não encontrado ou indisponível para este usuário. Use /agents para ver os perfis disponíveis.", modeText), nil
 	}
@@ -1381,7 +1381,8 @@ func (bc *BotController) cmdExplainProfile(c telebot.Context, text string) (stri
 		normalized = name
 	}
 
-	profile := bc.getVisibleProfile(normalized, bc.isOwner(c))
+	userID := safeSenderID(c.Sender())
+	profile := bc.getVisibleProfileForUser(normalized, userID, bc.isOwner(c))
 	if profile == nil {
 		return fmt.Sprintf("Perfil %q não encontrado ou indisponível para este usuário. Use /agents para ver os perfis disponíveis.", name), nil
 	}
@@ -1417,11 +1418,10 @@ func normalizeProfileSelection(name string) string {
 	return strings.TrimSpace(name)
 }
 
-// getProfile looks up a Prompt Profile by name. Checks the profiles resolver
-// first, then falls back to legacy agent registry.
-func (bc *BotController) getProfile(name string) *profiles.PromptProfile {
+// getProfileForUser looks up a Prompt Profile by name for a specific user.
+func (bc *BotController) getProfileForUser(name string, userID int64) *profiles.PromptProfile {
 	if bc.profiles != nil {
-		if p := bc.profiles.Get(name); p != nil {
+		if p := bc.profiles.GetForUser(userID, name); p != nil {
 			return p
 		}
 	}
@@ -1441,8 +1441,8 @@ func (bc *BotController) getProfile(name string) *profiles.PromptProfile {
 	return nil
 }
 
-func (bc *BotController) getVisibleProfile(name string, isOwner bool) *profiles.PromptProfile {
-	profile := bc.getProfile(name)
+func (bc *BotController) getVisibleProfileForUser(name string, userID int64, isOwner bool) *profiles.PromptProfile {
+	profile := bc.getProfileForUser(name, userID)
 	if !profiles.ProfileVisible(profile, isOwner) {
 		return nil
 	}

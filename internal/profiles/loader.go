@@ -56,7 +56,7 @@ func LoadCanonical(dir string) map[string]*PromptProfile {
 			continue
 		}
 
-		pp, err := parseCanonicalFile(data, path)
+		pp, err := parseProfileFile(data, path, KindGlobal, true)
 		if err != nil {
 			slog.Warn("profiles: skipping canonical profile due to parse error", "file", entry.Name(), "err", err)
 			continue
@@ -71,10 +71,54 @@ func LoadCanonical(dir string) map[string]*PromptProfile {
 	return result
 }
 
-// parseCanonicalFile splits a markdown file on --- markers, parses YAML
+// LoadUserPrivate reads user-scoped prompt profiles from
+// ~/.aurelia/users/<id>/profiles/*.md. These override global profiles of the
+// same name (Prompt Profiles spec Phase 2).
+func LoadUserPrivate(dir string) map[string]*PromptProfile {
+	result := make(map[string]*PromptProfile)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		slog.Debug("profiles: user-private profiles dir not found, skipping", "dir", dir)
+		return result
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		path := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			slog.Warn("profiles: failed to read user-private profile", "file", entry.Name(), "err", err)
+			continue
+		}
+
+		pp, err := parseProfileFile(data, path, KindUser, false)
+		if err != nil {
+			slog.Warn("profiles: skipping user-private profile due to parse error", "file", entry.Name(), "err", err)
+			continue
+		}
+		if pp == nil {
+			continue
+		}
+
+		result[strings.ToLower(pp.Name)] = pp
+	}
+
+	return result
+}
+
+// parseCanonicalFile splits a markdown profile file (canonical global format).
+func parseCanonicalFile(data []byte, source string) (*PromptProfile, error) {
+	return parseProfileFile(data, source, KindGlobal, true)
+}
+
+// parseProfileFile splits a markdown file on --- markers, parses YAML
 // frontmatter into PromptProfile, and extracts the prompt body.
 // Returns nil if the file has no valid frontmatter or the name field is empty.
-func parseCanonicalFile(data []byte, source string) (*PromptProfile, error) {
+func parseProfileFile(data []byte, source string, kind ProfileKind, defaultPublic bool) (*PromptProfile, error) {
 	parts := bytes.SplitN(data, []byte("---"), 3)
 	if len(parts) != 3 {
 		return nil, nil
@@ -89,11 +133,7 @@ func parseCanonicalFile(data []byte, source string) (*PromptProfile, error) {
 		return nil, nil
 	}
 
-	// Canonical profiles are always KindGlobal.
-	kind := KindGlobal
-
-	// Determine public visibility.
-	public := true
+	public := defaultPublic
 	if fm.Public != nil {
 		public = *fm.Public
 	}

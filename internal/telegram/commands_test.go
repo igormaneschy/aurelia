@@ -904,7 +904,7 @@ func buildTestProfileResolver(t *testing.T, profileMap map[string]testProfileFil
 			t.Fatalf("failed to write profile file: %v", err)
 		}
 	}
-	return profiles.NewResolverFromRegistry(nil, dir)
+	return profiles.NewResolverFromRegistry(nil, dir, "")
 }
 
 func newTestUserStore(t *testing.T) *users.Store {

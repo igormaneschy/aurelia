@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/igormaneschy/aurelia/internal/agents"
+	"github.com/igormaneschy/aurelia/internal/users"
 )
 
 func writeAgentFile(t *testing.T, dir, name, description, body string) {
@@ -19,7 +20,7 @@ func writeAgentFile(t *testing.T, dir, name, description, body string) {
 }
 
 func TestResolver_Get_Builtins(t *testing.T) {
-	r, err := NewResolver("", "") // no agents dir, no canonical dir
+	r, err := NewResolver("", "", "") // no agents dir, no canonical dir
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -42,7 +43,7 @@ func TestResolver_Get_LegacyAgentOverridesBuiltin(t *testing.T) {
 	dir := t.TempDir()
 	writeAgentFile(t, dir, "developer", "custom dev", "Custom dev prompt.")
 
-	r, err := NewResolver(dir, "")
+	r, err := NewResolver(dir, "", "")
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -63,7 +64,7 @@ func TestResolver_List_IncludesBuiltinsAndLegacy(t *testing.T) {
 	dir := t.TempDir()
 	writeAgentFile(t, dir, "coder", "writes code", "Coder body.")
 
-	r, err := NewResolver(dir, "")
+	r, err := NewResolver(dir, "", "")
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestResolver_ResolveEffective_AtProfile(t *testing.T) {
 	dir := t.TempDir()
 	writeAgentFile(t, dir, "coder", "writes code", "You are a coder.")
 
-	r, err := NewResolver(dir, "")
+	r, err := NewResolver(dir, "", "")
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -108,7 +109,7 @@ func TestResolver_ResolveEffective_AtProfile(t *testing.T) {
 }
 
 func TestResolver_ResolveEffective_AtProfileUnknown(t *testing.T) {
-	r, err := NewResolver("", "")
+	r, err := NewResolver("", "", "")
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -126,7 +127,7 @@ func TestResolver_ResolveEffective_MiddleTextNotParsed(t *testing.T) {
 	dir := t.TempDir()
 	writeAgentFile(t, dir, "coder", "writes code", "Coder body.")
 
-	r, err := NewResolver(dir, "")
+	r, err := NewResolver(dir, "", "")
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -146,7 +147,7 @@ func TestResolver_ResolveEffective_MiddleTextNotParsed(t *testing.T) {
 }
 
 func TestResolver_ResolveEffective_ActiveDefaultFallback(t *testing.T) {
-	r, err := NewResolver("", "")
+	r, err := NewResolver("", "", "")
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -164,7 +165,7 @@ func TestResolver_ResolveEffective_ActiveDefaultFallback(t *testing.T) {
 }
 
 func TestResolver_ResolveEffective_GeneralDefault(t *testing.T) {
-	r, err := NewResolver("", "")
+	r, err := NewResolver("", "", "")
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -182,7 +183,7 @@ func TestResolver_AtProfileWinsOverActiveDefault(t *testing.T) {
 	dir := t.TempDir()
 	writeAgentFile(t, dir, "researcher", "research profile", "Researcher prompt.")
 
-	r, err := NewResolver(dir, "")
+	r, err := NewResolver(dir, "", "")
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -207,7 +208,7 @@ func TestResolver_InvalidFrontmatterSkipped(t *testing.T) {
 	}
 
 	// Should not crash.
-	r, err := NewResolver(dir, "")
+	r, err := NewResolver(dir, "", "")
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
@@ -420,16 +421,123 @@ func TestResolver_ResolveEffectiveForUser_BlocksPrivateProfileForNonOwner(t *tes
 	writeCanonicalFileWithPublic(t, canonicalDir, "secret", "secret desc", "Secret prompt.", false)
 	r := &Resolver{builtins: builtinProfiles(), canonical: LoadCanonical(canonicalDir)}
 
-	_, _, err := r.ResolveEffectiveForUser("@secret do work", "", false)
+	_, _, err := r.ResolveEffectiveForUser("@secret do work", "", 0, false)
 	if _, ok := err.(*ErrProfileNotAllowed); !ok {
 		t.Fatalf("ResolveEffectiveForUser non-owner err = %T %v, want ErrProfileNotAllowed", err, err)
 	}
 
-	profile, stripped, err := r.ResolveEffectiveForUser("@secret do work", "", true)
+	profile, stripped, err := r.ResolveEffectiveForUser("@secret do work", "", 0, true)
 	if err != nil {
 		t.Fatalf("ResolveEffectiveForUser owner error = %v", err)
 	}
 	if profile == nil || profile.Name != "secret" || stripped != "do work" {
 		t.Fatalf("owner resolve got profile=%v stripped=%q", profile, stripped)
+	}
+}
+
+func writeUserPrivateFile(t *testing.T, dir, name, description, body string) {
+	t.Helper()
+	content := fmt.Sprintf("---\nname: %s\ndescription: %s\nkind: prompt_profile\n---\n%s", name, description, body)
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name+".md"), []byte(content), 0600); err != nil {
+		t.Fatalf("write user-private file %s: %v", name, err)
+	}
+}
+
+func TestResolver_GetForUser_UserPrivateOverridesCanonical(t *testing.T) {
+	root := t.TempDir()
+	canonicalDir := filepath.Join(root, "profiles")
+	if err := os.MkdirAll(canonicalDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	writeCanonicalFile(t, canonicalDir, "coder", "global coder", "Global coder prompt.")
+
+	userProfilesDir := filepath.Join(root, "users", "42", "profiles")
+	writeUserPrivateFile(t, userProfilesDir, "coder", "my coder", "My private coder prompt.")
+
+	r, err := NewResolver("", canonicalDir, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	global := r.Get("coder")
+	if global == nil || global.Prompt != "Global coder prompt." {
+		t.Fatalf("Get(coder) = %v, want global prompt", global)
+	}
+
+	user := r.GetForUser(42, "coder")
+	if user == nil {
+		t.Fatal("GetForUser(42, coder) = nil")
+	}
+	if user.Kind != KindUser {
+		t.Errorf("Kind = %q, want user", user.Kind)
+	}
+	if user.Prompt != "My private coder prompt." {
+		t.Errorf("Prompt = %q, want private prompt", user.Prompt)
+	}
+}
+
+func TestResolver_GetForUser_ModeOverlayMergesBuiltin(t *testing.T) {
+	root := t.TempDir()
+	userRes := users.NewResolver(root)
+	modePath := userRes.UserModePath(42, "developer")
+	if err := os.MkdirAll(filepath.Dir(modePath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(modePath, []byte("Always run tests before committing."), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := NewResolver("", "", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	base := r.builtins["developer"]
+	p := r.GetForUser(42, "developer")
+	if p == nil {
+		t.Fatal("GetForUser(42, developer) = nil")
+	}
+	if !strings.Contains(p.Prompt, base.Prompt) {
+		t.Fatal("expected builtin developer prompt in merged result")
+	}
+	if !strings.Contains(p.Prompt, "Always run tests before committing.") {
+		t.Fatal("expected mode overlay content in merged result")
+	}
+	if !strings.Contains(p.Prompt, modeOverlayHeader) {
+		t.Fatal("expected mode overlay header in merged result")
+	}
+}
+
+func TestResolver_GetForUser_UserPrivateSkipsModeOverlay(t *testing.T) {
+	root := t.TempDir()
+	userRes := users.NewResolver(root)
+	modePath := userRes.UserModePath(42, "developer")
+	if err := os.MkdirAll(filepath.Dir(modePath), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(modePath, []byte("Overlay should not appear."), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	userProfilesDir := userRes.UserProfilesDir(42)
+	writeUserPrivateFile(t, userProfilesDir, "developer", "custom", "Fully custom developer profile.")
+
+	r, err := NewResolver("", "", root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	p := r.GetForUser(42, "developer")
+	if p == nil {
+		t.Fatal("GetForUser = nil")
+	}
+	if p.Prompt != "Fully custom developer profile." {
+		t.Errorf("Prompt = %q, want user-private only", p.Prompt)
+	}
+	if strings.Contains(p.Prompt, "Overlay should not appear.") {
+		t.Fatal("mode overlay leaked into user-private profile")
 	}
 }

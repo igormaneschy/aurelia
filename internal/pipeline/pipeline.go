@@ -435,7 +435,7 @@ func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, rese
 
 	// Resolve effective Prompt Profile: @name > active mode > general.
 	activeMode := s.userActiveMode(input.userID)
-	profile, userText, resolveErr := s.resolveEffectiveProfile(input.text, activeMode, s.isOwnerUser(input.userID))
+	profile, userText, resolveErr := s.resolveEffectiveProfile(input.text, activeMode, input.userID, s.isOwnerUser(input.userID))
 	if resolveErr != nil {
 		if pfErr, ok := resolveErr.(*profiles.ErrProfileNotFound); ok {
 			log.Printf("pipeline: unknown @profile chat=%d name=%s", input.chatID, pfErr.Name)
@@ -524,9 +524,9 @@ func (s *Service) isOwnerUser(userID int64) bool {
 // resolveEffectiveProfile resolves the Prompt Profile for a message turn.
 // Uses profiles.Resolver for @name > active mode > general precedence.
 // Returns the resolved profile, stripped user text, and any error.
-func (s *Service) resolveEffectiveProfile(text string, activeDefault string, isOwner bool) (*profiles.PromptProfile, string, error) {
+func (s *Service) resolveEffectiveProfile(text string, activeDefault string, userID int64, isOwner bool) (*profiles.PromptProfile, string, error) {
 	if s.profiles != nil {
-		return s.profiles.ResolveEffectiveForUser(text, activeDefault, isOwner)
+		return s.profiles.ResolveEffectiveForUser(text, activeDefault, userID, isOwner)
 	}
 	// Fallback when resolver not available — route legacy-style via agents registry.
 	// This is a transitional path; will be removed when agents.Registry is fully deprecated.

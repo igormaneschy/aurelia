@@ -710,7 +710,7 @@ func fillTUIProjectAgent(a *app, userID int64, payload *ipc.ProjectStatePayload)
 	}
 	// ResolveEffectiveForUser with empty text (no @mention) and isOwner=true
 	// for the TUI (all local users are trusted).
-	profile, _, err := resolver.ResolveEffectiveForUser("", "", true)
+	profile, _, err := resolver.ResolveEffectiveForUser("", "", userID, true)
 	if err != nil || profile == nil {
 		payload.ActiveAgent = "general"
 		return
