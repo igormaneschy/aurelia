@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.37.8] - 2026-06-30
+
+### Added
+- Bridge content divergence audit: when streamed assistant text diverges
+  significantly (>500 chars) from authoritative `result` content, record a
+  warn-level `bridge_content_diverges` runlog timeline event with structured
+  metadata (`stream_len`, `result_len`, `diff`, `authoritative=result`) and
+  `slog.Warn` output. Result content remains authoritative.
+
 ## [0.37.7] - 2026-06-30
 
 ### Changed
