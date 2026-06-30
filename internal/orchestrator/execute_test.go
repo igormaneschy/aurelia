@@ -382,7 +382,7 @@ func TestExecutePlan_MergeFailure_PreservesWorktree(t *testing.T) {
 	)
 
 	gitExec := func(dir string, args ...string) error {
-		cmd := exec.Command("git", args...)
+		cmd := exec.Command("git", testGitArgs(args...)...)
 		cmd.Dir = dir
 		cmd.Env = gitEnv
 		out, err := cmd.CombinedOutput()
@@ -483,10 +483,10 @@ func TestExecutePlan_MergeFailure_PreservesWorktree(t *testing.T) {
 		}
 
 		// Cleanup for test isolation
-		cleanupCmd := exec.Command("git", "worktree", "remove", "--force", matches[0])
+		cleanupCmd := exec.Command("git", testGitArgs("worktree", "remove", "--force", matches[0])...)
 		cleanupCmd.Dir = repoDir
 		_ = cleanupCmd.Run()
-		delCmd := exec.Command("git", "branch", "-D", branch)
+		delCmd := exec.Command("git", testGitArgs("branch", "-D", branch)...)
 		delCmd.Dir = repoDir
 		_ = delCmd.Run()
 	}

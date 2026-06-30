@@ -486,14 +486,13 @@ func TestMerge_ConflictAbortsCleanly(t *testing.T) {
 
 func run(t *testing.T, dir string, name string, args ...string) {
 	t.Helper()
-	cmd := exec.Command(name, args...)
+	cmdArgs := args
+	if name == "git" {
+		cmdArgs = testGitArgs(args...)
+	}
+	cmd := exec.Command(name, cmdArgs...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(),
-		"GIT_AUTHOR_NAME=test",
-		"GIT_AUTHOR_EMAIL=test@test.com",
-		"GIT_COMMITTER_NAME=test",
-		"GIT_COMMITTER_EMAIL=test@test.com",
-	)
+	cmd.Env = testGitEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("%s %v: %v\n%s", name, args, err, out)
 	}
