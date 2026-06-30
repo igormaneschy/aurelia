@@ -1,7 +1,7 @@
 # Project-Scoped CWD Overlay — Specification
 
 **Roadmap step:** 5.5 (pós Context-Scoped Memory)
-**Status:** 📋 Draft
+**Status:** ✅ Validated (v0.37.0 code, v0.38.1 closure)
 **Depende de:** `.specs/features/project-binding/` (binding persistente), `.specs/features/project-memory/` (camadas de memória)
 **Altera:** `.specs/features/project-memory/spec.md` (cwd_overlay passa a ser project-scoped)
 
@@ -37,14 +37,14 @@ A camada `user_global`, por outro lado, **já é compartilhada** entre TUI e Tel
 
 ## Goals
 
-- [ ] `cwd_overlay` passa a ser escopado por **slug do projeto** (CWD), independente de chat/thread
-- [ ] TUI, Telegram DM e grupos/threads compartilham o mesmo `cwd_overlay` quando ativam o mesmo `/cwd`
-- [ ] `topic` memory permanece isolada por `(chatID, threadID)` — conversas ainda têm espaço privado
-- [ ] `user_global` permanece inalterada (já compartilhada)
-- [ ] Migração única dos dados existentes de `topics/*/cwd_overlay/` para `projects/<slug>/cwd_overlay/`
-- [ ] `BootstrapConversationProjectMemory` cria o novo diretório
-- [ ] Cache de memória invalida por slug em vez de por path de tópico
-- [ ] Instruções de prompt atualizadas para refletir o novo path
+- [x] `cwd_overlay` passa a ser escopado por **slug do projeto** (CWD), independente de chat/thread
+- [x] TUI, Telegram DM e grupos/threads compartilham o mesmo `cwd_overlay` quando ativam o mesmo `/cwd`
+- [x] `topic` memory permanece isolada por `(chatID, threadID)` — conversas ainda têm espaço privado
+- [x] `user_global` permanece inalterada (já compartilhada)
+- [x] Migração única dos dados existentes de `topics/*/cwd_overlay/` para `projects/<slug>/cwd_overlay/`
+- [x] `BootstrapConversationProjectMemory` cria o novo diretório
+- [x] Cache de memória invalida por slug em vez de por path de tópico
+- [x] Instruções de prompt atualizadas para refletir o novo path
 
 ## Non-Goals
 

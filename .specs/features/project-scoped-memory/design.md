@@ -1,7 +1,7 @@
 # Project-Scoped CWD Overlay — Design
 
 **Spec:** `.specs/features/project-scoped-memory/spec.md`
-**Status:** Draft
+**Status:** ✅ Validated
 
 ---
 

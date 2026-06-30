@@ -448,6 +448,69 @@ func TestLoadMemoryContents_IsolatesProjectPrivateByThread(t *testing.T) {
 	}
 }
 
+// TestLoadMemoryContents_CwdSwitchPreservesProjectFacts verifies that changing
+// the active /cwd swaps the injected cwd_overlay layer and that returning to a
+// previous project still loads the same on-disk facts (project-scoped memory).
+func TestLoadMemoryContents_CwdSwitchPreservesProjectFacts(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AURELIA_HOME", root)
+	resolver, err := runtime.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cwdA := "/repo/aurelia"
+	cwdB := "/repo/other"
+	overlayA := resolver.ProjectCwdOverlayDir(cwdA)
+	overlayB := resolver.ProjectCwdOverlayDir(cwdB)
+	for _, dir := range []string{overlayA, overlayB} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(overlayA, "facts.md"), []byte("FACT-AURELIA-UNIQUE"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(overlayB, "facts.md"), []byte("FACT-OTHER-UNIQUE"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	bc := &Service{resolver: resolver, memoryCache: NewMemoryCache()}
+	const chatID int64 = 50929027
+	const threadID = 0
+
+	gotA1 := bc.loadMemoryContents(chatID, threadID, 0, nil, cwdA)
+	if !strings.Contains(gotA1, "FACT-AURELIA-UNIQUE") {
+		t.Fatalf("expected project A facts on first load, got %q", gotA1)
+	}
+	if strings.Contains(gotA1, "FACT-OTHER-UNIQUE") {
+		t.Fatalf("project B facts leaked into project A load: %q", gotA1)
+	}
+
+	gotB := bc.loadMemoryContents(chatID, threadID, 0, nil, cwdB)
+	if !strings.Contains(gotB, "FACT-OTHER-UNIQUE") {
+		t.Fatalf("expected project B facts after cwd switch, got %q", gotB)
+	}
+	if strings.Contains(gotB, "FACT-AURELIA-UNIQUE") {
+		t.Fatalf("project A facts leaked into project B load: %q", gotB)
+	}
+
+	// Simulate /cwd handler cache invalidation for the restored project.
+	bc.InvalidateMemoryOverlay(cwdA)
+	gotA2 := bc.loadMemoryContents(chatID, threadID, 0, nil, cwdA)
+	if !strings.Contains(gotA2, "FACT-AURELIA-UNIQUE") {
+		t.Fatalf("expected project A facts preserved after returning to cwd A, got %q", gotA2)
+	}
+	if strings.Contains(gotA2, "FACT-OTHER-UNIQUE") {
+		t.Fatalf("project B facts leaked after returning to cwd A: %q", gotA2)
+	}
+
+	gotNone := bc.loadMemoryContents(chatID, threadID, 0, nil, "")
+	if strings.Contains(gotNone, "FACT-AURELIA-UNIQUE") || strings.Contains(gotNone, "FACT-OTHER-UNIQUE") {
+		t.Fatalf("cwd_overlay should not load without active /cwd, got %q", gotNone)
+	}
+}
+
 // fakeRunLog implements runlog.Store for testing checkpoint injection.
 type fakeRunLog struct {
 	latest *runlog.RunRecord
