@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.37.7] - 2026-06-30
+
+### Changed
+- Bridge overflow buffer: when the per-request event channel (128) fills, spill
+  non-terminal events into a bounded overflow queue (512) instead of dropping
+  immediately. FIFO order preserved; terminal events still evict into overflow
+  when possible (~768 events buffered before drop on slow consumers).
+
 ## [0.37.6] - 2026-06-30
 
 ### Added
