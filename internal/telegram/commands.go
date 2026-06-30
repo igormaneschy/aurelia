@@ -834,7 +834,7 @@ func (bc *BotController) cmdListAgents(c telebot.Context) (string, error) {
 	lines = append(lines, fmt.Sprintf("Perfil ativo: **%s**", displayActive))
 	lines = append(lines, "")
 	for _, p := range all {
-		lines = append(lines, formatProfileCatalogLine(p, displayActive, verbose))
+		lines = append(lines, profiles.FormatCatalogLine(p, displayActive, verbose))
 	}
 	lines = append(lines, "")
 	lines = append(lines, "Use `/mode <perfil>` para definir o perfil padrão.")
@@ -844,38 +844,6 @@ func (bc *BotController) cmdListAgents(c telebot.Context) (string, error) {
 	}
 
 	return strings.Join(lines, "\n"), nil
-}
-
-func formatProfileCatalogLine(p *profiles.PromptProfile, activeDefault string, verbose bool) string {
-	desc := p.Description
-	if desc == "" {
-		desc = "(sem descrição)"
-	}
-	marker := ""
-	if strings.EqualFold(p.Name, activeDefault) {
-		marker = " (● ativo)"
-	}
-	line := fmt.Sprintf("- **%s**%s: %s", p.Name, marker, desc)
-	if !verbose {
-		return line
-	}
-	var hints []string
-	if p.Harness != "" && p.Harness != "pi" {
-		hints = append(hints, "harness="+p.Harness)
-	}
-	if p.Model != "" {
-		hints = append(hints, "model="+p.Model)
-	}
-	if p.CapabilityProfile != "" {
-		hints = append(hints, "capability="+p.CapabilityProfile)
-	}
-	if len(p.Tags) > 0 {
-		hints = append(hints, "tags="+strings.Join(p.Tags, ","))
-	}
-	if len(hints) == 0 {
-		return line
-	}
-	return line + " _[" + strings.Join(hints, ", ") + "]_"
 }
 
 func (bc *BotController) cmdListModels() (string, error) {

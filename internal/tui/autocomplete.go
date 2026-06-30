@@ -6,6 +6,8 @@ var tuiCommandSuggestions = []string{
 	"/help",
 	"/status",
 	"/cwd",
+	"/mode",
+	"/agents",
 	"/model",
 	"/img",
 	"/attach",

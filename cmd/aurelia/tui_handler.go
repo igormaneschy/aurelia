@@ -277,6 +277,10 @@ func handleTUICommand(ctx context.Context, a *app, msg ipc.IPCMessage, emit func
 		response = handleTUIModel(ctx, a, chatID, threadID, userID, text)
 	case strings.HasPrefix(text, "/cwd"):
 		response = handleTUICwd(ctx, a, chatID, threadID, userID, text)
+	case text == "/mode" || strings.HasPrefix(text, "/mode "):
+		response = handleTUIMode(a, userID, text)
+	case text == "/agents" || strings.HasPrefix(text, "/agents "):
+		response = handleTUIAgents(a, userID, text)
 	case text == "/reset":
 		response = handleTUIReset(a, chatID, threadID, userID)
 	case strings.HasPrefix(text, "/status"):
@@ -306,6 +310,11 @@ Commands:
 - /cwd — show current project binding
 - /cwd <path> — set the project working directory
 - /cwd clear — remove the project binding
+- /mode — show active prompt profile
+- /mode <profile> — set default prompt profile
+- /mode explain <profile> — safe profile summary
+- /agents — list available prompt profiles
+- /agents verbose — list with model/capability hints
 - /reset — clear PI session context and start fresh
 - /img <path> — attach an image (png, jpg, gif, webp)
 - /attach <path> — attach a document (md, docx, pdf, etc.)
@@ -596,6 +605,8 @@ func handleTUIStatus(ctx context.Context, a *app, chatID int64, threadID int, us
 		fmt.Fprintf(&b, "⚙️ Model: **%s**\n", a.config.ModelDisplayName())
 	}
 
+	fmt.Fprintf(&b, "🎭 Profile: **%s**\n", tuiActiveProfileName(a, userID))
+
 	if a.bindings != nil {
 		resolved, err := a.bindings.Resolve(ctx, projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID})
 		if err == nil && resolved != nil && resolved.Binding != nil {
@@ -708,9 +719,13 @@ func fillTUIProjectAgent(a *app, userID int64, payload *ipc.ProjectStatePayload)
 		payload.ActiveAgent = "general"
 		return
 	}
-	// ResolveEffectiveForUser with empty text (no @mention) and isOwner=true
-	// for the TUI (all local users are trusted).
-	profile, _, err := resolver.ResolveEffectiveForUser("", "", userID, true)
+	activeMode := ""
+	if store := a.bot.UserStore(); store != nil {
+		if userProfile, err := store.Get(userID); err == nil && userProfile != nil {
+			activeMode = userProfile.ActiveMode
+		}
+	}
+	profile, _, err := resolver.ResolveEffectiveForUser("", activeMode, userID, true)
 	if err != nil || profile == nil {
 		payload.ActiveAgent = "general"
 		return
