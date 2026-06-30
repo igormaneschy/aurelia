@@ -601,4 +601,4 @@ Full guide: [docs/OPERATIONS.md](docs/OPERATIONS.md).
 - Go test suite is green
 - TypeScript Bridge compiles clean
 - Runtime target: macOS/Linux local daemon; Windows support is not a current operational target
-- Current architectural track: foundation P0–P2 closed (✅); planning/orchestration removed v0.38.0 (✅ — PI SDK owns agentic execution); active work: project-scoped memory, Prompt Profiles Phase 2–3, bridge adapter interface — see [.specs/project/ROADMAP.md](.specs/project/ROADMAP.md) §13
+- Current architectural track: foundation P0–P2 closed (✅); planning/orchestration removed v0.38.0 (✅ — PI SDK owns agentic execution); active work: Prompt Profiles Phase 3, bridge adapter interface — see [.specs/project/ROADMAP.md](.specs/project/ROADMAP.md) §13
