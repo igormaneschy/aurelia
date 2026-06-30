@@ -66,14 +66,13 @@ type LifecyclePolicy struct {
 
 // DefaultLifecyclePolicy returns safe defaults for session lifecycle policy.
 // PI SDK handles auto-compaction internally (contextWindow - reserveTokens).
-// Aurelia must not rotate large sessions just because token counters are high:
-// rotation creates a new session seeded by a generated summary and can degrade
-// topic continuity. Token thresholds are now observability signals only.
+// Aurelia's TokenGuard escalates to compact/rotate when growth stalls — see
+// token_guard.go. Thresholds here drive both observability and guard actions.
 func DefaultLifecyclePolicy() LifecyclePolicy {
 	return LifecyclePolicy{
 		Enabled:                      true,
-		CompactAfterInputTokens:      200000, // informational — PI SDK manages normal compaction
-		RotateAfterInputTokens:       500000, // informational — automatic token rotation is disabled
+		CompactAfterInputTokens:      200000, // token guard starts tracking above this
+		RotateAfterInputTokens:       500000, // token guard rotates immediately above this
 		MaxEmptyResultsBeforeRotate:  2,
 		MaxProcessDeathsBeforeRotate: 2,
 		IdleTimeoutMinutes:           20,
