@@ -1,7 +1,7 @@
 # Project-Scoped CWD Overlay — Tasks
 
 **Design:** `.specs/features/project-scoped-memory/design.md`
-**Status:** Draft
+**Status:** ✅ Done (v0.37.0 implementation, v0.38.1 validation + doc closure)
 
 ---
 

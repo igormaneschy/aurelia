@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.38.1] - 2026-06-30
+
+### Added
+- Regression test `TestLoadMemoryContents_CwdSwitchPreservesProjectFacts`:
+  changing `/cwd` swaps the injected `cwd_overlay` layer per project slug;
+  returning to a previous project reloads the same on-disk facts.
+
+### Changed
+- Project-scoped-memory spec, design, and tasks marked validated (implemented
+  in v0.37.0; closure in v0.38.1).
+- ROADMAP §13: project-scoped-memory moved to done.
+
 ## [0.38.0] - 2026-06-30
 
 ### Removed

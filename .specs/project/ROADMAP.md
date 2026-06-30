@@ -50,7 +50,7 @@ O objetivo é evitar dois extremos: o Aurélia não deve virar apenas um wrapper
 **Track ativo pós-v0.38.0** (ver também §13):
 
 1. **Higiene documental** — alinhar ROADMAP, PROJECT, README e specs superseded com a decisão pinned `no-planning-mode-or-orchestrator`.
-2. **Project-scoped memory** — unificar `cwd_overlay` por slug de projeto (TUI + Telegram + grupos); spec `.specs/features/project-scoped-memory/`.
+2. ~~**Project-scoped memory**~~ — ✅ v0.37.0 + closure v0.38.1; `cwd_overlay` unificado por slug (TUI + Telegram + grupos); spec `.specs/features/project-scoped-memory/`.
 3. **Prompt Profiles Phase 2–3** — user-private profiles + mode overlays no `profiles.Resolver`; spec `.specs/features/prompt-profiles/`.
 4. **Bridge Adapter Interface** — costura `engine.Engine` antes de multi-harness; spec `.specs/features/bridge-adapter-interface/`.
 5. **Long-flow UX v2** — polish Telegram em sessões longas; spec `.specs/features/long-flow-ux-v2/`.
@@ -353,7 +353,7 @@ boundary established in Sprint 0 (Delegate to PI SDK).
 
 | Priority | Spec | Status | Notes |
 |----------|------|:------:|-------|
-| P1 | `.specs/features/project-scoped-memory/` | 📋 Draft | `cwd_overlay` fragmentado entre TUI/Telegram/grupos |
+| — | `.specs/features/project-scoped-memory/` | ✅ v0.37.0 | `cwd_overlay` por slug; migração `migrate-cwd-overlay`; validado |
 | P1 | `.specs/features/prompt-profiles/` Phase 2–3 | 🟡 Partial | `internal/profiles/` exists; user-private layer pending |
 | P2 | `.specs/features/bridge-adapter-interface/` | 📋 Draft | No `internal/engine/` yet |
 | P2 | `.specs/features/long-flow-ux-v2/` | Proposed | UX polish for long PI turns |
