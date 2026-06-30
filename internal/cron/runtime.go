@@ -391,9 +391,10 @@ func (r *BridgeCronRuntime) runJob(ctx context.Context, job CronJob) (*Execution
 	opts.AllowedTools = allowedTools
 
 	ev, err := r.execute(ctx, bridge.Request{
-		Command: "query",
-		Prompt:  scrubbedPrompt,
-		Options: opts,
+		Command:  "query",
+		Prompt:   scrubbedPrompt,
+		Options:  opts,
+		Priority: bridge.PriorityCron,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("bridge execute: %w", err)

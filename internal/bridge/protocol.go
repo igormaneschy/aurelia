@@ -8,6 +8,8 @@ type Request struct {
 	TargetRequestID string         `json:"target_request_id,omitempty"`
 	Refresh         bool           `json:"refresh,omitempty"`
 	Options         RequestOptions `json:"options,omitempty"`
+	// Priority gates dispatch on the Go side (not sent to the TS bridge).
+	Priority Priority `json:"-"`
 }
 
 // ImageAttachment represents a base64-encoded image to send alongside the prompt.
