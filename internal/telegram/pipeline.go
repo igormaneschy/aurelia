@@ -106,10 +106,6 @@ func (bc *BotController) processBridgeEventsAsyncWithThread(chat *telebot.Chat, 
 	return bridgeOutcome(bc.ensurePipeline().ProcessBridgeEvents(chat.ID, threadID, messageID, ch, progress, userText, nil, uid, chat.Type == telebot.ChatPrivate, nil, nil))
 }
 
-func (bc *BotController) invalidateMemoryDirs(chatID int64, threadID int, userID int64, cwd string) {
-	bc.ensurePipeline().InvalidateMemoryDirs(chatID, threadID, userID, cwd)
-}
-
 func (bc *BotController) invalidateMemoryOverlay(cwd string) {
 	bc.ensurePipeline().InvalidateMemoryOverlay(cwd)
 }
