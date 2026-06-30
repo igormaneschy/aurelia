@@ -20,8 +20,9 @@ import (
 // on daemon restart it resets to 0, triggering a fresh summary on the
 // next turn from existing continuity state.
 type summaryCounter struct {
-	mu     sync.Mutex
-	counts map[continuity.ConversationKey]int
+	mu       sync.Mutex
+	counts   map[continuity.ConversationKey]int
+	lastSeen map[continuity.ConversationKey]time.Time
 }
 
 // increment increments the turn counter and returns the new count and whether
@@ -29,7 +30,11 @@ type summaryCounter struct {
 func (c *summaryCounter) increment(key continuity.ConversationKey, interval int) (int, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.lastSeen == nil {
+		c.lastSeen = make(map[continuity.ConversationKey]time.Time)
+	}
 	c.counts[key]++
+	c.lastSeen[key] = time.Now()
 	turns := c.counts[key]
 	return turns, turns >= interval
 }
@@ -39,6 +44,31 @@ func (c *summaryCounter) reset(key continuity.ConversationKey) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.counts, key)
+	if c.lastSeen != nil {
+		delete(c.lastSeen, key)
+	}
+}
+
+// gc removes counter entries not touched since maxAge ago.
+func (c *summaryCounter) gc(maxAge time.Duration) int {
+	if c == nil || maxAge <= 0 {
+		return 0
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cutoff := time.Now().Add(-maxAge)
+	removed := 0
+	for key := range c.counts {
+		seen, ok := c.lastSeen[key]
+		if !ok || seen.Before(cutoff) {
+			delete(c.counts, key)
+			if c.lastSeen != nil {
+				delete(c.lastSeen, key)
+			}
+			removed++
+		}
+	}
+	return removed
 }
 
 // runeCap returns the first n runes of s, preserving valid UTF-8.

@@ -118,6 +118,7 @@ func (b *bridgeModelCataloger) ModelSupportsImagesByID(ctx context.Context, mode
 type runLogState struct {
 	mu               sync.Mutex
 	runID            string
+	startedAt        time.Time
 	summary          strings.Builder
 	summaryCount     int
 	wg               sync.WaitGroup // tracks in-flight DB updates
@@ -1632,7 +1633,7 @@ func (s *Service) startRunLog(p startRunLogParams) bool {
 		log.Printf("runlog: failed to start %s: %v", p.RequestID, err)
 		return false
 	}
-	s.runLogStates[key] = &runLogState{runID: runID}
+	s.runLogStates[key] = &runLogState{runID: runID, startedAt: now}
 	return true
 }
 

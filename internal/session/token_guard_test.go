@@ -1,6 +1,9 @@
 package session
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestTokenGuard_NoEscalationBelowCompact(t *testing.T) {
 	g := NewTokenGuard()
@@ -121,5 +124,21 @@ func TestWarnInputTokensThreshold(t *testing.T) {
 	policy := DefaultLifecyclePolicy()
 	if WarnInputTokensThreshold(policy) != DefaultWarnInputTokens {
 		t.Fatalf("expected default warn %d", DefaultWarnInputTokens)
+	}
+}
+
+func TestTokenGuardGC_RemovesStaleEntries(t *testing.T) {
+	g := NewTokenGuard()
+	key := SessionKey{ChatID: 1, ThreadID: 0, UserID: 100}
+	policy := DefaultLifecyclePolicy()
+	g.Evaluate(key, 250_000, policy)
+
+	g.mu.Lock()
+	g.entries[key] = tokenGuardEntry{LastInputTokens: 250_000, LastTouched: time.Now().Add(-48 * time.Hour)}
+	g.mu.Unlock()
+
+	removed := g.GC(24 * time.Hour)
+	if removed != 1 {
+		t.Fatalf("removed = %d, want 1", removed)
 	}
 }

@@ -3,6 +3,7 @@ package session
 import (
 	"fmt"
 	"sync"
+	"time"
 )
 
 const (
@@ -26,6 +27,7 @@ type TokenGuard struct {
 type tokenGuardEntry struct {
 	LastInputTokens int
 	StallTurns      int
+	LastTouched     time.Time
 }
 
 // NewTokenGuard creates an empty token guard tracker.
@@ -73,6 +75,7 @@ func (g *TokenGuard) Evaluate(key SessionKey, inputTokens int, policy LifecycleP
 		entry.StallTurns++
 	}
 	entry.LastInputTokens = inputTokens
+	entry.LastTouched = time.Now()
 	g.entries[key] = entry
 
 	stallLimit := largeTurnsBeforeCompact(policy)
@@ -92,6 +95,24 @@ func (g *TokenGuard) Evaluate(key SessionKey, inputTokens int, policy LifecycleP
 			stallLimit, tokenReductionMinPercent, inputTokens, policy.CompactAfterInputTokens,
 		),
 	}, true
+}
+
+// GC removes entries not touched since maxAge ago.
+func (g *TokenGuard) GC(maxAge time.Duration) int {
+	if g == nil || maxAge <= 0 {
+		return 0
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	cutoff := time.Now().Add(-maxAge)
+	removed := 0
+	for key, entry := range g.entries {
+		if entry.LastTouched.IsZero() || entry.LastTouched.Before(cutoff) {
+			delete(g.entries, key)
+			removed++
+		}
+	}
+	return removed
 }
 
 // Reset clears tracking for a session (after rotate, cold resume, or /new).

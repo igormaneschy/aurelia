@@ -552,6 +552,7 @@ func (a *app) start() {
 		})
 	}
 	a.startSessionGC()
+	a.startPipelineMapsGC()
 	if a.ipcServer != nil {
 		// Wire TUI handler before starting.
 		a.ipcServer.StreamHandler = makeTUIHandler(a)
@@ -643,11 +644,7 @@ func (a *app) startSessionGC() {
 	if a.sessions == nil || a.config == nil {
 		return
 	}
-	ttlHours := a.config.SessionTTLHours
-	if ttlHours <= 0 {
-		ttlHours = 168
-	}
-	maxAge := time.Duration(ttlHours) * time.Hour
+	maxAge := a.sessionGCMaxAge()
 	goSafe("session GC", func() {
 		ticker := time.NewTicker(1 * time.Hour)
 		defer ticker.Stop()
@@ -659,6 +656,28 @@ func (a *app) startSessionGC() {
 				a.sessions.GC(maxAge)
 			}
 		}
+	})
+}
+
+func (a *app) sessionGCMaxAge() time.Duration {
+	ttlHours := 168
+	if a.config != nil && a.config.SessionTTLHours > 0 {
+		ttlHours = a.config.SessionTTLHours
+	}
+	return time.Duration(ttlHours) * time.Hour
+}
+
+func (a *app) startPipelineMapsGC() {
+	if a.bot == nil {
+		return
+	}
+	svc := a.bot.Pipeline()
+	if svc == nil {
+		return
+	}
+	maxAge := a.sessionGCMaxAge()
+	goSafe("pipeline maps GC", func() {
+		svc.StartMapsGC(a.cronCtx, 1*time.Hour, maxAge)
 	})
 }
 

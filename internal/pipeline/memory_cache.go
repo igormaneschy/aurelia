@@ -135,6 +135,24 @@ func (c *MemoryCache) put(dir string, content string, mtimes map[string]time.Tim
 	c.mu.Unlock()
 }
 
+// gc removes cache entries not validated since maxAge ago.
+func (c *MemoryCache) gc(maxAge time.Duration) int {
+	if c == nil || maxAge <= 0 {
+		return 0
+	}
+	cutoff := time.Now().Add(-maxAge)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	removed := 0
+	for dir, entry := range c.entries {
+		if entry.lastValidated.Before(cutoff) {
+			delete(c.entries, dir)
+			removed++
+		}
+	}
+	return removed
+}
+
 // Invalidate removes the cached entry for dir, forcing a re-read on next access.
 func (c *MemoryCache) Invalidate(dir string) {
 	if dir == "" {
