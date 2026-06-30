@@ -123,6 +123,7 @@ type runLogState struct {
 	wg               sync.WaitGroup // tracks in-flight DB updates
 	partialAssistant string         // last partial assistant text, for checkpoint on timeout
 	writeToolsUsed   bool           // Write/Edit tools may have changed memory files
+	pendingEvents    []runlog.RunEvent
 }
 
 // activeRun is stored in activeSessions to carry both a cancel function
@@ -1656,6 +1657,26 @@ func (s *Service) recordPipelineEvent(chatID int64, threadID int, userID int64, 
 		return
 	}
 	ev.RunID = runID
+
+	key := runLogKey(chatID, threadID, userID)
+	s.runLogMu.Lock()
+	state, ok := s.runLogStates[key]
+	s.runLogMu.Unlock()
+	if ok && state != nil {
+		state.mu.Lock()
+		state.pendingEvents = append(state.pendingEvents, runlog.RunEvent{
+			RunID:        ev.RunID,
+			Timestamp:    ev.Timestamp.Unix(),
+			Phase:        ev.Phase,
+			Level:        ev.Level,
+			Message:      ev.Message,
+			MetadataJSON: ev.MetadataJSON,
+		})
+		state.mu.Unlock()
+		return
+	}
+
+	// Post-completion events (state already cleaned up) write immediately.
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 	if err := s.runLog.RecordEvent(ctx, runlog.RunEvent{
@@ -1751,8 +1772,6 @@ func (s *Service) recordToolUse(chatID int64, threadID int, userID int64, toolNa
 	}
 
 	state.mu.Lock()
-	needsUpdate := false
-	var toolSummary string
 	if toolName == "Write" || toolName == "Edit" {
 		state.writeToolsUsed = true
 	}
@@ -1760,34 +1779,8 @@ func (s *Service) recordToolUse(chatID int64, threadID int, userID int64, toolNa
 		state.summary.WriteString(", ")
 	}
 	state.summary.WriteString(toolName)
-
-	// Persist summary every 5 tools to avoid loss on crash
 	state.summaryCount++
-	if state.summaryCount%5 == 0 {
-		toolSummary = state.summary.String()
-		needsUpdate = true
-	}
 	state.mu.Unlock()
-
-	if needsUpdate {
-		state.wg.Add(1)
-		go func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("pipeline: panic in recordToolUse update: %v", r)
-				}
-			}()
-			defer state.wg.Done()
-			updateCtx, updateCancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer updateCancel()
-			if err := s.runLog.Update(updateCtx, runlog.RunUpdate{
-				RunID:       state.runID,
-				ToolSummary: &toolSummary,
-			}); err != nil {
-				log.Printf("runlog: failed to persist tool summary for %s: %v", state.runID, err)
-			}
-		}()
-	}
 }
 
 // savePartialAssistant stores the current partial assistant response text
@@ -1841,10 +1834,12 @@ func (s *Service) completeRunLog(chatID int64, threadID int, userID int64, statu
 		return
 	}
 
-	// Capture final tool summary and partial assistant text under the per-state lock
+	// Capture final tool summary, pending events, and partial assistant text.
 	state.mu.Lock()
 	summary := state.summary.String()
 	partialAssistant := state.partialAssistant
+	pendingEvents := append([]runlog.RunEvent(nil), state.pendingEvents...)
+	state.pendingEvents = nil
 	state.mu.Unlock()
 
 	// Defensive redaction: assistant output may contain credentials.
@@ -1860,26 +1855,17 @@ func (s *Service) completeRunLog(chatID int64, threadID int, userID int64, statu
 		checkpoint = buildCheckpoint(status, checkpoint, summary, errMsg, partialAssistant)
 	}
 
-	// Wait for any in-flight DB updates (e.g., tool summary from recordToolUse)
-	// before completing the runlog entry, ensuring consistent ordering.
 	state.wg.Wait()
 
 	completeCtx, completeCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer completeCancel()
-	if err := s.runLog.Complete(completeCtx, state.runID, status, checkpoint, errMsg); err != nil {
-		log.Printf("runlog: failed to complete %s (status=%s): %v", state.runID, status, err)
-	}
-
-	// Flush session update with final summary
-	if summary != "" {
-		flushCtx, flushCancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer flushCancel()
-		if err := s.runLog.Update(flushCtx, runlog.RunUpdate{
-			RunID:       state.runID,
-			ToolSummary: &summary,
-		}); err != nil {
-			log.Printf("runlog: failed to update summary for %s: %v", state.runID, err)
+	if len(pendingEvents) > 0 {
+		if err := s.runLog.RecordEvents(completeCtx, pendingEvents); err != nil {
+			log.Printf("runlog: failed to flush %d events for %s: %v", len(pendingEvents), state.runID, err)
 		}
+	}
+	if err := s.runLog.Complete(completeCtx, state.runID, status, checkpoint, errMsg, summary); err != nil {
+		log.Printf("runlog: failed to complete %s (status=%s): %v", state.runID, status, err)
 	}
 }
 

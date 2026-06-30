@@ -207,8 +207,12 @@ type fakeRunLogStore struct{}
 
 func (f *fakeRunLogStore) Start(_ context.Context, _ runlog.RunRecord) error  { return nil }
 func (f *fakeRunLogStore) Update(_ context.Context, _ runlog.RunUpdate) error { return nil }
-func (f *fakeRunLogStore) Complete(_ context.Context, _ string, _ runlog.RunStatus, _, _ string) error {
+func (f *fakeRunLogStore) Complete(_ context.Context, _ string, _ runlog.RunStatus, _, _, _ string) error {
 	return nil
+}
+func (f *fakeRunLogStore) RecordEvents(_ context.Context, _ []runlog.RunEvent) error { return nil }
+func (f *fakeRunLogStore) Prune(_ context.Context, _ runlog.PruneOptions) (runlog.PruneResult, error) {
+	return runlog.PruneResult{}, nil
 }
 func (f *fakeRunLogStore) Latest(_ context.Context, _ int64, _ int) (*runlog.RunRecord, error) {
 	return nil, nil

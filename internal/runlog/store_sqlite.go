@@ -318,16 +318,16 @@ func (s *SQLiteStore) Update(ctx context.Context, update RunUpdate) error {
 	return nil
 }
 
-// Complete marks a run with a terminal status and optional checkpoint/error.
+// Complete marks a run with a terminal status and optional checkpoint/error/tool summary.
 // Also sets completed_at and updates updated_at.
-func (s *SQLiteStore) Complete(ctx context.Context, runID string, status RunStatus, checkpoint, errMsg string) error {
+func (s *SQLiteStore) Complete(ctx context.Context, runID string, status RunStatus, checkpoint, errMsg, toolSummary string) error {
 	now := unix(time.Now())
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE run_journal
-		SET status = ?, checkpoint = ?, error = ?,
+		SET status = ?, checkpoint = ?, error = ?, tool_summary = ?,
 		    updated_at = ?, completed_at = ?
 		WHERE run_id = ?`,
-		string(status), checkpoint, errMsg, now, now, runID)
+		string(status), checkpoint, errMsg, toolSummary, now, now, runID)
 	if err != nil {
 		return fmt.Errorf("runlog complete %s: %w", runID, err)
 	}
@@ -359,6 +359,44 @@ func (s *SQLiteStore) Latest(ctx context.Context, chatID int64, threadID int) (*
 // ---------------------------------------------------------------------------
 // New Store methods (observability)
 // ---------------------------------------------------------------------------
+
+// RecordEvents persists multiple timeline events in one transaction.
+func (s *SQLiteStore) RecordEvents(ctx context.Context, events []RunEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("runlog record_events begin: %w", err)
+	}
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO run_events (run_id, ts, phase, level, message, metadata_json)
+		VALUES (?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		_ = tx.Rollback()
+		return fmt.Errorf("runlog record_events prepare: %w", err)
+	}
+	defer func() { _ = stmt.Close() }()
+
+	for _, ev := range events {
+		ts := ev.Timestamp
+		if ts == 0 {
+			ts = unix(time.Now())
+		}
+		level := ev.Level
+		if level == "" {
+			level = "info"
+		}
+		if _, err := stmt.ExecContext(ctx, ev.RunID, ts, ev.Phase, level, ev.Message, ev.MetadataJSON); err != nil {
+			_ = tx.Rollback()
+			return fmt.Errorf("runlog record_events %s/%s: %w", ev.RunID, ev.Phase, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("runlog record_events commit: %w", err)
+	}
+	return nil
+}
 
 // RecordEvent persists a single run event to the timeline.
 // Best-effort: errors are logged, never block the caller.
@@ -502,6 +540,57 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, chatID int64, limit int) ([]
 		return nil, fmt.Errorf("runlog list_runs rows: %w", err)
 	}
 	return records, nil
+}
+
+// Prune deletes terminal runs older than opts.OlderThan and their events.
+// Running runs are never deleted.
+func (s *SQLiteStore) Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
+	cutoff := unix(opts.OlderThan)
+	if cutoff <= 0 {
+		return PruneResult{}, fmt.Errorf("runlog prune: invalid OlderThan %v", opts.OlderThan)
+	}
+
+	var result PruneResult
+	countQuery := `
+		SELECT
+			(SELECT COUNT(*) FROM run_journal
+			 WHERE started_at < ? AND status != ?) AS runs,
+			(SELECT COUNT(*) FROM run_events
+			 WHERE run_id IN (
+				SELECT run_id FROM run_journal
+				WHERE started_at < ? AND status != ?
+			 )) AS events`
+	if err := s.db.QueryRowContext(ctx, countQuery, cutoff, string(RunRunning), cutoff, string(RunRunning)).
+		Scan(&result.RunsDeleted, &result.EventsDeleted); err != nil {
+		return PruneResult{}, fmt.Errorf("runlog prune count: %w", err)
+	}
+	if opts.DryRun || result.RunsDeleted == 0 {
+		return result, nil
+	}
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return PruneResult{}, fmt.Errorf("runlog prune begin: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM run_events
+		WHERE run_id IN (
+			SELECT run_id FROM run_journal
+			WHERE started_at < ? AND status != ?
+		)`, cutoff, string(RunRunning)); err != nil {
+		_ = tx.Rollback()
+		return PruneResult{}, fmt.Errorf("runlog prune delete events: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM run_journal
+		WHERE started_at < ? AND status != ?`, cutoff, string(RunRunning)); err != nil {
+		_ = tx.Rollback()
+		return PruneResult{}, fmt.Errorf("runlog prune delete runs: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return PruneResult{}, fmt.Errorf("runlog prune commit: %w", err)
+	}
+	return result, nil
 }
 
 // Close releases the database connection.
