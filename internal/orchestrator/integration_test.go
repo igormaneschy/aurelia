@@ -47,10 +47,7 @@ func TestOrchestrationCycle_Smoke(t *testing.T) {
 	repoDir := t.TempDir()
 	gitExec := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", append([]string{"-C", repoDir}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v\n%s", args, err, out)
-		}
+		runGitInDir(t, repoDir, args...)
 	}
 	gitExec("init")
 	gitExec("config", "user.email", "test@test.com")

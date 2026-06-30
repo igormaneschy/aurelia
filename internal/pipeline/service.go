@@ -82,6 +82,10 @@ type Config struct {
 	// (which creates a pipeline per send) reuses the mtime cache between turns.
 	// When nil, NewService creates a fresh one.
 	MemoryCache *MemoryCache
+	// TokenGuard, when set, is shared across pipeline instances so the TUI
+	// (which creates a pipeline per send) retains stall-turn compaction state.
+	// When nil, NewService creates a fresh one.
+	TokenGuard *session.TokenGuard
 }
 
 // Service owns the LLM/message pipeline independent from Telegram routing.
@@ -194,7 +198,7 @@ func NewService(cfg Config) *Service {
 		continuity:       cfg.Continuity,
 		summaryCounter:   &summaryCounter{counts: make(map[continuity.ConversationKey]int)},
 		summaryInterval:  defaultSummaryInterval,
-		tokenGuard:       session.NewTokenGuard(),
+		tokenGuard:       cfg.TokenGuard,
 		usersStore:       cfg.UsersStore,
 		userResolver:     cfg.UserResolver,
 		activeToolStates: make(map[string]activeToolState),
@@ -207,6 +211,9 @@ func NewService(cfg Config) *Service {
 	}
 	if s.memoryCache == nil {
 		s.memoryCache = NewMemoryCache()
+	}
+	if s.tokenGuard == nil {
+		s.tokenGuard = session.NewTokenGuard()
 	}
 
 	if cfg.Bridge != nil {
@@ -478,6 +485,12 @@ func (s *Service) NudgeBuffer() *session.NudgeBuffer {
 // per-send pipelines should hold the same cache pointer).
 func (s *Service) MemoryCache() *MemoryCache {
 	return s.memoryCache
+}
+
+// TokenGuard returns the session token guard. Exposed so callers can share one
+// instance across Telegram and TUI pipeline instances.
+func (s *Service) TokenGuard() *session.TokenGuard {
+	return s.tokenGuard
 }
 
 // getSecurityConfig returns the security configuration from AppConfig,

@@ -67,6 +67,7 @@ type BotController struct {
 	runLog             runlog.Store
 	pipeline           *pipelinepkg.Service
 	memoryCache        *pipelinepkg.MemoryCache // shared across Telegram + TUI pipeline instances
+	tokenGuard         *session.TokenGuard      // shared across Telegram + TUI pipeline instances
 
 	onboardingStore *users.OnboardingStore
 	userGate        *UserGate
@@ -191,6 +192,7 @@ func NewBotController(
 		UserResolver: userResolver,
 		NudgeBuffer:  bc.NudgeBuffer(),
 		MemoryCache:  bc.MemoryCache(),
+		TokenGuard:   bc.TokenGuard(),
 	})
 	// nudgeBuffer is owned by the bot (shared with TUI); pipeline uses the same.
 	bc.nudgeBuffer = bc.pipeline.NudgeBuffer()
@@ -456,4 +458,14 @@ func (bc *BotController) MemoryCache() *pipelinepkg.MemoryCache {
 		bc.memoryCache = pipelinepkg.NewMemoryCache()
 	}
 	return bc.memoryCache
+}
+
+// TokenGuard returns the shared session token guard, creating it lazily on
+// first access. Shared across Telegram and TUI so stall-turn compaction
+// state survives across TUI sends (TUI creates a pipeline per send).
+func (bc *BotController) TokenGuard() *session.TokenGuard {
+	if bc.tokenGuard == nil {
+		bc.tokenGuard = session.NewTokenGuard()
+	}
+	return bc.tokenGuard
 }

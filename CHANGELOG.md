@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.37.3] - 2026-06-30
+
+### Fixed
+- TUI token guard: share `TokenGuard` singleton with Telegram so stall-turn
+  compact/rotate escalation persists across per-send TUI pipelines (parity with
+  Telegram validation).
+
+### Changed
+- Orchestrator tests: isolate ephemeral git repos from global OpenCode git hooks
+  (`core.hooksPath` + protected-branch env) so `go test ./internal/orchestrator`
+  passes under developer git config.
+
 ## [0.37.2] - 2026-06-30
 
 ### Fixed

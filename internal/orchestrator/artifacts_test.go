@@ -16,10 +16,7 @@ func setupTestRepo(t *testing.T) string {
 	dir := t.TempDir()
 
 	initGit := func(args ...string) {
-		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v in %s: %v\n%s", args, dir, err, out)
-		}
+		runGitInDir(t, dir, args...)
 	}
 
 	initGit("init")
@@ -83,7 +80,7 @@ func TestCollectArtifacts_RunsTaskVerify(t *testing.T) {
 	_ = os.WriteFile(testFile, []byte("package main\nimport \"testing\"\nfunc TestFoo(t *testing.T) {}\n"), 0644)
 
 	// Stage but don't commit so diff is empty and verify can run against HEAD tree
-	exec.Command("git", "-C", repo, "add", ".").Run()
+	_ = exec.Command("git", testGitArgs("-C", repo, "add", ".")...).Run()
 
 	o := NewOrchestrator(nil, OrchestratorConfig{RepoRoot: repo})
 	art, err := o.CollectArtifacts(context.Background(), repo,
