@@ -1372,18 +1372,15 @@ func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, e
 	content := eventContent(ev)
 	if content != "" {
 		prior := assistantText.String()
-		if prior != "" && prior != content {
-			diff := len(prior) - len(content)
-			if diff < 0 {
-				diff = -diff
-			}
-			// Só loga divergência significativa (>500 chars). Divergências pequenas
-			// são normais: o SDK pode consolidar texto entre tool_use/tool_result
-			// de forma diferente dos deltas de streaming.
-			if diff > 500 {
-				log.Printf("bridge: result.Content diverges from accumulated assistant text (%d vs %d chars, diff=%d)", len(prior), len(content), diff)
-			}
+		if div, ok := detectContentDivergence(prior, content); ok && div.significant() {
+			logContentDivergence(div)
+			s.recordPipelineEvent(chatID, threadID, userID, func() observability.RunEvent {
+				ev := observability.NewWarnEvent("", observability.PhaseBridgeContentDiverges, div.message())
+				ev.MetadataJSON = div.metadataJSON()
+				return ev
+			}())
 		}
+		// Result content is authoritative over streamed deltas.
 		assistantText.Reset()
 		assistantText.WriteString(content)
 	}
