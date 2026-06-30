@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.39.0] - 2026-06-30
+
+### Added
+- User-private prompt profiles at `~/.aurelia/users/<id>/profiles/*.md`
+  (`GetForUser`, `ListForUser` on `profiles.Resolver`).
+- Mode overlay merge: `mode_<name>.md` overlays builtin profile prompts.
+- TUI `/mode` and `/agents` commands (parity with Telegram), including
+  `explain` and `verbose` subcommands.
+- `docs/prompt-profiles.md` — storage layout and usage guide.
+- Shared `profiles.FormatCatalogLine` for metadata-safe catalog formatting.
+
+### Changed
+- Pipeline uses resolver-only profile path; legacy `routeAgent` fallback removed.
+- `/agents` catalog polish: unified listing, `verbose` mode, `explain` subcommand.
+- Prompt Profiles Phase 2 marked complete in spec and ROADMAP §8b/§13.
+
 ## [0.38.1] - 2026-06-30
 
 ### Added
