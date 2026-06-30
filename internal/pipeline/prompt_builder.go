@@ -489,6 +489,13 @@ func (bc *Service) logMemoryLayers(chatID int64, threadID int, userID int64, has
 		len(layers), chatID, threadID, userID, layers, totalChars)
 }
 
+func memoryDirLabel(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	return filepath.Base(dir)
+}
+
 // loadMemoryDir reads MEMORY.md and all .md files from a directory.
 // Results are cached by mtime to avoid redundant disk reads.
 func (bc *Service) loadMemoryDir(dir string) string {
@@ -498,12 +505,29 @@ func (bc *Service) loadMemoryDir(dir string) string {
 
 	if bc.memoryCache != nil {
 		if cached, ok := bc.memoryCache.get(dir); ok {
+			log.Printf("memory: cache hit dir=%s", memoryDirLabel(dir))
 			return cached
 		}
+		log.Printf("memory: cache miss dir=%s", memoryDirLabel(dir))
 	}
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		return ""
+	}
+
+	hasMd := false
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		hasMd = true
+		break
+	}
+	if !hasMd {
+		if bc.memoryCache != nil {
+			bc.memoryCache.put(dir, "", nil)
+		}
 		return ""
 	}
 
@@ -551,8 +575,32 @@ func (bc *Service) loadMemoryDirCompact(dir string) string {
 		return ""
 	}
 
+	cacheKey := compactMemoryCacheKey(dir)
+	if bc.memoryCache != nil {
+		if cached, ok := bc.memoryCache.get(cacheKey); ok {
+			log.Printf("memory: cache hit dir=%s mode=compact", memoryDirLabel(dir))
+			return cached
+		}
+		log.Printf("memory: cache miss dir=%s mode=compact", memoryDirLabel(dir))
+	}
+
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		return ""
+	}
+
+	hasMd := false
+	for _, entry := range entries {
+		if entry.IsDir() || entry.Type()&os.ModeSymlink != 0 || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		hasMd = true
+		break
+	}
+	if !hasMd {
+		if bc.memoryCache != nil {
+			bc.memoryCache.put(cacheKey, "", nil)
+		}
 		return ""
 	}
 
@@ -619,7 +667,11 @@ func (bc *Service) loadMemoryDirCompact(dir string) string {
 	// Notice that budget limitation is in effect
 	sb.WriteString("\n\n*Memory compact mode: memória completa omitida devido ao limite do prompt.*")
 
-	return sb.String()
+	content := sb.String()
+	if bc.memoryCache != nil {
+		bc.memoryCache.put(cacheKey, content, mtimes)
+	}
+	return content
 }
 
 // dedupMemoryIndex removes duplicate entries from a MEMORY.md index.

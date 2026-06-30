@@ -134,8 +134,9 @@ func (p *tuiProgress) Delete() {}
 // tuiRunGuard limits TUI pipeline runs to one at a time.
 // Initialized in bootstrapApp and passed to makeTUIHandler.
 type tuiRunGuard struct {
-	mu     sync.Mutex
-	active bool
+	mu           sync.Mutex
+	active       bool
+	cancelActive func()
 }
 
 // tryAcquire returns true if the run slot was acquired.
@@ -153,7 +154,41 @@ func (g *tuiRunGuard) tryAcquire() bool {
 func (g *tuiRunGuard) release() {
 	g.mu.Lock()
 	g.active = false
+	g.cancelActive = nil
 	g.mu.Unlock()
+}
+
+func (g *tuiRunGuard) setCancel(fn func()) {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	g.cancelActive = fn
+	g.mu.Unlock()
+}
+
+func (g *tuiRunGuard) clearCancel() {
+	if g == nil {
+		return
+	}
+	g.mu.Lock()
+	g.cancelActive = nil
+	g.mu.Unlock()
+}
+
+// cancelIfActive aborts the in-flight TUI pipeline run, if any.
+func (g *tuiRunGuard) cancelIfActive() bool {
+	if g == nil {
+		return false
+	}
+	g.mu.Lock()
+	fn := g.cancelActive
+	g.mu.Unlock()
+	if fn == nil {
+		return false
+	}
+	fn()
+	return true
 }
 
 // makeTUIHandler creates the IPC stream handler for TUI clients.
@@ -414,6 +449,10 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 
 	// Launch pipeline processing (async).
 	pipeErr := pipeSvc.Process(chatID, threadID, 0, enrichedText, attachments, userID, true)
+	if a.tuiRunGuard != nil {
+		a.tuiRunGuard.setCancel(func() { pipeSvc.Cancel(chatID, threadID, userID) })
+		defer a.tuiRunGuard.clearCancel()
+	}
 	if pipeErr != nil {
 		log.Printf("tui: pipeline process error: %s", pipeline.RedactSecrets(pipeErr.Error()))
 		_ = output.SendError(chatID, threadID, pipeline.RedactSecrets(pipeErr.Error()))
@@ -483,15 +522,35 @@ func handleTUICwd(ctx context.Context, a *app, chatID int64, threadID int, userI
 	if a.sessions != nil {
 		a.sessions.SetCwd(chatID, threadID, cwd)
 	}
+	if a.resolver != nil {
+		if err := runtime.BootstrapConversationProjectMemory(a.resolver, cwd, chatID, threadID); err != nil {
+			log.Printf("tui cwd: bootstrap project memory for %s: %v", cwd, err)
+		}
+	}
+	if a.bot != nil {
+		a.bot.InvalidateMemoryOverlay(cwd)
+	}
 	return fmt.Sprintf("✅ Project set to: `%s`", cwd)
 }
 
 // handleTUIReset clears the PI session for the active TUI chat.
 func handleTUIReset(a *app, chatID int64, threadID int, userID int64) string {
-	if a.sessions != nil {
+	canceled := false
+	if a.tuiRunGuard != nil {
+		canceled = a.tuiRunGuard.cancelIfActive()
+	}
+	if a.bot != nil {
+		if a.bot.ResetSession(chatID, threadID, userID, true, true) {
+			canceled = true
+		}
+	} else if a.sessions != nil {
 		a.sessions.ClearSessionForUser(chatID, threadID, userID)
 	}
-	return "🗑️ Session reset. Next message starts a fresh conversation."
+	msg := "🗑️ Session reset. Next message starts a fresh conversation."
+	if canceled {
+		msg = "🛑 Active response canceled.\n" + msg
+	}
+	return msg
 }
 
 // buildTUICwdStatus returns a formatted cwd status string.

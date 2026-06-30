@@ -345,6 +345,7 @@ func bootstrapApp() (*app, error) {
 	}
 	dreamCfg.RunLog = runLogStore
 	dreamCfg.NudgeSender = bot
+	dreamCfg.MemoryCache = bot.MemoryCache()
 	userResolver := users.NewResolver(resolver.Root())
 	dreamer := dream.New(userResolver, resolver, br, dreamCfg)
 	bot.SetDreamer(dreamer)

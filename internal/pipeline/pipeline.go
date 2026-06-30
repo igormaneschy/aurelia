@@ -122,6 +122,7 @@ type runLogState struct {
 	summaryCount     int
 	wg               sync.WaitGroup // tracks in-flight DB updates
 	partialAssistant string         // last partial assistant text, for checkpoint on timeout
+	writeToolsUsed   bool           // Write/Edit tools may have changed memory files
 }
 
 // activeRun is stored in activeSessions to carry both a cancel function
@@ -1752,6 +1753,9 @@ func (s *Service) recordToolUse(chatID int64, threadID int, userID int64, toolNa
 	state.mu.Lock()
 	needsUpdate := false
 	var toolSummary string
+	if toolName == "Write" || toolName == "Edit" {
+		state.writeToolsUsed = true
+	}
 	if state.summary.Len() > 0 {
 		state.summary.WriteString(", ")
 	}

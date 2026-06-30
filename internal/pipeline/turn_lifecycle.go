@@ -184,7 +184,11 @@ func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText strin
 		s.nudgeBuffer.AddToolEvent(chatID, threadID, userID, toolSummary)
 	}
 	s.dreamer.AfterTurnNudge(chatID, threadID, userID, cwd, sessionFile, s.nudgeBuffer)
-	s.InvalidateMemoryDirs(chatID, threadID, userID, cwd)
+	// Invalidate only when the agent used Write/Edit this turn — background nudge/dream
+	// invalidate their own dirs after async writes; broad per-turn wipe defeated the cache.
+	if s.runUsedWriteTools(chatID, threadID, userID) {
+		s.InvalidateMemoryDirs(chatID, threadID, userID, cwd)
+	}
 }
 
 // --- Continuity lifecycle helpers ---

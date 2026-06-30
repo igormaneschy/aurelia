@@ -130,21 +130,31 @@ func validateFilename(name string) error {
 
 // applyUpdates writes one or more memory updates with full validation.
 // It logs each rejected update but continues processing the rest.
-// Returns the number of successfully applied updates.
-func (w *safeMemoryWriter) applyUpdates(updates []memoryUpdate, chatID int64, threadID int, cwd string) int {
+// Returns the number of successfully applied updates and the layer base dirs touched.
+func (w *safeMemoryWriter) applyUpdates(updates []memoryUpdate, chatID int64, threadID int, cwd string) (int, []string) {
 	applied := 0
+	touched := make(map[string]struct{})
 	for _, u := range updates {
-		if err := w.applyOne(u, chatID, threadID, cwd); err != nil {
+		dir, err := w.applyOne(u, chatID, threadID, cwd)
+		if err != nil {
 			log.Printf("[nudge] rejected update %s/%s: %v", u.Layer, u.Filename, err)
-		} else {
-			applied++
+			continue
+		}
+		applied++
+		if dir != "" {
+			touched[dir] = struct{}{}
 		}
 	}
-	return applied
+	dirs := make([]string, 0, len(touched))
+	for dir := range touched {
+		dirs = append(dirs, dir)
+	}
+	return applied, dirs
 }
 
 // applyOne writes one memory update with validation.
-func (w *safeMemoryWriter) applyOne(u memoryUpdate, chatID int64, threadID int, cwd string) error {
+// On success it returns the layer base directory that was written.
+func (w *safeMemoryWriter) applyOne(u memoryUpdate, chatID int64, threadID int, cwd string) (string, error) {
 	// 0. Sanitize title and facts at the shared writer layer so that both
 	// nudge and dream consolidation paths are protected consistently.
 	u.Title = sanitizeTitle(u.Title)
@@ -161,23 +171,23 @@ func (w *safeMemoryWriter) applyOne(u memoryUpdate, chatID int64, threadID int, 
 	}
 	u.Facts = dedupeStrings(u.Facts)
 	if len(u.Facts) == 0 {
-		return fmt.Errorf("no valid facts after sanitization")
+		return "", fmt.Errorf("no valid facts after sanitization")
 	}
 
 	// 1. Validate layer
 	if !allowedLayers[u.Layer] {
-		return errInvalidLayer
+		return "", errInvalidLayer
 	}
 
 	// 2. Validate filename (basename .md only, no separators)
 	if err := validateFilename(u.Filename); err != nil {
-		return err
+		return "", err
 	}
 
 	// 3. Resolve layer target: base + containment root + persona policy
 	lt, err := w.resolveLayerTarget(u.Layer, chatID, threadID, cwd)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	// 4. Build target path
@@ -186,47 +196,47 @@ func (w *safeMemoryWriter) applyOne(u memoryUpdate, chatID int64, threadID int, 
 	// 5. Lexical containment: ensure base is relative to layer root.
 	// This catches obvious escapes before any I/O.
 	if !isSubDirLexical(lt.root, lt.base) {
-		return errPathTraversal
+		return "", errPathTraversal
 	}
 
 	// 6. Create the base directory with private permissions.
 	// If a malicious symlink already exists at this path, MkdirAll follows it
 	// (no-op if target exists). The symlink escape is detected in step 7.
 	if err := os.MkdirAll(lt.base, 0700); err != nil {
-		return fmt.Errorf("create dir: %w", err)
+		return "", fmt.Errorf("create dir: %w", err)
 	}
 
 	// 7. Symlink-resolved containment: resolve layer root and base symlinks,
 	// then check that base and target parent stay inside the resolved root.
 	rootResolved, err := filepath.EvalSymlinks(lt.root)
 	if err != nil {
-		return fmt.Errorf("resolve layer root symlinks: %w", err)
+		return "", fmt.Errorf("resolve layer root symlinks: %w", err)
 	}
 	baseResolved, err := filepath.EvalSymlinks(lt.base)
 	if err != nil {
-		return fmt.Errorf("resolve base symlinks: %w", err)
+		return "", fmt.Errorf("resolve base symlinks: %w", err)
 	}
 	targetParentResolved, err := filepath.EvalSymlinks(filepath.Dir(target))
 	if err != nil {
-		return fmt.Errorf("resolve target dir symlinks: %w", err)
+		return "", fmt.Errorf("resolve target dir symlinks: %w", err)
 	}
 
 	if !isSubDirLexical(rootResolved, baseResolved) {
-		return errPathTraversal
+		return "", errPathTraversal
 	}
 	if !isSubDirLexical(rootResolved, targetParentResolved) {
-		return errPathTraversal
+		return "", errPathTraversal
 	}
 
 	// 8. Personas exclusion (only for layers that block personas).
 	if lt.blocksPersonas {
 		rel, err := filepath.Rel(rootResolved, baseResolved)
 		if err != nil || isPersonasRelPath(rel) {
-			return errPersonasPath
+			return "", errPersonasPath
 		}
 		rel, err = filepath.Rel(rootResolved, targetParentResolved)
 		if err != nil || isPersonasRelPath(rel) {
-			return errPersonasPath
+			return "", errPersonasPath
 		}
 	}
 
@@ -234,15 +244,15 @@ func (w *safeMemoryWriter) applyOne(u memoryUpdate, chatID int64, threadID int, 
 	// already exists and is a symlink, EvalSymlinks reveals where it actually
 	// points. Reject if it escapes the resolved root or targets personas.
 	if err := w.checkTargetSymlink(lt, rootResolved, target); err != nil {
-		return err
+		return "", err
 	}
 
 	// 10-11. Write facts and update MEMORY.md index.
 	if err := writeFactsAndIndex(w, lt, target, u.Facts, u.Filename, u.Title, rootResolved); err != nil {
-		return err
+		return "", err
 	}
 
-	return nil
+	return lt.base, nil
 }
 
 // checkTargetSymlink resolves an existing file via EvalSymlinks and rejects it

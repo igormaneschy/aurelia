@@ -385,20 +385,31 @@ func (bc *BotController) cmdSessionReset(chatID int64, threadID int, userID int6
 }
 
 func (bc *BotController) resetCurrentSession(chatID int64, threadID int, invalidate bool, userID int64, isPrivateChat bool) (string, error) {
+	canceledActive := bc.ResetSession(chatID, threadID, userID, invalidate, isPrivateChat)
+	return formatResetSummary(canceledActive), nil
+}
+
+// ResetSession cancels an active Telegram pipeline run, flushes the nudge buffer,
+// optionally invalidates memory session cache, and clears the PI session file.
+// Shared by Telegram /new and TUI /reset.
+func (bc *BotController) ResetSession(chatID int64, threadID int, userID int64, invalidateMemory bool, isPrivateChat bool) bool {
+	if bc == nil {
+		return false
+	}
 	canceledActive := bc.cancelActiveRun(chatID, threadID, userID)
 	if bc.dreamer != nil && bc.sessions != nil {
 		cwd := bc.currentCwdForContext(chatID, threadID, userID, isPrivateChat)
 		sessionFile := bc.sessions.GetSession(chatID, threadID, userID)
 		bc.dreamer.FlushNudge(chatID, threadID, userID, cwd, sessionFile, bc.nudgeBuffer)
-		if invalidate {
-			bc.invalidateMemoryDirs(chatID, threadID, userID, cwd)
+		if invalidateMemory {
+			bc.InvalidateMemorySession(chatID, threadID, userID)
 		}
 	}
 	if bc.sessions != nil {
 		bc.sessions.ClearSessionForUser(chatID, threadID, userID)
 	}
-	log.Printf("command: session reset for chat=%d thread=%d user=%d", chatID, threadID, userID)
-	return formatResetSummary(canceledActive), nil
+	log.Printf("session: reset for chat=%d thread=%d user=%d", chatID, threadID, userID)
+	return canceledActive
 }
 
 func (bc *BotController) cancelActiveRun(chatID int64, threadID int, userID ...int64) bool {

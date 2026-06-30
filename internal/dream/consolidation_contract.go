@@ -183,7 +183,8 @@ func applyConsolidationUpdate(w *safeMemoryWriter, op *updateFileOp, chatID int6
 		Title:    op.Title,
 		Facts:    op.Facts,
 	}
-	return w.applyOne(up, chatID, threadID, cwd)
+	_, err := w.applyOne(up, chatID, threadID, cwd)
+	return err
 }
 
 func applyDelete(w *safeMemoryWriter, filename string, chatID int64, threadID int, cwd string) error {
