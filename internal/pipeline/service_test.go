@@ -596,17 +596,19 @@ func TestHandleContextOutcome_CancelledCapturesRunID(t *testing.T) {
 	}
 }
 
-// TestNewService_SharesInjectedNudgeBufferAndMemoryCache verifies that when
-// Config provides NudgeBuffer and MemoryCache, NewService reuses them instead
-// of creating fresh instances. This is the wiring that lets Telegram (singleton
+// TestNewService_SharesInjectedSharedState verifies that when Config provides
+// NudgeBuffer, MemoryCache, and TokenGuard, NewService reuses them instead of
+// creating fresh instances. This is the wiring that lets Telegram (singleton
 // pipeline) and TUI (per-send pipeline) share state across frontends.
-func TestNewService_SharesInjectedNudgeBufferAndMemoryCache(t *testing.T) {
+func TestNewService_SharesInjectedSharedState(t *testing.T) {
 	sharedBuffer := session.NewNudgeBuffer()
 	sharedCache := NewMemoryCache()
+	sharedGuard := session.NewTokenGuard()
 
 	svc := NewService(Config{
 		NudgeBuffer: sharedBuffer,
 		MemoryCache: sharedCache,
+		TokenGuard:  sharedGuard,
 	})
 
 	if svc.NudgeBuffer() != sharedBuffer {
@@ -615,10 +617,13 @@ func TestNewService_SharesInjectedNudgeBufferAndMemoryCache(t *testing.T) {
 	if svc.MemoryCache() != sharedCache {
 		t.Error("MemoryCache(): injected instance not retained (sharing broken)")
 	}
+	if svc.TokenGuard() != sharedGuard {
+		t.Error("TokenGuard(): injected instance not retained (sharing broken)")
+	}
 }
 
 // TestNewService_CreatesFreshWhenNotInjected verifies backward compat:
-// when Config leaves NudgeBuffer/MemoryCache nil, NewService creates fresh ones.
+// when Config leaves shared-state fields nil, NewService creates fresh ones.
 func TestNewService_CreatesFreshWhenNotInjected(t *testing.T) {
 	svc := NewService(Config{})
 
@@ -627,5 +632,8 @@ func TestNewService_CreatesFreshWhenNotInjected(t *testing.T) {
 	}
 	if svc.MemoryCache() == nil {
 		t.Error("MemoryCache(): nil when not injected, expected fresh instance")
+	}
+	if svc.TokenGuard() == nil {
+		t.Error("TokenGuard(): nil when not injected, expected fresh instance")
 	}
 }

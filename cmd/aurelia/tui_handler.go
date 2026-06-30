@@ -390,6 +390,7 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 		pipeCfg.Dreamer = a.bot.Dreamer()
 		pipeCfg.NudgeBuffer = a.bot.NudgeBuffer()
 		pipeCfg.MemoryCache = a.bot.MemoryCache()
+		pipeCfg.TokenGuard = a.bot.TokenGuard()
 	}
 	pipeSvc := pipeline.NewService(pipeCfg)
 

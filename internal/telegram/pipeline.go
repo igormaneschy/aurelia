@@ -144,6 +144,7 @@ func (bc *BotController) ensurePipeline() *pipelinepkg.Service {
 		UserResolver: userResolver,
 		NudgeBuffer:  bc.NudgeBuffer(),
 		MemoryCache:  bc.MemoryCache(),
+		TokenGuard:   bc.TokenGuard(),
 	})
 	bc.nudgeBuffer = bc.pipeline.NudgeBuffer()
 	return bc.pipeline
