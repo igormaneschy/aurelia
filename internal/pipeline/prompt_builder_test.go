@@ -11,6 +11,7 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/continuity"
+	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
@@ -1134,6 +1135,79 @@ func TestBuildSystemPrompt_AllSectionsPresent(t *testing.T) {
 		if lastRunIdx < 0 {
 			t.Error("Last Known Run State should follow Conversation Continuity")
 		}
+	}
+}
+
+func TestBuildSystemPrompt_SingleActiveProfileSection(t *testing.T) {
+	resolver, err := profiles.NewResolver("", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile := resolver.Get("developer")
+	if profile == nil {
+		t.Fatal("developer builtin missing")
+	}
+
+	svc := &Service{
+		config:      &config.AppConfig{DefaultProvider: "test", DefaultModel: "test"},
+		sessions:    session.NewStore(),
+		memoryDir:   t.TempDir(),
+		memoryCache: NewMemoryCache(),
+	}
+
+	prompt, err := svc.buildSystemPrompt("refactor the handler", profile, 42, 1, 0, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(prompt, "# Active Prompt Profile:"); n != 1 {
+		t.Fatalf("expected exactly one Active Prompt Profile section, got %d in prompt", n)
+	}
+	if !strings.Contains(prompt, "Active Prompt Profile: developer") {
+		t.Fatal("expected developer profile header")
+	}
+	if strings.Contains(prompt, "You are in researcher mode") {
+		t.Fatal("researcher profile body leaked into developer prompt")
+	}
+}
+
+func TestBuildSystemPrompt_OneShotProfileOverridesActiveDefault(t *testing.T) {
+	resolver, err := profiles.NewResolver("", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	profile, stripped, err := resolver.ResolveEffectiveForUser("@researcher compare SDKs", "developer", 0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile == nil || profile.Name != "researcher" {
+		t.Fatalf("ResolveEffectiveForUser profile = %v, want researcher", profile)
+	}
+	if stripped != "compare SDKs" {
+		t.Fatalf("stripped text = %q, want %q", stripped, "compare SDKs")
+	}
+
+	svc := &Service{
+		config:      &config.AppConfig{DefaultProvider: "test", DefaultModel: "test"},
+		sessions:    session.NewStore(),
+		memoryDir:   t.TempDir(),
+		memoryCache: NewMemoryCache(),
+	}
+
+	prompt, err := svc.buildSystemPrompt(stripped, profile, 42, 1, 0, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(prompt, "# Active Prompt Profile:"); n != 1 {
+		t.Fatalf("expected exactly one Active Prompt Profile section, got %d", n)
+	}
+	if !strings.Contains(prompt, "Active Prompt Profile: researcher") {
+		t.Fatal("expected researcher profile header")
+	}
+	if !strings.Contains(prompt, "You are in researcher mode") {
+		t.Fatal("expected researcher profile body")
+	}
+	if strings.Contains(prompt, "You are in developer mode") {
+		t.Fatal("developer profile body leaked when @researcher overrides /mode developer")
 	}
 }
 

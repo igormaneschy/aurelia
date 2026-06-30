@@ -219,12 +219,11 @@ Multiple requests run concurrently — each with its own `request_id`.
 
 Aurelia does not run independent worker agents. It selects a **Prompt Profile** — a markdown-defined set of complementary instructions and optional execution hints — and injects it into the request sent to the SDK harness.
 
-The current legacy storage path is `~/.aurelia/agents/`, kept for compatibility. Conceptually these files are **profiles**, not separate executors.
-
 ```text
 /mode developer          # make developer the default profile
 @researcher compare SDKs # use researcher once, without changing the default
 /agents                  # list available profiles
+/agents verbose          # owner DM: model/capability hints
 ```
 
 Resolution order for each message:
@@ -233,27 +232,19 @@ Resolution order for each message:
 explicit @profile > active /mode profile > general
 ```
 
-Example profile file:
+**Storage** (highest precedence first):
 
-```markdown
----
-name: prospector
-description: Busca leads e entra em contato
-model: kimi-k2-thinking
-schedule: "0 9 * * 1"
-cwd: D:\projetos\crm
-mcp_servers:
-  google-places: { command: "npx google-places-mcp" }
-allowed_tools: ["WebSearch", "WebFetch", "Bash"]
----
+| Path | Scope |
+|------|-------|
+| `~/.aurelia/users/<id>/profiles/*.md` | User-private |
+| `~/.aurelia/profiles/*.md` | Global canonical |
+| `~/.aurelia/agents/*.md` | Legacy (compat) |
+| Builtins | `general`, `developer`, `researcher` |
 
-Voce eh um perfil de prospeccao comercial.
-Busque empresas no Google Places na regiao configurada.
-```
+Legacy `personas/mode_developer.md` overlays merge into the matching builtin
+when no user-private `profiles/developer.md` exists.
 
-Fields: `name`, `description`, `model`, `schedule`, `cwd`, `mcp_servers`, `allowed_tools`.
-
-`model`, `cwd`, and tool fields are execution hints passed to the current harness when supported; they do not make Aurelia the executor. Profiles with `schedule` are still supported by the legacy cron integration; their `cwd` is persisted on the cron job so scheduled executions do not depend on prompt parsing.
+Full guide: [`docs/prompt-profiles.md`](docs/prompt-profiles.md)
 
 ### Persona
 
@@ -610,4 +601,4 @@ Full guide: [docs/OPERATIONS.md](docs/OPERATIONS.md).
 - Go test suite is green
 - TypeScript Bridge compiles clean
 - Runtime target: macOS/Linux local daemon; Windows support is not a current operational target
-- Current architectural track: foundation P0–P2 closed (✅); planning/orchestration removed v0.38.0 (✅ — PI SDK owns agentic execution); active work: project-scoped memory, Prompt Profiles Phase 2–3, bridge adapter interface — see [.specs/project/ROADMAP.md](.specs/project/ROADMAP.md) §13
+- Current architectural track: foundation P0–P2 closed (✅); planning/orchestration removed v0.38.0 (✅ — PI SDK owns agentic execution); active work: Prompt Profiles Phase 3, bridge adapter interface — see [.specs/project/ROADMAP.md](.specs/project/ROADMAP.md) §13

@@ -164,13 +164,6 @@ func (bc *BotController) handleAgentsCommand(c telebot.Context) error {
 	if err != nil {
 		return err
 	}
-	// Check if any profiles exist (via resolver or legacy agents).
-	hasProfiles := (bc.profiles != nil && len(bc.profiles.List()) > 0) ||
-		(bc.agents != nil && len(bc.agents.Agents()) > 0)
-	if !hasProfiles {
-		reply = "Nenhum perfil configurado. Crie arquivos .md em ~/.aurelia/profiles/ ou ~/.aurelia/agents/\n\n" +
-			"Perfis built-in (general, developer, researcher) estão sempre disponíveis."
-	}
 	return SendTextWithThread(bc.bot, c.Chat(), reply, c.Message().ThreadID)
 }
 

@@ -1,6 +1,6 @@
 # Prompt Profiles — Unificar `/mode`, `/agents` e `@profile`
 
-**Status:** 🟡 Parcial — MVP semantics implementado em v0.21.0; Phase 1 (`internal/profiles` abstraction) pendente  
+**Status:** 🟡 Parcial — Phase 0–2 ✅ (`feature/prompt-profiles-phase2`); Phase 3 pendente (multi-harness via `engine.Engine`)
 **Roadmap step:** pós Session/Profile Operability; antes de multi-engine routing  
 **Depende de:** User Isolation, Session/Profile Operability, Security Guard-Rails, Bridge Adapter Interface  
 **Substitui/realinha:** `Mode Profiles` como comportamento persistente e `internal/agents` como catálogo de perfis de injeção de contexto, sem transformar Aurelia em runtime de execução.
@@ -509,11 +509,14 @@ Prompt Profiles MAY include `harness` as an execution hint, but MVP only support
 - Pipeline depends on `profiles.PromptProfile`, not `agents.Agent`, for prompt assembly.
 - Legacy `agents.Registry` may remain as loader behind the resolver.
 
-### Phase 2: Canonical storage and docs
+### Phase 2: Canonical storage and docs ✅
 
-- Add docs for `~/.aurelia/profiles/*.md`.
-- Optionally add migration script or lazy compatibility loader.
-- README explains `/mode`, `/agents`, `@profile` as one concept.
+- ✅ `~/.aurelia/users/<id>/profiles/*.md` user-private profiles (`GetForUser`, `ListForUser`).
+- ✅ Mode overlay merge (`mode_<name>.md`) into builtins via `profiles.Resolver`.
+- ✅ `/agents` catalog polish + `verbose`/`explain`; metadata-safe `FormatCatalogLine`.
+- ✅ `docs/prompt-profiles.md`; README command table updated.
+- ✅ TUI `/mode` and `/agents` wired (parity with Telegram).
+- ✅ Pipeline resolver-only path (no legacy `routeAgent` fallback).
 
 ### Phase 3: Multi-harness routing
 

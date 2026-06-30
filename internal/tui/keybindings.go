@@ -41,6 +41,10 @@ type keyMap struct {
 	CmdModelName    key.Binding
 	CmdModelAuto    key.Binding
 	CmdModelRefresh key.Binding
+	CmdMode         key.Binding
+	CmdModeName     key.Binding
+	CmdAgents       key.Binding
+	CmdAgentsVerbose key.Binding
 	CmdCwd          key.Binding
 	CmdCwdPath      key.Binding
 	CmdCwdClear     key.Binding
@@ -189,6 +193,10 @@ func defaultKeyMap() keyMap {
 		CmdModelName:    helpOnlyBinding("/model <name>", "Switch model"),
 		CmdModelAuto:    helpOnlyBinding("/model auto", "Use automatic model selection"),
 		CmdModelRefresh: helpOnlyBinding("/model refresh", "Refresh model list"),
+		CmdMode:         helpOnlyBinding("/mode", "Show active prompt profile"),
+		CmdModeName:     helpOnlyBinding("/mode <profile>", "Set default prompt profile"),
+		CmdAgents:       helpOnlyBinding("/agents", "List prompt profiles"),
+		CmdAgentsVerbose: helpOnlyBinding("/agents verbose", "List profiles with execution hints"),
 		CmdCwd:          helpOnlyBinding("/cwd", "Show current project binding"),
 		CmdCwdPath:      helpOnlyBinding("/cwd <path>", "Set project working directory"),
 		CmdCwdClear:     helpOnlyBinding("/cwd clear", "Remove project binding"),
@@ -240,6 +248,10 @@ func (k keyMap) FullHelp() [][]key.Binding {
 		{
 			k.CmdHelp,
 			k.CmdStatus,
+			k.CmdMode,
+			k.CmdModeName,
+			k.CmdAgents,
+			k.CmdAgentsVerbose,
 			k.CmdModel,
 			k.CmdModelName,
 			k.CmdModelAuto,

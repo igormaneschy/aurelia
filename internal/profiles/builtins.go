@@ -1,5 +1,10 @@
 package profiles
 
+// GeneralBuiltin returns a copy of the general builtin profile.
+func GeneralBuiltin() *PromptProfile {
+	return cloneProfile(builtinProfiles()["general"])
+}
+
 // builtinProfiles returns the three built-in Prompt Profiles that are always
 // available even when no files exist on disk. Per Prompt Profiles spec §11.
 func builtinProfiles() map[string]*PromptProfile {

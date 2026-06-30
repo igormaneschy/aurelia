@@ -51,7 +51,7 @@ O objetivo é evitar dois extremos: o Aurélia não deve virar apenas um wrapper
 
 1. **Higiene documental** — alinhar ROADMAP, PROJECT, README e specs superseded com a decisão pinned `no-planning-mode-or-orchestrator`.
 2. ~~**Project-scoped memory**~~ — ✅ v0.37.0 + closure v0.38.1; `cwd_overlay` unificado por slug (TUI + Telegram + grupos); spec `.specs/features/project-scoped-memory/`.
-3. **Prompt Profiles Phase 2–3** — user-private profiles + mode overlays no `profiles.Resolver`; spec `.specs/features/prompt-profiles/`.
+3. **Prompt Profiles Phase 3** — multi-harness routing (`profile.Harness` → `engine.Engine`); Phase 2 ✅ em `feature/prompt-profiles-phase2`; spec `.specs/features/prompt-profiles/`.
 4. **Bridge Adapter Interface** — costura `engine.Engine` antes de multi-harness; spec `.specs/features/bridge-adapter-interface/`.
 5. **Long-flow UX v2** — polish Telegram em sessões longas; spec `.specs/features/long-flow-ux-v2/`.
 6. **Efficiency audit residual** — project index roots, receipts rotation (maps GC obsoleto após v0.38.0).
@@ -282,7 +282,7 @@ Prompt assembly por TurnContext:
 ## 8b. Prompt Profiles — `/mode`, `/agents`, `@profile`
 
 **Spec:** `.specs/features/prompt-profiles/`
-**Status:** 🟡 Parcial — MVP semantics implementado em v0.21.0; Phase 1 (`internal/profiles`) pendente
+**Status:** 🟡 Parcial — Phase 0–2 ✅ (`internal/profiles`, user-private, TUI/Telegram parity); Phase 3 (multi-harness) pendente
 **Depende de:** Session/Profile Operability + Security Guard-Rails + Bridge Adapter Interface
 
 **Problem:** `/mode`, `/agents` e `@agent` estavam conceitualmente próximos demais: todos eram prompt injections/context hints enviados ao SDK, mas a documentação tratava parte deles como “agentes” executores. Isso conflita com a boundary canônica: SDKs executam; Aurelia injeta personalidade, contexto e policy.
@@ -354,7 +354,7 @@ boundary established in Sprint 0 (Delegate to PI SDK).
 | Priority | Spec | Status | Notes |
 |----------|------|:------:|-------|
 | — | `.specs/features/project-scoped-memory/` | ✅ v0.37.0 | `cwd_overlay` por slug; migração `migrate-cwd-overlay`; validado |
-| P1 | `.specs/features/prompt-profiles/` Phase 2–3 | 🟡 Partial | `internal/profiles/` exists; user-private layer pending |
+| P1 | `.specs/features/prompt-profiles/` Phase 3 | 🟡 Partial | Phase 2 ✅ (user-private, mode merge, TUI `/mode`+`/agents`); harness routing pending |
 | P2 | `.specs/features/bridge-adapter-interface/` | 📋 Draft | No `internal/engine/` yet |
 | P2 | `.specs/features/long-flow-ux-v2/` | Proposed | UX polish for long PI turns |
 | P2 | Efficiency audit (ai-memory) | Partial | project index roots, receipts rotation |

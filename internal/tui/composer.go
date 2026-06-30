@@ -73,7 +73,7 @@ func (m Model) renderComposerHints() string {
 	sendHint := m.styles.SidebarMutedStyle.Render("↵ send")
 
 	if strings.TrimSpace(m.textarea.Value()) == "" {
-		left := m.styles.SidebarMutedStyle.Render("/help · /cwd · /model")
+		left := m.styles.SidebarMutedStyle.Render("/help · /cwd · /mode · /model")
 		right := m.styles.SidebarMutedStyle.Render("F1 · ↵ send")
 		gap := width - lipgloss.Width(left) - lipgloss.Width(right)
 		if gap < 2 {

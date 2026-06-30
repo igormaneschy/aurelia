@@ -809,13 +809,16 @@ func statusWorkLines(description string, queueSize int) []string {
 func (bc *BotController) cmdListAgents(c telebot.Context) (string, error) {
 	userID := safeSenderID(c.Sender())
 	isOwner := bc.isOwner(c)
+	isPrivate := c.Chat().Type == telebot.ChatPrivate
+	verbose := strings.EqualFold(strings.TrimSpace(c.Message().Payload), "verbose")
+	if verbose && (!isOwner || !isPrivate) {
+		verbose = false
+	}
 
-	// Use profiles resolver for canonical list (includes legacy agents + builtins + canonical).
 	var all []*profiles.PromptProfile
 	if bc.profiles != nil {
-		all = bc.profiles.ListVisible(isOwner)
+		all = bc.profiles.ListVisibleForUser(userID, isOwner)
 	} else if bc.agents != nil {
-		// Fallback: legacy agents only when resolver not available.
 		for _, a := range bc.agents.Agents() {
 			all = append(all, profiles.FromAgent(a))
 		}
@@ -824,54 +827,23 @@ func (bc *BotController) cmdListAgents(c telebot.Context) (string, error) {
 		return "Nenhum perfil disponível. Perfis built-in (general, developer, researcher) estão sempre disponíveis.", nil
 	}
 
-	var lines []string
-	lines = append(lines, fmt.Sprintf("**Perfis disponíveis** (%d)\n", len(all)))
-	for _, p := range all {
-		desc := p.Description
-		if desc == "" {
-			desc = "(sem descrição)"
-		}
-		lines = append(lines, fmt.Sprintf("- **%s**: %s", p.Name, desc))
-	}
+	displayActive := profiles.ActiveDefault(bc.userActiveMode(userID))
 
-	// Mode section
-	modeSection := bc.buildModeListSection(userID)
-	if modeSection != "" {
-		lines = append(lines, modeSection)
+	var lines []string
+	lines = append(lines, fmt.Sprintf("**Perfis disponíveis** (%d)", len(all)))
+	lines = append(lines, fmt.Sprintf("Perfil ativo: **%s**", displayActive))
+	lines = append(lines, "")
+	for _, p := range all {
+		lines = append(lines, profiles.FormatCatalogLine(p, displayActive, verbose))
+	}
+	lines = append(lines, "")
+	lines = append(lines, "Use `/mode <perfil>` para definir o perfil padrão.")
+	lines = append(lines, "Use `@perfil <pedido>` para aplicar um perfil só nesta mensagem.")
+	if isOwner && isPrivate {
+		lines = append(lines, "Use `/agents verbose` para ver hints de execução (modelo, capability).")
 	}
 
 	return strings.Join(lines, "\n"), nil
-}
-
-// buildModeListSection returns a formatted "Modos disponíveis" section.
-// Returns "" when user store is unavailable or profile load fails.
-func (bc *BotController) buildModeListSection(userID int64) string {
-	activeMode := ""
-	if bc.userStore != nil {
-		if profile, err := bc.userStore.Get(userID); err == nil && profile != nil {
-			activeMode = profile.ActiveMode
-		} else if err != nil {
-			log.Printf("command: list agents failed to load profile user=%d: %v", userID, err)
-		}
-	}
-	// Default to "general" when empty
-	displayActive := activeMode
-	if displayActive == "" {
-		displayActive = "general"
-	}
-	profiles := []string{"general", "developer", "researcher"}
-	var lines []string
-	lines = append(lines, "\n**Perfis disponíveis**")
-	for _, p := range profiles {
-		marker := ""
-		if p == displayActive {
-			marker = " (● ativo)"
-		}
-		lines = append(lines, fmt.Sprintf("- **%s**%s", p, marker))
-	}
-	lines = append(lines, "\nUse /mode <perfil> para definir o perfil padrão.")
-	lines = append(lines, "Use @perfil <pedido> para aplicar um perfil só nesta mensagem.")
-	return strings.Join(lines, "\n")
 }
 
 func (bc *BotController) cmdListModels() (string, error) {
@@ -1303,7 +1275,7 @@ func (bc *BotController) cmdSetMode(c telebot.Context, text string) (string, err
 	// Set mode. Builtin aliases are normalized; canonical/legacy profiles may
 	// also be used when visible to this user.
 	normalized := normalizeProfileSelection(modeText)
-	selected := bc.getVisibleProfile(normalized, bc.isOwner(c))
+	selected := bc.getVisibleProfileForUser(normalized, userID, bc.isOwner(c))
 	if selected == nil {
 		return fmt.Sprintf("Perfil %q não encontrado ou indisponível para este usuário. Use /agents para ver os perfis disponíveis.", modeText), nil
 	}
@@ -1381,7 +1353,8 @@ func (bc *BotController) cmdExplainProfile(c telebot.Context, text string) (stri
 		normalized = name
 	}
 
-	profile := bc.getVisibleProfile(normalized, bc.isOwner(c))
+	userID := safeSenderID(c.Sender())
+	profile := bc.getVisibleProfileForUser(normalized, userID, bc.isOwner(c))
 	if profile == nil {
 		return fmt.Sprintf("Perfil %q não encontrado ou indisponível para este usuário. Use /agents para ver os perfis disponíveis.", name), nil
 	}
@@ -1417,11 +1390,10 @@ func normalizeProfileSelection(name string) string {
 	return strings.TrimSpace(name)
 }
 
-// getProfile looks up a Prompt Profile by name. Checks the profiles resolver
-// first, then falls back to legacy agent registry.
-func (bc *BotController) getProfile(name string) *profiles.PromptProfile {
+// getProfileForUser looks up a Prompt Profile by name for a specific user.
+func (bc *BotController) getProfileForUser(name string, userID int64) *profiles.PromptProfile {
 	if bc.profiles != nil {
-		if p := bc.profiles.Get(name); p != nil {
+		if p := bc.profiles.GetForUser(userID, name); p != nil {
 			return p
 		}
 	}
@@ -1441,8 +1413,8 @@ func (bc *BotController) getProfile(name string) *profiles.PromptProfile {
 	return nil
 }
 
-func (bc *BotController) getVisibleProfile(name string, isOwner bool) *profiles.PromptProfile {
-	profile := bc.getProfile(name)
+func (bc *BotController) getVisibleProfileForUser(name string, userID int64, isOwner bool) *profiles.PromptProfile {
+	profile := bc.getProfileForUser(name, userID)
 	if !profiles.ProfileVisible(profile, isOwner) {
 		return nil
 	}

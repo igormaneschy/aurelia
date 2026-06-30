@@ -10,7 +10,7 @@ import (
 
 func TestCommandSuggestionsPrefixMatch(t *testing.T) {
 	got := commandSuggestions("/mo")
-	want := []string{"/model"}
+	want := []string{"/mode", "/model"}
 
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("suggestions = %#v, want %#v", got, want)
@@ -68,8 +68,8 @@ func TestModel_EnterAppliesAutocomplete(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("expected nil command while applying autocomplete")
 	}
-	if got := m2.textarea.Value(); got != "/model" {
-		t.Fatalf("textarea = %q, want /model", got)
+	if got := m2.textarea.Value(); got != "/mode" {
+		t.Fatalf("textarea = %q, want /mode", got)
 	}
 	if m2.hasAutocomplete() {
 		t.Fatal("expected autocomplete cleared after apply")

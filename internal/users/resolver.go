@@ -41,6 +41,11 @@ func (r *Resolver) UserMdPath(userID int64) string {
 	return filepath.Join(r.PersonasDir(userID), "USER.md")
 }
 
+// UserProfilesDir returns the user-private prompt profiles directory.
+func (r *Resolver) UserProfilesDir(userID int64) string {
+	return filepath.Join(r.UserRoot(userID), "profiles")
+}
+
 // UserModePath returns the path to a user's mode overlay file.
 // Mode must already be normalized (call NormalizeMode first).
 func (r *Resolver) UserModePath(userID int64, mode string) string {
@@ -62,6 +67,7 @@ func (r *Resolver) EnsureUserDir(userID int64) error {
 	dirs := []string{
 		r.MemoryDir(userID),
 		r.PersonasDir(userID),
+		r.UserProfilesDir(userID),
 		filepath.Join(r.UserRoot(userID), "projects"),
 		r.SkillsDir(userID),
 	}
