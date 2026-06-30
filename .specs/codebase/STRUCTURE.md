@@ -33,7 +33,6 @@
 │   ├── deps/                  # Runtime dependency checks (Node/npm/git/gh)
 │   ├── dream/                 # Background memory consolidation + nudges
 │   ├── onboarding/            # Interactive setup wizard
-│   ├── orchestrator/          # Workflow orchestration (plan/workers/validate/git)
 │   ├── persona/               # Identity & prompt assembly
 │   ├── pipeline/              # Turn processing service (resilience + active-run tracking)
 │   ├── runtime/               # Path resolution
@@ -54,15 +53,11 @@
 
 ### internal/telegram — Telegram Bot Interface
 **Purpose:** All Telegram I/O — input handling, output formatting, markdown rendering, commands
-**Key files:** `bot.go` (controller), `input_pipeline.go` (message flow), `output.go` (event processing), `send.go` (chunked delivery), `orchestration.go` (executeApprovedPlan), `worker_status.go` (per-worker status messages)
+**Key files:** `bot.go` (controller), `input_pipeline.go` (message flow), `output.go` (event processing), `send.go` (chunked delivery), `commands.go` (slash/natural-language commands)
 
 ### internal/pipeline — Turn Processing Service
-**Purpose:** Encapsulates a single conversational turn — prompt assembly, bridge call, event handling, recovery, plan detection. Extracted from the Telegram controller so the same logic powers cron jobs and other entrypoints.
-**Key files:** `service.go` (entrypoint + active-run tracking), `pipeline.go` (event loop + plan dispatch), `prompt_builder.go`, `resilient_bridge.go` (retry + circuit breaker), `planning_intent.go` (heuristic plan-mode detection)
-
-### internal/orchestrator — Workflow Orchestration
-**Purpose:** Plan→workers→validate cycle. Detects `aurelia-plan` blocks in bridge responses, spawns workers per wave in isolated git worktrees, validates results via a quality gate, and contains scaffold for docs/tasks/git delivery. The full closed cycle is still roadmap work.
-**Key files:** `orchestrator.go` (struct + BridgeExecutor interface), `plan.go` (Plan/Task model + topological ExecutionOrder), `extract.go` (parse `aurelia-plan` blocks), `execute.go` (wave execution + ExecuteTask), `validate.go` (quality gate), `worktree.go` (git worktree CRUD), `defaults.go` (worker fallback + ResolveAgentConfig), `prompt.go` (TLC + worker + validation prompt builders), `agents_md.go` (`AGENTS.md`/`CLAUDE.md` generators), `tasks_status.go` (update `.specs/.../tasks.md` checkboxes), `git.go` (commit + `gh pr create`)
+**Purpose:** Encapsulates a single conversational turn — prompt assembly, bridge call, event handling, recovery. Extracted from the Telegram controller so the same logic powers cron jobs and other entrypoints.
+**Key files:** `service.go` (entrypoint + active-run tracking), `pipeline.go` (event loop + reply delivery), `prompt_builder.go`, `resilient_bridge.go` (retry + circuit breaker)
 
 ### internal/bridge — LLM Bridge Client
 **Purpose:** Manages TypeScript process, NDJSON protocol, request multiplexing. The bridge adapts the PI SDK (`@earendil-works/pi-coding-agent`) — Aurelia treats PI as its core inference/execution engine.
@@ -103,14 +98,6 @@
 - Output processing: `internal/telegram/output.go`
 - Message sending: `internal/telegram/send.go`
 - Markdown→HTML: `internal/telegram/markdown*.go`
-- Orchestrated plans: `internal/telegram/orchestration.go`, `worker_status.go`
-
-**Workflow orchestration:**
-- Plan detection: `internal/orchestrator/extract.go` (called from `internal/pipeline/pipeline.go`)
-- Wave execution: `internal/orchestrator/execute.go`
-- Worktrees: `internal/orchestrator/worktree.go`
-- Quality gate: `internal/orchestrator/validate.go`
-- Git delivery: `internal/orchestrator/git.go`
 
 **LLM communication:**
 - Go client: `internal/bridge/bridge.go`

@@ -74,11 +74,15 @@ The boundary is intentional:
 
 - **PI SDK owns** model/provider resolution, tool execution, session runtime, compaction, context-file loading, skills/extensions, MCP tools, and agentic execution primitives.
 - **PI + ai-memory MCP owns** transversal Wiki memory used by PI, PI Code/opencode, and other MCP-compatible clients.
-- **Aurelia owns** identity, personality, Prompt Profile selection/injection, Telegram/TUI UX, user/project scoping, operational memory, cron, workflows, audit, orchestration, and continuity.
-- When the PI SDK already owns a capability, Aurelia adapts or orchestrates it rather than reimplementing it.
+- **Aurelia owns** identity, personality, Prompt Profile selection/injection, Telegram/TUI UX, user/project scoping, operational memory, cron, audit, and continuity.
+- When the PI SDK already owns a capability, Aurelia adapts to it rather than reimplementing it.
 - When the capability is product-specific continuity, operational memory, policy, UX, or workflow state, Aurelia remains the source of truth.
 
 The long-term differentiator is the persistent local product layer over PI: Telegram for async/mobile work, the TUI for focused terminal work, and shared daemon state where it is safe. Transversal Wiki memory is delegated to PI through the existing `ai-memory` MCP rather than reimplemented as an Aurelia gateway.
+
+### No Planning Mode / No Orchestrator
+
+Aurelia does **not** implement a separate planning mode, `aurelia-plan` blocks, `/execute`, or worker orchestration. Agentic execution — reasoning, tool use, multi-step work, and human-in-the-loop approvals — is owned entirely by the **PI SDK**. Aurelia's pipeline sends each user message to the bridge and delivers the SDK response back to Telegram/TUI. Do not reintroduce plan detection, pending plans, or an `internal/orchestrator/` package.
 
 ## Core Capabilities
 
@@ -106,10 +110,6 @@ The long-term differentiator is the persistent local product layer over PI: Tele
 - **Operational observability** — structured slog logging (text/JSON), durable run
   timelines with `run_events`, extended `run_journal` (provider, model, tokens,
   cost, errors, timeout, fallback), metrics queries, and debug commands
-- **Workflow orchestration** — close orchestration cycle with `ExecutionContext`, git
-  preflight, artifact collection, fail-closed validation with retry, serial merge,
-  dependency skip, commit + optional PR creation
-
 ## Runtime Features
 
 Aurelia uses a TypeScript Bridge adapting the PI SDK as its inference and execution engine:
@@ -186,7 +186,7 @@ internal/dream/           Memory consolidation (dream) and extraction (nudge)
 internal/cron/            Persistent cron scheduler with Telegram delivery
 internal/config/          App configuration (providers, Telegram, sessions)
 internal/runtime/         Path resolver + instance bootstrap + project memory dirs
-internal/orchestrator/    Git operations, worktree management, PR creation
+internal/pipeline/        Turn driver: prompt assembly, bridge call, run supervisor
 pkg/stt/                  Speech-to-text (Groq Whisper)
 bridge/                   TypeScript Bridge source (compiled to bundle.js via esbuild, embedded in binary)
 ```
@@ -610,4 +610,4 @@ Full guide: [docs/OPERATIONS.md](docs/OPERATIONS.md).
 - Go test suite is green
 - TypeScript Bridge compiles clean
 - Runtime target: macOS/Linux local daemon; Windows support is not a current operational target
-- Current architectural track: PI SDK boundary hardening (✅), user isolation (✅), observability (✅), orchestration cycle (✅), context-scoped operational memory (✅), Memory Boundary Realignment (✅ docs decision: PI + `ai-memory` MCP owns Wiki memory), TUI local workflow (✅ phases 0–4.6, phase 5 polish/distribution in progress), Session/Profile Operability, Learning Nudge, Agent Comms, and Auto-Skills — see [.specs/project/ROADMAP.md](.specs/project/ROADMAP.md) and [docs/aurelia-tui-roadmap.md](docs/aurelia-tui-roadmap.md) for details
+- Current architectural track: PI SDK boundary hardening (✅), user isolation (✅), observability (✅), planning/orchestration removed (✅ — PI SDK owns agentic execution), context-scoped operational memory (✅), Memory Boundary Realignment (✅ docs decision: PI + `ai-memory` MCP owns Wiki memory), TUI local workflow (✅ phases 0–4.6, phase 5 polish/distribution in progress), Session/Profile Operability, Learning Nudge, Agent Comms, and Auto-Skills — see [.specs/project/ROADMAP.md](.specs/project/ROADMAP.md) and [docs/aurelia-tui-roadmap.md](docs/aurelia-tui-roadmap.md) for details

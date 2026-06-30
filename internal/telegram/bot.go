@@ -15,7 +15,6 @@ import (
 	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/cron"
-	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/persona"
 	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
 	"github.com/igormaneschy/aurelia/internal/profiles"
@@ -47,7 +46,6 @@ type BotController struct {
 	bootstrapMu      sync.Mutex
 	pendingBootstrap map[int64]bootstrapState
 	albums           *albumBuffer
-	orchestrator     *orchestrator.Orchestrator
 	nudgeBuffer      *session.NudgeBuffer
 	botCwd           string // working directory of the aurelia daemon
 	dreamer          interface {
@@ -200,11 +198,6 @@ func NewBotController(
 	bc.setupRoutes()
 
 	return bc, nil
-}
-
-func (bc *BotController) SetOrchestrator(o *orchestrator.Orchestrator) {
-	bc.orchestrator = o
-	bc.ensurePipeline().SetOrchestrator(o)
 }
 
 // SetProviderEnvRefresher installs a callback that will be invoked after the

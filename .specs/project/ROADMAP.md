@@ -89,7 +89,7 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 
 **Decisões:**
 - `internal/agents/` mantido como produto Aurelia. Sem migração para PI SDK.
-- `internal/persona/`, `internal/dream/`, `internal/cron/`, `internal/orchestrator/` mantidos.
+- `internal/persona/`, `internal/dream/`, `internal/cron/` mantidos.
 
 **Fixes adicionais no fechamento (v0.13.7):**
 - Modelo não encontrado → erro claro (não mais log silencioso)
@@ -99,7 +99,7 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 - Goroutine `chatActionLoop` com `defer recover()`
 - Branch policy: feature/stable/main workflow
 
-**Princípio:** preservar persona, memory, cron, Telegram UX, project binding e orchestrator no Aurelia; delegar engine/session/context/tools ao PI.
+**Princípio:** preservar persona, memory, cron, Telegram UX e project binding no Aurelia; delegar engine/session/context/tools/execução agentica ao PI SDK.
 
 ---
 
@@ -148,7 +148,7 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 
 **Scope:**
 
-- `run_id` propagado de Telegram/cron/orchestration até Bridge/runlog/audit;
+- `run_id` propagado de Telegram/cron até Bridge/runlog/audit;
 - logs estruturados com campos estáveis (`run_id`, `request_id`, `chat_id`, `thread_id`, `user_id`, `phase`);
 - expansão de `run_journal` com provider/model/agent/profile/duração/tokens/custo/fallback/timeout/error_class;
 - tabela `run_events` com timeline fase-a-fase;
@@ -159,27 +159,14 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 
 ---
 
-## 3. Close Orchestration Cycle
+## 3. Close Orchestration Cycle (Removed)
 
-**Spec:** `.specs/features/agent-orchestration-execution/`
-**Design:** `.specs/features/agent-orchestration-execution/design.md`
-**Tasks:** `.specs/features/agent-orchestration-execution/tasks.md`
-**Status:** ✅ Implementado em v0.16.0 (2026-05-24)
-**Depende de:** Operational Observability (✅); User Isolation runtime hardening (✅); Project Binding (✅)
+**Spec:** `.specs/features/agent-orchestration-execution/` (superseded)
+**Status:** 🗑️ Removido em v0.38.0 (2026-06-30)
 
-**Problem:** Aurelia já tem `internal/orchestrator/` com worktree, waves, git.go, validate.go, tasks_status.go (80% do código), mas **o ciclo não fecha**: `Validate`, `CommitChanges`, `CreatePR`, `UpdateTasksStatus` não são chamados no fluxo real. `currentBranch()` retorna hardcoded `"HEAD"`. Thread ID é perdido no handoff. O executor funcional prometido pela spec nunca foi entregue.
+**Decision:** Aurelia-side orchestration (`internal/orchestrator/`, `aurelia-plan` interception, `/execute`) was removed entirely. Agentic execution — planning, tools, multi-step work, human approvals — belongs to the **PI SDK**. The pipeline is message → bridge → reply.
 
-**Scope:**
-
-- `ExecutionContext` com cwd persistente, thread/user/security context;
-- git preflight (recusa dirty base, detached HEAD);
-- validation com diff/verify real + retry com feedback;
-- merge serial com dependentes skipped;
-- update `tasks.md`, commit seguro e PR opcional;
-- orphan worktree cleanup no startup;
-- artifact collection + manifest.
-
-**Por que agora:** o scaffold já existe e ~40% do esforço total foi investido, mas o ciclo não fecha. O handoff entre planejamento conversacional e execução precisa funcionar. É mais rápido conectar o que já existe do que reconstruir depois.
+**Historical note:** v0.16.0 shipped a closed orchestration cycle, but the architecture duplicated PI SDK capabilities and assumed Aurelia-specific project layouts. Do not reintroduce.
 
 ---
 
@@ -193,10 +180,9 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 - Plan Mode prompt injection, offer heuristic, planning intent detection
 - Artifact observation and reconciliation in the pipeline
 
-**What was preserved:**
-- Orchestrator and `tryExecutePlan` for legacy/conversational `aurelia-plan` execution
-- `sanitizeExecutionPlanForChat` - still sanitizes invalid plan blocks
-- `ExecuteApprovedPlan` on the Output interface (used by orchestrator)
+**Also removed in v0.38.0 (2026-06-30):**
+- Legacy `aurelia-plan` interception, pending plans, `/execute`, and `internal/orchestrator/`
+- Agentic execution is owned by the PI SDK; Aurelia delivers bridge results as-is
 
 ---
 
@@ -483,8 +469,8 @@ Sprint D0: Memory Contract & Spec Hygiene ✅ v0.16.1
 
 Sprint D: ~~Plan Mode (T-1-T13 do tasks.md)~~  🗑️ Removido 2026-05-24
   Planejamento permanece conversacional, sem Plan Mode explícito.
-  internal/planning/ removido. /plan* e /execute removidos.
-  Orquestrador e aurelia-plan preservados para execução legada.
+  internal/planning/ removido. /plan* removidos.
+  Orquestrador e aurelia-plan removidos em v0.38.0 — PI SDK executa.
 
 Sprint E: Context-Scoped Memory ✅ v0.20.0
   ├─ ✅ runtime.PathResolver: UserMemoryDir, TopicMemoryDir, TopicCwdOverlayDir

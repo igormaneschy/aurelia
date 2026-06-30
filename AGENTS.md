@@ -103,6 +103,10 @@ This uses `make install` (build → `.new` → `mv` — never corrupts a running
 
 > **Pro tip:** A `post-commit` git hook is installed at `.git/hooks/post-commit` that runs `make deploy` automatically after every commit. If enabled, step 6 is automatic — just commit and the daemon updates itself.
 
+## Architecture constraint
+
+**No planning mode / no orchestrator.** Aurelia does not implement `aurelia-plan` blocks, `/execute`, pending plans, or `internal/orchestrator/`. Agentic execution belongs to the PI SDK. The pipeline is message → bridge → reply.
+
 ## Rules
 
 - Service layer for business logic — never in handlers or entrypoints
@@ -115,6 +119,7 @@ This uses `make install` (build → `.new` → `mv` — never corrupts a running
 |---------|---------------|
 | `cmd/aurelia/` | Entrypoint, wiring, onboarding |
 | `internal/bridge/` | Go client for the TS Bridge process |
+| `internal/pipeline/` | Turn driver: prompt + bridge + resilience + run supervisor (no plan/orchestrator) |
 | `internal/agents/` | Legacy Prompt Profile registry (`~/.aurelia/agents/*.md`, `@profile` compatibility) |
 | `internal/session/` | PI session_file resume, cwd state, nudge buffers |
 | `internal/persona/` | Identity files, prompt assembly |

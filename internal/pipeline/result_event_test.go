@@ -2,10 +2,9 @@ package pipeline
 
 import (
 	"strings"
-	"sync"
 	"testing"
+
 	"github.com/igormaneschy/aurelia/internal/bridge"
-	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/transport"
 )
 
@@ -13,13 +12,7 @@ import (
 type fakeOutput struct {
 	lastError     string
 	lastReply     string
-	planExecuted  bool
-	planThreadID  int
-	planCwd       string
-	planUserID    int64
 	confirmCalled bool
-	planDone      chan struct{}
-	planDoneOnce  sync.Once
 }
 
 func (f *fakeOutput) StartTyping(_ int64, _ int) func() {
@@ -50,16 +43,6 @@ func (f *fakeOutput) ConfirmMessage(_ int64, _ int) {
 	f.confirmCalled = true
 }
 
-func (f *fakeOutput) ExecuteApprovedPlan(_ int64, threadID int, _ int, cwd string, userID int64, _ *orchestrator.Plan) {
-	f.planExecuted = true
-	f.planThreadID = threadID
-	f.planCwd = cwd
-	f.planUserID = userID
-	if f.planDone != nil {
-		f.planDoneOnce.Do(func() { close(f.planDone) })
-	}
-}
-
 type fakeProgress struct{}
 
 func (fakeProgress) ReportTool(_, _ string)    {}
@@ -69,12 +52,11 @@ func (fakeProgress) Delete()                   {}
 
 func newTestService(output Output) *Service {
 	return &Service{
-		output:       output,
-		sessions:     nil,
-		nudgeBuffer:  nil,
-		dreamer:      nil,
-		orchestrator: nil,
-		config:       nil,
+		output:      output,
+		sessions:    nil,
+		nudgeBuffer: nil,
+		dreamer:     nil,
+		config:      nil,
 	}
 }
 
@@ -178,11 +160,12 @@ func TestHandleResultEvent_TextContent_ReturnsSuccess(t *testing.T) {
 	}
 }
 
-func TestHandleResultEvent_StripsPlanBlockFromNormalReply(t *testing.T) {
+func TestHandleResultEvent_DeliversResultTextAsIs(t *testing.T) {
 	fo := &fakeOutput{}
 	s := newTestService(fo)
 
-	ev := bridge.Event{Type: "result", Content: "Vou executar.\n\n```aurelia-plan\n{\"tasks\":[{\"id\":\"T1\",\"description\":\"secret\",\"prompt\":\"internal prompt\",\"needs_worktree\":false}]}\n```"}
+	content := "Vou executar.\n\n```aurelia-plan\n{\"tasks\":[{\"id\":\"T1\",\"prompt\":\"internal prompt\"}]}\n```"
+	ev := bridge.Event{Type: "result", Content: content}
 	var assistantText strings.Builder
 
 	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
@@ -190,34 +173,10 @@ func TestHandleResultEvent_StripsPlanBlockFromNormalReply(t *testing.T) {
 	if outcome != OutcomeSuccess {
 		t.Fatalf("expected OutcomeSuccess, got %v", outcome)
 	}
-	if strings.Contains(fo.lastReply, "internal prompt") || strings.Contains(fo.lastReply, "aurelia-plan") {
-		t.Fatalf("reply leaked plan internals: %q", fo.lastReply)
+	if fo.lastReply != content {
+		t.Fatalf("expected passthrough reply, got %q", fo.lastReply)
 	}
-	if !strings.Contains(fo.lastReply, "[plano de execução interno omitido]") {
-		t.Fatalf("expected omission marker, got %q", fo.lastReply)
-	}
-}
-
-func TestHandleResultEvent_InvalidPlanMarkerIsNotSentRaw(t *testing.T) {
-	fo := &fakeOutput{}
-	s := newTestService(fo)
-	s.orchestrator = orchestrator.NewOrchestrator(nil, orchestrator.OrchestratorConfig{})
-
-	ev := bridge.Event{Type: "result", Content: "Now emit plan.\n\n```aurelia-plan\n{not valid json with prompt: secret}\n```"}
-	var assistantText strings.Builder
-
-	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "pode iniciar", 100, false)
-
-	if outcome != OutcomeSuccess {
-		t.Fatalf("expected OutcomeSuccess, got %v", outcome)
-	}
-	if fo.lastError == "" {
-		t.Fatal("expected safe parse error message")
-	}
-	if strings.Contains(fo.lastError, "secret") || strings.Contains(fo.lastError, "aurelia-plan") {
-		t.Fatalf("error leaked plan internals: %q", fo.lastError)
-	}
-	if fo.lastReply != "" {
-		t.Fatalf("did not expect raw reply, got %q", fo.lastReply)
+	if !fo.confirmCalled {
+		t.Fatal("expected ConfirmMessage to be called")
 	}
 }

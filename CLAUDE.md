@@ -41,6 +41,10 @@ auto-restart, recovery from orphan daemons, troubleshooting, etc.
 
 For trivial tasks, implement directly and validate.
 
+## Architecture constraint
+
+**No planning mode / no orchestrator.** Aurelia does not implement `aurelia-plan` blocks, `/execute`, pending plans, or `internal/orchestrator/`. Agentic execution belongs to the PI SDK. The pipeline is message → bridge → reply.
+
 ## Rules
 
 - Service layer for business logic — never in handlers or entrypoints
@@ -59,8 +63,7 @@ For trivial tasks, implement directly and validate.
 |---------|---------------|
 | `cmd/aurelia/` | Entrypoint, wiring, lifecycle |
 | `internal/bridge/` | Go client for the TS Bridge process (PI SDK) |
-| `internal/pipeline/` | Reusable turn driver: prompt + bridge + plan dispatch + resilience + run supervisor |
-| `internal/orchestrator/` | Plan→workers→validate cycle, worktrees, quality gate, git/PR |
+| `internal/pipeline/` | Reusable turn driver: prompt + bridge + resilience + run supervisor |
 | `internal/agents/` | Legacy Prompt Profile registry (`~/.aurelia/agents/*.md`, `@profile` compatibility) |
 | `internal/session/` | PI session_file resume, cwd state, nudge buffers |
 | `internal/persona/` | Identity files, prompt assembly |

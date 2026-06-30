@@ -15,10 +15,9 @@ package observability
 
 // EntryPoint enumerates the known run origins.
 const (
-	EntryPointTelegram      = "telegram"
-	EntryPointCron          = "cron"
-	EntryPointOrchestration = "orchestration"
-	EntryPointNudge         = "nudge"
+	EntryPointTelegram = "telegram"
+	EntryPointCron     = "cron"
+	EntryPointNudge    = "nudge"
 	EntryPointCLI           = "cli"
 )
 
@@ -60,16 +59,5 @@ const (
 	PhaseCronPromptBuilt = "cron_prompt_built"
 	PhaseCronBridgeStart = "cron_bridge_started"
 	PhaseCronCompleted   = "cron_completed"
-	PhaseCronFailed      = "cron_failed"
-
-	// Orchestration phases
-	PhaseOrchPreflightStarted = "orchestration_preflight_started"
-	PhaseOrchPreflightFailed  = "orchestration_preflight_failed"
-	PhaseWorkerStarted        = "worker_started"
-	PhaseWorkerToolUse        = "worker_tool_use"
-	PhaseWorkerValFailed      = "worker_validation_failed"
-	PhaseWorkerApproved       = "worker_approved"
-	PhaseWorkerMerged         = "worker_merged"
-	PhaseOrchCommitted        = "orchestration_committed"
-	PhaseOrchCompleted        = "orchestration_completed"
+	PhaseCronFailed = "cron_failed"
 )

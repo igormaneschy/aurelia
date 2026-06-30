@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/igormaneschy/aurelia/internal/config"
-	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/session"
@@ -32,8 +31,7 @@ func (r *testOutputRecorder) SendText(_ int64, _ int, text string) (transport.Me
 }
 
 func (r *testOutputRecorder) DeleteMessage(transport.MessageHandle)                   {}
-func (r *testOutputRecorder) ConfirmMessage(int64, int)                               { r.confirmCalled = true }
-func (r *testOutputRecorder) ExecuteApprovedPlan(int64, int, int, string, int64, *orchestrator.Plan) {}
+func (r *testOutputRecorder) ConfirmMessage(int64, int) { r.confirmCalled = true }
 
 func TestCheckProjectPreflight_NoCwdWithKnownProjects(t *testing.T) {
 	// Setup known projects for user 42

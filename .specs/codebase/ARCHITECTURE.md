@@ -61,19 +61,15 @@
 ### Fire-and-Forget Async Execution
 **Location:** `internal/telegram/input_pipeline.go` → `internal/pipeline/service.go`
 **Purpose:** Non-blocking Telegram message handling — handler returns immediately, results sent asynchronously
-**Implementation:** The Telegram input handler launches a goroutine that delegates to the `pipeline.Service`. The service builds the prompt, calls the bridge, processes streaming events, runs plan detection, and sends the Telegram reply on completion.
+**Implementation:** The Telegram input handler launches a goroutine that delegates to the `pipeline.Service`. The service builds the prompt, calls the bridge, processes streaming events, and sends the Telegram reply on completion.
 
 ### Pipeline Service as Reusable Turn Driver
 **Location:** `internal/pipeline/`
 **Purpose:** Decouple "one conversational turn" from any particular entrypoint so Telegram, cron, and CLI can share the same turn semantics
-**Implementation:** `Service.Run()` accepts a chat-shaped input and orchestrates: prompt assembly → resilient bridge call (retry + circuit breaker) → user-scoped active-run tracking → event loop → plan dispatch.
-**Example:** `pipeline.go:tryExecutePlan` detects an `aurelia-plan` block and hands control to the orchestrator.
+**Implementation:** `Service.Run()` accepts a chat-shaped input and drives: prompt assembly → resilient bridge call (retry + circuit breaker) → user-scoped active-run tracking → event loop → reply delivery.
+**Example:** `pipeline.go:handleResultEvent` delivers bridge `result` text to the transport output.
 
-### Agent Orchestration (Plan → Workers → Validate → Deliver)
-**Location:** `internal/orchestrator/`, dispatched from `internal/pipeline/pipeline.go` and `internal/telegram/orchestration.go`
-**Purpose:** When the model emits a structured execution plan, fan out atomic tasks to isolated workers, validate their output, and ship the result
-**Implementation:** `ExtractPlan` parses the `aurelia-plan` code block. `ExecutionOrder` topologically sorts tasks into waves. `ExecutePlan` spawns workers per wave with bounded concurrency, each in its own git worktree when `needs_worktree` is set. Validation with artifact-aware retry, serial merge, commit, and optional PR creation form a closed production cycle since v0.16.0.
-**Example:** `pipeline.go:tryExecutePlan` → `BotController.executeApprovedPlan` → `Orchestrator.ExecutePlan`.
+**Note (v0.38.0):** Aurelia does not implement planning mode, `aurelia-plan` interception, or worker orchestration. Agentic execution belongs to the PI SDK.
 
 ### Tool Monitoring & Loop Defenses
 **Location:** `internal/pipeline/tool_monitoring.go`
@@ -99,7 +95,7 @@
 ### Persona-Based System Prompt Assembly
 **Location:** `internal/persona/`, `internal/pipeline/prompt_builder.go`
 **Purpose:** Dynamic system prompt construction from identity files + agent config + context
-**Implementation:** Layers: Persona (IDENTITY+SOUL+USER) → Agent instructions → Cron instructions → Telegram context. Each layer is optional. Workers receive a different layered prompt (CLAUDE.md + AGENTS.md + spec + design + task + siblings) built by `orchestrator.BuildWorkerPrompt`.
+**Implementation:** Layers: Persona (IDENTITY+SOUL+USER) → Prompt profile instructions → Cron instructions → Telegram context. Each layer is optional.
 
 ### Embedded Bridge Bundle
 **Location:** `internal/bridge/embed.go`, `internal/bridge/setup.go`
@@ -121,22 +117,8 @@
 4. **Routing:** `routeAgent()` — `@name` prefix match OR LLM classification
 5. **Pipeline:** `pipeline.Service.Run()` takes over: builds layered prompt, opens a supervised run, calls the resilient bridge
 6. **Streaming:** Pipeline accumulates assistant text, tracks tool use via `toolCallTracker` + `loopDetector`, drives a `ProgressReporter` for typing/progress feedback, and stores PI `session_file` for resume
-7. **Plan dispatch:** If the final response contains an `aurelia-plan` code block, `tryExecutePlan` strips the block, sends the visible reply, and hands off to `BotController.executeApprovedPlan`
-8. **Output:** `SendTextReply()` chunks at 3900 chars, converts MD→HTML, handles rate limits
-9. **Session:** PI `session_file` stored for context resumption on next message; SDK compaction handles pruning; dream/nudge consolidation runs in the background
-
-### Approved Plan → Workers → Delivery
-
-1. **Detection:** `orchestrator.ExtractPlan` reads the `aurelia-plan` JSON block from the assistant response
-2. **Ensure docs:** `EnsureClaudeMd` and `EnsureAgentsMd` write project conventions and squad config if missing
-3. **Plan summary:** `WorkerStatusReporter.SendPlanSummary` posts the wave layout to Telegram
-4. **Waves:** `ExecutionOrder` topologically sorts tasks; each wave runs in parallel up to `MaxConcurrentWorkers`
-5. **Worker spawn:** For tasks with `needs_worktree`, `WorktreeManager.Create` cuts a git worktree on a `worker/<slug>` branch; otherwise the worker runs in the repo root
-6. **Worker prompt:** `BuildWorkerPrompt` layers agent base + `CLAUDE.md` + `AGENTS.md` + `spec.md` + `design.md` + task + sibling context
-7. **Streaming:** `ExecuteTask` opens a bridge request per worker, forwarding `tool_use` events as `WorkerEvent` updates to the status reporter
-8. **Quality gate:** Fail-closed validation with artifact-aware prompt, bridge/parse errors, and per-task retry (up to 3 attempts) with feedback appended to user prompt
-9. **Merge:** Serial merge of approved worktrees in deterministic task-id order after each wave; merge conflict stops the run and preserves worktree/branch for manual recovery
-10. **Consolidate:** `CommitChanges` stages only provided files, `UpdateTasksStatus` tracks all states (pending→approved/failed/skipped), optional PR creation, `ExecutionManifest` serialized for audit
+7. **Output:** `SendTextReply()` chunks at 3900 chars, converts MD→HTML, handles rate limits
+8. **Session:** PI `session_file` stored for context resumption on next message; SDK compaction handles pruning; dream/nudge consolidation runs in the background
 
 ### Cron Job Execution
 
@@ -154,8 +136,7 @@
 **Module boundaries:**
 - `cmd/aurelia/` — CLI entry points, dependency wiring, lifecycle
 - `internal/telegram/` — Telegram I/O, message processing, rendering, command layer
-- `internal/pipeline/` — Reusable turn processor (prompt + bridge + plan dispatch + resilience + supervision + tool monitoring)
-- `internal/orchestrator/` — Plan→workers→validate→deliver cycle, worktree management, quality gate, git/PR
+- `internal/pipeline/` — Reusable turn processor (prompt + bridge + resilience + supervision + tool monitoring)
 - `internal/bridge/` — TypeScript process management, NDJSON protocol (PI SDK)
 - `internal/cron/` — Scheduler, store, runtime, delivery (self-contained with SQLite)
 - `internal/dream/` — Background memory consolidation (dream) and extraction (nudge)

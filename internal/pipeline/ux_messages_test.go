@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/transport"
 )
@@ -25,8 +24,7 @@ func (c *captureOutput) SendText(_ int64, _ int, text string) (transport.Message
 	return nil, nil
 }
 func (c *captureOutput) DeleteMessage(_ transport.MessageHandle)          {}
-func (c *captureOutput) ConfirmMessage(_ int64, _ int)                    { c.confirmCalled = true }
-func (c *captureOutput) ExecuteApprovedPlan(_ int64, _ int, _ int, _ string, _ int64, _ *orchestrator.Plan) {}
+func (c *captureOutput) ConfirmMessage(_ int64, _ int) { c.confirmCalled = true }
 
 func TestRunTimeoutTrackerKeepsFirstOrigin(t *testing.T) {
 	t.Parallel()
