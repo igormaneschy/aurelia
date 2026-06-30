@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.39.1] - 2026-07-01
+
+### Added
+- Project Work State storage foundation: per-project continuity state is now
+  persisted, loaded, and reset independently via `continuity.Store` SQLite
+  backend (`internal/continuity/store_sqlite.go`, `project_work_test.go`).
+- Surface-specific entrypoint handling: TUI (`cmd/aurelia/tui_handler.go`) and
+  Telegram (`internal/telegram/pipeline.go`) pass distinct surface hints through
+  the pipeline, enabling different default project resolutions per surface.
+- Multi-SDK design and specification (`.specs/features/multi-sdk/`) — forward
+  architecture for multiple PI SDK connector support.
+
+### Changed
+- Pipeline context plumbing extended with surface metadata for downstream
+  dispatch (`internal/pipeline/pipeline.go`, `internal/pipeline/service.go`).
+- Project Work State spec, design, and tasks marked validated (Phase 1 complete).
+- ROADMAP and PROJECT docs updated to reflect multi-sdk and project-work-state
+  progress.
+
 ## [0.39.0] - 2026-06-30
 
 ### Added
