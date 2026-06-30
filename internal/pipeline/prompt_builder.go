@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/igormaneschy/aurelia/internal/continuity"
+	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
@@ -94,9 +95,9 @@ func (bc *Service) buildSystemPrompt(userText string, profile *profiles.PromptPr
 	cronSection := bc.buildCronInstructions(chatID)
 	sections = append(sections, cronSection)
 
-	// Telegram interaction instructions
-	telegramSection := bc.buildTelegramInstructions(chatID, messageID, threadID, profile, userID, isPrivateChat)
-	sections = append(sections, telegramSection)
+	// Surface interaction instructions — dispatch by entrypoint
+	surfaceSection := bc.buildSurfaceInstructions(bc.entryPoint, chatID, messageID, threadID, profile, userID, isPrivateChat)
+	sections = append(sections, surfaceSection)
 
 	// Security Boundaries — capability profile and rules for tool usage.
 	// Injected before continuity so the model sees its restrictions early.
@@ -268,6 +269,64 @@ IMPORTANT rules about the working directory:
 	// This applies broadly (not only codebase-read intent) but concisely.
 	if cwd == "" {
 		// Remind the model it has memory loaded — do not claim inability to remember.
+		sb.WriteString(`
+- You HAVE memory loaded — do NOT claim you cannot remember or that each session starts empty. Memory and conversation context ARE available. However, without a cwd binding, you CANNOT access files for this chat/topic.`)
+
+		// If the user has known projects from other chats, list them as suggestions.
+		knownPaths := bc.listKnownProjectPaths(userID)
+		if len(knownPaths) > 0 {
+			sb.WriteString(`
+- Known/remembered project paths from other chats are NOT the active operational cwd. They are suggestions.`)
+			sb.WriteString("\n  Suggested projects (use `/cwd <path>` to activate):")
+			for _, p := range knownPaths {
+				fmt.Fprintf(&sb, "\n  - `/cwd %s`", p)
+			}
+		}
+	}
+
+	return sb.String()
+}
+
+// buildSurfaceInstructions dispatches to the surface-specific instructions
+// based on the entrypoint. Unknown entrypoints fall back to Telegram for
+// backward compatibility.
+func (bc *Service) buildSurfaceInstructions(entrypoint string, chatID int64, messageID int, threadID int, profile *profiles.PromptProfile, userID int64, isPrivateChat bool) string {
+	switch entrypoint {
+	case observability.EntryPointTUI:
+		return bc.buildTUIInstructions(chatID, threadID, profile, userID, isPrivateChat)
+	default:
+		return bc.buildTelegramInstructions(chatID, messageID, threadID, profile, userID, isPrivateChat)
+	}
+}
+
+// buildTUIInstructions returns surface instructions for the TUI/terminal.
+// It provides terminal context, cwd guidance, and session awareness without
+// Telegram-specific concepts (reactions, message IDs, forum topics).
+func (bc *Service) buildTUIInstructions(chatID int64, threadID int, profile *profiles.PromptProfile, userID int64, isPrivateChat bool) string {
+	cwd := bc.effectiveCwdForContext(profile, chatID, threadID, userID, isPrivateChat)
+	cwdDisplay := cwd
+	if cwd == "" {
+		cwdDisplay = "(none — no project set)"
+	}
+
+	var sb strings.Builder
+
+	fmt.Fprintf(&sb, `## Terminal / TUI Context
+
+You are running in a terminal user interface. The user is in a local terminal session.
+This is NOT a Telegram bot — you have no access to Telegram reactions, replies, or emoji reactions.
+
+### Working directory
+Current working directory: %s
+
+IMPORTANT rules about the working directory:
+- When cwd is "(none)", you are in CHAT MODE. Do NOT read files, run commands, or analyze any project. Only use your memory and conversation context to answer questions.
+- When the user wants to work on files or a project, tell them to set the directory first: `+"`/cwd <path>`"+`
+- Only perform file operations (Read, Write, Edit, Bash, Glob, Grep) when a cwd is explicitly set.
+- If the user asks about "this project" or "the project", refer to conversation context and memory — do NOT go reading random directories.`, cwdDisplay)
+
+	// When cwd is empty, add chat-mode guidance.
+	if cwd == "" {
 		sb.WriteString(`
 - You HAVE memory loaded — do NOT claim you cannot remember or that each session starts empty. Memory and conversation context ARE available. However, without a cwd binding, you CANNOT access files for this chat/topic.`)
 

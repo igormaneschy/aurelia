@@ -1,6 +1,6 @@
 # TUI Rich Components — Especificação
 
-**Status:** Draft — Junho 2026
+**Status:** ✅ Historical — entregue em v0.33.0; refinado em tui-visual-polish (v0.34.0)
 **Sprint:** TUI Rich UX
 **Depende de:** `tui-polish-distribution` (fase 5 completa), `tui-image-input`, `tui-document-attachments`
 **Desbloqueia:** Experiência de terminal rica, comparável a clients desktop leves

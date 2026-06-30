@@ -1,6 +1,6 @@
 # TUI Document Attachments — Especificação
 
-**Status:** Draft — Junho 2026
+**Status:** ✅ Validated — entregue em v0.35.0 (Fase 4.6, Sprint J)
 **Sprint:** J (TUI) — sub-fase pós-Fase 4.5 (Image Input)
 **Depende de:** Fase 1 (IPC Layer), Fase 2 (TUI MVP), Fase 4 (Project State Panel)
 **Desbloqueia:** Enviar documentos (md, docx, ppt, pdf, etc.) do terminal para o projeto ativo sem sair da TUI

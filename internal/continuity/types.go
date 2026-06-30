@@ -85,3 +85,53 @@ const FreshThreshold = 5 * time.Minute
 // StaleThreshold is the boundary for "stale" state — continuity recovery
 // context is unlikely to be useful beyond this point.
 const StaleThreshold = 6 * time.Hour
+
+// --- ProjectWork types ---
+
+// ProjectWorkKey identifies project-scoped work state by user and project.
+type ProjectWorkKey struct {
+	UserID      int64
+	ProjectSlug string
+}
+
+// ProjectWorkState is the durable recovery context for a (user, project) pair.
+// All text fields SHALL be redacted and length-capped before persistence.
+type ProjectWorkState struct {
+	UserID      int64
+	ProjectSlug string
+	CWD         string
+
+	ActiveGoal           string
+	LastUserIntent       string
+	LastAssistantSummary string
+	LastCheckpoint       string
+
+	LastRunID     string
+	LastRunStatus string
+	LastTools     string
+
+	LastEntrypoint string
+	LastChatID     int64
+
+	UpdatedAt time.Time
+}
+
+// ProjectWorkPatch carries optional fields for partial updates. Nil pointer
+// means "do not update this field", avoiding accidental zero-value overwrites.
+type ProjectWorkPatch struct {
+	CWD                  *string
+	ActiveGoal           *string
+	LastUserIntent       *string
+	LastAssistantSummary *string
+	LastCheckpoint       *string
+	LastRunID            *string
+	LastRunStatus        *string
+	LastTools            *string
+	LastEntrypoint       *string
+	LastChatID           *int64
+	UpdatedAt            time.Time
+}
+
+// MaxProjectWorkBlockChars is the maximum total characters for a formatted
+// Project Work State prompt block. Same as the continuity block limit.
+const MaxProjectWorkBlockChars = 2000

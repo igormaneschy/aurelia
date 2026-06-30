@@ -1,5 +1,7 @@
 # Bridge Adapter Interface — Tasks
 
+**Track:** `.specs/features/multi-sdk/` Phase **B** — ver `multi-sdk/tasks.md` para DAG completo.
+
 ## Pré-requisitos
 
 - [ ] Rever `internal/bridge/bridge.go`, `protocol.go`, `events.go` para confirmar todos os campos usados pelo pipeline

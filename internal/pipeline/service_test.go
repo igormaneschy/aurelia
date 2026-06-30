@@ -646,3 +646,116 @@ func TestNewService_CreatesFreshWhenNotInjected(t *testing.T) {
 		t.Error("TokenGuard(): nil when not injected, expected fresh instance")
 	}
 }
+
+// --- EntryPoint normalization ---
+
+func TestNormalizeEntryPoint_EmptyDefaultsToTelegram(t *testing.T) {
+	if got := normalizeEntryPoint(""); got != observability.EntryPointTelegram {
+		t.Errorf("normalizeEntryPoint(\"\") = %q, want %q", got, observability.EntryPointTelegram)
+	}
+}
+
+func TestNormalizeEntryPoint_PreservesKnownValues(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{observability.EntryPointTelegram, observability.EntryPointTelegram},
+		{observability.EntryPointTUI, observability.EntryPointTUI},
+		{observability.EntryPointCron, observability.EntryPointCron},
+	}
+	for _, tc := range tests {
+		if got := normalizeEntryPoint(tc.input); got != tc.want {
+			t.Errorf("normalizeEntryPoint(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestNormalizeEntryPoint_UnknownFallsBackToTelegram(t *testing.T) {
+	if got := normalizeEntryPoint("unknown-surface"); got != observability.EntryPointTelegram {
+		t.Errorf("normalizeEntryPoint(\"unknown-surface\") = %q, want %q", got, observability.EntryPointTelegram)
+	}
+}
+
+func TestNewService_EntryPointDefault(t *testing.T) {
+	// When EntryPoint is empty, NewService defaults to Telegram.
+	svc := NewService(Config{})
+	if svc.EntryPoint() != observability.EntryPointTelegram {
+		t.Errorf("EntryPoint() = %q, want %q", svc.EntryPoint(), observability.EntryPointTelegram)
+	}
+}
+
+func TestNewService_EntryPointTUI(t *testing.T) {
+	// When EntryPoint is tui, NewService preserves it.
+	svc := NewService(Config{EntryPoint: observability.EntryPointTUI})
+	if svc.EntryPoint() != observability.EntryPointTUI {
+		t.Errorf("EntryPoint() = %q, want %q", svc.EntryPoint(), observability.EntryPointTUI)
+	}
+}
+
+// captureRunLogStore records the RunRecord passed to the first Start call.
+type captureRunLogStore struct {
+	fakeRunLogStore
+	started *runlog.RunRecord
+}
+
+func (c *captureRunLogStore) Start(ctx context.Context, record runlog.RunRecord) error {
+	c.started = &record
+	return nil
+}
+
+func TestStartRunLog_EntryPointTUI(t *testing.T) {
+	// Assertion 3: TUI-configured service persists "tui" in runlog entrypoint.
+	store := &captureRunLogStore{}
+	s := &Service{
+		runLog:       store,
+		entryPoint:   observability.EntryPointTUI,
+		runLogStates: make(map[string]*runLogState),
+		runLogMu:     sync.Mutex{},
+	}
+
+	ok := s.startRunLog(startRunLogParams{
+		ChatID:     42,
+		ThreadID:   7,
+		RequestID:  "req-123",
+		MessageID:  1,
+		EntryPoint: s.entryPoint,
+	})
+	if !ok {
+		t.Fatal("startRunLog returned false")
+	}
+	if store.started == nil {
+		t.Fatal("startRunLog did not call runLog.Start")
+	}
+	if store.started.EntryPoint != observability.EntryPointTUI {
+		t.Errorf("runlog EntryPoint = %q, want %q", store.started.EntryPoint, observability.EntryPointTUI)
+	}
+}
+
+func TestStartRunLog_DefaultEntryPointTelegram(t *testing.T) {
+	// Assertion 4: Empty entrypoint defaults to telegram in runlog.
+	store := &captureRunLogStore{}
+	s := &Service{
+		runLog:       store,
+		entryPoint:   observability.EntryPointTelegram,
+		runLogStates: make(map[string]*runLogState),
+		runLogMu:     sync.Mutex{},
+	}
+
+	ok := s.startRunLog(startRunLogParams{
+		ChatID:     42,
+		ThreadID:   7,
+		RequestID:  "req-456",
+		MessageID:  1,
+		EntryPoint: s.entryPoint,
+	})
+	if !ok {
+		t.Fatal("startRunLog returned false")
+	}
+	if store.started == nil {
+		t.Fatal("startRunLog did not call runLog.Start")
+	}
+	if store.started.EntryPoint != observability.EntryPointTelegram {
+		t.Errorf("runlog EntryPoint = %q, want %q", store.started.EntryPoint, observability.EntryPointTelegram)
+	}
+}

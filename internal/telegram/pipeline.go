@@ -8,6 +8,7 @@ import (
 	"gopkg.in/telebot.v3"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
+	"github.com/igormaneschy/aurelia/internal/observability"
 	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
 	"github.com/igormaneschy/aurelia/internal/transport"
 	"github.com/igormaneschy/aurelia/internal/users"
@@ -150,6 +151,7 @@ func (bc *BotController) ensurePipeline() *pipelinepkg.Service {
 		NudgeBuffer:  bc.NudgeBuffer(),
 		MemoryCache:  bc.MemoryCache(),
 		TokenGuard:   bc.TokenGuard(),
+		EntryPoint:   observability.EntryPointTelegram,
 	})
 	bc.nudgeBuffer = bc.pipeline.NudgeBuffer()
 	return bc.pipeline

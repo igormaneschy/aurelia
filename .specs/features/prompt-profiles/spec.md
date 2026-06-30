@@ -520,8 +520,38 @@ Prompt Profiles MAY include `harness` as an execution hint, but MVP only support
 
 ### Phase 3: Multi-harness routing
 
-- After Bridge Adapter Interface: route `profile.Harness` to engine adapter.
-- Keep semantics stable.
+**Track:** `.specs/features/multi-sdk/` Phase **C**  
+**Depende de:** `bridge-adapter-interface` ✅ (Phase B)  
+**Complementa:** `project-work-state` (Phase A) — continuidade cross-surface independente do harness
+
+#### Goals Phase 3
+
+- [ ] `engine.Registry` regista adapters por nome (`pi` default)
+- [ ] `profile.Harness` resolve para `engine.Engine` via registry
+- [ ] Harness desconhecido → fail-closed com mensagem clara (sem fallback silencioso)
+- [ ] `SessionKey` inclui `harness` — resume só dentro do mesmo motor
+- [ ] `ProjectWorkState` permanece visível ao trocar harness no mesmo `/cwd`
+- [ ] `run_journal` regista `harness` + `entrypoint`
+- [ ] Runtime Identity no prompt menciona harness efectivo
+
+#### Non-Goals Phase 3
+
+- Implementar 2º SDK concreto (Phase D)
+- Traduzir `PromptProfile` para config nativa de outro SDK (adapters futuros)
+- Reset automático de profile ao trocar harness
+
+#### Acceptance Criteria
+
+1. WHEN profile omite `harness` THEN effective harness SHALL be `pi` (ou default em `app.json` futuro).
+2. WHEN profile tem `harness: pi` THEN comportamento idêntico ao pré-Phase 3.
+3. WHEN profile tem `harness: <unknown>` THEN pipeline SHALL reply locally sem invocar motor: `Harness "<unknown>" ainda não está disponível.`
+4. WHEN harness muda entre turnos no mesmo chat THEN session resume SHALL use cold session do novo harness; `ProjectWorkState` SHALL still inject when `/cwd` active.
+5. WHEN `engine.Registry.Resolve` falha THEN runlog SHALL NOT record a completed bridge run for that attempt.
+6. WHEN cron executa com agent legacy THEN harness SHALL default to `pi` unless profile specifies otherwise.
+
+#### Implementation pointers
+
+Ver `.specs/features/multi-sdk/design.md` (`HarnessRegistry`, session key, testing matrix).
 
 ---
 
