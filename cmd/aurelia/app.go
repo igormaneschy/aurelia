@@ -21,7 +21,6 @@ import (
 	"github.com/igormaneschy/aurelia/internal/cron"
 	"github.com/igormaneschy/aurelia/internal/deps"
 	"github.com/igormaneschy/aurelia/internal/dream"
-	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/persona"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
@@ -279,32 +278,6 @@ func bootstrapApp() (*app, error) {
 	bot.SetRunLog(runLogStore)
 	bot.SetContinuity(continuityStore)
 	bot.SetOnboardingStore(onboardingStore)
-
-	// Wire orchestrator — enables autonomous agent orchestration
-	cwd, err := os.Getwd()
-	if err != nil {
-		if closeErr := onboardingStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close onboarding store: %v", closeErr)
-		}
-		if closeErr := continuityStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close continuity store: %v", closeErr)
-		}
-		if closeErr := runLogStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close runlog store: %v", closeErr)
-		}
-		if closeErr := bindings.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close project binding store: %v", closeErr)
-		}
-		if closeErr := cronStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close cron store: %v", closeErr)
-		}
-		return nil, fmt.Errorf("get current working directory: %w", err)
-	}
-	orch := orchestrator.NewOrchestrator(br, orchestrator.OrchestratorConfig{
-		RepoRoot:       cwd,
-		SecurityConfig: &cfg.SecurityConfig,
-	})
-	bot.SetOrchestrator(orch)
 
 	// When the user changes the default model via /model, the live cfg has been
 	// mutated already; re-export the provider env vars so the bridge picks up

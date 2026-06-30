@@ -8,8 +8,6 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
-	
-	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/session"
 	"github.com/igormaneschy/aurelia/internal/transport"
 )
@@ -375,9 +373,7 @@ func (r *recordingOutput) SendText(_ int64, _ int, text string) (transport.Messa
 	return nil, nil
 }
 func (r *recordingOutput) DeleteMessage(_ transport.MessageHandle) {}
-func (r *recordingOutput) ConfirmMessage(_ int64, _ int)           {}
-func (r *recordingOutput) ExecuteApprovedPlan(_ int64, _ int, _ int, _ string, _ int64, _ *orchestrator.Plan) {
-}
+func (r *recordingOutput) ConfirmMessage(_ int64, _ int) {}
 
 func TestApplyLifecycle_ColdStoreSendsNoRotateNotices(t *testing.T) {
 	// Cold/inactive sessions without suspect failures go directly to

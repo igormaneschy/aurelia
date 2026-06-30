@@ -14,7 +14,6 @@ import (
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/internal/memoryux"
-	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/pipeline"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runtime"
@@ -89,9 +88,6 @@ func (o *tuiOutput) DeleteMessage(_ transport.MessageHandle) {}
 // that call SendText then ConfirmMessage without SendReply/SendError.
 func (o *tuiOutput) ConfirmMessage(_ int64, _ int) {
 	o.markDone()
-}
-
-func (o *tuiOutput) ExecuteApprovedPlan(_ int64, _ int, _ int, _ string, _ int64, _ *orchestrator.Plan) {
 }
 
 // tuiProgress streams assistant progress to the TUI via stream_chunk events.

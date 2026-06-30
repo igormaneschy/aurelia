@@ -16,7 +16,6 @@ import (
 	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/observability"
-	"github.com/igormaneschy/aurelia/internal/orchestrator"
 	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/security"
@@ -1414,21 +1413,15 @@ func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, e
 		return s.handleEmptyResult(chatID, threadID, messageID, ev, userText, toolSummary, userID)
 	}
 
-	safeFinalText := sanitizeExecutionPlanForChat(finalText)
-
 	// Capture runID before completeRunLog cleans up runLogStates.
 	successRunID := s.getRunID(chatID, threadID, userID)
-	s.completeRunLog(chatID, threadID, userID, runlog.RunCompleted, safeFinalText, "")
+	s.completeRunLog(chatID, threadID, userID, runlog.RunCompleted, finalText, "")
 	// Record run_completed event using captured runID since completeRunLog
 	// deleted the in-memory runLogStates entry.
 	s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent(successRunID,
 		observability.PhaseRunCompleted, "status=completed"))
 
-	if ok, outcome := s.handlePlanExecution(chatID, threadID, messageID, finalText, safeFinalText, successRunID, userText, userID, isPrivateChat); ok {
-		return outcome
-	}
-
-	return s.handleNormalReply(chatID, threadID, messageID, safeFinalText, successRunID, userText, userID, isPrivateChat)
+	return s.handleNormalReply(chatID, threadID, messageID, finalText, successRunID, userText, userID, isPrivateChat)
 }
 
 // handleEmptyResult handles the case where the bridge returned no text.
@@ -1471,23 +1464,6 @@ func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, e
 	return OutcomeLLMError
 }
 
-// handlePlanExecution checks whether the assistant output contains an execution
-// plan and, if so, starts the orchestrator. Returns (true, outcome) when a plan
-// was executed, or (false, OutcomeSuccess) to continue with normal reply.
-func (s *Service) handlePlanExecution(chatID int64, threadID int, messageID int, finalText string, safeFinalText string, successRunID string, userText string, userID int64, isPrivateChat bool) (bool, Outcome) {
-	handled, outcome := s.tryExecutePlan(chatID, threadID, messageID, finalText, userID, isPrivateChat)
-	if !handled {
-		return false, OutcomeSuccess
-	}
-	if outcome != OutcomeSuccess {
-		return true, outcome
-	}
-
-	s.output.ConfirmMessage(chatID, messageID)
-	s.afterSuccessfulTurn(chatID, threadID, userText, safeFinalText, successRunID, userID, isPrivateChat)
-	return true, OutcomeSuccess
-}
-
 // handleNormalReply sends the assistant's text response to the chat as a
 // normal reply and finalizes the turn.
 func (s *Service) handleNormalReply(chatID int64, threadID int, messageID int, safeFinalText string, successRunID string, userText string, userID int64, isPrivateChat bool) Outcome {
@@ -1511,67 +1487,6 @@ func (s *Service) recordUsage(chatID int64, threadID int, ev bridge.Event, userI
 	}
 	log.Printf("session usage: chat=%d thread=%d user=%d cost=$%.4f turns=%d input=%d output=%d",
 		chatID, threadID, userID, ev.CostUSD, ev.NumTurns, ev.InputTokens, ev.OutputTokens)
-}
-
-func (s *Service) tryExecutePlan(chatID int64, threadID int, messageID int, finalText string, userID int64, isPrivateChat bool) (bool, Outcome) {
-	if s.orchestrator == nil {
-		return false, OutcomeSuccess
-	}
-	plan, err := s.orchestrator.ExtractPlan(finalText)
-	if err != nil {
-		if orchestrator.ContainsPlanMarker(finalText) {
-			log.Printf("Execution plan marker detected but plan was invalid: %v", err)
-			if err := s.output.SendError(chatID, threadID, "Plano de execução gerado, mas não consegui interpretar o JSON. Não vou enviar os prompts internos no chat."); err != nil {
-				log.Printf("pipeline: SendError(plan json parse) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
-			}
-			return true, OutcomeSuccess
-		}
-		return false, OutcomeSuccess
-	}
-	if plan == nil {
-		if orchestrator.ContainsPlanMarker(finalText) {
-			log.Printf("Execution plan marker detected but plan block was incomplete")
-			if err := s.output.SendError(chatID, threadID, "Plano de execução gerado, mas o bloco veio incompleto. Não vou enviar os prompts internos no chat."); err != nil {
-				log.Printf("pipeline: SendError(plan block) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
-			}
-			return true, OutcomeSuccess
-		}
-		return false, OutcomeSuccess
-	}
-	log.Printf("Execution plan detected with %d tasks", len(plan.Tasks))
-	if displayText := orchestrator.StripPlanBlock(finalText); displayText != "" {
-		if _, err := s.output.SendReply(chatID, threadID, displayText); err != nil {
-			log.Printf("pipeline: SendReply(plan display) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
-		}
-	}
-
-	// Resolve effective working directory — refuse execution without one
-	cwd := s.effectiveCwdForContext(nil, chatID, threadID, userID, isPrivateChat)
-	if cwd == "" {
-		log.Printf("orchestration: refusing plan execution for chat=%d thread=%d: no cwd bound", chatID, threadID)
-		if err := s.output.SendError(chatID, threadID, "Não encontrei um diretório de trabalho (cwd) para executar o plano. Use /cwd para fixar um projeto e tente novamente."); err != nil {
-			log.Printf("pipeline: SendError(no cwd) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
-		}
-		return true, OutcomeSuccess
-	}
-
-	// Store plan as pending — user must confirm with /execute
-	s.storePendingPlan(chatID, threadID, messageID, cwd, userID, plan)
-	if _, err := s.output.SendReply(chatID, threadID, "✅ **Plano de execução detectado!**\n\nUse /execute para confirmar a execução ou /cancel para descartar.\n\nO plano expira em 10 minutos."); err != nil {
-		log.Printf("pipeline: SendReply(plan confirmation) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
-	}
-	return true, OutcomeSuccess
-}
-
-func sanitizeExecutionPlanForChat(text string) string {
-	if !orchestrator.ContainsPlanMarker(text) {
-		return text
-	}
-	displayText := strings.TrimSpace(orchestrator.StripPlanBlock(text))
-	if displayText == "" {
-		return "Plano de execução gerado para o orquestrador. Prompts internos omitidos."
-	}
-	return displayText + "\n\n[plano de execução interno omitido]"
 }
 
 // --- Run log lifecycle ---
