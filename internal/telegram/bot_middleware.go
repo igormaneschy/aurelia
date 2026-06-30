@@ -277,7 +277,7 @@ func (bc *BotController) handleCwdCommand(c telebot.Context) error {
 		}
 	}
 	// Invalidate overlay cache — project changed; user/topic layers are unchanged.
-	bc.invalidateMemoryOverlay(cwd)
+	bc.InvalidateMemoryOverlay(cwd)
 
 	var msg string
 	switch target.Scope {

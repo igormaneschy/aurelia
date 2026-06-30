@@ -106,11 +106,19 @@ func (bc *BotController) processBridgeEventsAsyncWithThread(chat *telebot.Chat, 
 	return bridgeOutcome(bc.ensurePipeline().ProcessBridgeEvents(chat.ID, threadID, messageID, ch, progress, userText, nil, uid, chat.Type == telebot.ChatPrivate, nil, nil))
 }
 
-func (bc *BotController) invalidateMemoryOverlay(cwd string) {
+// InvalidateMemoryOverlay clears cached CWD overlay memory after a project binding change.
+func (bc *BotController) InvalidateMemoryOverlay(cwd string) {
+	if bc == nil {
+		return
+	}
 	bc.ensurePipeline().InvalidateMemoryOverlay(cwd)
 }
 
-func (bc *BotController) invalidateMemorySession(chatID int64, threadID int, userID int64) {
+// InvalidateMemorySession clears cached user global and topic memory layers.
+func (bc *BotController) InvalidateMemorySession(chatID int64, threadID int, userID int64) {
+	if bc == nil {
+		return
+	}
 	bc.ensurePipeline().InvalidateMemorySession(chatID, threadID, userID)
 }
 
