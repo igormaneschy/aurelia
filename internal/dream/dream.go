@@ -45,6 +45,7 @@ type DreamConfig struct {
 	NudgeMinInterval   time.Duration // minimum time between nudge reviews per chat/thread
 	NudgeMinTranscript int           // minimum total chars in buffer before running nudge (0=disable)
 	NudgeMaxTranscript int           // max total bytes sent to LLM per nudge (0=no cap)
+	BackgroundCircuitCooldown time.Duration // pause dream/nudge after 401/402/429 (0=30m default)
 	RunLog             NudgeRunLog
 	NudgeSender      NudgeSender
 }
@@ -83,6 +84,10 @@ type Dreamer struct {
 	nudgeMu      sync.Mutex
 	nudgeRunning map[session.SessionKey]struct{}
 	nudgeLast    map[session.SessionKey]time.Time // rate-limit per key
+
+	bgCircuitMu        sync.Mutex
+	bgCircuitOpenUntil time.Time
+	bgCircuitReason    string
 }
 
 // New creates a Dreamer.
@@ -120,6 +125,10 @@ func (d *Dreamer) AfterTurn(userID int64) {
 	// Gate: enough time since last dream?
 	last := lastDreamTime(memoryDir)
 	if !last.IsZero() && time.Since(last) < d.config.MinInterval {
+		return
+	}
+
+	if d.backgroundCircuitSkip("dream") {
 		return
 	}
 
@@ -249,11 +258,13 @@ func (d *Dreamer) run(userID int64) {
 	ev, err := d.bridge.ExecuteSync(ctx, req)
 	if err != nil {
 		log.Printf("[dream] user=%d failed: %v", userID, err)
+		d.backgroundCircuitTrip("dream", err.Error())
 		d.recordDreamReceipt(memoryDir, start, nil, 0, 0, "error", err.Error())
 		return
 	}
 	if ev.Type == "error" {
 		log.Printf("[dream] user=%d bridge error: %s", userID, ev.Message)
+		d.backgroundCircuitTrip("dream", ev.Message)
 		d.recordDreamReceipt(memoryDir, start, ev, 0, 0, "error", ev.Message)
 		return
 	}
