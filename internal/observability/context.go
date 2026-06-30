@@ -16,9 +16,10 @@ package observability
 // EntryPoint enumerates the known run origins.
 const (
 	EntryPointTelegram = "telegram"
+	EntryPointTUI      = "tui"
 	EntryPointCron     = "cron"
 	EntryPointNudge    = "nudge"
-	EntryPointCLI           = "cli"
+	EntryPointCLI      = "cli"
 )
 
 // Standard phase names for the run_events timeline.

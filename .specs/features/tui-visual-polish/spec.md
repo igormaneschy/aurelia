@@ -1,6 +1,6 @@
 # TUI Visual Polish — Especificação
 
-**Status:** Draft — Junho 2026  
+**Status:** ✅ Historical — entregue em v0.34.0; refinamentos finais em Sprint J (v0.35.0)
 **Sprint:** TUI Visual Richness  
 **Depende de:** `tui-rich-components` (v0.33.0 em `main`)  
 **Desbloqueia:** TUI com identidade visual forte, affordances claras e densidade de informação sem ruído

@@ -83,6 +83,10 @@ type Config struct {
 	// (which creates a pipeline per send) retains stall-turn compaction state.
 	// When nil, NewService creates a fresh one.
 	TokenGuard *session.TokenGuard
+	// EntryPoint identifies the surface that triggered this pipeline instance.
+	// Accepted values from observability: "telegram" (default), "tui", "cron".
+	// When empty, NewService normalizes to observability.EntryPointTelegram.
+	EntryPoint string
 }
 
 // Service owns the LLM/message pipeline independent from Telegram routing.
@@ -127,6 +131,7 @@ type Service struct {
 	tokenGuard      *session.TokenGuard
 	usersStore      *users.Store
 	userResolver    *users.Resolver
+	entryPoint      string
 	// active tool monitoring state — set/cleared per-run for /status.
 	toolStateMu      sync.Mutex
 	activeToolStates map[string]activeToolState
@@ -148,6 +153,7 @@ func NewService(cfg Config) *Service {
 	s := &Service{
 		config:           cfg.AppConfig,
 		bridge:           cfg.Bridge,
+		entryPoint:       normalizeEntryPoint(cfg.EntryPoint),
 		agents:           cfg.Agents,
 		profiles:         cfg.Profiles,
 		persona:          cfg.Persona,
@@ -207,6 +213,32 @@ func NewService(cfg Config) *Service {
 	}
 
 	return s
+}
+
+// normalizeEntryPoint normalizes the entry point string, defaulting to
+// observability.EntryPointTelegram when empty or unknown.
+func normalizeEntryPoint(ep string) string {
+	if ep == "" {
+		return observability.EntryPointTelegram
+	}
+	switch ep {
+	case observability.EntryPointTelegram,
+		observability.EntryPointTUI,
+		observability.EntryPointCron,
+		observability.EntryPointNudge,
+		observability.EntryPointCLI:
+		return ep
+	default:
+		return observability.EntryPointTelegram
+	}
+}
+
+// EntryPoint returns the normalized entry point for this pipeline instance.
+func (s *Service) EntryPoint() string {
+	if s == nil {
+		return ""
+	}
+	return s.entryPoint
 }
 
 // Cancel stops the active run for a chat thread by sending abort to bridge.

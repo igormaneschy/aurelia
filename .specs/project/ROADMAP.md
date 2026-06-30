@@ -29,32 +29,49 @@ O conceito central está fechado assim:
 - **Aurelia owns**: experiência Telegram/TUI, identidade, memória operacional/produto, cron, multi-projeto, user/project scoping, auditoria e continuidade.
 - **Regra de arquitetura**: quando algo já existe no PI SDK, Aurelia adapta — não reimplementa execução agentica, planning mode, worker orchestration ou `aurelia-plan` (removidos em v0.38.0).
 
-Formulação-alvo:
+Formulação-alvo (evolução multi-SDK — ver `.specs/features/multi-sdk/spec.md`):
 
 ```text
-Telegram / CLI / Cron / Interfaces
+Telegram / TUI / Cron
         ↓
-Aurelia Product Layer
-identidade · persona · UX · memória operacional · políticas · continuidade · scheduling
+Aurelia Product Layer (SDK-agnóstico)
+persona · memória operacional · ProjectWorkState · guard-rails · scheduling · prompt profiles
         ↓
-PI SDK
-reasoning · tools · sessions · agent runtime · providers/models
+engine.Engine  ← costura (Phase B); HarnessRegistry (Phase C)
         ↓
-Ferramentas / FS / Web / APIs / Projetos
+PI SDK hoje · outros harnesses depois
+        ↓
+Tools / FS / Web / APIs / Projetos
+        ↓
+Repo (AGENTS.md/CLAUDE.md) + ai-memory MCP (wiki cross-harness)
 ```
 
-O objetivo é evitar dois extremos: o Aurélia não deve virar apenas um wrapper fino do PI, nem deve reconstruir o runtime agentic que o PI já entrega. A memória Wiki transversal agora fica no PI via `ai-memory` MCP; Aurelia mantém apenas o contexto operacional necessário para UX, continuidade e workflows Telegram.
+**Três camadas de contexto** (não confundir):
+
+| Camada | Dono | Exemplo |
+|---|---|---|
+| Produto | Aurelia | persona, `ProjectWorkState`, `cwd_overlay` |
+| Sessão | harness activo | `session_file`, histórico PI |
+| Projeto durável | repo + ai-memory | decisões wiki, handoffs opt-in |
+
+O objetivo é evitar dois extremos: o Aurelia não deve virar apenas um wrapper fino do PI, nem deve reconstruir o runtime agentic que o PI já entrega. A memória Wiki transversal fica no PI via `ai-memory` MCP; Aurelia mantém contexto operacional (incluindo continuidade cross-surface Telegram↔TUI quando `/cwd` activo).
 
 **Fundação P0–P2 (fechada em v0.38.0):** PI delegation, user isolation, observability, context-scoped memory, memory boundary realignment, session/profile operability, learning nudge, TUI Sprint J, e remoção total de planning mode + orchestrator Aurelia-side.
 
-**Track ativo pós-v0.38.0** (ver também §13):
+**Track ativo pós-v0.38.0** (ver também §13; **plano unificado multi-SDK:** `.specs/features/multi-sdk/`):
 
-1. **Higiene documental** — alinhar ROADMAP, PROJECT, README e specs superseded com a decisão pinned `no-planning-mode-or-orchestrator`.
+> **v0.39.0 (2026-06-30):** Prompt Profiles Phase 2 completa — user-private profiles (`profiles.GetForUser`/`ListForUser`), TUI `/mode`+`/agents` parity, pipeline resolver-only path, metadata-safe catalog. Próximo: Project Work State (Phase A). Ver §8b.
+
+~~1. **Higiene documental**~~ — ✅ v0.39.0: ROADMAP/PROJECT/specs superseded alinhados; README já alinhado anteriormente.
 2. ~~**Project-scoped memory**~~ — ✅ v0.37.0 + closure v0.38.1; `cwd_overlay` unificado por slug (TUI + Telegram + grupos); spec `.specs/features/project-scoped-memory/`.
-3. **Prompt Profiles Phase 3** — multi-harness routing (`profile.Harness` → `engine.Engine`); Phase 2 ✅ em `feature/prompt-profiles-phase2`; spec `.specs/features/prompt-profiles/`.
-4. **Bridge Adapter Interface** — costura `engine.Engine` antes de multi-harness; spec `.specs/features/bridge-adapter-interface/`.
-5. **Long-flow UX v2** — polish Telegram em sessões longas; spec `.specs/features/long-flow-ux-v2/`.
-6. **Efficiency audit residual** — project index roots, receipts rotation (maps GC obsoleto após v0.38.0).
+3. **Project Work State** — Phase A multi-SDK: continuidade cross-surface (Telegram↔TUI) por `projectSlug` quando `/cwd` activo; spec `.specs/features/project-work-state/`.
+4. **Bridge Adapter Interface** — Phase B: costura `engine.Engine` + `PIAdapter`; spec `.specs/features/bridge-adapter-interface/`.
+5. **Prompt Profiles Phase 3** — Phase C: multi-harness routing (`profile.Harness` → `engine.Registry`); Phase 2 ✅; spec `.specs/features/prompt-profiles/` + `multi-sdk/design.md`.
+6. **Segundo harness** — Phase D (TBD): primeiro adapter não-PI; critérios em `multi-sdk/design.md`.
+7. **Long-flow UX v2** — polish Telegram em sessões longas; spec `.specs/features/long-flow-ux-v2/`.
+8. **Efficiency audit residual** — project index roots, receipts rotation (maps GC obsoleto após v0.38.0).
+
+**Ordem recomendada:** 3 → 4 → 5 → (6 quando motor escolhido). Itens 3 e 4 podem paralelizar com cuidado em ficheiros distintos.
 
 **Descartados permanentemente (não reabrir):** Plan Mode formal, `aurelia-plan` interception, Aurelia orchestrator, Agent Comms, Auto-Skills — PI SDK owns agentic execution.
 
@@ -282,8 +299,9 @@ Prompt assembly por TurnContext:
 ## 8b. Prompt Profiles — `/mode`, `/agents`, `@profile`
 
 **Spec:** `.specs/features/prompt-profiles/`
-**Status:** 🟡 Parcial — Phase 0–2 ✅ (`internal/profiles`, user-private, TUI/Telegram parity); Phase 3 (multi-harness) pendente
-**Depende de:** Session/Profile Operability + Security Guard-Rails + Bridge Adapter Interface
+**Status:** 🟡 Parcial — Phase 0–2 ✅ (`internal/profiles`, user-private, TUI/Telegram parity); **Phase 3 = multi-SDK Phase C**
+**Depende de:** Session/Profile Operability + Security Guard-Rails + **Bridge Adapter Interface (Phase B)**
+**Complementa:** Project Work State (Phase A) — continuidade cross-surface independente do harness
 
 **Problem:** `/mode`, `/agents` e `@agent` estavam conceitualmente próximos demais: todos eram prompt injections/context hints enviados ao SDK, mas a documentação tratava parte deles como “agentes” executores. Isso conflita com a boundary canônica: SDKs executam; Aurelia injeta personalidade, contexto e policy.
 
@@ -298,6 +316,31 @@ Prompt assembly por TurnContext:
 - esconder metadata operacional no catálogo público/grupo.
 
 **Princípio:** Aurelia é a camada de personalidade/contexto acima dos harnesses. Profiles empacotam o pedido; SDKs executam.
+
+**Phase 3 (pendente):** `profile.Harness` → `engine.Registry.Resolve()`; fail-closed se harness desconhecido; `run_journal.harness`; sessão keyed por `(chat, thread, user, harness)`. Ver `.specs/features/prompt-profiles/spec.md` §13 e `multi-sdk/design.md`.
+
+---
+
+## 8c. Multi-SDK — Plano unificado
+
+**Spec:** `.specs/features/multi-sdk/`
+**Status:** 📋 Draft — 2026-06-30
+**Depende de:** Delegate to PI SDK ✅, Prompt Profiles Phase 0–2 ✅, TUI ✅, Project-Scoped Memory ✅
+
+**Problem:** specs fragmentadas (`bridge-adapter-interface`, `prompt-profiles` Phase 3) sem tese de produto unificada; continuidade Telegram↔TUI incompleta apesar de `cwd_overlay` unificado; `entrypoint` vs `harness` não distinguidos.
+
+**Fases:**
+
+| Fase | Feature | Branch sugerida |
+|---|---|---|
+| A | Project Work State | `feature/project-work-state` |
+| B | Bridge Adapter Interface | `refactor/bridge-adapter-interface` |
+| C | Harness routing | `feature/multi-harness-routing` |
+| D | Segundo harness | TBD |
+
+**Invariante:** `buildSystemPrompt` (persona, memória, `ProjectWorkState`) monta **antes** de qualquer adapter — ver `bridge-adapter-interface/spec.md` §Product Layer Invariants.
+
+**Estimativa até multi-SDK ready (sem 2º motor):** ~7 dias.
 
 ---
 
@@ -349,17 +392,42 @@ boundary established in Sprint 0 (Delegate to PI SDK).
 
 ---
 
+## 5.5. Project-Scoped CWD Overlay ✅
+
+**Spec:** `.specs/features/project-scoped-memory/`
+**Status:** ✅ Validated (v0.37.0 code, v0.38.1 closure)
+
+**Problem:** `cwd_overlay` fragmentado por `(chatID, threadID)` — TUI e Telegram não partilhavam factos de projeto com o mesmo `/cwd`.
+
+**Entregue:**
+
+- `cwd_overlay` em `~/.aurelia/projects/<slug>/cwd_overlay/` (independente de chat/thread);
+- migração `migrate-cwd-overlay`;
+- `topic` memory permanece por conversa; `user_global` inalterado.
+
+**Gap remanescente (Sprint L):** continuidade de *trabalho activo* (goal, intent, checkpoint) ainda por `chatID` — ver §13 Phase A (`project-work-state`).
+
+---
+
 ## 13. Active Track (post-v0.38.0)
 
-| Priority | Spec | Status | Notes |
-|----------|------|:------:|-------|
-| — | `.specs/features/project-scoped-memory/` | ✅ v0.37.0 | `cwd_overlay` por slug; migração `migrate-cwd-overlay`; validado |
-| P1 | `.specs/features/prompt-profiles/` Phase 3 | 🟡 Partial | Phase 2 ✅ (user-private, mode merge, TUI `/mode`+`/agents`); harness routing pending |
-| P2 | `.specs/features/bridge-adapter-interface/` | 📋 Draft | No `internal/engine/` yet |
-| P2 | `.specs/features/long-flow-ux-v2/` | Proposed | UX polish for long PI turns |
-| P2 | Efficiency audit (ai-memory) | Partial | project index roots, receipts rotation |
+**Plano unificado:** `.specs/features/multi-sdk/` (spec + design + tasks)
 
-**Superseded specs (do not implement):** `agent-orchestration-execution/`, `plan-mode-architecture/` (legacy path removed v0.38.0), `auto-skills/`, `agent-comms/`.
+| Phase | Priority | Spec | Status | Entrega |
+|-------|:--------:|------|:------:|---------|
+| — | — | `project-scoped-memory/` | ✅ | `cwd_overlay` por `projectSlug` |
+| **A** | **P0** | `project-work-state/` | 📋 Draft | `ProjectWorkState` cross-surface; prompt TUI; `entrypoint: tui` |
+| **B** | **P1** | `bridge-adapter-interface/` | 📋 Draft | `internal/engine/` + `PIAdapter`; pipeline sem `bridge.Request` |
+| **C** | **P1** | `prompt-profiles/` Phase 3 + `multi-sdk/design.md` | 🟡 Partial | `HarnessRegistry`; `profile.Harness` routing; session+harness |
+| **D** | **P2** | `multi-sdk/` (2º harness TBD) | ⏳ | Primeiro adapter não-PI — motor por escolher |
+| — | P2 | `long-flow-ux-v2/` | Proposed | Polish sessões longas Telegram |
+| — | P3 | Efficiency audit | Partial | project index roots, receipts rotation |
+
+**Ordem obrigatória:** A → B → C → (D). A e B podem paralelizar com cuidado (ficheiros distintos).
+
+**Superseded specs (do not implement):** `agent-orchestration-execution/`, `plan-mode-architecture/`, `auto-skills/`, `agent-comms/`, `wiki-memory/` (gateway interno).
+
+**Rejeitado como dependência:** dotcontext PREVC/orchestrator — inspiração pontual apenas (sensores, replay).
 
 ---
 
@@ -387,45 +455,33 @@ boundary established in Sprint 0 (Delegate to PI SDK).
 ## Sequenciamento resumido
 
 ```text
-Foundation validada (Security Guard-Rails + Project Binding + Bridge Resilience)
-      │
-      ├──→ 0. Delegate to PI SDK Native core ✅
+Foundation (P0–P2) ✅  →  v0.38.0
       │
       ▼
-1. User Isolation MVP + runtime hardening ✅
+5.5 Project-Scoped cwd_overlay ✅  (v0.37–v0.38.1)
       │
       ▼
-2. Operational Observability ✅
+┌─────────────────────────────────────────────────────┐
+│  Active Track — Multi-SDK (post-v0.38.0)            │
+│  Plano: .specs/features/multi-sdk/                  │
+├─────────────────────────────────────────────────────┤
+│  Phase A  Project Work State      📋 próximo        │
+│  Phase B  engine.Engine + PIAdapter                 │
+│  Phase C  HarnessRegistry + profile.Harness         │
+│  Phase D  2º harness (TBD)                          │
+└─────────────────────────────────────────────────────┘
       │
-      ▼
-3. ~~Close Orchestration Cycle~~ 🗑️ Removed v0.38.0 (PI SDK owns execution)
-      │
-      ▼
-D0. Memory Contract & Spec Hygiene ✅
-      │
-      ▼
-5. Context-Scoped Memory ✅
-      │
-      ▼
-6. Memory Boundary Realignment ✅
-      │
-      ▼
- 7. Session/Profile Operability ✅
-      │
-      ▼
- 8b. Prompt Profiles 🟡
-      │
-      ▼
- 8. Learning Nudge ✅
-      │
-      ▼
-  11. TUI — Transport Abstraction (Fase 0) ✅
-       │
-       ▼
-  12. TUI (Terminal User Interface) ✅
-      │
-      ▼
- 13. Active Track (post-v0.38.0) — project-scoped memory, profiles, bridge adapter
+      ├──→ long-flow UX v2 (paralelo, P2)
+      └──→ efficiency audit (paralelo, P3)
+```
+
+**Fundação histórica (completa):**
+
+```text
+0. Delegate to PI SDK ✅ → 1. User Isolation ✅ → 2. Observability ✅
+→ ~~3. Orchestration~~ 🗑️ → D0 Memory hygiene ✅ → 5. Context Memory ✅
+→ 6. Memory Boundary ✅ → 7. Session/Profile ✅ → 8b. Prompt Profiles 🟡
+→ 8. Nudge ✅ → 11. Transport Abstraction ✅ → 12. TUI ✅
 ```
 
 ## Mapa de implementação por sprint
@@ -505,13 +561,13 @@ Sprint G: Session/Profile Operability ✅
   ├─ DefaultCWD fallback só em private chat
   └─ onboarding timezone
 
-Sprint G2: Prompt Profiles 🟡 (parcial — v0.21.0)
+Sprint G2: Prompt Profiles 🟡 (Phase 0–2 ✅)
   ├─ ✅ `/mode` = default Prompt Profile
-  ├─ ✅ `@profile` = one-shot Prompt Profile override (via `agents.Route`)
+  ├─ ✅ `@profile` = one-shot Prompt Profile override
   ├─ ✅ `/agents` = compatible Prompt Profile catalog
-  ├─ ✅ no default composition of mode overlay + agent prompt
-  └─ ✅ metadata-safe catalog in groups/non-owner contexts
-  └─ ⏳ `internal/profiles` package abstraction (Phase 1 da spec)
+  ├─ ✅ `internal/profiles` + user-private profiles (Phase 2)
+  ├─ ✅ TUI `/mode` + `/agents` parity
+  └─ ⏳ Phase 3 harness routing → Sprint N
 
 Sprint H: Learning Nudge ✅ (v0.9.0–v0.21.1)
   ├─ ✅ transcript recorder por SessionKey
@@ -526,6 +582,35 @@ Sprint K: TUI ✅ (v0.27.1–v0.35.0)
   ├─ ✅ Fase 4: Painel de Estado do Projeto
   ├─ ✅ Fases 4.5–4.6: Image input + document attachments
   └─ ✅ Fase 5: Polish Charm v2, distribuição, tool activity
+
+Sprint K2: Project-Scoped Memory ✅ (v0.37.0–v0.38.1)
+  ├─ ✅ cwd_overlay por projectSlug (TUI + Telegram + grupos)
+  ├─ ✅ migrate-cwd-overlay
+  └─ ⏳ gap: continuidade activa ainda por chatID → Sprint L
+
+Sprint L: Project Work State — Multi-SDK Phase A 📋
+  ├─ ⏳ ProjectWorkState (userID + projectSlug) em continuity.db
+  ├─ ⏳ dual-write turn lifecycle quando /cwd activo
+  ├─ ⏳ prompt: Project Work State vs Conversation Continuity
+  ├─ ⏳ buildSurfaceInstructions (TUI sem bloco Telegram)
+  ├─ ⏳ entrypoint: tui no runlog
+  └─ ⏳ live: Telegram → TUI "onde paramos?"
+
+Sprint M: Bridge Adapter Interface — Multi-SDK Phase B 📋
+  ├─ ⏳ internal/engine/ (Engine, Request, Event, MockEngine)
+  ├─ ⏳ bridge/adapter.go (PIAdapter)
+  ├─ ⏳ pipeline sem bridge.Request em produção
+  └─ ⏳ ARCHITECTURE.md + product layer invariants
+
+Sprint N: Multi-Harness Routing — Multi-SDK Phase C 📋
+  ├─ ⏳ engine.Registry + wire app.go
+  ├─ ⏳ profile.Harness → Resolve (fail-closed)
+  ├─ ⏳ SessionKey + harness; migração sessões → pi
+  ├─ ⏳ run_journal.harness + debug CLI
+  └─ ⏳ ProjectWorkState invariável ao trocar harness
+
+Sprint O: Segundo Harness — Multi-SDK Phase D ⏳
+  └─ ⏳ motor TBD; spec dedicada quando Igor escolher
 ```
 
 ## Nota de implementação incremental
@@ -543,17 +628,27 @@ migração CLI
 active run / Bridge commands user-scoped
 ```
 
-O próximo trabalho deve assumir `user_id` real no handoff e evitar novos caminhos com `userID=0`, exceto compatibilidade/testes. Sprint E foi concluído em v0.20.0; `TopicMemoryDir` e `TopicCwdOverlayDir` estão em produção desde então.
+O próximo trabalho é o **track Multi-SDK Phase A** (`project-work-state`): fechar continuidade Telegram↔TUI no mesmo `/cwd`, antes da costura `engine.Engine`. Assumir `user_id` real em todos os caminhos novos.
 
 ## Backlog futuro
 
-- Cross-device Agent Comms seguro
+- **Multi-SDK Phase D:** segundo harness (escolha pendente)
+- **ai-memory UX:** reforço handoff/long-flow; comando `/handoff` opcional (sem gateway Go)
+- **Sensores/evidência** inspirados em dotcontext (cron, validação pós-turno) — não PREVC
 - Human approval flow para guard-rails ambíguos
 - OS sandbox para Bridge
 - Project history/favorites para `/cwd`
-- Team memory sync via git
 - TUI: gRPC local para múltiplas surfaces (desktop app, VS Code extension)
+
+**Backlog descartado:** Cross-device Agent Comms, Auto-Skills, Plan Mode, Aurelia orchestrator, Wiki MCP interno.
 
 ## Notas de visão
 
-Aurelia ocupa o nicho de **personal agent persistente via Telegram**, com TUI como interface secundária local. Não é IDE, não é SaaS multi-tenant, não é apenas coding agent. PI SDK é o motor de inferência/execução agentica; Go é a camada de produto — segurança, memória operacional, persistência e UX (Telegram + TUI).
+Aurelia é **personal agent persistente** via Telegram (primário) e TUI (terminal). Não é IDE, SaaS multi-tenant, nem harness universal tipo dotcontext.
+
+- **Go / Aurelia:** produto — persona, memória operacional, continuidade cross-surface, UX, cron, guard-rails.
+- **engine.Engine:** costura para um ou mais SDKs; PI é o motor hoje.
+- **ai-memory MCP:** wiki e handoffs cross-harness (via tools do motor, não daemon Go).
+- **Repo:** regras de execução (`AGENTS.md`, `.specs/`).
+
+Ver `.specs/features/multi-sdk/spec.md` e `.specs/codebase/AGENT_RESPONSIBILITY_MODEL.md`.

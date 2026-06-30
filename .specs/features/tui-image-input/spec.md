@@ -1,6 +1,6 @@
 # TUI Image Input — Especificação
 
-**Status:** Draft — Junho 2026
+**Status:** ✅ Validated — entregue em v0.35.0 (Fase 4.5, Sprint J)
 **Sprint:** J (TUI) — sub-fase pós-Fase 3
 **Depende de:** Fase 1 (IPC Layer), Fase 2 (TUI MVP)
 **Desbloqueia:** Análise de imagens (screenshots, diagramas, fotos) directamente no terminal sem trocar para o Telegram

@@ -14,6 +14,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/internal/memoryux"
+	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/pipeline"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runtime"
@@ -419,6 +420,7 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 		Bindings:   a.bindings,
 		RunLog:     a.runLog,
 		Continuity: a.continuity,
+		EntryPoint: observability.EntryPointTUI,
 	}
 	if a.bot != nil {
 		pipeCfg.Profiles = a.bot.ProfileResolver()

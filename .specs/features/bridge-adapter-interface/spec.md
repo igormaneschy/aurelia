@@ -1,6 +1,9 @@
 # Bridge Adapter Interface — Especificação
 
 **Status:** Draft — Junho 2026
+**Track:** `.specs/features/multi-sdk/` Phase **B**
+**Depende de (recomendado):** `.specs/features/project-work-state/` Phase A — prompt/superfície estável antes de migrar pipeline
+**Bloqueia:** `.specs/features/prompt-profiles/` Phase 3 (harness routing)
 
 ## Problem Statement
 
@@ -12,6 +15,8 @@ O problema não é o PI SDK em si — é a ausência de costura. Não existe uma
 2. **Testabilidade degradada**: Os testes do pipeline que usam `FakeBridge` têm de simular o protocolo PI completo. Um `MockEngine` com contrato mínimo seria muito mais simples.
 3. **Bloqueio para multi-engine**: Quando se quiser usar um segundo SDK (ex: API nativa do Anthropic sem PI, um agente local, ou um stub de desenvolvimento), será necessário tocar em dezenas de call sites no pipeline em vez de criar um novo adapter.
 4. **`input any` prolifera**: O campo `bridge.Event.Input` é `any` (deserializado como `map[string]interface{}`). O pipeline faz `json.Marshal(ev.Input)` em múltiplos sítios. Esse problema devia ser resolvido na fronteira, não espalhado.
+
+> **Nota histórica (v0.35.0→v0.35.2):** O Aurelia já teve `internal/engine/` (interface `Engine`) e `PIAdapter` em `internal/bridge/adapter.go` — introduzidos em v0.35.0 e **removidos em v0.35.2** por over-abstraction prematura. O problema não era falta de adapter concreto (o `PIAdapter` existia), mas sim que a abstracção não tinha motor multi-SDK real a conduzi-la: o pipeline migrou para `bridge.Bridge` directo porque o caminho mais simples funcionava para o PI único, e o custo de manter a camada extra não se justificava sem um segundo harness. A reintrodução agora (`bridge-adapter-interface`) é **diferente** porque: (1) tem um roadmap multi-SDK concreto a conduzi-la (Phase A→B→C→D em `.specs/features/multi-sdk/`), não é uma "arrumação" arquitectural; (2) segue Strangler Fig — zero regressão, migração por task; (3) a interface é minimalista (3 métodos + `Command` nominal), abstendo **apenas** o que o pipeline precisa, sem cobrir session lifecycle (`rotate`/`compact`) que permanece específico do PI.
 
 O momento certo para criar esta abstracção é **agora**, enquanto o código tem um único implementador e o refactor ainda é cirúrgico. Após a unificação de Prompt Profiles e o início de multi-harness routing, cada profile poderá declarar preferências de harness/model/tool policy — e nessa altura a abstracção será obrigatória, mas muito mais cara.
 
@@ -27,11 +32,31 @@ O momento certo para criar esta abstracção é **agora**, enquanto o código te
 
 ## Out of Scope
 
-- Implementar um segundo SDK/adapter concreto (este spec cria apenas a costura; o segundo adapter virá noutro sprint)
+- Implementar um segundo SDK/adapter concreto (este spec cria apenas a costura; ver `multi-sdk/` Phase D)
 - Alterar o protocolo NDJSON do PI ou o `bundle.ts`
 - Mover lógica de session lifecycle (rotate, compact) para fora do bridge
 - Alterar `app.json` ou configuração de runtime
 - Qualquer mudança na UI/Telegram
+- `HarnessRegistry` e routing por `profile.Harness` (Phase C — `prompt-profiles` + `multi-sdk/design.md`)
+- `ProjectWorkState` cross-surface (Phase A — `project-work-state/`)
+
+---
+
+## Product Layer Invariants (multi-SDK)
+
+Esta costura **não move** responsabilidades de produto para o adapter.
+
+| Responsabilidade | Onde fica após Phase B |
+|---|---|
+| `buildSystemPrompt` (persona, memória, continuity) | `internal/pipeline/prompt_builder.go` |
+| `ProjectWorkState` / `ConversationState` | `internal/continuity` — injectado em `engine.Request.SystemPrompt` |
+| `cwd_overlay`, user_global, topic memory | Aurelia — injectado no `SystemPrompt` |
+| Security capability profiles (selecção) | Aurelia pipeline → `engine.Request.Security` |
+| Tool policy enforcement | PI `beforeToolCall` (adapter PI traduz) |
+| `AGENTS.md` / `CLAUDE.md` | PI `ResourceLoader` (adapter PI); outros SDKs no seu equivalente |
+| ai-memory wiki / handoff | MCP do harness — **não** no daemon Go |
+
+O `PIAdapter` traduz protocolo; **não** reinterpreta persona nem memória operacional.
 
 ---
 

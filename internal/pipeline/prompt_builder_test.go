@@ -11,6 +11,7 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/continuity"
+	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
@@ -1226,6 +1227,109 @@ func TestBuildSystemPrompt_NoContinuityWhenNilStore(t *testing.T) {
 	}
 	if strings.Contains(prompt, "Conversation Continuity") {
 		t.Fatal("expected no continuity section when store is nil")
+	}
+}
+
+// --- Entrypoint surface instructions ---
+
+func TestBuildSystemPrompt_TUIExcludesTelegramOnlyText(t *testing.T) {
+	// Assertion 1: TUI pipeline must NOT contain Telegram-only text.
+	svc := &Service{
+		entryPoint:  observability.EntryPointTUI,
+		config:      &config.AppConfig{DefaultProvider: "test", DefaultModel: "test"},
+		sessions:    session.NewStore(),
+		memoryDir:   t.TempDir(),
+		memoryCache: NewMemoryCache(),
+	}
+
+	prompt, err := svc.buildSystemPrompt("hello", nil, 42, 1, 0, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	telegramOnly := []struct {
+		needle string
+		desc   string
+	}{
+		{needle: "You ARE the Telegram bot", desc: "Telegram identity"},
+		{needle: "`aurelia telegram react", desc: "telegram react CLI"},
+		{needle: "Available emojis", desc: "reaction emojis"},
+		{needle: "## Telegram Context", desc: "Telegram context header"},
+	}
+	for _, c := range telegramOnly {
+		if strings.Contains(prompt, c.needle) {
+			t.Errorf("TUI prompt contains Telegram-only text %q (%s)", c.needle, c.desc)
+		}
+	}
+	// TUI prompt must have the Terminal/TUI section header.
+	if !strings.Contains(prompt, "## Terminal / TUI Context") {
+		t.Error("TUI prompt missing TUI context section")
+	}
+}
+
+func TestBuildSystemPrompt_TUIHasNoTelegramReactionCLI(t *testing.T) {
+	// Assertion 1 (precise): the react CLI instruction must not appear.
+	svc := &Service{
+		entryPoint:  observability.EntryPointTUI,
+		config:      &config.AppConfig{DefaultProvider: "test", DefaultModel: "test"},
+		sessions:    session.NewStore(),
+		memoryDir:   t.TempDir(),
+		memoryCache: NewMemoryCache(),
+	}
+
+	prompt, err := svc.buildSystemPrompt("hello", nil, 42, 1, 0, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if strings.Contains(prompt, "`aurelia telegram react") {
+		t.Error("TUI prompt must not contain 'telegram react' CLI instruction")
+	}
+}
+
+func TestBuildSystemPrompt_TelegramStillHasReactionCLI(t *testing.T) {
+	// Assertion 2: Telegram prompt still has reaction CLI.
+	svc := &Service{
+		entryPoint:  observability.EntryPointTelegram,
+		config:      &config.AppConfig{DefaultProvider: "test", DefaultModel: "test"},
+		sessions:    session.NewStore(),
+		memoryDir:   t.TempDir(),
+		memoryCache: NewMemoryCache(),
+	}
+
+	prompt, err := svc.buildSystemPrompt("hello", nil, 42, 1, 0, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(prompt, "telegram react") {
+		t.Error("Telegram prompt must contain 'telegram react' CLI instruction")
+	}
+	if !strings.Contains(prompt, "You ARE the Telegram bot") {
+		t.Error("Telegram prompt must identify as Telegram bot")
+	}
+}
+
+func TestBuildSystemPrompt_DefaultEntryPointUsesTelegram(t *testing.T) {
+	// Assertion 4: Empty entrypoint defaults to Telegram prompt.
+	svc := &Service{
+		entryPoint:  "", // zero value — but NewService normalizes it
+		config:      &config.AppConfig{DefaultProvider: "test", DefaultModel: "test"},
+		sessions:    session.NewStore(),
+		memoryDir:   t.TempDir(),
+		memoryCache: NewMemoryCache(),
+	}
+
+	prompt, err := svc.buildSystemPrompt("hello", nil, 42, 1, 0, 0, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !strings.Contains(prompt, "## Telegram Context") {
+		t.Error("Default (empty) entrypoint prompt missing Telegram context")
+	}
+	if !strings.Contains(prompt, "telegram react") {
+		t.Error("Default (empty) entrypoint prompt missing 'telegram react'")
 	}
 }
 

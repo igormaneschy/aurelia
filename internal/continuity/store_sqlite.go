@@ -88,7 +88,32 @@ func (s *SQLiteStore) initialize() error {
 	if _, err := s.db.Exec(query); err != nil {
 		return fmt.Errorf("initialize continuity schema: %w", err)
 	}
-	return s.ensureUserIDColumn()
+	if err := s.ensureUserIDColumn(); err != nil {
+		return err
+	}
+
+	// Create project_work_state table (append-only, no destructive migration).
+	projectQuery := `
+	CREATE TABLE IF NOT EXISTS project_work_state (
+		user_id          INTEGER NOT NULL,
+		project_slug     TEXT NOT NULL,
+		cwd              TEXT NOT NULL DEFAULT '',
+		active_goal      TEXT NOT NULL DEFAULT '',
+		last_user_intent TEXT NOT NULL DEFAULT '',
+		last_assistant_summary TEXT NOT NULL DEFAULT '',
+		last_checkpoint  TEXT NOT NULL DEFAULT '',
+		last_run_id      TEXT NOT NULL DEFAULT '',
+		last_run_status  TEXT NOT NULL DEFAULT '',
+		last_tools       TEXT NOT NULL DEFAULT '',
+		last_entrypoint  TEXT NOT NULL DEFAULT '',
+		last_chat_id     INTEGER NOT NULL DEFAULT 0,
+		updated_at       INTEGER NOT NULL,
+		PRIMARY KEY (user_id, project_slug)
+	);`
+	if _, err := s.db.Exec(projectQuery); err != nil {
+		return fmt.Errorf("initialize project work schema: %w", err)
+	}
+	return nil
 }
 
 // ensureUserIDColumn migrates from the old (chat_id, thread_id) primary key
@@ -342,6 +367,118 @@ func (s *SQLiteStore) MarkColdForSessions(ctx context.Context, reason string) er
 		return fmt.Errorf("continuity mark cold for sessions: %w", err)
 	}
 	return nil
+}
+
+// GetProjectWork retrieves project work state for a (userID, projectSlug) pair,
+// or nil if absent. Returns an error if projectSlug is empty.
+func (s *SQLiteStore) GetProjectWork(ctx context.Context, userID int64, projectSlug string) (*ProjectWorkState, error) {
+	if projectSlug == "" {
+		return nil, fmt.Errorf("get project work: project_slug must not be empty")
+	}
+	row := s.db.QueryRowContext(ctx, `
+		SELECT user_id, project_slug, cwd, active_goal, last_user_intent,
+		       last_assistant_summary, last_checkpoint, last_run_id,
+		       last_run_status, last_tools, last_entrypoint,
+		       last_chat_id, updated_at
+		FROM project_work_state
+		WHERE user_id = ? AND project_slug = ?`, userID, projectSlug)
+
+	state, err := scanProjectWorkState(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get project work user=%d slug=%s: %w", userID, projectSlug, err)
+	}
+	return state, nil
+}
+
+// PatchProjectWork applies partial updates without overwriting nil fields.
+// Uses a single atomic INSERT ... ON CONFLICT DO UPDATE.
+// Creates a new row if one doesn't exist with defaults for unspecified fields.
+// Returns an error if projectSlug is empty.
+// All text fields are sanitized (redacted + capped) before storage.
+func (s *SQLiteStore) PatchProjectWork(ctx context.Context, key ProjectWorkKey, patch ProjectWorkPatch) error {
+	if key.ProjectSlug == "" {
+		return fmt.Errorf("patch project work: project_slug must not be empty")
+	}
+	now := unix(patch.UpdatedAt)
+
+	cols := "user_id, project_slug, updated_at"
+	vals := "?, ?, ?"
+	var valueArgs []any
+	var setClauses []string
+	var setArgs []any
+
+	valueArgs = append(valueArgs, key.UserID, key.ProjectSlug, now)
+	setClauses = append(setClauses, "updated_at = ?")
+	setArgs = append(setArgs, now)
+
+	appendField := func(col string, val *string, cap int, def string) {
+		cols += ", " + col
+		vals += ", ?"
+		valueArgs = append(valueArgs, sanitizePtr(val, cap, def))
+		if val != nil {
+			sanitized := sanitize(*val, cap)
+			setClauses = append(setClauses, col+" = ?")
+			setArgs = append(setArgs, sanitized)
+		} else {
+			setClauses = append(setClauses, col+" = COALESCE(NULL, "+col+")")
+		}
+	}
+	appendInt64Field := func(col string, val *int64) {
+		cols += ", " + col
+		vals += ", ?"
+		if val != nil {
+			valueArgs = append(valueArgs, *val)
+			setClauses = append(setClauses, col+" = ?")
+			setArgs = append(setArgs, *val)
+		} else {
+			valueArgs = append(valueArgs, 0)
+			setClauses = append(setClauses, col+" = COALESCE(NULL, "+col+")")
+		}
+	}
+
+	appendField("cwd", patch.CWD, 200, "")
+	appendField("active_goal", patch.ActiveGoal, MaxActiveGoal, "")
+	appendField("last_user_intent", patch.LastUserIntent, MaxUserIntent, "")
+	appendField("last_assistant_summary", patch.LastAssistantSummary, MaxAssistantSummary, "")
+	appendField("last_checkpoint", patch.LastCheckpoint, MaxCheckpoint, "")
+	appendField("last_run_id", patch.LastRunID, 200, "")
+	appendField("last_run_status", patch.LastRunStatus, 100, "")
+	appendField("last_tools", patch.LastTools, MaxTools, "")
+	appendField("last_entrypoint", patch.LastEntrypoint, 16, "")
+	appendInt64Field("last_chat_id", patch.LastChatID)
+
+	setStr := strings.Join(setClauses, ", ")
+	allArgs := append(valueArgs, setArgs...)
+
+	q := fmt.Sprintf(`
+		INSERT INTO project_work_state (%s)
+		VALUES (%s)
+		ON CONFLICT(user_id, project_slug) DO UPDATE SET %s`, cols, vals, setStr)
+
+	_, err := s.db.ExecContext(ctx, q, allArgs...)
+	if err != nil {
+		return fmt.Errorf("patch project work user=%d slug=%s: %w", key.UserID, key.ProjectSlug, err)
+	}
+	return nil
+}
+
+// --- project work scan ---
+
+func scanProjectWorkState(row stateScanner) (*ProjectWorkState, error) {
+	var s ProjectWorkState
+	var updatedAt int64
+	err := row.Scan(&s.UserID, &s.ProjectSlug, &s.CWD,
+		&s.ActiveGoal, &s.LastUserIntent, &s.LastAssistantSummary,
+		&s.LastCheckpoint, &s.LastRunID, &s.LastRunStatus,
+		&s.LastTools, &s.LastEntrypoint, &s.LastChatID, &updatedAt)
+	if err != nil {
+		return nil, err
+	}
+	s.UpdatedAt = fromUnix(updatedAt)
+	return &s, nil
 }
 
 // Close releases the database connection.

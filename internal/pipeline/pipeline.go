@@ -856,17 +856,18 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 		profile = req.Options.Security.Profile
 	}
 	runLogStarted := s.startRunLog(startRunLogParams{
-		ChatID:    chatID,
-		ThreadID:  threadID,
-		RequestID: req.RequestID,
-		MessageID: messageID,
-		CWD:       cwd,
-		Prompt:    userText,
-		UserID:    userID,
-		AgentName: agentName,
-		Provider:  req.Options.Provider,
-		Model:     req.Options.Model,
-		Profile:   profile,
+		ChatID:      chatID,
+		ThreadID:    threadID,
+		RequestID:   req.RequestID,
+		MessageID:   messageID,
+		CWD:         cwd,
+		Prompt:      userText,
+		UserID:      userID,
+		AgentName:   agentName,
+		Provider:    req.Options.Provider,
+		Model:       req.Options.Model,
+		Profile:     profile,
+		EntryPoint:  s.entryPoint,
 	})
 	var processDeathRunID string // captured before completeRunLog for retry events
 
@@ -1426,17 +1427,18 @@ func runLogKey(chatID int64, threadID int, userID int64) string {
 // startRunLogParams carries the extended context needed to populate a
 // run_journal start row. All fields are populated before Bridge execution.
 type startRunLogParams struct {
-	ChatID    int64
-	ThreadID  int
-	RequestID string
-	MessageID int
-	CWD       string
-	Prompt    string
-	UserID    int64
-	AgentName string
-	Provider  string
-	Model     string
-	Profile   string
+	ChatID      int64
+	ThreadID    int
+	RequestID   string
+	MessageID   int
+	CWD         string
+	Prompt      string
+	UserID      int64
+	AgentName   string
+	Provider    string
+	Model       string
+	Profile     string
+	EntryPoint  string
 }
 
 // startRunLog creates a new runlog entry and stores the per-run state.
@@ -1455,6 +1457,10 @@ func (s *Service) startRunLog(p startRunLogParams) bool {
 	now := time.Now()
 	runLogCtx, runLogCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer runLogCancel()
+	entryPoint := p.EntryPoint
+	if entryPoint == "" {
+		entryPoint = observability.EntryPointTelegram
+	}
 	err := s.runLog.Start(runLogCtx, runlog.RunRecord{
 		RunID:             runID,
 		ChatID:            p.ChatID,
@@ -1464,7 +1470,7 @@ func (s *Service) startRunLog(p startRunLogParams) bool {
 		Prompt:            truncatePrompt(redactSecrets(p.Prompt)),
 		StartedAt:         now,
 		UserID:            p.UserID,
-		EntryPoint:        observability.EntryPointTelegram,
+		EntryPoint:        entryPoint,
 		AgentName:         p.AgentName,
 		Provider:          p.Provider,
 		Model:             p.Model,

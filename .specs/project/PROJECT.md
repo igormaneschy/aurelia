@@ -52,11 +52,11 @@ The strategic differentiator is the persistent Telegram/TUI product layer: ident
 - **Cross-platform** — CI and development target macOS, Windows, and Linux
 - **No Docker** — Single binary deployment, no container orchestration
 
-## Current State (June 2026 — v0.38.0)
+## Current State (June 2026 — v0.39.0)
 
 ### Core operational
 - **Pipeline:** message → prompt assembly → bridge (PI SDK) → reply (Telegram/TUI). No planning mode, no `aurelia-plan`, no Aurelia-side orchestrator.
-- Persona: IDENTITY + SOUL + USER; Prompt Profiles via `/mode`, `@profile`, `/agents`
+- Persona: IDENTITY + SOUL + USER; Prompt Profiles via `/mode`, `@profile`, `/agents` (Phase 2: user-private profiles, TUI parity — v0.39.0)
 - Cron, multi-modal input (text/photo/voice/docs), session resume via PI `session_file`
 - TUI Sprint J complete: IPC, multi-session, vision, attachments, tool activity (`v0.35.0+`)
 - Tool monitoring, observability (`run_id`, run_events), security guard-rails, project binding
@@ -67,20 +67,31 @@ The strategic differentiator is the persistent Telegram/TUI product layer: ident
 ### Removed (v0.38.0)
 - `internal/orchestrator/`, `aurelia-plan` interception, pending plans, `/execute` — PI SDK owns agentic execution
 
-### Active track (post-v0.38.0)
-- Project-scoped memory (`cwd_overlay` by project slug)
-- Prompt Profiles Phase 2–3 (user-private profiles)
-- Bridge Adapter Interface (`engine.Engine` costura)
-- Long-flow UX v2, efficiency audit residual
+### Active track (post-v0.38.0) — Multi-SDK
 
-See `.specs/project/ROADMAP.md` §13 for details.
+Plano unificado: `.specs/features/multi-sdk/`
+
+| Phase | Entrega | Status |
+|---|---|---|
+| A | Project Work State — continuidade Telegram↔TUI (`projectSlug`) | 📋 Draft |
+| B | `engine.Engine` + `PIAdapter` | 📋 Draft |
+| C | `HarnessRegistry` + `profile.Harness` routing | 🟡 Partial |
+| D | Segundo harness (TBD) | ⏳ |
+
+**Já fechado no track:** project-scoped `cwd_overlay` (v0.37–v0.38.1); Prompt Profiles Phase 0–2.
+
+**Paralelo (P2):** long-flow UX v2, efficiency audit.
+
+Ver `.specs/project/ROADMAP.md` §13 e §8c.
 
 ## Roadmap
 
 Ver `.specs/project/ROADMAP.md`. Resumo:
 
 ```
-Sprint 0–12  → Foundation + TUI ✅
-Sprint C/D   → Orchestration + Plan Mode 🗑️ Removed v0.38.0
-Sprint 13    → Active track: project-scoped memory, profiles, bridge adapter
+Foundation + TUI + cwd_overlay por slug  →  ✅
+Sprint L   → Project Work State (Phase A)  →  📋 próximo
+Sprint M   → engine.Engine (Phase B)
+Sprint N   → Harness routing (Phase C)
+Sprint O   → 2º harness (Phase D, TBD)
 ```

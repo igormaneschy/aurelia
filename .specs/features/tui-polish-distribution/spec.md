@@ -1,6 +1,6 @@
 # TUI Polish & Distribution — Especificação
 
-**Status:** Draft — Junho 2026
+**Status:** ✅ Validated — entregue em v0.35.0 (Fase 5, Sprint J)
 **Sprint:** J (TUI) — Fase 5
 **Depende de:** Fase 1 (IPC Layer), Fase 2 (TUI MVP), Fase 3 (Multi-sessão)
 **Desbloqueia:** Experiência de terminal madura, fácil de instalar e distribuir

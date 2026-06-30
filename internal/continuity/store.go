@@ -19,6 +19,15 @@ type Store interface {
 	// with a non-empty session_id. Used when the bridge process dies.
 	MarkColdForSessions(ctx context.Context, reason string) error
 
+	// GetProjectWork retrieves project work state for a (userID, projectSlug)
+	// pair, or nil if absent.
+	GetProjectWork(ctx context.Context, userID int64, projectSlug string) (*ProjectWorkState, error)
+
+	// PatchProjectWork applies partial updates without overwriting nil fields.
+	// Creates a new row if one doesn't exist. Returns an error if projectSlug
+	// is empty.
+	PatchProjectWork(ctx context.Context, key ProjectWorkKey, patch ProjectWorkPatch) error
+
 	// Close releases the store's resources.
 	Close() error
 }
