@@ -391,7 +391,7 @@ func (bc *BotController) resetCurrentSession(chatID int64, threadID int, invalid
 		sessionFile := bc.sessions.GetSession(chatID, threadID, userID)
 		bc.dreamer.FlushNudge(chatID, threadID, userID, cwd, sessionFile, bc.nudgeBuffer)
 		if invalidate {
-			bc.invalidateMemoryDirs(chatID, threadID, userID, cwd)
+			bc.invalidateMemorySession(chatID, threadID, userID)
 		}
 	}
 	if bc.sessions != nil {

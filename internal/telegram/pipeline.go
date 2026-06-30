@@ -110,6 +110,14 @@ func (bc *BotController) invalidateMemoryDirs(chatID int64, threadID int, userID
 	bc.ensurePipeline().InvalidateMemoryDirs(chatID, threadID, userID, cwd)
 }
 
+func (bc *BotController) invalidateMemoryOverlay(cwd string) {
+	bc.ensurePipeline().InvalidateMemoryOverlay(cwd)
+}
+
+func (bc *BotController) invalidateMemorySession(chatID int64, threadID int, userID int64) {
+	bc.ensurePipeline().InvalidateMemorySession(chatID, threadID, userID)
+}
+
 func (bc *BotController) ensurePipeline() *pipelinepkg.Service {
 	if bc.pipeline != nil {
 		return bc.pipeline

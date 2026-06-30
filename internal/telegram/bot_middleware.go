@@ -276,12 +276,8 @@ func (bc *BotController) handleCwdCommand(c telebot.Context) error {
 			log.Printf("cwd: failed to bootstrap project memory for %s: %v", cwd, err)
 		}
 	}
-	// Invalidate memory cache — project changed, memory files may differ
-	bc.invalidateMemoryDirs(chatID, target.ThreadID, userID, cwd)
-	// If setting group-level from a topic, also invalidate the topic cache
-	if target.ThreadID == 0 && threadID != 0 {
-		bc.invalidateMemoryDirs(chatID, threadID, userID, cwd)
-	}
+	// Invalidate overlay cache — project changed; user/topic layers are unchanged.
+	bc.invalidateMemoryOverlay(cwd)
 
 	var msg string
 	switch target.Scope {

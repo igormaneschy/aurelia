@@ -48,6 +48,7 @@ type DreamConfig struct {
 	BackgroundCircuitCooldown time.Duration // pause dream/nudge after 401/402/429 (0=30m default)
 	RunLog             NudgeRunLog
 	NudgeSender      NudgeSender
+	MemoryCache      *pipelinepkg.MemoryCache // shared with pipeline; invalidated after writes
 }
 
 // DefaultConfig returns sensible defaults.
@@ -75,6 +76,7 @@ type Dreamer struct {
 	config       DreamConfig
 	runLog       NudgeRunLog
 	nudgeSender  NudgeSender
+	memoryCache  *pipelinepkg.MemoryCache
 
 	turnsMu   sync.Mutex
 	turns     map[int64]*atomic.Int32 // userID → turn counter
@@ -99,10 +101,24 @@ func New(userResolver *users.Resolver, resolver *runtime.PathResolver, br *bridg
 		config:       cfg,
 		runLog:       cfg.RunLog,
 		nudgeSender:  cfg.NudgeSender,
+		memoryCache:  cfg.MemoryCache,
 		turns:        make(map[int64]*atomic.Int32),
 		running:      make(map[int64]*atomic.Bool),
 		nudgeRunning: make(map[session.SessionKey]struct{}),
 		nudgeLast:    make(map[session.SessionKey]time.Time),
+	}
+}
+
+func (d *Dreamer) invalidateMemoryDirs(dirs ...string) {
+	if d.memoryCache == nil {
+		return
+	}
+	for _, dir := range dirs {
+		if dir == "" {
+			continue
+		}
+		d.memoryCache.Invalidate(dir)
+		d.memoryCache.Invalidate(dir + ":compact")
 	}
 }
 
@@ -290,6 +306,7 @@ func (d *Dreamer) run(userID int64) {
 			applied = applyConsolidationActions(writer, ext.Actions, 0, 0, "")
 			log.Printf("[dream] user=%d applied %d/%d consolidation actions", userID, applied, total)
 			if applied > 0 {
+				d.invalidateMemoryDirs(memoryDir)
 				receiptStatus = "applied"
 			} else {
 				receiptStatus = "noop"

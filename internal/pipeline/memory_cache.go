@@ -135,41 +135,63 @@ func (c *MemoryCache) put(dir string, content string, mtimes map[string]time.Tim
 	c.mu.Unlock()
 }
 
-// invalidate removes the cached entry for dir, forcing a re-read on next access.
-func (c *MemoryCache) invalidate(dir string) {
+// Invalidate removes the cached entry for dir, forcing a re-read on next access.
+func (c *MemoryCache) Invalidate(dir string) {
+	if dir == "" {
+		return
+	}
 	c.mu.Lock()
 	delete(c.entries, dir)
 	c.mu.Unlock()
 }
 
-// InvalidateMemoryDirs clears cached entries for all memory directories that may
-// have been modified. Called after nudge/dream writes and CWD changes.
-func (bc *Service) InvalidateMemoryDirs(chatID int64, threadID int, userID int64, cwd string) {
+func compactMemoryCacheKey(dir string) string {
+	return dir + ":compact"
+}
+
+// InvalidateMemoryDir clears the cache for a single memory directory (full and compact).
+func (bc *Service) InvalidateMemoryDir(dir string) {
+	if bc.memoryCache == nil || dir == "" {
+		return
+	}
+	bc.memoryCache.Invalidate(dir)
+	bc.memoryCache.Invalidate(compactMemoryCacheKey(dir))
+}
+
+// InvalidateMemoryOverlay clears only the CWD overlay layer for the active project.
+func (bc *Service) InvalidateMemoryOverlay(cwd string) {
+	if bc.memoryCache == nil || cwd == "" || bc.resolver == nil {
+		return
+	}
+	if overlayDir := bc.resolver.ProjectCwdOverlayDir(cwd); overlayDir != "" {
+		bc.InvalidateMemoryDir(overlayDir)
+	}
+}
+
+// InvalidateMemorySession clears user global and topic layers (not CWD overlay).
+func (bc *Service) InvalidateMemorySession(chatID int64, threadID int, userID int64) {
 	if bc.memoryCache == nil {
 		return
 	}
-
-	// Invalidate user memory dir via canonical PathResolver
 	if bc.resolver != nil && userID != 0 {
 		if userDir := bc.resolver.UserMemoryDir(userID); userDir != "" {
-			bc.memoryCache.invalidate(userDir)
+			bc.InvalidateMemoryDir(userDir)
 		}
 	} else if bc.memoryDir != "" {
-		bc.memoryCache.invalidate(bc.memoryDir)
+		bc.InvalidateMemoryDir(bc.memoryDir)
 	}
-
-	// Invalidate topic memory dir via canonical PathResolver
 	if bc.resolver != nil {
 		if topicDir := bc.resolver.TopicMemoryDir(chatID, threadID); topicDir != "" {
-			bc.memoryCache.invalidate(topicDir)
+			bc.InvalidateMemoryDir(topicDir)
 		}
 	}
+}
 
-	if cwd != "" && bc.resolver != nil {
-		// CWD overlay — project-scoped, independent of chat/thread
-		if overlayDir := bc.resolver.ProjectCwdOverlayDir(cwd); overlayDir != "" {
-			bc.memoryCache.invalidate(overlayDir)
-		}
-	}
+// InvalidateMemoryDirs clears cached entries for all memory directories that may
+// have been modified. Prefer narrower helpers (InvalidateMemoryDir, InvalidateMemoryOverlay,
+// InvalidateMemorySession) when the affected layer is known.
+func (bc *Service) InvalidateMemoryDirs(chatID int64, threadID int, userID int64, cwd string) {
+	bc.InvalidateMemorySession(chatID, threadID, userID)
+	bc.InvalidateMemoryOverlay(cwd)
 }
 

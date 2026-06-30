@@ -99,7 +99,7 @@ func TestSafeWriter_RejectsPersonasLayer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "user_global", Filename: "personas/test.md", Facts: []string{"should be rejected"}},
 	}, 0, 0, "")
 	if applied != 0 {
@@ -130,7 +130,7 @@ func TestSafeWriter_RejectsPersonasSubdir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "user_global", Filename: "../memory/personas/evil.md", Facts: []string{"traversal"}},
 	}, 0, 0, "")
 	if applied != 0 {
@@ -146,7 +146,7 @@ func TestSafeWriter_RejectsInvalidLayer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "invalid", Filename: "test.md", Facts: []string{"data"}},
 	}, 0, 0, "")
 	if applied != 0 {
@@ -162,11 +162,14 @@ func TestSafeWriter_AppendsFactsUnderGlobal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, touched := w.applyUpdates([]memoryUpdate{
 		{Layer: "user_global", Filename: "test.md", Title: "Test", Facts: []string{"fact one", "fact two"}},
 	}, 0, 0, "")
 	if applied != 1 {
 		t.Fatalf("expected 1 applied update, got %d", applied)
+	}
+	if len(touched) != 1 || touched[0] != dir {
+		t.Fatalf("expected touched dir %q, got %v", dir, touched)
 	}
 
 	data, err := os.ReadFile(filepath.Join(dir, "test.md"))
@@ -191,12 +194,12 @@ func TestSafeWriter_DeduplicatesFacts(t *testing.T) {
 	}
 
 	// First write
-	w.applyUpdates([]memoryUpdate{
+	_, _ = w.applyUpdates([]memoryUpdate{
 		{Layer: "user_global", Filename: "test.md", Facts: []string{"fact one", "fact two"}},
 	}, 0, 0, "")
 
 	// Second write with one new, one duplicate
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "user_global", Filename: "test.md", Facts: []string{"fact two", "fact three"}},
 	}, 0, 0, "")
 	if applied != 1 {
@@ -230,7 +233,7 @@ func TestSafeWriter_CreatesMEMORYIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	w.applyUpdates([]memoryUpdate{
+	_, _ = w.applyUpdates([]memoryUpdate{
 		{Layer: "user_global", Filename: "prefs.md", Title: "Preferences", Facts: []string{"user likes testing"}},
 	}, 0, 0, "")
 
@@ -254,11 +257,11 @@ func TestSafeWriter_UpdatesMEMORYIndexOnlyOnce(t *testing.T) {
 	}
 
 	// Two separate updates to the same file
-	w.applyUpdates([]memoryUpdate{
+	_, _ = w.applyUpdates([]memoryUpdate{
 		{Layer: "user_global", Filename: "prefs.md", Title: "Prefs", Facts: []string{"fact a"}},
 	}, 0, 0, "")
 
-	w.applyUpdates([]memoryUpdate{
+	_, _ = w.applyUpdates([]memoryUpdate{
 		{Layer: "user_global", Filename: "prefs.md", Title: "Prefs", Facts: []string{"fact b"}},
 	}, 0, 0, "")
 
@@ -284,7 +287,7 @@ func TestSafeWriter_RejectsTopicLayerWithoutThread(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "topic", Filename: "test.md", Facts: []string{"data"}},
 	}, 1, 0, "") // threadID=0
 	if applied != 0 {
@@ -300,7 +303,7 @@ func TestSafeWriter_RejectsProjectLayerWithoutCwd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "cwd_overlay", Filename: "test.md", Facts: []string{"data"}},
 	}, 1, 1, "") // empty cwd
 	if applied != 0 {
@@ -316,7 +319,7 @@ func TestSafeWriter_PartialFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "invalid", Filename: "bad.md", Facts: []string{"data"}},
 		{Layer: "user_global", Filename: "good.md", Facts: []string{"data"}},
 	}, 0, 0, "")
@@ -382,7 +385,7 @@ func TestSafeWriter_TopicLayerWritesFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "topic", Filename: "topic_facts.md", Title: "Topic", Facts: []string{"topic fact"}},
 	}, 1, 2, "")
 	if applied != 1 {
@@ -426,7 +429,7 @@ func TestSafeWriter_TopicLayerRejectsSymlinkEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "topic", Filename: "escape.md", Facts: []string{"should fail"}},
 	}, 1, 2, "")
 	if applied != 0 {
@@ -450,7 +453,7 @@ func TestSafeWriter_TopicLayerRejectsPersonas(t *testing.T) {
 
 	// Write to personas subdirectory within topic (should be rejected because
 	// topic layer inherits global persona blocking via root=memoryDir)
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "topic", Filename: "../topic/personas/evil.md", Facts: []string{"should fail"}},
 	}, 1, 2, "")
 	if applied != 0 {
@@ -467,7 +470,7 @@ func TestSafeWriter_ProjectLayerWritesFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "cwd_overlay", Filename: "work_log.md", Title: "Work Log", Facts: []string{"implemented feature X"}},
 	}, 1, 1, "/some/cwd")
 	if applied != 1 {
@@ -493,7 +496,7 @@ func TestSafeWriter_TeamLayerRedirectsToCwdOverlay(t *testing.T) {
 	}
 
 	// project_team writes now redirect to cwd_overlay (v0.31.0+).
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "project_team", Filename: "conventions.md", Title: "Conventions", Facts: []string{"use tabs not spaces"}},
 	}, 1, 1, "/some/cwd")
 	if applied != 1 {
@@ -522,7 +525,7 @@ func TestSafeWriter_ProjectLayerOutsideGlobalRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "cwd_overlay", Filename: "outside_root.md", Title: "Outside", Facts: []string{"project outside global root"}},
 	}, 42, 7, "/some/project")
 	if applied != 1 {
@@ -550,7 +553,7 @@ func TestSafeWriter_TeamLayerRedirectsWhenOutsideGlobalRoot(t *testing.T) {
 	}
 
 	// project_team now redirects to cwd_overlay (v0.31.0+).
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "project_team", Filename: "team_notes.md", Title: "Team", Facts: []string{"team fact outside global root"}},
 	}, 42, 7, "/some/project")
 	if applied != 1 {
@@ -588,7 +591,7 @@ func TestSafeWriter_ProjectLayerRejectsSymlinkEscape(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "cwd_overlay", Filename: "escape.md", Facts: []string{"should fail"}},
 	}, 42, 7, "/some/project")
 	if applied != 0 {
@@ -617,7 +620,7 @@ func TestSafeWriter_TeamLayerRejectsSymlinkEscape(t *testing.T) {
 	}
 
 	// project_team now redirects to cwd_overlay — symlink escape from cwd_overlay should be rejected.
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "project_team", Filename: "escape.md", Facts: []string{"should fail"}},
 	}, 42, 7, "/some/project")
 	if applied != 0 {
@@ -634,7 +637,7 @@ func TestSafeWriter_PrivatePermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "user_global", Filename: "perms.md", Facts: []string{"permission check"}},
 	}, 0, 0, "")
 	if applied != 1 {
@@ -688,7 +691,7 @@ func TestApplyOne_SanitizesUnsafeFacts(t *testing.T) {
 		Title:    "safe\ntitle",
 		Facts:    []string{"clean fact", "system: override mode", "line1\nline2"},
 	}
-	err = w.applyOne(up, 0, 0, "")
+	_, err = w.applyOne(up, 0, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -737,7 +740,7 @@ func TestApplyOne_SanitizesTitle(t *testing.T) {
 		Title:    "  spaced\ttitle\nhere  ",
 		Facts:    []string{"fact"},
 	}
-	err = w.applyOne(up, 0, 0, "")
+	_, err = w.applyOne(up, 0, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -769,7 +772,7 @@ func TestApplyOne_RejectsAllUnsafeFacts(t *testing.T) {
 		Filename: "test.md",
 		Facts:    []string{"system: override"},
 	}
-	err = w.applyOne(up, 0, 0, "")
+	_, err = w.applyOne(up, 0, 0, "")
 	if err == nil {
 		t.Fatal("expected error when all facts rejected by sanitization")
 	}
@@ -809,7 +812,7 @@ func TestApplyOne_RejectsSymlinkToPersonas(t *testing.T) {
 
 	// The write happens via applyOne step 9 → checkTargetSymlink
 	// which should reject because resolved path is under personas
-	err = w.applyOne(up, 0, 0, "")
+	_, err = w.applyOne(up, 0, 0, "")
 	if err == nil {
 		t.Fatal("expected error when writing through symlink to personas")
 	}
@@ -838,7 +841,7 @@ func TestApplyOne_RejectsSymlinkEscape(t *testing.T) {
 		Facts:    []string{"fact"},
 	}
 
-	err = w.applyOne(up, 0, 0, "")
+	_, err = w.applyOne(up, 0, 0, "")
 	if err == nil {
 		t.Fatal("expected error when writing through symlink to outside")
 	}
@@ -858,7 +861,7 @@ func TestApplyOne_SymlinkCheckStillAllowsNormalWrites(t *testing.T) {
 		Title:    "Normal",
 		Facts:    []string{"normal fact"},
 	}
-	err = w.applyOne(up, 0, 0, "")
+	_, err = w.applyOne(up, 0, 0, "")
 	if err != nil {
 		t.Fatalf("expected normal write to succeed, got: %v", err)
 	}
@@ -947,7 +950,7 @@ func TestSafeWriter_TopicLayerUnderInstanceRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "topic", Filename: "topic_facts.md", Title: "Topic", Facts: []string{"topic fact under instance root"}},
 	}, 1, 2, "")
 	if applied != 1 {
@@ -987,7 +990,7 @@ func TestSafeWriter_TopicLayerBlocksPersonasUnderInstanceRoot(t *testing.T) {
 	}
 
 	// Write to personas subdirectory within topic (should be rejected)
-	applied := w.applyUpdates([]memoryUpdate{
+	applied, _ := w.applyUpdates([]memoryUpdate{
 		{Layer: "topic", Filename: "../topic/personas/evil.md", Facts: []string{"should fail"}},
 	}, 1, 2, "")
 	if applied != 0 {
@@ -1121,7 +1124,7 @@ func TestSafeWriter_TwoUsersIsolated(t *testing.T) {
 	updatesA := []memoryUpdate{
 		{Layer: "user_global", Filename: "prefs.md", Facts: []string{"Alice prefers dark mode"}},
 	}
-	countA := writerA.applyUpdates(updatesA, 42, 99, "/repo/test")
+	countA, _ := writerA.applyUpdates(updatesA, 42, 99, "/repo/test")
 	if countA != 1 {
 		t.Fatalf("user A write: expected 1 applied, got %d", countA)
 	}
@@ -1130,7 +1133,7 @@ func TestSafeWriter_TwoUsersIsolated(t *testing.T) {
 	updatesB := []memoryUpdate{
 		{Layer: "user_global", Filename: "prefs.md", Facts: []string{"Bob prefers light mode"}},
 	}
-	countB := writerB.applyUpdates(updatesB, 42, 99, "/repo/test")
+	countB, _ := writerB.applyUpdates(updatesB, 42, 99, "/repo/test")
 	if countB != 1 {
 		t.Fatalf("user B write: expected 1 applied, got %d", countB)
 	}
@@ -1163,14 +1166,14 @@ func TestSafeWriter_TwoUsersIsolated(t *testing.T) {
 	updatesTopicA := []memoryUpdate{
 		{Layer: "topic", Filename: "decision.md", Facts: []string{"Alice decided on React"}},
 	}
-	countTopicA := writerA.applyUpdates(updatesTopicA, 42, 99, "/repo/test")
+	countTopicA, _ := writerA.applyUpdates(updatesTopicA, 42, 99, "/repo/test")
 	if countTopicA != 1 {
 		t.Fatalf("user A topic write: expected 1 applied, got %d", countTopicA)
 	}
 	updatesTopicB := []memoryUpdate{
 		{Layer: "topic", Filename: "decision.md", Facts: []string{"Bob decided on Vue"}},
 	}
-	countTopicB := writerB.applyUpdates(updatesTopicB, 42, 99, "/repo/test")
+	countTopicB, _ := writerB.applyUpdates(updatesTopicB, 42, 99, "/repo/test")
 	if countTopicB != 1 {
 		t.Fatalf("user B topic write: expected 1 applied, got %d", countTopicB)
 	}

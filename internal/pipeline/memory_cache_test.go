@@ -72,11 +72,34 @@ func TestMemoryCache_InvalidateRemovesEntry(t *testing.T) {
 		t.Fatal("expected cache hit before invalidation")
 	}
 
-	cache.invalidate(dir)
+	cache.Invalidate(dir)
 
 	// Cache miss after invalidation
 	if _, ok := cache.get(dir); ok {
 		t.Fatal("expected cache miss after invalidation")
+	}
+}
+
+func TestMemoryCache_SelectiveInvalidationPreservesOtherDirs(t *testing.T) {
+	t.Parallel()
+
+	cache := NewMemoryCache()
+	dirA := t.TempDir()
+	dirB := t.TempDir()
+
+	writeFile(t, filepath.Join(dirA, "a.md"), "a")
+	writeFile(t, filepath.Join(dirB, "b.md"), "b")
+	cache.put(dirA, "content A", nil)
+	cache.put(dirB, "content B", nil)
+
+	cache.Invalidate(dirA)
+
+	if _, ok := cache.get(dirA); ok {
+		t.Fatal("expected cache miss for invalidated dirA")
+	}
+	got, ok := cache.get(dirB)
+	if !ok || got != "content B" {
+		t.Fatalf("expected cache hit for dirB, got %q ok=%v", got, ok)
 	}
 }
 
