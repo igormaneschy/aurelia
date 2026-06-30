@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	telebot "gopkg.in/telebot.v3"
+
 	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
@@ -773,6 +775,73 @@ func TestCmdListAgents_HidesPrivateProfilesForNonOwner(t *testing.T) {
 	}
 	if !strings.Contains(ownerReply, "secret") {
 		t.Fatalf("owner listing should include private profile, got %q", ownerReply)
+	}
+}
+
+func TestCmdListAgents_ShowsActiveProfileOnce(t *testing.T) {
+	t.Parallel()
+
+	store := newTestUserStore(t)
+	if err := store.Save(&users.Profile{UserID: 1, Name: "Owner", Language: "pt", IsOwner: true, ActiveMode: "developer"}); err != nil {
+		t.Fatal(err)
+	}
+
+	bc := &BotController{
+		config:    &config.AppConfig{DefaultOwnerUserID: 1, Providers: map[string]config.ProviderConfig{}},
+		profiles:  profiles.NewResolverFromRegistry(nil, "", ""),
+		userStore: store,
+	}
+
+	reply, err := bc.cmdListAgents(newTestTelegramContext(42, 0, 1, ""))
+	if err != nil {
+		t.Fatalf("cmdListAgents() error = %v", err)
+	}
+	if !strings.Contains(reply, "Perfil ativo: **developer**") {
+		t.Fatalf("expected active profile line, got %q", reply)
+	}
+	if !strings.Contains(reply, "**developer** (● ativo)") {
+		t.Fatalf("expected active marker on developer entry, got %q", reply)
+	}
+	if strings.Count(reply, "**Perfis disponíveis**") != 1 {
+		t.Fatalf("expected single catalog header, got %q", reply)
+	}
+}
+
+func TestCmdListAgents_VerboseOwnerPrivate(t *testing.T) {
+	t.Parallel()
+
+	resolver := buildTestProfileResolver(t, map[string]testProfileFile{
+		"coder": {
+			Description: "Writes code",
+			Public:      true,
+			Prompt:      "coder body",
+		},
+	})
+	// Inject model via rewriting file with richer frontmatter
+	dir := t.TempDir()
+	content := "---\nname: coder\ndescription: Writes code\nmodel: claude-sonnet\npublic: true\ncapability_profile: execute_safe\ntags: [code]\n---\ncoder body"
+	if err := writeTestFile(filepath.Join(dir, "coder.md"), content); err != nil {
+		t.Fatal(err)
+	}
+	resolver = profiles.NewResolverFromRegistry(nil, dir, "")
+
+	bc := &BotController{
+		config:   &config.AppConfig{DefaultOwnerUserID: 1, Providers: map[string]config.ProviderConfig{}},
+		profiles: resolver,
+	}
+
+	ctx := newTestTelegramContext(42, 0, 1, "")
+	ctx.chat.Type = telebot.ChatPrivate
+	ctx.message.Payload = "verbose"
+	reply, err := bc.cmdListAgents(ctx)
+	if err != nil {
+		t.Fatalf("cmdListAgents(verbose) error = %v", err)
+	}
+	if !strings.Contains(reply, "model=claude-sonnet") {
+		t.Fatalf("verbose listing should include model hint, got %q", reply)
+	}
+	if !strings.Contains(reply, "capability=execute_safe") {
+		t.Fatalf("verbose listing should include capability hint, got %q", reply)
 	}
 }
 

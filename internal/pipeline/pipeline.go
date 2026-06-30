@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/igormaneschy/aurelia/pkg/idgen"
-	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/profiles"
@@ -161,8 +160,6 @@ type pipelineInput struct {
 }
 
 const (
-	classifyTimeout        = 5 * time.Second
-	classifyMinTextLen     = 10
 	bridgeExecutionTimeout = 30 * time.Minute // hard safety net, not configurable
 	defaultIdleTimeout     = 15 * time.Minute // fallback when config not available
 
@@ -528,23 +525,8 @@ func (s *Service) resolveEffectiveProfile(text string, activeDefault string, use
 	if s.profiles != nil {
 		return s.profiles.ResolveEffectiveForUser(text, activeDefault, userID, isOwner)
 	}
-	// Fallback when resolver not available — route legacy-style via agents registry.
-	// This is a transitional path; will be removed when agents.Registry is fully deprecated.
-	if s.agents != nil {
-		agent := s.routeAgent(text)
-		if agent != nil {
-			// Strip @name prefix from text (legacy behavior).
-			stripped := text
-			if idx := strings.IndexByte(text[1:], ' '); idx != -1 {
-				if s := strings.TrimSpace(text[idx+2:]); s != "" {
-					stripped = s
-				}
-			}
-			return profiles.FromAgent(agent), stripped, nil
-		}
-	}
-	// No resolver and no legacy agents — return general builtin.
-	return nil, text, nil
+	// Resolver is always wired in production; fall back to general builtin only.
+	return profiles.GeneralBuiltin(), text, nil
 }
 
 func (s *Service) applyVisionFallback(ctx context.Context, req *bridge.Request, images []bridge.ImageAttachment) {
@@ -630,60 +612,6 @@ func (s *Service) applyVisionFallback(ctx context.Context, req *bridge.Request, 
 		return
 	}
 	slog.Info("vision: no fallback configured, using current model for image input")
-}
-
-// routeAgent resolves which agent should handle the message, first by @name
-// prefix, then by LLM classification if agents are configured. Classification
-// is skipped when there are fewer than 2 agents (no choice to make) or when
-// the message is too short to carry useful intent — that saves a 5s round-trip
-// to the bridge on trivial follow-ups like "ok" or "obrigado".
-func (s *Service) routeAgent(text string) *agents.Agent {
-	if s.agents == nil {
-		return nil
-	}
-	agent := s.agents.Route(text)
-	if agent != nil {
-		return agent
-	}
-	if len(s.agents.Agents()) < 2 {
-		return nil
-	}
-	if len(strings.TrimSpace(text)) < classifyMinTextLen {
-		return nil
-	}
-	classifyCtx, classifyCancel := context.WithTimeout(context.Background(), classifyTimeout)
-	defer classifyCancel()
-	return s.agents.Classify(classifyCtx, text, s.classifyFunc())
-}
-
-func (s *Service) classifyFunc() agents.ClassifyFunc {
-	return func(ctx context.Context, system, prompt string) (string, error) {
-		req := bridge.Request{
-			Command: "query",
-			Prompt:  prompt,
-			Options: bridge.RequestOptions{
-				SystemPrompt: system,
-			},
-		}
-		s.applyConfiguredModelOptions(&req.Options)
-		ch, err := s.bridge.Execute(ctx, req)
-		if err != nil {
-			return "", err
-		}
-		for ev := range ch {
-			if ev.Type == "error" {
-				msg := ev.Message
-				if msg == "" {
-					msg = ev.Content
-				}
-				return "", fmt.Errorf("%s", msg)
-			}
-			if ev.Type == "result" {
-				return ev.ContentText(), nil
-			}
-		}
-		return "", fmt.Errorf("classify: no result from bridge")
-	}
 }
 
 // buildBridgeRequest assembles a bridge.Request with agent overrides, session

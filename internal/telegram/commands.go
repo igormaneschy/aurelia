@@ -809,13 +809,16 @@ func statusWorkLines(description string, queueSize int) []string {
 func (bc *BotController) cmdListAgents(c telebot.Context) (string, error) {
 	userID := safeSenderID(c.Sender())
 	isOwner := bc.isOwner(c)
+	isPrivate := c.Chat().Type == telebot.ChatPrivate
+	verbose := strings.EqualFold(strings.TrimSpace(c.Message().Payload), "verbose")
+	if verbose && (!isOwner || !isPrivate) {
+		verbose = false
+	}
 
-	// Use profiles resolver for canonical list (includes legacy agents + builtins + canonical).
 	var all []*profiles.PromptProfile
 	if bc.profiles != nil {
 		all = bc.profiles.ListVisibleForUser(userID, isOwner)
 	} else if bc.agents != nil {
-		// Fallback: legacy agents only when resolver not available.
 		for _, a := range bc.agents.Agents() {
 			all = append(all, profiles.FromAgent(a))
 		}
@@ -824,54 +827,55 @@ func (bc *BotController) cmdListAgents(c telebot.Context) (string, error) {
 		return "Nenhum perfil disponível. Perfis built-in (general, developer, researcher) estão sempre disponíveis.", nil
 	}
 
-	var lines []string
-	lines = append(lines, fmt.Sprintf("**Perfis disponíveis** (%d)\n", len(all)))
-	for _, p := range all {
-		desc := p.Description
-		if desc == "" {
-			desc = "(sem descrição)"
-		}
-		lines = append(lines, fmt.Sprintf("- **%s**: %s", p.Name, desc))
-	}
+	displayActive := profiles.ActiveDefault(bc.userActiveMode(userID))
 
-	// Mode section
-	modeSection := bc.buildModeListSection(userID)
-	if modeSection != "" {
-		lines = append(lines, modeSection)
+	var lines []string
+	lines = append(lines, fmt.Sprintf("**Perfis disponíveis** (%d)", len(all)))
+	lines = append(lines, fmt.Sprintf("Perfil ativo: **%s**", displayActive))
+	lines = append(lines, "")
+	for _, p := range all {
+		lines = append(lines, formatProfileCatalogLine(p, displayActive, verbose))
+	}
+	lines = append(lines, "")
+	lines = append(lines, "Use `/mode <perfil>` para definir o perfil padrão.")
+	lines = append(lines, "Use `@perfil <pedido>` para aplicar um perfil só nesta mensagem.")
+	if isOwner && isPrivate {
+		lines = append(lines, "Use `/agents verbose` para ver hints de execução (modelo, capability).")
 	}
 
 	return strings.Join(lines, "\n"), nil
 }
 
-// buildModeListSection returns a formatted "Modos disponíveis" section.
-// Returns "" when user store is unavailable or profile load fails.
-func (bc *BotController) buildModeListSection(userID int64) string {
-	activeMode := ""
-	if bc.userStore != nil {
-		if profile, err := bc.userStore.Get(userID); err == nil && profile != nil {
-			activeMode = profile.ActiveMode
-		} else if err != nil {
-			log.Printf("command: list agents failed to load profile user=%d: %v", userID, err)
-		}
+func formatProfileCatalogLine(p *profiles.PromptProfile, activeDefault string, verbose bool) string {
+	desc := p.Description
+	if desc == "" {
+		desc = "(sem descrição)"
 	}
-	// Default to "general" when empty
-	displayActive := activeMode
-	if displayActive == "" {
-		displayActive = "general"
+	marker := ""
+	if strings.EqualFold(p.Name, activeDefault) {
+		marker = " (● ativo)"
 	}
-	profiles := []string{"general", "developer", "researcher"}
-	var lines []string
-	lines = append(lines, "\n**Perfis disponíveis**")
-	for _, p := range profiles {
-		marker := ""
-		if p == displayActive {
-			marker = " (● ativo)"
-		}
-		lines = append(lines, fmt.Sprintf("- **%s**%s", p, marker))
+	line := fmt.Sprintf("- **%s**%s: %s", p.Name, marker, desc)
+	if !verbose {
+		return line
 	}
-	lines = append(lines, "\nUse /mode <perfil> para definir o perfil padrão.")
-	lines = append(lines, "Use @perfil <pedido> para aplicar um perfil só nesta mensagem.")
-	return strings.Join(lines, "\n")
+	var hints []string
+	if p.Harness != "" && p.Harness != "pi" {
+		hints = append(hints, "harness="+p.Harness)
+	}
+	if p.Model != "" {
+		hints = append(hints, "model="+p.Model)
+	}
+	if p.CapabilityProfile != "" {
+		hints = append(hints, "capability="+p.CapabilityProfile)
+	}
+	if len(p.Tags) > 0 {
+		hints = append(hints, "tags="+strings.Join(p.Tags, ","))
+	}
+	if len(hints) == 0 {
+		return line
+	}
+	return line + " _[" + strings.Join(hints, ", ") + "]_"
 }
 
 func (bc *BotController) cmdListModels() (string, error) {
