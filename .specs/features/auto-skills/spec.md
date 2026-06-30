@@ -1,7 +1,9 @@
 # Auto-Skills
 
-**Roadmap step:** 9  
-**Status:** 🗑️ Descartado — 2026-06-02  
+> **DISCARDED — 2026-06-02:** Skill creation/loading/execution is PI SDK responsibility. Do not implement in Aurelia. See ROADMAP §10.
+
+**Roadmap step:** ~~10~~ Discarded  
+**Status:** 🗑️ Descartado — 2026-06-02
 **Depende de:** User Isolation (`multi-user-profiles`) para `TurnContext`, `SessionKey`, `UserGate` e diretórios privados por `user_id`
 **Depende de:** Security Guard-Rails (✅ done)
 **Ganha valor com:** Nudge, Orchestration, Agent Comms e a boundary PI/`ai-memory`, mas o MVP manual (`/skill save`) funciona sem eles

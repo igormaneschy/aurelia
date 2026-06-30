@@ -1,8 +1,10 @@
 # Agent Orchestration — Execution Mode — Design
 
+> **SUPERSEDED — v0.38.0 (2026-06-30):** Implementation removed. Historical reference only. PI SDK owns agentic execution.
+
 **Spec:** `.specs/features/agent-orchestration-execution/spec.md`
-**Roadmap step:** 3 — Close Orchestration Cycle
-**Status:** ✅ Implementado em v0.16.0 (2026-05-24)
+**Roadmap step:** ~~3 — Close Orchestration Cycle~~ Removed v0.38.0
+**Status:** 🗑️ Historical (was v0.16.0)
 **Depende de:** Project Binding (✅ done), User Isolation runtime hardening (✅), Operational Observability
 
 ---

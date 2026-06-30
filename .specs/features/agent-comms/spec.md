@@ -1,10 +1,11 @@
 # Agent Comms — Comunicação Controlada entre Agentes
 
-**Roadmap step:** 9  
+> **DISCARDED — 2026-06-02:** Inter-worker/agent messaging is PI SDK responsibility. Aurelia orchestrator removed v0.38.0. Do not implement. See ROADMAP §9.
+
+**Roadmap step:** ~~9~~ Discarded  
 **Status:** 🗑️ Descartado — 2026-06-02  
-**Depende de:** `.specs/features/agent-orchestration-execution/` para workers, manifest e execução por waves  
-**Depende de:** `.specs/features/security-guard-rails/` (✅ done) para capability profiles, payload policy e audit  
-**Complementa:** execução de planos conversacionais aprovados e `.specs/features/auto-skills/`
+**Depende de:** ~~`.specs/features/agent-orchestration-execution/`~~ (removed v0.38.0)  
+**Depende de:** `.specs/features/security-guard-rails/` (✅ done) para capability profiles, payload policy e audit
 
 ## Problem Statement
 

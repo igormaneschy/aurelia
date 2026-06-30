@@ -20,14 +20,14 @@ Estas features já foram implementadas ou têm validação registrada. Elas são
 
 ## Current Evolution Track
 
-Aurelia continua sendo um **personal agent persistente via Telegram**, com PI como motor de execução e Go como camada de produto: Telegram UX, identidade/persona, memória operacional, scheduling, project binding, governância e orquestração.
+Aurelia continua sendo um **personal agent persistente via Telegram e TUI**, com PI SDK como motor de execução agentica e Go como camada de produto: Telegram/TUI UX, identidade/persona, memória operacional, scheduling, project binding, governância e continuidade.
 
 O conceito central está fechado assim:
 
 - **PI SDK owns**: modelo, sessão/compaction, execução de tools, context files do projeto, MCP tools e capacidades agentic nativas.
 - **PI + ai-memory MCP owns**: memória Wiki transversal usada diretamente por PI/PI Code/opencode.
-- **Aurelia owns**: experiência Telegram, identidade, memória operacional/produto, cron, multi-projeto, user/project scoping, auditoria, roadmap e workflows.
-- **Regra de arquitetura**: quando algo já existe no PI, Aurelia só adapta/orquestra; não reimplementa.
+- **Aurelia owns**: experiência Telegram/TUI, identidade, memória operacional/produto, cron, multi-projeto, user/project scoping, auditoria e continuidade.
+- **Regra de arquitetura**: quando algo já existe no PI SDK, Aurelia adapta — não reimplementa execução agentica, planning mode, worker orchestration ou `aurelia-plan` (removidos em v0.38.0).
 
 Formulação-alvo:
 
@@ -35,7 +35,7 @@ Formulação-alvo:
 Telegram / CLI / Cron / Interfaces
         ↓
 Aurelia Product Layer
-identidade · persona · UX · workflows · memória operacional · políticas · continuidade
+identidade · persona · UX · memória operacional · políticas · continuidade · scheduling
         ↓
 PI SDK
 reasoning · tools · sessions · agent runtime · providers/models
@@ -45,20 +45,20 @@ Ferramentas / FS / Web / APIs / Projetos
 
 O objetivo é evitar dois extremos: o Aurélia não deve virar apenas um wrapper fino do PI, nem deve reconstruir o runtime agentic que o PI já entrega. A memória Wiki transversal agora fica no PI via `ai-memory` MCP; Aurelia mantém apenas o contexto operacional necessário para UX, continuidade e workflows Telegram.
 
-A próxima onda foca em tornar o sistema seguro e estável para trabalho autônomo em projetos reais:
+**Fundação P0–P2 (fechada em v0.38.0):** PI delegation, user isolation, observability, context-scoped memory, memory boundary realignment, session/profile operability, learning nudge, TUI Sprint J, e remoção total de planning mode + orchestrator Aurelia-side.
 
-1. manter fechado o hardening pós-v0.13 do limite PI↔Aurelia;
-2. criar base de observabilidade operacional antes de ampliar execução autônoma;
-3. usar a base de User Isolation já auditada para fechar o ciclo de execução orquestrada;
-4. planejamento permanece conversacional, sem Plan Mode explícito (removido em 2026-05-24);
-5. escopar memória por utilizador e contexto conversacional - **topic/thread como eixo primário, `/cwd` como overlay declarativo opt-in** (reformulado em 2026-05-30; ver Sprint 5);
-6. realinhar a boundary de memória, descartando o Wiki MCP interno em favor de PI + `ai-memory` MCP;
-7. fechar operabilidade de sessão/perfil antes de ampliar memória/nudge: message bridge, timezone, default cwd e mode profiles;
-8. só então ativar nudge profundo, agent comms e auto-skills.
+**Track ativo pós-v0.38.0** (ver também §13):
 
-**Ordem é importante:** cada spec depende da anterior, técnica e conceitualmente. O refactoring do PI SDK pode ser feito em paralelo com User Isolation, mas deve ser merged antes para reduzir a superfície de código.
+1. **Higiene documental** — alinhar ROADMAP, PROJECT, README e specs superseded com a decisão pinned `no-planning-mode-or-orchestrator`.
+2. **Project-scoped memory** — unificar `cwd_overlay` por slug de projeto (TUI + Telegram + grupos); spec `.specs/features/project-scoped-memory/`.
+3. **Prompt Profiles Phase 2–3** — user-private profiles + mode overlays no `profiles.Resolver`; spec `.specs/features/prompt-profiles/`.
+4. **Bridge Adapter Interface** — costura `engine.Engine` antes de multi-harness; spec `.specs/features/bridge-adapter-interface/`.
+5. **Long-flow UX v2** — polish Telegram em sessões longas; spec `.specs/features/long-flow-ux-v2/`.
+6. **Efficiency audit residual** — project index roots, receipts rotation (maps GC obsoleto após v0.38.0).
 
-> **Nota sobre o delta real:** Security Guard-Rails e Project Binding já foram implementados (revisão de Maio 2026), então o roadmap foi reordenado para refletir o estado real da codebase. Antes de fechar Orchestration, entrou uma fundação curta de Observability porque execução autônoma só é segura se cada run puder ser depurado por `run_id`, timeline, provider/model, tokens/custo, erro e fase de falha.
+**Descartados permanentemente (não reabrir):** Plan Mode formal, `aurelia-plan` interception, Aurelia orchestrator, Agent Comms, Auto-Skills — PI SDK owns agentic execution.
+
+> **Nota histórica:** Observability (Sprint B) foi priorizado antes de ampliar execução autônoma porque cada run precisa ser depurável por `run_id`. A execução autônoma Aurelia-side (Sprint C) foi entregue em v0.16.0 e **removida** em v0.38.0 por duplicar o PI SDK.
 
 ### Future Quality Gates
 
@@ -155,7 +155,7 @@ artificiais: `gocritic`, `misspell`, `goconst`, além dos checks de estilo do
 - `/debug` e `aurelia debug` para latest run, run específico, erros recentes e métricas;
 - métricas locais por SQLite: sucesso/falha, latência, tokens, custo, fallback, provider/model e cron.
 
-**Por que agora:** Orchestration e workflows autônomos vão aumentar muito a complexidade operacional. Antes de executar workflows mais longos, precisamos conseguir responder rapidamente "qual run falhou, em que fase, com qual modelo, custo, tools e erro?".
+**Por que era P0:** runs longos no PI SDK exigem correlacionar Telegram input, bridge events, runlog e timeline — sem isso, debugging de produção é manual.
 
 ---
 
@@ -349,6 +349,20 @@ boundary established in Sprint 0 (Delegate to PI SDK).
 
 ---
 
+## 13. Active Track (post-v0.38.0)
+
+| Priority | Spec | Status | Notes |
+|----------|------|:------:|-------|
+| P1 | `.specs/features/project-scoped-memory/` | 📋 Draft | `cwd_overlay` fragmentado entre TUI/Telegram/grupos |
+| P1 | `.specs/features/prompt-profiles/` Phase 2–3 | 🟡 Partial | `internal/profiles/` exists; user-private layer pending |
+| P2 | `.specs/features/bridge-adapter-interface/` | 📋 Draft | No `internal/engine/` yet |
+| P2 | `.specs/features/long-flow-ux-v2/` | Proposed | UX polish for long PI turns |
+| P2 | Efficiency audit (ai-memory) | Partial | project index roots, receipts rotation |
+
+**Superseded specs (do not implement):** `agent-orchestration-execution/`, `plan-mode-architecture/` (legacy path removed v0.38.0), `auto-skills/`, `agent-comms/`.
+
+---
+
 ## 12. TUI (Terminal User Interface)
 
 **Spec:** `docs/aurelia-tui-roadmap.md` + `.specs/features/tui-transport-abstraction/`
@@ -384,7 +398,7 @@ Foundation validada (Security Guard-Rails + Project Binding + Bridge Resilience)
 2. Operational Observability ✅
       │
       ▼
-3. Close Orchestration Cycle ✅
+3. ~~Close Orchestration Cycle~~ 🗑️ Removed v0.38.0 (PI SDK owns execution)
       │
       ▼
 D0. Memory Contract & Spec Hygiene ✅
@@ -409,6 +423,9 @@ D0. Memory Contract & Spec Hygiene ✅
        │
        ▼
   12. TUI (Terminal User Interface) ✅
+      │
+      ▼
+ 13. Active Track (post-v0.38.0) — project-scoped memory, profiles, bridge adapter
 ```
 
 ## Mapa de implementação por sprint
@@ -447,15 +464,9 @@ Sprint B: Operational Observability (T0-T12 do tasks.md) ✅ v0.14.0
   ├─ ✅ /debug owner-only
   └─ ✅ métricas locais por SQLite
 
-Sprint C: Close Orchestration Cycle (T0-T12 do tasks.md) ✅ v0.16.0
-  ├─ ✅ ExecutionContext com cwd+threadID
-  ├─ ✅ git preflight
-  ├─ ✅ artifact collection + verify command
-  ├─ ✅ fail-closed validation com retry
-  ├─ ✅ merge serial + skip dependents
-  ├─ ✅ commit + PR + tasks.md update
-  ├─ ✅ orphan cleanup no startup
-  └─ ✅ integration smoke test
+Sprint C: ~~Close Orchestration Cycle~~ 🗑️ Removed v0.38.0
+  Entregue em v0.16.0, removido por duplicar PI SDK (ver §3).
+  Não reintroduzir `internal/orchestrator/` nem `aurelia-plan`.
 
 Sprint D0: Memory Contract & Spec Hygiene ✅ v0.16.1
   ├─ AGENT_RESPONSIBILITY_MODEL.md - canonical PI↔Aurelia boundary
@@ -545,4 +556,4 @@ O próximo trabalho deve assumir `user_id` real no handoff e evitar novos caminh
 
 ## Notas de visão
 
-Aurelia ocupa o nicho de **personal agent persistente via Telegram**, com TUI como interface secundária local. Não é IDE, não é SaaS multi-tenant, não é apenas coding agent. PI SDK é o motor de inferência/execução; Go é a camada de orquestração, segurança, memória, persistência e UX (Telegram + TUI).
+Aurelia ocupa o nicho de **personal agent persistente via Telegram**, com TUI como interface secundária local. Não é IDE, não é SaaS multi-tenant, não é apenas coding agent. PI SDK é o motor de inferência/execução agentica; Go é a camada de produto — segurança, memória operacional, persistência e UX (Telegram + TUI).

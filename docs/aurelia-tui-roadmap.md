@@ -2,7 +2,7 @@
 
 **Sprint:** J (pós Auto-Skills)
 **Status:** ✅ Sprint J concluído — Fases 0–5 mergeadas em `main`.
-**Versão actual:** `v0.35.0` (Sprint J completo + IPC peer UID auth)
+**Versão actual:** `v0.38.0` (Sprint J completo; foundation closed on `main`)
 **Depende de:** Sprint E (Project Memory), Sprint F (Wiki Memory Gateway)
 **Desbloqueia:** Interface alternativa ao Telegram, onboarding sem bot, uso em contexto de terminal/IDE
 
