@@ -67,6 +67,8 @@ type Bridge struct {
 	// envAllowlist restricts the child process environment. When nil, the bridge
 	// inherits os.Environ() (insecure — leaks daemon secrets).
 	envAllowlist []string
+
+	slots *requestSlotTracker
 }
 
 // New creates a Bridge that runs in bridgeDir.
@@ -88,6 +90,7 @@ func New(bridgeDir string, bundlePath string) *Bridge {
 		args:      args,
 		pending:   make(map[string]chan Event),
 		done:      done,
+		slots:     newRequestSlotTracker(),
 	}
 }
 
@@ -463,10 +466,25 @@ func (b *Bridge) Execute(ctx context.Context, req Request) (<-chan Event, error)
 	b.pending[req.RequestID] = ch
 	b.pendingMu.Unlock()
 
+	priority := effectivePriority(req)
+	trackPriority := b.slots != nil && !commandBypassesPriorityQueue(req.Command)
+	if trackPriority {
+		if err := b.slots.acquire(ctx, priority); err != nil {
+			b.pendingMu.Lock()
+			delete(b.pending, req.RequestID)
+			b.pendingMu.Unlock()
+			safeClose(ch)
+			return nil, err
+		}
+	}
+
 	// Write request to stdin (don't close stdin!).
 	b.mu.Lock()
 	if !b.started {
 		b.mu.Unlock()
+		if trackPriority {
+			b.slots.release(priority)
+		}
 		b.pendingMu.Lock()
 		delete(b.pending, req.RequestID)
 		b.pendingMu.Unlock()
@@ -477,6 +495,9 @@ func (b *Bridge) Execute(ctx context.Context, req Request) (<-chan Event, error)
 	b.mu.Unlock()
 
 	if err != nil {
+		if trackPriority {
+			b.slots.release(priority)
+		}
 		b.pendingMu.Lock()
 		delete(b.pending, req.RequestID)
 		b.pendingMu.Unlock()
@@ -492,6 +513,11 @@ func (b *Bridge) Execute(ctx context.Context, req Request) (<-chan Event, error)
 			delete(b.pending, req.RequestID)
 			b.pendingMu.Unlock()
 		}
+		defer func() {
+			if trackPriority {
+				b.slots.release(priority)
+			}
+		}()
 		defer func() {
 			if r := recover(); r != nil {
 				slog.Error("bridge: panic in Execute proxy", "error", r)

@@ -222,8 +222,9 @@ func (d *Dreamer) run(userID int64) {
 	consolidationPrompt := buildConsolidationPrompt(memoryDir, memoryContent)
 
 	req := bridge.Request{
-		Command: "query",
-		Prompt:  consolidationPrompt,
+		Command:  "query",
+		Prompt:   consolidationPrompt,
+		Priority: bridge.PriorityBackground,
 		Options: bridge.RequestOptions{
 			Provider:       d.config.Provider,
 			Model:          d.config.Model,
