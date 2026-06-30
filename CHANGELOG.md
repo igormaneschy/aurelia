@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.37.6] - 2026-06-30
+
+### Added
+- Runlog retention pruning: delete terminal runs older than
+  `observability.retention_days` (default 30; `0` disables); running runs are
+  always preserved.
+- Startup background prune on daemon launch and `aurelia debug prune [--days]
+  [--dry-run]` for manual inspection.
+
+### Changed
+- Runlog batch writes: buffer pipeline timeline events until run completion and
+  flush via `RecordEvents`; `Complete` persists `tool_summary` in a single
+  UPDATE (removed mid-run tool-summary `Update` every 5 tools).
+
 ## [0.37.5] - 2026-06-30
 
 ### Added
