@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -747,24 +748,81 @@ func TestBridge_DroppedEvents_WhenConsumerSlow(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Send a flood of events — enough to overflow ch(128) + out(128) = 256
-	// total capacity. The consumer never reads, so every event beyond
-	// capacity hits the non-blocking send's default branch.
+	// 400 events fit in channel(128) + overflow(512); consumer never reads.
 	_, err := b.Execute(ctx, Request{Command: "flood", Prompt: "400", RequestID: "flood-1"})
 	if err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
 
-	// Wait for the bridge to finish processing: the flood mock JS sends all
-	// events synchronously then exits (no more stdin). readLoop reads the
-	// pipe, fills the channel (buffer=128), and drops the remaining events.
 	time.Sleep(500 * time.Millisecond)
 
-	dropped := b.DroppedEvents()
-	if dropped == 0 {
-		t.Fatal("expected dropped events > 0 when consumer never reads")
+	if dropped := b.DroppedEvents(); dropped != 0 {
+		t.Fatalf("expected 0 dropped events with overflow buffer, got %d", dropped)
 	}
-	t.Logf("dropped %d events (buffer=%d)", dropped, eventChannelBuffer)
+}
+
+func TestBridge_DroppedEvents_WhenOverflowExhausted(t *testing.T) {
+	dir := t.TempDir()
+	b := newMockBridge(t, dir, floodMockJS)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Consumer never reads: proxy blocks when out is full (another eventChannelBuffer).
+	total := eventChannelBuffer*2 + eventOverflowBuffer + 50
+	_, err := b.Execute(ctx, Request{
+		Command:   "flood",
+		Prompt:    fmt.Sprintf("%d", total),
+		RequestID: "flood-overflow",
+	})
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+
+	time.Sleep(500 * time.Millisecond)
+
+	wantDropped := uint64(50)
+	if dropped := b.DroppedEvents(); dropped != wantDropped {
+		t.Fatalf("DroppedEvents() = %d, want %d", dropped, wantDropped)
+	}
+}
+
+func TestBridge_OverflowBuffer_DeliveredInOrder(t *testing.T) {
+	dir := t.TempDir()
+	b := newMockBridge(t, dir, floodMockJS)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	ch, err := b.Execute(ctx, Request{Command: "flood", Prompt: "300", RequestID: "flood-order"})
+	if err != nil {
+		t.Fatalf("Execute() error: %v", err)
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	var count int
+	var gotResult bool
+	for ev := range ch {
+		if ev.Type == "result" {
+			gotResult = true
+			break
+		}
+		want := fmt.Sprintf("msg %d", count)
+		if ev.Text != want {
+			t.Fatalf("event %d text = %q, want %q", count, ev.Text, want)
+		}
+		count++
+	}
+	if count != 300 {
+		t.Fatalf("received %d assistant events, want 300", count)
+	}
+	if !gotResult {
+		t.Fatal("expected terminal result event")
+	}
+	if dropped := b.DroppedEvents(); dropped != 0 {
+		t.Fatalf("unexpected drops: %d", dropped)
+	}
 }
 
 func TestBridge_Stop_And_Restart(t *testing.T) {
