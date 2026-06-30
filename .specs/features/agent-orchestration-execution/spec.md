@@ -1,9 +1,9 @@
 # Agent Orchestration — Execution Mode
 
-**Roadmap step:** 3 — Close Orchestration Cycle  
-**Companion context:** planning remains conversational; `.specs/features/plan-mode-architecture/` is a removed historical artifact.  
-**Depends on:** `.specs/features/project-binding/` (✅ done) + `.specs/features/multi-user-profiles/` (✅ runtime hardening) + `.specs/features/operational-observability/`  
-**Desbloqueia:** conversational plan handoff, Agent Comms
+> **SUPERSEDED — v0.38.0 (2026-06-30):** `internal/orchestrator/` and all `aurelia-plan` execution were **removed**. PI SDK owns agentic execution. See ROADMAP §3, README § "No Planning Mode / No Orchestrator", and ai-memory `decisions/no-planning-mode-or-orchestrator.md`. **Do not implement.**
+
+**Roadmap step:** ~~3 — Close Orchestration Cycle~~ Removed  
+**Status:** 🗑️ Historical artifact only
 
 ## Problem Statement
 

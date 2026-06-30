@@ -604,10 +604,10 @@ Full guide: [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Current State
 
-- **v0.30.1 active development** — see [CHANGELOG.md](CHANGELOG.md)
+- **v0.38.0** — see [CHANGELOG.md](CHANGELOG.md)
 - Canonical repository: `https://github.com/igormaneschy/aurelia`
 - Go module: `github.com/igormaneschy/aurelia`
 - Go test suite is green
 - TypeScript Bridge compiles clean
 - Runtime target: macOS/Linux local daemon; Windows support is not a current operational target
-- Current architectural track: PI SDK boundary hardening (✅), user isolation (✅), observability (✅), planning/orchestration removed (✅ — PI SDK owns agentic execution), context-scoped operational memory (✅), Memory Boundary Realignment (✅ docs decision: PI + `ai-memory` MCP owns Wiki memory), TUI local workflow (✅ phases 0–4.6, phase 5 polish/distribution in progress), Session/Profile Operability, Learning Nudge, Agent Comms, and Auto-Skills — see [.specs/project/ROADMAP.md](.specs/project/ROADMAP.md) and [docs/aurelia-tui-roadmap.md](docs/aurelia-tui-roadmap.md) for details
+- Current architectural track: foundation P0–P2 closed (✅); planning/orchestration removed v0.38.0 (✅ — PI SDK owns agentic execution); active work: project-scoped memory, Prompt Profiles Phase 2–3, bridge adapter interface — see [.specs/project/ROADMAP.md](.specs/project/ROADMAP.md) §13

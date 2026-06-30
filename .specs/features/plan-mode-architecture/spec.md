@@ -1,6 +1,6 @@
 # Plan Mode Architecture
 
-**Status:** 🗑️ Superseded / removed 2026-05-24 — historical artifact only. Do not implement. Planning remains conversational; `aurelia-plan` legacy orchestration is preserved outside any formal Plan Mode.
+**Status:** 🗑️ Superseded / removed — historical artifact only. Formal Plan Mode removed 2026-05-24. Legacy `aurelia-plan` + Aurelia orchestrator **also removed v0.38.0**. PI SDK owns agentic execution. Do not implement.
 
 **Roadmap step:** 4  
 **Depende de:** `.specs/features/multi-user-profiles/` (`TurnContext`, `SessionKey`, `UserGate`, comandos por usuário)  

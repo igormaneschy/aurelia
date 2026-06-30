@@ -2,7 +2,7 @@
 
 ## Vision
 
-Aurelia OS is a personality, context, and product layer accessible via Telegram and local terminal surfaces. The goal is not to reimplement what PI or future SDK harnesses already do — it's to **wrap and orchestrate them**, adding identity, Prompt Profiles, persistence, scheduling, multi-project support, and natural conversational interfaces on top.
+Aurelia OS is a personality, context, and product layer accessible via Telegram and local terminal surfaces. The goal is not to reimplement what PI or future SDK harnesses already do — it's to **wrap them with product context**, adding identity, Prompt Profiles, persistence, scheduling, multi-project support, and natural conversational interfaces on top. Agentic execution (planning, tools, multi-step work) belongs to the PI SDK — not Aurelia (v0.38.0).
 
 One persistent Go daemon, many projects, many prompt profiles.
 
@@ -17,7 +17,7 @@ Aurelia Product Layer
 - identity and persona
 - Prompt Profile selection/injection (`/mode`, `/agents`, `@profile`)
 - Telegram-native UX
-- workflows and conversational planning
+- scheduling and cron delivery
 - operational memory and continuity context
 - user/project/topic scoping
 - policy, audit, continuity and scheduling
@@ -34,14 +34,14 @@ Tools / filesystem / web / APIs / projects
 
 The architectural rule is: **delegate engine capabilities to PI; keep product continuity in Aurelia**. Aurelia must not become a thin PI wrapper, but it also must not rebuild model routing, session compaction, context loading, tool execution or MCP-backed memory when PI already provides them.
 
-The strategic differentiator is the persistent Telegram product layer: identity, UX, continuity, scheduling, orchestration, guard-rails and operational context over PI. Transversal Wiki memory is delegated to PI via the existing `ai-memory` MCP instead of being reimplemented inside Aurelia.
+The strategic differentiator is the persistent Telegram/TUI product layer: identity, UX, continuity, scheduling, guard-rails and operational context over PI. Transversal Wiki memory is delegated to PI via the existing `ai-memory` MCP instead of being reimplemented inside Aurelia.
 
 ## Goals
 
 - **Natural interface** — Talk to an AI assistant via Telegram with text, photos, voice, documents, or locally via TUI when working in the terminal. No raw CLI required for daily use.
-- **Prompt Profile orchestration** — Package each request with the right personality/context profile, schedule autonomous execution, and deliver results back to Telegram.
+- **Prompt Profile selection** — Package each request with the right personality/context profile; PI SDK executes; Aurelia delivers results to Telegram/TUI.
 - **Local-first** — Single binary, SQLite, no cloud dependencies beyond LLM providers. Runs on your machine, owns your data.
-- **Stay light** — Don't rebuild what the PI SDK already provides. Wrap it, orchestrate it, extend it.
+- **Stay light** — Don't rebuild what the PI SDK already provides. Adapt to it; extend only the product layer.
 - **Multi-provider** — Not locked to Anthropic. Support Kimi, OpenRouter, Zai, Alibaba, and whatever comes next.
 
 ## Constraints
@@ -52,57 +52,35 @@ The strategic differentiator is the persistent Telegram product layer: identity,
 - **Cross-platform** — CI and development target macOS, Windows, and Linux
 - **No Docker** — Single binary deployment, no container orchestration
 
-## Current State (June 2026)
+## Current State (June 2026 — v0.38.0)
 
 ### Core operational
-- Core loop working: Telegram → Prompt Profile resolution → Bridge → PI SDK → Response
-- Persona system: IDENTITY.md + SOUL.md + USER.md assembled into system prompts
-- Cron scheduler: SQLite-backed, recurring and one-time jobs, Telegram delivery
-- Multi-modal input: text, photos (albums), voice (Groq STT), documents
-- Session continuity: resume via PI `session_file`; context pruning delegated to PI SDK compaction
-- Prompt Profile registry: markdown-defined Aurelia context profiles with optional model/tool/MCP hints; legacy storage remains `~/.aurelia/agents/` for compatibility
-- Onboarding CLI: interactive setup for providers, tokens, and configuration
-- Vision model fallback + Groq STT + bridge image format (PI SDK compatible)
-- Tool monitoring: `toolCallTracker` + `loopDetector` + heartbeat monitor prevent silent explosions and loop cycles
-- Local TUI MVP: `aurelia-tui` talks to the daemon over Unix socket IPC with streaming replies, `/cwd`/`/status`, sidebar/status chrome, markdown rendering and hardened terminal input handling.
+- **Pipeline:** message → prompt assembly → bridge (PI SDK) → reply (Telegram/TUI). No planning mode, no `aurelia-plan`, no Aurelia-side orchestrator.
+- Persona: IDENTITY + SOUL + USER; Prompt Profiles via `/mode`, `@profile`, `/agents`
+- Cron, multi-modal input (text/photo/voice/docs), session resume via PI `session_file`
+- TUI Sprint J complete: IPC, multi-session, vision, attachments, tool activity (`v0.35.0+`)
+- Tool monitoring, observability (`run_id`, run_events), security guard-rails, project binding
 
-### Recently completed (v0.11.0–v0.16.0)
-- **User Isolation MVP + runtime hardening**: user profiles, owner gate, per-user persona/memory loading, user-scoped sessions/active runs/Bridge commands, cron ownership, `/users`, `/forgetme`, migration CLI.
-- **Delegate to PI SDK Native — core slice**: PI model resolution, PI context-file loading, PI compaction, `session_file` resume, Bridge-side session lifecycle (`steer`/`followUp`/`abort`).
-- **Security Guard-Rails**: CapabilityProfile governance, PI tool_call hooks in the Bridge, audit trail, fail-closed. 5 profiles: observe→privileged.
-- **Persistent Project Binding**: SQLite-backed `/cwd` that survives restart, topic→group fallback, explicit clear, pipeline integration.
-- **Continuity Engine v1**: Persistent conversation state, progressive summarization, checkpoint/run journal.
-- **UX Polish**: Streaming text, idle timeout, live progress metrics, `/stop`, `/status`, queue system, Telegram ack flow.
-- **Bridge Resilience**: Circuit breaker, retry with backoff, translated error messages, scanner-based NDJSON with 10MB limit.
-- **CI Hardening**: Lint gates (`errcheck`, `govet`, `staticcheck`, `unused`), security scan (`gosec`), local parity via `make check`.
-- **Operational Observability v0.14.0**: `run_id` correlation, structured `slog`, expanded `run_journal`, `run_events` timeline, `/debug` CLI/Telegram commands, local metrics.
-- **Session Lifecycle Manager v0.15.0**: Health states (healthy/large/suspect/dangerous/cold), auto-decisions (continue/compact/rotate/cold_resume), bridge commands (`get-session-stats`, `compact-session`, `rotate-session`), failure metadata persistence.
-- **Close Orchestration Cycle v0.16.0**: `ExecutionContext` with cwd/threadID, git preflight, artifact collection, fail-closed validation with retry, serial merge, dependency skip, commit + optional PR, `ExecutionManifest`.
-- **Tool Monitoring hardening (Jun 2026)**: `loopDetector.ResetForNewTurn()`, elapsed time in steer messages, `detectToolSpiral` prefix-match, `AddToolEvent` nudge integration.
+### Foundation closed (P0–P2)
+- Delegate to PI SDK, User Isolation, Operational Observability, Context-Scoped Memory, Memory Boundary Realignment, Session/Profile Operability, Learning Nudge, TUI
 
-### Recently completed (v0.23.6–Unreleased)
-- **TUI foundations**: transport abstraction (Fase 0), Unix socket IPC layer (Fase 1), and local TUI MVP (Fase 2) are implemented on `feature/tui-mvp` with live terminal validation.
+### Removed (v0.38.0)
+- `internal/orchestrator/`, `aurelia-plan` interception, pending plans, `/execute` — PI SDK owns agentic execution
 
-### In progress
-- Closing the conceptual boundary: SDK harnesses own model/session/context/tool execution; Aurelia owns Telegram UX, identity/persona, Prompt Profile injection, persistence, scheduling, memory, project binding, policy/audit and orchestration.
-- Prompt Profile boundary decision: keep Aurelia profiles as a product-layer context feature for now; investigate SDK-native parsing/discovery later via adapter-specific mappings rather than forcing a user-facing migration.
-- Memory boundary realignment: project memory scopes remain Aurelia operational context; transversal Wiki memory is handled by PI via `ai-memory` MCP.
+### Active track (post-v0.38.0)
+- Project-scoped memory (`cwd_overlay` by project slug)
+- Prompt Profiles Phase 2–3 (user-private profiles)
+- Bridge Adapter Interface (`engine.Engine` costura)
+- Long-flow UX v2, efficiency audit residual
+
+See `.specs/project/ROADMAP.md` §13 for details.
 
 ## Roadmap
 
-Ver `.specs/project/ROADMAP.md` para o sequenciamento completo. Resumo:
+Ver `.specs/project/ROADMAP.md`. Resumo:
 
 ```
-Sprint 0 → Delegate to PI SDK Native core ✅; remaining registry boundary superseded by Prompt Profiles
-Sprint A → User Isolation MVP + runtime hardening ✅; remaining context-scoped operational memory moved to Sprint E
-Sprint B → Operational Observability (run_id, timeline, /debug, métricas locais)
-Sprint C → Close Orchestration Cycle (conectar scaffold existente)
-Sprint D → ~~Plan Mode Architecture~~ 🗑️ Removido 2026-05-24; planejamento conversational
-Sprint E → Context-Scoped Operational Memory
-Sprint F → Memory Boundary Realignment ✅ (PI + ai-memory MCP, no internal Wiki Gateway)
-Sprint G → Session/Profile Operability ✅
-Sprint G2 → Prompt Profiles (`/mode`, `/agents`, `@profile` unification)
-Sprint H → Learning Nudge escopado
-Sprint I → Agent Comms 🗑️ descartado; SDK responsibility
-Sprint J → Auto-Skills 🗑️ descartado; SDK responsibility
+Sprint 0–12  → Foundation + TUI ✅
+Sprint C/D   → Orchestration + Plan Mode 🗑️ Removed v0.38.0
+Sprint 13    → Active track: project-scoped memory, profiles, bridge adapter
 ```
