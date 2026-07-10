@@ -76,8 +76,8 @@ Decisão de tratar na Phase 1+ ou num follow-up estreito fica a cargo do archite
 
 ## Phase 5 — Release (após aprovação)
 
-- [ ] **T5.1** Propor bump de versão + CHANGELOG (TBD; aguardar OK Igor)
-- [ ] **T5.2** Merge `stable/project-work-state` → `main`
+- [x] **T5.1** Bump v0.39.2 + CHANGELOG (security: Go 1.26.5, goldmark v1.7.17)
+- [x] **T5.2** Merge `feature/project-work-state` → `main` (2026-07-10)
 - [ ] **T5.3** Actualizar `.specs/features/continuity-engine/spec.md` com pointer para project work state
 - [ ] **T5.4** Página ai-memory `concepts/memory-system.md` — três camadas (operational / project facts / wiki)
 
