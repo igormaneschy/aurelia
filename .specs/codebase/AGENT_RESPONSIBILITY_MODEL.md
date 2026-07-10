@@ -53,11 +53,19 @@ Tools / filesystem / web / APIs / projects
 2. **Aurelia is the product.** Identity, UX, persistence, scheduling, governance, and workflow state are Aurelia concerns.
 3. **The Bridge is the adapter.** `bridge/index.ts` maps PI SDK primitives to Go-interpretable events and vice versa. It owns no product logic.
 4. **Security is layered.** PI SDK enforces tool-call hooks (`beforeToolCall`). Aurelia enforces capability profiles, access control, redaction, and audit.
-5. **Memory is split by boundary.** Product/operational memory, persona context, Telegram continuity and `/cwd` scoping are Aurelia's domain. Transversal Wiki memory is PI's domain through `ai-memory` MCP. Aurelia must not implement a competing Wiki MCP gateway.
+5. **Memory is split by boundary.** Product/operational memory, persona context, continuity and `/cwd` scoping are Aurelia's domain. Transversal Wiki memory is PI's domain through `ai-memory` MCP. Aurelia must not implement a competing Wiki MCP gateway.
+
+6. **Three context layers (multi-SDK).** Do not conflate them:
+   - **Product layer (Aurelia):** persona, `ProjectWorkState` / chat continuity, `cwd_overlay`, guard-rails — injected in `SystemPrompt` before any harness; SDK-agnostic.
+   - **Session layer (harness):** conversation history, compaction, `session_file` — keyed by `(chatID, threadID, userID, harness)` once multi-harness routing lands.
+   - **Durable project layer (repo + ai-memory):** `AGENTS.md`/`CLAUDE.md`, wiki decisions, optional handoffs — cross-harness; ai-memory via MCP tools, not Aurelia daemon writes.
+
+7. **Entrypoint ≠ harness.** `telegram` / `tui` / `cron` are UX surfaces; `pi` / future values are execution engines. See `.specs/features/multi-sdk/spec.md`.
 
 ## Reference
 
 - Architecture thesis: `README.md` (Architectural Thesis section)
 - Current evolution track: `.specs/project/ROADMAP.md`
+- Multi-SDK unified plan: `.specs/features/multi-sdk/spec.md`
 - Memory layer specification: `.specs/features/project-memory/spec.md`
 - Superseded Wiki memory decision: `.specs/features/wiki-memory/spec.md`

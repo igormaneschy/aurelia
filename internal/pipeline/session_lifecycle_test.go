@@ -215,7 +215,7 @@ func TestHandleRetryOutcome_MarksProcessDeathForCurrentUser(t *testing.T) {
 	sessions.SetSession(42, 7, 200, "/tmp/user-200.jsonl")
 	svc := &Service{sessions: sessions, output: &fakeOutput{}}
 
-	svc.handleRetryOutcome(42, 7, 123, OutcomeProcessDeath, 100)
+	svc.handleRetryOutcome(42, 7, 123, OutcomeProcessDeath, 100, false)
 
 	user100 := sessions.GetHealthSignals(42, 7, 100)
 	if user100.RecentProcessDeaths != 1 {

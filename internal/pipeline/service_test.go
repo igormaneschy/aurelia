@@ -576,7 +576,7 @@ func TestHandleContextOutcome_CancelledCapturesRunID(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	handled := s.handleContextOutcome(ctx, context.Background(), 1, 0, 100)
+	handled := s.handleContextOutcome(ctx, context.Background(), 1, 0, 100, false)
 	if !handled {
 		t.Fatal("expected handleContextOutcome to return true for cancelled parentCtx")
 	}

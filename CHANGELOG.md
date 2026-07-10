@@ -10,16 +10,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Project Work State storage foundation: per-project continuity state is now
   persisted, loaded, and reset independently via `continuity.Store` SQLite
   backend (`internal/continuity/store_sqlite.go`, `project_work_test.go`).
+- Project Work State dual-write: pipeline mirrors chat continuity patches into
+  per-project rows when `/cwd` is active (`mirrorProjectWork` in
+  `internal/pipeline/turn_lifecycle.go`).
+- Project Work State prompt injection: `buildProjectWorkSection` injects
+  cross-surface continuity when `projectSlug` is active, including
+  entrypoint-change detection (Telegram ↔ TUI).
 - Surface-specific entrypoint handling: TUI (`cmd/aurelia/tui_handler.go`) and
   Telegram (`internal/telegram/pipeline.go`) pass distinct surface hints through
   the pipeline, enabling different default project resolutions per surface.
 - Multi-SDK design and specification (`.specs/features/multi-sdk/`) — forward
   architecture for multiple PI SDK connector support.
+- Optional `aurelia-tui` session shortcuts (`configure`, `aurelia`) via
+  `scripts/install-path.sh` and `~/bin/aurelia-tui` wrapper.
 
 ### Changed
 - Pipeline context plumbing extended with surface metadata for downstream
   dispatch (`internal/pipeline/pipeline.go`, `internal/pipeline/service.go`).
-- Project Work State spec, design, and tasks marked validated (Phase 1 complete).
+- `AGENTS.md` and `AGENT_RESPONSIBILITY_MODEL.md` document PI SDK isolation,
+  symlink diagnostics, and the three multi-SDK context layers.
+- Project Work State phases 0–4 marked complete in tasks; live validation passed.
 - ROADMAP and PROJECT docs updated to reflect multi-sdk and project-work-state
   progress.
 

@@ -82,10 +82,6 @@ func ConversationKeyFor(chatID int64, threadID int, userID int64) ConversationKe
 // warm and continuity can be skipped to save tokens.
 const FreshThreshold = 5 * time.Minute
 
-// StaleThreshold is the boundary for "stale" state — continuity recovery
-// context is unlikely to be useful beyond this point.
-const StaleThreshold = 6 * time.Hour
-
 // --- ProjectWork types ---
 
 // ProjectWorkKey identifies project-scoped work state by user and project.
@@ -135,3 +131,7 @@ type ProjectWorkPatch struct {
 // MaxProjectWorkBlockChars is the maximum total characters for a formatted
 // Project Work State prompt block. Same as the continuity block limit.
 const MaxProjectWorkBlockChars = 2000
+
+// ProjectWorkStaleThreshold is the maximum age of a ProjectWorkState before
+// it is considered stale and skipped in prompt injection (6 hours).
+const ProjectWorkStaleThreshold = 6 * time.Hour

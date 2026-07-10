@@ -178,3 +178,21 @@ func Freshness(state *ConversationState) FreshnessLevel {
 func IsFresh(state *ConversationState) bool {
 	return Freshness(state) == FreshnessHot
 }
+
+// FreshnessProjectWork returns how fresh the project work state is.
+// Uses ProjectWorkStaleThreshold (6h) instead of RetentionThreshold (7d)
+// because project work state goes stale much faster than chat continuity.
+func FreshnessProjectWork(state *ProjectWorkState) FreshnessLevel {
+	if state == nil {
+		return FreshnessStale
+	}
+	age := time.Since(state.UpdatedAt)
+	switch {
+	case age <= FreshThreshold:
+		return FreshnessHot
+	case age <= ProjectWorkStaleThreshold:
+		return FreshnessWarm
+	default:
+		return FreshnessStale
+	}
+}
