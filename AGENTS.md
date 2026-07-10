@@ -113,6 +113,24 @@ This uses `make install` (build → `.new` → `mv` — never corrupts a running
 - `context.Context` with timeout on external operations
 - Secrets via `~/.aurelia/config/app.json`
 
+## PI SDK Configuration
+
+O Aurelia isola seu ambiente PI em `~/.aurelia/pi-agent/` (via `PI_CODING_AGENT_DIR`). O PI CLI global usa `~/.pi/agent/`. São diretórios **separados**.
+
+- **Symlinks gerenciados pelo `setup.go` (EnsureBridge)**: 5 recursos são sincronizados do PI global → Aurelia PI:
+  - `auth.json` — credenciais de API
+  - `npm/` — extensions: `pi-mcp-adapter`, `pi-web-access`, `pi-hermes-memory`
+  - `mcp.json` — servidores MCP configurados
+  - `mcp-cache.json` — cache de manifests
+  - `mcp-npx-cache.json` — cache de resolução npx
+- **Sem o symlink `npm/`**, as extensions não carregam e o modelo não consegue usar `web_search`, `mcp`, `memory_search` etc.
+- **Sem os symlinks `mcp*.json`**, o `pi-mcp-adapter` não descobre servidores MCP.
+- **Diagnóstico "ferramenta não funciona"**:
+  1. Verificar se a tool está no `allowed_tools` → `translateAllowedTools`
+  2. Verificar se a extension está carregada → `ls ~/.aurelia/pi-agent/npm/`
+  3. Verificar se o MCP server está configurado → `cat ~/.aurelia/pi-agent/mcp.json`
+  4. **Não confiar em `getActiveToolNames()`** — bug de timing no PI SDK; usar `translateAllowedTools()` para o report.
+
 ## Key Packages
 
 | Package | Responsibility |

@@ -41,10 +41,10 @@ Decisão de tratar na Phase 1+ ou num follow-up estreito fica a cargo do archite
 
 ## Phase 2 — Pipeline dual-write
 
-- [ ] **T2.1** `mirrorProjectWork()` em `turn_lifecycle.go`
-- [ ] **T2.2** Chamar mirror em `patchContinuityAfterSuccess`, `patchContinuityFailure`, `patchContinuitySessionCold`
-- [ ] **T2.3** Helper partilhado para evitar drift entre chat patch e project patch
-- [ ] **T2.4** Testes `turn_lifecycle`: cwd set → project row exists; cwd empty → no row
+- [x] **T2.1** `mirrorProjectWork()` em `turn_lifecycle.go`
+- [x] **T2.2** Chamar mirror em `patchContinuityAfterSuccess`, `patchContinuityFailure`, `patchContinuitySessionCold`
+- [x] **T2.3** Helper partilhado para evitar drift entre chat patch e project patch
+- [x] **T2.4** Testes `turn_lifecycle`: cwd set → project row exists; cwd empty → no row
 
 **Critério:** teste cross-chatID mesmo slug
 
@@ -52,11 +52,11 @@ Decisão de tratar na Phase 1+ ou num follow-up estreito fica a cargo do archite
 
 ## Phase 3 — Prompt injection
 
-- [ ] **T3.1** `buildProjectWorkSection` em `prompt_builder.go`
-- [ ] **T3.2** `buildContinuitySection`: cwd activo → project block; senão → chat block
-- [ ] **T3.3** Regra cross-surface: `LastEntrypoint != current` → always inject
-- [ ] **T3.4** Linha no bloco Persistent Memory sobre ai-memory vs Project Work State
-- [ ] **T3.5** Testes prompt_builder (cwd/no-cwd, cross-surface, stale, continuation)
+- [x] **T3.1** `buildProjectWorkSection` em `prompt_builder.go`
+- [x] **T3.2** `buildContinuitySection`: cwd activo → project block; senão → chat block
+- [x] **T3.3** Regra cross-surface: `LastEntrypoint != current` → always inject
+- [x] **T3.4** Linha no bloco Persistent Memory sobre ai-memory vs Project Work State
+- [x] **T3.5** Testes prompt_builder (cwd/no-cwd, cross-surface, stale, continuation)
 
 **Critério:** `go test ./internal/pipeline/... -short`
 
@@ -64,13 +64,13 @@ Decisão de tratar na Phase 1+ ou num follow-up estreito fica a cargo do archite
 
 ## Phase 4 — Validação live
 
-- [ ] **T4.1** `make deploy` no daemon
-- [ ] **T4.2** Telegram: `/cwd aurelia`, pergunta de análise, 2–3 turnos
-- [ ] **T4.3** TUI: mesmo `/cwd`, “onde paramos?” / “continua”
-- [ ] **T4.4** `aurelia debug last` confirma entrypoint correcto em cada superfície
-- [ ] **T4.5** Chat mode sem cwd: confirmar que não há Project Work State no prompt (log debug)
+- [x] **T4.1** `make deploy` no daemon
+- [x] **T4.2** Telegram: `/cwd aurelia`, pergunta de análise, 2–3 turnos
+- [x] **T4.3** TUI: mesmo `/cwd`, “onde paramos?” / “continua”
+- [x] **T4.4** `aurelia debug last` confirma entrypoint correcto em cada superfície
+- [x] **T4.5** Chat mode sem cwd: confirmar que não há Project Work State no prompt (log debug)
 
-**Critério:** aprovação Igor → `stable/project-work-state`
+**Critério:** aprovação Igor → `stable/project-work-state` ✅ (2026-07-10)
 
 ---
 
