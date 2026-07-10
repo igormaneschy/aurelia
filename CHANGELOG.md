@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.39.3] - 2026-07-10
+
+### Changed
+- Long Flow UX v2 spec (`.specs/features/long-flow-ux-v2/spec.md`) updated to
+  **Implemented**: goals and validation contract marked complete, rollout steps
+  closed, and post-v0.19.6 `TokenGuard` escalation layer documented (cold
+  resume for suspect sessions; rotate/compact fallback via `applyLifecycle`).
+
 ## [0.39.2] - 2026-07-10
 
 ### Security
