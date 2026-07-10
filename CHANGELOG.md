@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.39.2] - 2026-07-10
+
+### Security
+- Bumped Go toolchain to `1.26.5` (fixes GO-2026-5856 `crypto/tls` ECH privacy
+  leak reported by govulncheck).
+- Bumped `github.com/yuin/goldmark` to v1.7.17 (fixes GO-2026-5320 XSS in
+  `telegram.MarkdownToHTML`).
+
+### Changed
+- CI workflows (`ci.yml`, `govulncheck.yml`, `golangci-lint.yml`) aligned to Go
+  `1.26.5`.
+
 ## [0.39.1] - 2026-07-01
 
 ### Added

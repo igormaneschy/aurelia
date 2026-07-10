@@ -10,7 +10,7 @@ Telegram-native, terminal-friendly, PI-powered. Built to stay light.
 
 One persistent daemon, many projects, many prompt profiles.
 
-[![Go](https://img.shields.io/badge/Go-1.26.3-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![Go](https://img.shields.io/badge/Go-1.26.5-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![Runtime](https://img.shields.io/badge/Runtime-Local--First-0F172A)](#runtime-model)
 [![Architecture](https://img.shields.io/badge/Architecture-Modular_Monolith-1F2937)](.specs/codebase/ARCHITECTURE.md)
 [![Storage](https://img.shields.io/badge/Storage-SQLite-003B57?logo=sqlite&logoColor=white)](https://sqlite.org/)
@@ -23,7 +23,7 @@ One persistent daemon, many projects, many prompt profiles.
 
 Before installing, ensure you have:
 
-- **Go** `1.26.3` — [go.dev](https://go.dev/)
+- **Go** `1.26.5` — [go.dev](https://go.dev/)
 - **Node.js** `>=20.6.0` and **npm** `9+` — [nodejs.org](https://nodejs.org/)
   - *The PI SDK (inference engine) installs automatically via npm on first run*
   - *No need to install the PI CLI (`pi`) or run `pi /login`*
@@ -375,7 +375,7 @@ aurelia debug last --json             # Machine-readable JSON output
 
 Requirements:
 
-- Go `1.26.3`
+- Go `1.26.5`
 - Node.js `>=20.6.0` and npm `9+` (the PI SDK installs automatically on first run)
 - Telegram bot token
 - One LLM provider:

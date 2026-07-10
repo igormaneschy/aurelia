@@ -1,6 +1,6 @@
 module github.com/igormaneschy/aurelia
 
-go 1.26.3
+go 1.26.5
 
 require (
 	charm.land/bubbles/v2 v2.1.0
@@ -11,7 +11,7 @@ require (
 	github.com/charmbracelet/harmonica v0.2.0
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/robfig/cron/v3 v3.0.1
-	github.com/yuin/goldmark v1.7.8
+	github.com/yuin/goldmark v1.7.17
 	golang.org/x/sys v0.45.0
 	golang.org/x/term v0.41.0
 	gopkg.in/telebot.v3 v3.3.8

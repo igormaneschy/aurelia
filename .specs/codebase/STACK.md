@@ -4,7 +4,7 @@
 
 ## Core
 
-- Language: Go 1.26.3
+- Language: Go 1.26.5
 - Module: `github.com/igormaneschy/aurelia`
 - Package manager: Go modules
 - Build: `go build -trimpath -ldflags "-s -w" -o ./build/aurelia ./cmd/aurelia`
@@ -33,7 +33,7 @@
 - Unit/Integration: Standard `testing` package (no testify assertions)
 - Mocking: Hand-written fakes (e.g., `fakeCronStore`)
 - E2E: `e2e/` directory with bridge integration tests
-- CI: `go test ./...` on Windows Latest, Go 1.26.3
+- CI: `go test ./...` on Windows Latest, Go 1.26.5
 
 ## External Services
 
