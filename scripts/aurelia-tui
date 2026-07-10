@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Thin wrapper for aurelia-tui with fixed session shortcuts.
+# Installed to ~/bin/aurelia-tui by scripts/install-path.sh.
+# The shell function in ~/.aurelia/env takes precedence when sourced.
+
+set -euo pipefail
+
+BINARY="${HOME}/.aurelia/bin/aurelia-tui"
+AURELIA_PROJECT="${AURELIA_PROJECT:-${HOME}/aurelia}"
+
+if [[ ! -x "${BINARY}" ]]; then
+	printf 'aurelia-tui binary not found: %s\n' "${BINARY}" >&2
+	printf 'Run: make install-tui\n' >&2
+	exit 1
+fi
+
+cmd="${1:-}"
+case "${cmd}" in
+	help | -h | --help)
+		cat <<EOF
+Usage: aurelia-tui [shortcut] [flags]
+
+Shortcuts:
+  (none)      Open the default TUI session (project: aurelia when bound)
+  aurelia     Same as default — work on the aurelia repo
+  configure   Open the "configure" TUI session (Aurelia setup/config work)
+
+Other arguments are forwarded to the aurelia-tui binary.
+Examples:
+  aurelia-tui
+  aurelia-tui configure
+  aurelia-tui --session work
+EOF
+		;;
+	aurelia)
+		shift
+		exec "${BINARY}" "$@"
+		;;
+	configure)
+		shift
+		exec "${BINARY}" --session configure "$@"
+		;;
+	*)
+		exec "${BINARY}" "$@"
+		;;
+esac
