@@ -905,13 +905,13 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 					observability.PhaseBridgeProcessDeath, "bridge process exited during Execute"))
 			}
 		} else if errors.Is(err, context.Canceled) {
-			if handled := s.handleContextOutcome(parentCtx, ctx, chatID, threadID, userID, timeoutTracker); handled {
+			if handled := s.handleContextOutcome(parentCtx, ctx, chatID, threadID, userID, isPrivateChat, timeoutTracker); handled {
 				s.output.ConfirmMessage(chatID, messageID)
 				return
 			}
 			log.Printf("pipeline: run canceled by user chat=%d thread=%d user=%d", chatID, threadID, userID)
 			if runLogStarted {
-				s.patchContinuityFailure(chatID, threadID, "canceled", "cancelado pelo usuário", userID)
+				s.patchContinuityFailure(chatID, threadID, "canceled", "cancelado pelo usuário", userID, isPrivateChat)
 				s.completeRunLog(chatID, threadID, userID, runlog.RunCanceled, "", "cancelado pelo usuário")
 			}
 			return
@@ -921,7 +921,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 				redacted := redactSecrets(err.Error())
 				s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent("",
 					observability.PhaseBridgeExecuteError, redacted))
-				s.patchContinuityFailure(chatID, threadID, "failed", redacted, userID)
+				s.patchContinuityFailure(chatID, threadID, "failed", redacted, userID, isPrivateChat)
 				s.completeRunLog(chatID, threadID, userID, runlog.RunFailed, "", redacted)
 			}
 			s.output.ConfirmMessage(chatID, messageID)
@@ -931,7 +931,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 		toolUseSignal := make(chan struct{}, 16)
 		go heartbeatMonitor(ctx.Done(), toolUseSignal, toolTracker, chatID, threadID, s.output)
 		outcome = s.ProcessBridgeEvents(chatID, threadID, messageID, ch, progress, userText, toolUseSignal, userID, isPrivateChat, toolTracker, loopDetect)
-		if handled := s.handleContextOutcome(parentCtx, ctx, chatID, threadID, userID, timeoutTracker); handled {
+		if handled := s.handleContextOutcome(parentCtx, ctx, chatID, threadID, userID, isPrivateChat, timeoutTracker); handled {
 			s.output.ConfirmMessage(chatID, messageID)
 			return
 		}
@@ -941,7 +941,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 		}
 		if outcome != OutcomeProcessDeath {
 			if runLogStarted {
-				s.patchContinuityFailure(chatID, threadID, "failed", "", userID)
+				s.patchContinuityFailure(chatID, threadID, "failed", "", userID, isPrivateChat)
 				s.completeRunLog(chatID, threadID, userID, runlog.RunFailed, "", "")
 			}
 			return
@@ -958,7 +958,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 
 	if runLogStarted {
 		processDeathRunID = s.getRunID(chatID, threadID, userID)
-		s.patchContinuityFailure(chatID, threadID, "failed", "process death, retrying", userID)
+		s.patchContinuityFailure(chatID, threadID, "failed", "process death, retrying", userID, isPrivateChat)
 		s.completeRunLog(chatID, threadID, userID, runlog.RunFailed, "", "process death, retrying")
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewWarnEvent(processDeathRunID,
 			observability.PhaseRetryStarted, "process death recovery, retrying"))
@@ -996,7 +996,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	s.output.DeleteMessage(reconnectMsg)
 	if err != nil {
 		log.Printf("bridge: retry failed for chat=%d: %s", chatID, redactSecrets(err.Error()))
-		s.patchContinuitySessionCold(chatID, threadID, "bridge retry failed: "+redactSecrets(err.Error()), userID)
+		s.patchContinuitySessionCold(chatID, threadID, "bridge retry failed: "+redactSecrets(err.Error()), userID, isPrivateChat)
 		if runLogStarted {
 			s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent(processDeathRunID,
 				observability.PhaseRetryFailed, "retry failed: process death persisted"))
@@ -1017,11 +1017,11 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	toolUseSignal := make(chan struct{}, 16)
 	go heartbeatMonitor(ctx.Done(), toolUseSignal, toolTracker, chatID, threadID, s.output)
 	outcome = s.ProcessBridgeEvents(chatID, threadID, messageID, ch, progress, userText, toolUseSignal, userID, isPrivateChat, toolTracker, loopDetect)
-	if handled := s.handleContextOutcome(parentCtx, ctx, chatID, threadID, userID, timeoutTracker); handled {
+	if handled := s.handleContextOutcome(parentCtx, ctx, chatID, threadID, userID, isPrivateChat, timeoutTracker); handled {
 		s.output.ConfirmMessage(chatID, messageID)
 		return
 	}
-	s.handleRetryOutcome(chatID, threadID, messageID, outcome, userID)
+	s.handleRetryOutcome(chatID, threadID, messageID, outcome, userID, isPrivateChat)
 }
 
 func (s *Service) cancelBridgeOnContextDone(ctx context.Context, requestID string) func() {
@@ -1045,11 +1045,11 @@ func (s *Service) cancelBridgeOnContextDone(ctx context.Context, requestID strin
 	return func() { close(done) }
 }
 
-func (s *Service) handleContextOutcome(parentCtx context.Context, ctx context.Context, chatID int64, threadID int, userID int64, tracker ...*runTimeoutTracker) bool {
+func (s *Service) handleContextOutcome(parentCtx context.Context, ctx context.Context, chatID int64, threadID int, userID int64, isPrivateChat bool, tracker ...*runTimeoutTracker) bool {
 	if parentCtx.Err() != nil {
 		log.Printf("pipeline: run canceled chat=%d thread=%d user=%d", chatID, threadID, userID)
 		runID := s.getRunID(chatID, threadID, userID)
-		s.patchContinuityFailure(chatID, threadID, "canceled", "cancelado pelo usuário", userID)
+		s.patchContinuityFailure(chatID, threadID, "canceled", "cancelado pelo usuário", userID, isPrivateChat)
 		s.completeRunLog(chatID, threadID, userID, runlog.RunCanceled, "", "cancelado pelo usuário")
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent(runID,
 			observability.PhaseRunCanceled, "cancelado pelo usuário"))
@@ -1059,7 +1059,7 @@ func (s *Service) handleContextOutcome(parentCtx context.Context, ctx context.Co
 		origin, elapsed := timeoutDetails(tracker...)
 		log.Printf("pipeline: run timeout origin=%s elapsed=%s chat=%d thread=%d user=%d", origin, elapsed.Round(time.Second), chatID, threadID, userID)
 		runID := s.getRunID(chatID, threadID, userID)
-		s.patchContinuityFailure(chatID, threadID, "timed_out", origin, userID)
+		s.patchContinuityFailure(chatID, threadID, "timed_out", origin, userID, isPrivateChat)
 		s.completeRunLog(chatID, threadID, userID, runlog.RunTimedOut, "", origin)
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent(runID,
 			observability.PhaseRunTimedOut,
@@ -1082,7 +1082,7 @@ func timeoutDetails(trackers ...*runTimeoutTracker) (string, time.Duration) {
 	return trackers[0].snapshot()
 }
 
-func (s *Service) handleRetryOutcome(chatID int64, threadID int, messageID int, outcome Outcome, userID int64) {
+func (s *Service) handleRetryOutcome(chatID int64, threadID int, messageID int, outcome Outcome, userID int64, isPrivateChat bool) {
 	switch outcome {
 	case OutcomeSuccess:
 		s.bridgeFailures.reset()
@@ -1091,7 +1091,7 @@ func (s *Service) handleRetryOutcome(chatID int64, threadID int, messageID int, 
 		if s.sessions != nil {
 			s.sessions.MarkProcessDeath(chatID, threadID, userID)
 		}
-		s.patchContinuitySessionCold(chatID, threadID, "bridge retry process death", userID)
+		s.patchContinuitySessionCold(chatID, threadID, "bridge retry process death", userID, isPrivateChat)
 		if err := s.output.SendError(chatID, threadID, bridgeRetryFailedMessage); err != nil {
 			log.Printf("pipeline: SendError(retry outcome) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
 		}
@@ -1252,7 +1252,7 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 		case "result":
 			return s.handleResultEvent(chatID, threadID, messageID, ev, &assistantText, userText, userID, isPrivateChat)
 		case "error":
-			return s.handleErrorEvent(chatID, threadID, messageID, ev, userID)
+			return s.handleErrorEvent(chatID, threadID, messageID, ev, userID, isPrivateChat)
 		case "compaction_start", "compaction_end":
 			// Compaction events reset idle timer and provide observability.
 			if s.runLog != nil {
@@ -1339,7 +1339,7 @@ func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, e
 
 	if finalText == "" {
 		toolSummary := s.getRunToolSummary(chatID, threadID, userID)
-		return s.handleEmptyResult(chatID, threadID, messageID, ev, userText, toolSummary, userID)
+		return s.handleEmptyResult(chatID, threadID, messageID, ev, userText, toolSummary, userID, isPrivateChat)
 	}
 
 	// Capture runID before completeRunLog cleans up runLogStates.
@@ -1355,7 +1355,7 @@ func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, e
 
 // handleEmptyResult handles the case where the bridge returned no text.
 // It distinguishes between "worked but empty" (tokens consumed) and "no work at all".
-func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, ev bridge.Event, userText string, toolSummary string, userID int64) Outcome {
+func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, ev bridge.Event, userText string, toolSummary string, userID int64, isPrivateChat bool) Outcome {
 	if emptyResultHadWork(ev) {
 		log.Printf("bridge: empty result after work chat=%d thread=%d request=%s turns=%d cost=$%.4f in=%d out=%d",
 			chatID, threadID, ev.RequestID, ev.NumTurns, ev.CostUSD, ev.InputTokens, ev.OutputTokens)
@@ -1367,7 +1367,7 @@ func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, e
 		}
 
 		emptyWorkRunID := s.getRunID(chatID, threadID, userID)
-		s.patchContinuityFailure(chatID, threadID, "failed", "empty result after work", userID)
+		s.patchContinuityFailure(chatID, threadID, "failed", "empty result after work", userID, isPrivateChat)
 		s.completeRunLog(chatID, threadID, userID, runlog.RunFailed, "", "empty result after work")
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent(emptyWorkRunID,
 			observability.PhaseRunFailed, "empty result after work"))
@@ -1380,7 +1380,7 @@ func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, e
 		log.Printf("bridge: empty result (no work) chat=%d thread=%d request=%s",
 			chatID, threadID, ev.RequestID)
 		emptyNoWorkRunID := s.getRunID(chatID, threadID, userID)
-		s.patchContinuityFailure(chatID, threadID, "failed", "empty result", userID)
+		s.patchContinuityFailure(chatID, threadID, "failed", "empty result", userID, isPrivateChat)
 		s.completeRunLog(chatID, threadID, userID, runlog.RunFailed, "", "empty result")
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent(emptyNoWorkRunID,
 			observability.PhaseRunFailed, "empty result"))

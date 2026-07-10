@@ -13,6 +13,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/runlog"
+	"github.com/igormaneschy/aurelia/internal/runtime"
 )
 
 // summaryCounter tracks the number of successful turns since the last
@@ -168,7 +169,7 @@ func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText strin
 	}
 
 	// Patch continuity with the (potentially summarized) assistant text
-	s.patchContinuityAfterSuccess(chatID, threadID, userText, finalSummary, runID, userID)
+	s.patchContinuityAfterSuccess(chatID, threadID, userText, finalSummary, runID, userID, isPrivateChat)
 
 	if s.dreamer == nil {
 		return
@@ -208,14 +209,14 @@ func (s *Service) getRunID(chatID int64, threadID int, userID int64) string {
 
 // patchContinuityAfterSuccess writes successful turn state into the continuity store.
 // runID must be captured before completeRunLog (which cleans up runLogStates).
-func (s *Service) patchContinuityAfterSuccess(chatID int64, threadID int, userText string, assistantText string, runID string, userID int64) {
+func (s *Service) patchContinuityAfterSuccess(chatID int64, threadID int, userText string, assistantText string, runID string, userID int64, isPrivateChat bool) {
 	if s.continuity == nil {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
-	cwd := s.effectiveCwd(nil, chatID, threadID)
+	cwd := s.effectiveCwdForContext(nil, chatID, threadID, userID, isPrivateChat)
 	now := time.Now()
 	runStatus := "completed"
 	sessionCold := false
@@ -238,11 +239,21 @@ func (s *Service) patchContinuityAfterSuccess(chatID int64, threadID int, userTe
 	if err != nil {
 		log.Printf("continuity: failed to patch after success chat=%d thread=%d: %v", chatID, threadID, err)
 	}
+
+	// Mirror to ProjectWorkState when /cwd is active (cross-surface continuity)
+	s.mirrorProjectWork(chatID, threadID, userID, isPrivateChat, continuity.ProjectWorkPatch{
+		LastUserIntent:       &userText,
+		LastAssistantSummary: &assistantText,
+		LastRunID:            &runID,
+		LastRunStatus:        &runStatus,
+		CWD:                  &cwd,
+		UpdatedAt:            now,
+	})
 }
 
 // patchContinuityFailure writes failure/timeout/error state into the continuity store.
 // Must be called BEFORE completeRunLog, since that cleans up the run log state.
-func (s *Service) patchContinuityFailure(chatID int64, threadID int, status string, errMsg string, userID int64) {
+func (s *Service) patchContinuityFailure(chatID int64, threadID int, status string, errMsg string, userID int64, isPrivateChat bool) {
 	if s.continuity == nil {
 		return
 	}
@@ -280,7 +291,7 @@ func (s *Service) patchContinuityFailure(chatID int64, threadID int, status stri
 	cp := buildCheckpoint(runlog.RunStatus(status), "", tools, errMsg, assistantText)
 	checkpoint = redactSecrets(cp)
 
-	cwd := s.effectiveCwd(nil, chatID, threadID)
+	cwd := s.effectiveCwdForContext(nil, chatID, threadID, userID, isPrivateChat)
 
 	sid := ""
 	if s.sessions != nil {
@@ -301,10 +312,20 @@ func (s *Service) patchContinuityFailure(chatID int64, threadID int, status stri
 	if err != nil {
 		log.Printf("continuity: failed to patch failure chat=%d thread=%d: %v", chatID, threadID, err)
 	}
+
+	// Mirror to ProjectWorkState when /cwd is active (cross-surface continuity)
+	s.mirrorProjectWork(chatID, threadID, userID, isPrivateChat, continuity.ProjectWorkPatch{
+		LastCheckpoint: &checkpoint,
+		LastRunStatus:  &status,
+		LastRunID:      &runID,
+		LastTools:      &tools,
+		CWD:            &cwd,
+		UpdatedAt:      now,
+	})
 }
 
 // patchContinuitySessionCold marks the session as cold with a reset reason.
-func (s *Service) patchContinuitySessionCold(chatID int64, threadID int, reason string, userID int64) {
+func (s *Service) patchContinuitySessionCold(chatID int64, threadID int, reason string, userID int64, isPrivateChat bool) {
 	if s.continuity == nil {
 		return
 	}
@@ -320,6 +341,16 @@ func (s *Service) patchContinuitySessionCold(chatID int64, threadID int, reason 
 	if err != nil {
 		log.Printf("continuity: failed to patch session cold chat=%d thread=%d: %v", chatID, threadID, err)
 	}
+
+	// Mirror checkpoint to ProjectWorkState when /cwd is active
+	now := time.Now()
+	cp := redactSecrets(reason)
+	coldStatus := "cold"
+	s.mirrorProjectWork(chatID, threadID, userID, isPrivateChat, continuity.ProjectWorkPatch{
+		LastCheckpoint: &cp,
+		LastRunStatus:  &coldStatus,
+		UpdatedAt:      now,
+	})
 }
 
 // patchContinuitySessionID updates the session ID in continuity state.
@@ -336,6 +367,32 @@ func (s *Service) patchContinuitySessionID(chatID int64, threadID int, sessionID
 	})
 	if err != nil {
 		log.Printf("continuity: failed to patch session ID chat=%d thread=%d: %v", chatID, threadID, err)
+	}
+}
+
+// mirrorProjectWork writes a ProjectWorkState row when /cwd is active.
+// It resolves the cwd, computes the project slug, sets LastEntrypoint and
+// LastChatID from the current turn, and patches the project store.
+// Errors are logged but never fail the caller's turn.
+func (s *Service) mirrorProjectWork(chatID int64, threadID int, userID int64, isPrivateChat bool, patch continuity.ProjectWorkPatch) {
+	cwd := s.effectiveCwdForContext(nil, chatID, threadID, userID, isPrivateChat)
+	if cwd == "" || userID == 0 || s.continuity == nil {
+		return
+	}
+	slug := runtime.ProjectSlug(cwd)
+	if slug == "" {
+		return
+	}
+	patch.CWD = &cwd
+	ep := s.entryPoint
+	patch.LastEntrypoint = &ep
+	patch.LastChatID = &chatID
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	if err := s.continuity.PatchProjectWork(ctx, continuity.ProjectWorkKey{UserID: userID, ProjectSlug: slug}, patch); err != nil {
+		log.Printf("continuity: failed to mirror project work user=%d slug=%s: %v", userID, slug, err)
 	}
 }
 
@@ -421,7 +478,7 @@ func classifyBridgeErrorOutcome(message string) (string, runlog.RunStatus, strin
 	return "failed", runlog.RunFailed, message
 }
 
-func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev bridge.Event, userID int64) Outcome {
+func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev bridge.Event, userID int64, isPrivateChat bool) Outcome {
 	errMsg := ev.Message
 	if errMsg == "" {
 		errMsg = ev.Content
@@ -432,7 +489,7 @@ func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev
 	redacted := redactSecrets(errMsg)
 	log.Printf("Bridge error: %s", redacted)
 	status, runStatus, reason := classifyBridgeErrorOutcome(redacted)
-	s.patchContinuityFailure(chatID, threadID, status, reason, userID)
+	s.patchContinuityFailure(chatID, threadID, status, reason, userID, isPrivateChat)
 	s.completeRunLog(chatID, threadID, userID, runStatus, "", reason)
 	s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent("",
 		observability.PhaseRunFailed, reason))

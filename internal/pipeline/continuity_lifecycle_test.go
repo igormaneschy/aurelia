@@ -8,7 +8,9 @@ import (
 	"time"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/continuity"
+	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/session"
+	"github.com/igormaneschy/aurelia/internal/users"
 )
 
 // TestContinuityAfterSuccessfulTurn verifies that after a successful turn,
@@ -79,7 +81,7 @@ func TestContinuityAfterTimeout(t *testing.T) {
 
 	tracker := newRunTimeoutTracker()
 	tracker.mark(timeoutOriginMaxExecution)
-	_ = svc.handleContextOutcome(parentCtx, ctx, 42, 0, 100, tracker)
+	_ = svc.handleContextOutcome(parentCtx, ctx, 42, 0, 100, false, tracker)
 
 	state, err := contStore.Get(context.Background(), 42, 0, 100)
 	if err != nil {
@@ -168,7 +170,7 @@ func TestContinuityAfterError(t *testing.T) {
 	}
 
 	ev := newFakeErrorEvent("API rate limit exceeded")
-	outcome := svc.handleErrorEvent(42, 0, 100, ev, 100)
+	outcome := svc.handleErrorEvent(42, 0, 100, ev, 100, false)
 
 	if outcome != OutcomeLLMError {
 		t.Fatalf("expected OutcomeLLMError, got %v", outcome)
@@ -269,6 +271,278 @@ func TestContinuityMarkColdForSessions(t *testing.T) {
 	}
 	if noSession.SessionCold {
 		t.Fatal("chat 3 should NOT be cold (no session_id)")
+	}
+}
+
+// --- Project Work State dual-write tests ---
+
+// TestProjectWorkState_DualWriteOnSuccess verifies that after a successful turn
+// with /cwd active, a ProjectWorkState row is created for (userID, projectSlug).
+func TestProjectWorkState_DualWriteOnSuccess(t *testing.T) {
+	contStore := newContinuityTestStore(t)
+	defer contStore.Close()
+
+	ss := session.NewStore()
+	svc := &Service{
+		continuity: contStore,
+		sessions:   ss,
+		runLog:     &fakeRunLogStore{},
+		entryPoint: "telegram",
+	}
+
+	// Set CWD via session so effectiveCwd resolves
+	ss.SetCwd(42, 0, "/Users/test/my-project")
+	ss.SetSession(42, 0, 100, "sid-100")
+
+	svc.afterSuccessfulTurn(42, 0, "analyze the code", "here is the analysis", "run-001", 100, false)
+
+	ctx := t.Context()
+	slug := runtime.ProjectSlug("/Users/test/my-project")
+	state, err := contStore.GetProjectWork(ctx, 100, slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state == nil {
+		t.Fatal("expected ProjectWorkState to be created")
+	}
+	if state.LastUserIntent != "analyze the code" {
+		t.Fatalf("LastUserIntent = %q, want %q", state.LastUserIntent, "analyze the code")
+	}
+	if !strings.Contains(state.LastAssistantSummary, "here is the analysis") {
+		t.Fatalf("LastAssistantSummary = %q, want to contain %q", state.LastAssistantSummary, "here is the analysis")
+	}
+	if state.LastRunID != "run-001" {
+		t.Fatalf("LastRunID = %q, want %q", state.LastRunID, "run-001")
+	}
+	if state.LastRunStatus != "completed" {
+		t.Fatalf("LastRunStatus = %q, want %q", state.LastRunStatus, "completed")
+	}
+	if state.LastEntrypoint != "telegram" {
+		t.Fatalf("LastEntrypoint = %q, want %q", state.LastEntrypoint, "telegram")
+	}
+	if state.LastChatID != 42 {
+		t.Fatalf("LastChatID = %d, want %d", state.LastChatID, 42)
+	}
+}
+
+// TestProjectWorkState_DualWriteOnFailure verifies that after a failed turn
+// with /cwd active, ProjectWorkState receives checkpoint and status.
+func TestProjectWorkState_DualWriteOnFailure(t *testing.T) {
+	contStore := newContinuityTestStore(t)
+	defer contStore.Close()
+
+	ss := session.NewStore()
+	svc := &Service{
+		continuity:   contStore,
+		sessions:     ss,
+		runLog:       &fakeRunLogStore{},
+		runLogStates: make(map[string]*runLogState),
+		output:       &fakeOutput{},
+		entryPoint:   "tui",
+	}
+
+	// Set CWD so effectiveCwd resolves
+	ss.SetCwd(42, 0, "/Users/test/project-b")
+	ss.SetSession(42, 0, 100, "sid-100")
+
+	ev := newFakeErrorEvent("rate limit exceeded")
+	svc.handleErrorEvent(42, 0, 100, ev, 100, false)
+
+	ctx := t.Context()
+	slug := runtime.ProjectSlug("/Users/test/project-b")
+	state, err := contStore.GetProjectWork(ctx, 100, slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state == nil {
+		t.Fatal("expected ProjectWorkState to be created on failure")
+	}
+	if state.LastRunStatus != "failed" {
+		t.Fatalf("LastRunStatus = %q, want %q", state.LastRunStatus, "failed")
+	}
+	if state.LastCheckpoint == "" {
+		t.Fatal("expected LastCheckpoint to be set")
+	}
+	if state.LastEntrypoint != "tui" {
+		t.Fatalf("LastEntrypoint = %q, want %q", state.LastEntrypoint, "tui")
+	}
+}
+
+// TestProjectWorkState_NoWriteWithoutCwd verifies that without /cwd active,
+// no ProjectWorkState row is created.
+func TestProjectWorkState_NoWriteWithoutCwd(t *testing.T) {
+	contStore := newContinuityTestStore(t)
+	defer contStore.Close()
+
+	ss := session.NewStore()
+	svc := &Service{
+		continuity: contStore,
+		sessions:   ss,
+		runLog:     &fakeRunLogStore{},
+		entryPoint: "telegram",
+	}
+
+	// No CWD set — effectiveCwd returns ""
+	svc.afterSuccessfulTurn(42, 0, "hello", "hi there", "run-002", 100, false)
+
+	ctx := t.Context()
+	// Try a few possible slugs — none should exist
+	for _, slug := range []string{"", "hello", "42"} {
+		state, _ := contStore.GetProjectWork(ctx, 100, slug)
+		if state != nil {
+			t.Fatalf("unexpected ProjectWorkState for slug %q", slug)
+		}
+	}
+}
+
+// TestProjectWorkState_NoWriteWithZeroUserID verifies that userID=0 skips
+// the project write (no isolation possible).
+func TestProjectWorkState_NoWriteWithZeroUserID(t *testing.T) {
+	contStore := newContinuityTestStore(t)
+	defer contStore.Close()
+
+	ss := session.NewStore()
+	svc := &Service{
+		continuity: contStore,
+		sessions:   ss,
+		runLog:     &fakeRunLogStore{},
+		entryPoint: "telegram",
+	}
+
+	ss.SetCwd(42, 0, "/Users/test/project-c")
+	svc.afterSuccessfulTurn(42, 0, "hello", "hi", "run-003", 0, false)
+
+	ctx := t.Context()
+	slug := runtime.ProjectSlug("/Users/test/project-c")
+	state, _ := contStore.GetProjectWork(ctx, 0, slug)
+	if state != nil {
+		t.Fatal("should not create ProjectWorkState for userID=0")
+	}
+}
+
+// TestProjectWorkState_CrossChatIDSameSlug verifies that different chatIDs
+// with the same userID and cwd produce the same ProjectWorkState (cross-surface).
+func TestProjectWorkState_CrossChatIDSameSlug(t *testing.T) {
+	contStore := newContinuityTestStore(t)
+	defer contStore.Close()
+
+	ss := session.NewStore()
+	svc := &Service{
+		continuity: contStore,
+		sessions:   ss,
+		runLog:     &fakeRunLogStore{},
+		entryPoint: "telegram",
+	}
+
+	// Turn 1: Telegram chat
+	ss.SetCwd(50929027, 0, "/Users/test/aurelia")
+	svc.afterSuccessfulTurn(50929027, 0, "start analysis", "analysis done", "run-tg", 100, false)
+
+	// Turn 2: TUI chat (different chatID, same user+cwd)
+	svc.entryPoint = "tui"
+	ss.SetCwd(-9000001, 0, "/Users/test/aurelia")
+	svc.afterSuccessfulTurn(-9000001, 0, "continue where we left off", "resuming", "run-tui", 100, false)
+
+	ctx := t.Context()
+	slug := runtime.ProjectSlug("/Users/test/aurelia")
+	state, err := contStore.GetProjectWork(ctx, 100, slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state == nil {
+		t.Fatal("expected ProjectWorkState to exist")
+	}
+	// The second turn should have updated the state
+	if state.LastUserIntent != "continue where we left off" {
+		t.Fatalf("LastUserIntent = %q, want %q (cross-surface update)", state.LastUserIntent, "continue where we left off")
+	}
+	if state.LastEntrypoint != "tui" {
+		t.Fatalf("LastEntrypoint = %q, want %q (latest entrypoint)", state.LastEntrypoint, "tui")
+	}
+	if state.LastChatID != -9000001 {
+		t.Fatalf("LastChatID = %d, want %d (latest chatID)", state.LastChatID, -9000001)
+	}
+}
+
+// TestProjectWorkState_DualWriteDefaultCWD verifies that when a private chat
+// has no explicit /cwd but the user profile has DefaultCWD, a successful turn
+// writes a ProjectWorkState row for the resolved slug (DefaultCWD fallback).
+func TestProjectWorkState_DualWriteDefaultCWD(t *testing.T) {
+	contStore := newContinuityTestStore(t)
+	defer contStore.Close()
+
+	dir := t.TempDir()
+	resolved, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolver := users.NewResolver(dir)
+	usersStore := users.NewStore(resolver)
+	if err := usersStore.Save(&users.Profile{
+		UserID:     100,
+		DefaultCWD: dir,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	ss := session.NewStore()
+	svc := &Service{
+		continuity: contStore,
+		sessions:   ss,
+		usersStore: usersStore,
+		runLog:     &fakeRunLogStore{},
+		entryPoint: "telegram",
+	}
+
+	// No explicit SetCwd — effectiveCwdForContext falls back to DefaultCWD
+	svc.afterSuccessfulTurn(42, 0, "analyze the code", "analysis done", "run-dd", 100, true)
+
+	ctx := t.Context()
+	slug := runtime.ProjectSlug(resolved)
+	state, err := contStore.GetProjectWork(ctx, 100, slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state == nil {
+		t.Fatal("expected ProjectWorkState to be created via DefaultCWD fallback")
+	}
+	if state.LastUserIntent != "analyze the code" {
+		t.Fatalf("LastUserIntent = %q, want %q", state.LastUserIntent, "analyze the code")
+	}
+}
+
+// TestProjectWorkState_SessionColdPreservesCWD verifies that
+// patchContinuitySessionCold with /cwd active writes the resolved CWD
+// to the ProjectWorkState row.
+func TestProjectWorkState_SessionColdPreservesCWD(t *testing.T) {
+	contStore := newContinuityTestStore(t)
+	defer contStore.Close()
+
+	ss := session.NewStore()
+	svc := &Service{
+		continuity: contStore,
+		sessions:   ss,
+		entryPoint: "telegram",
+	}
+
+	ss.SetCwd(42, 0, "/Users/test/project-cold")
+
+	svc.patchContinuitySessionCold(42, 0, "bridge died", 100, false)
+
+	ctx := t.Context()
+	slug := runtime.ProjectSlug("/Users/test/project-cold")
+	state, err := contStore.GetProjectWork(ctx, 100, slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state == nil {
+		t.Fatal("expected ProjectWorkState to exist after session cold")
+	}
+	if state.CWD != "/Users/test/project-cold" {
+		t.Fatalf("CWD = %q, want %q", state.CWD, "/Users/test/project-cold")
+	}
+	if state.LastRunStatus != "cold" {
+		t.Fatalf("LastRunStatus = %q, want %q", state.LastRunStatus, "cold")
 	}
 }
 

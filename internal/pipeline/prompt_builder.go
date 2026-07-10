@@ -109,9 +109,8 @@ func (bc *Service) buildSystemPrompt(userText string, profile *profiles.PromptPr
 
 	// Conversation Continuity — durable recovery context for this chat/thread.
 	// Injected before memory so it is never evicted by large memory budgets.
-	// Placed before the last-run-state checkpoint section and memory sections,
-	// immediately after Telegram/cwd instructions (per spec priority order).
-	if continuitySection := bc.buildContinuitySection(chatID, threadID, userText, userID); continuitySection != "" {
+	// When /cwd is active, injects Project Work State instead of chat continuity.
+	if continuitySection := bc.buildContinuitySection(chatID, threadID, userText, userID, profile, isPrivateChat); continuitySection != "" {
 		sections = append(sections, continuitySection)
 	}
 
@@ -387,7 +386,10 @@ IMPORTANT: Unlike standard coding agents, you DO have persistent memory across c
 If the user asks to forget or remove something while a project cwd is active, delete the file with Bash (rm) and remove its entry from MEMORY.md. In chat mode without cwd, explain that file tools are disabled and ask the user to bind a project or run a maintenance command.
 
 ### Project configuration files
-Never mention internal project files (CLAUDE.md, AGENTS.md) in casual conversation. Only reference them when a working directory is set AND the user asks about project configuration.`)
+Never mention internal project files (CLAUDE.md, AGENTS.md) in casual conversation. Only reference them when a working directory is set AND the user asks about project configuration.
+
+### Cross-surface work state
+When a Project Work State block appears above, it is the shared operational context across Telegram, TUI, and cron for this project. Use it for "where were we?" and continuation. For durable decisions, architecture notes, and formal handoffs between sessions, use the ai-memory MCP. The **Project Work State** block above is the operational work context shared across Telegram/TUI for this project.`)
 
 	// Inject actual memory contents
 	memoryContent := bc.loadMemoryContents(chatID, threadID, userID, profile, cwd)
@@ -899,13 +901,20 @@ func (bc *Service) buildSecurityPromptSection(chatID int64, threadID int, pp *pr
 }
 
 // buildContinuitySection returns the prompt block for durable conversation
-// recovery context. Returns empty when no recent state exists in the store.
-// The block is redacted and wrapped in untrusted delimiters.
-func (bc *Service) buildContinuitySection(chatID int64, threadID int, userText string, userID int64) string {
+// recovery context. When /cwd is active, returns the Project Work State block
+// instead (cross-surface continuity). Returns empty when no recent state exists.
+func (bc *Service) buildContinuitySection(chatID int64, threadID int, userText string, userID int64, profile *profiles.PromptProfile, isPrivateChat bool) string {
 	if bc.continuity == nil {
 		return ""
 	}
 
+	// When /cwd is active, use Project Work State instead of chat continuity
+	cwd := bc.effectiveCwdForContext(profile, chatID, threadID, userID, isPrivateChat)
+	if cwd != "" {
+		return bc.buildProjectWorkSection(chatID, threadID, cwd, userText, userID, bc.entryPoint)
+	}
+
+	// Chat mode: existing Conversation Continuity logic
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -947,6 +956,60 @@ func (bc *Service) buildContinuitySection(chatID int64, threadID int, userText s
 		// Warm + active, stale, or nil state: don't inject
 		return ""
 	}
+}
+
+// buildProjectWorkSection returns the Project Work State prompt block when
+// /cwd is active. Applies freshness rules: always inject for continuation or
+// cross-surface, skip when hot+active in same chat, skip when stale.
+func (bc *Service) buildProjectWorkSection(chatID int64, threadID int, cwd, userText string, userID int64, entrypoint string) string {
+	slug := runtime.ProjectSlug(cwd)
+	if slug == "" {
+		return ""
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	state, err := bc.continuity.GetProjectWork(ctx, userID, slug)
+	if err != nil {
+		log.Printf("continuity: failed to get project work user=%d slug=%s: %v", userID, slug, err)
+		return ""
+	}
+	if state == nil {
+		return ""
+	}
+
+	// Freshness rules (from spec):
+	// 1. Always inject for continuation
+	if isContinuation(userText) {
+		return continuity.FormatProjectWorkSection(state, RedactSecrets)
+	}
+
+	freshness := continuity.FreshnessProjectWork(state)
+
+	// 2. Cross-surface (entrypoint changed) → always inject (even if stale)
+	if state.LastEntrypoint != "" && state.LastEntrypoint != entrypoint {
+		return continuity.FormatProjectWorkSection(state, RedactSecrets)
+	}
+
+	// 3. Stale (> 6h) → skip
+	if freshness == continuity.FreshnessStale {
+		return ""
+	}
+
+	// 4. Hot + active session in same chat → skip (save tokens)
+	if freshness == continuity.FreshnessHot {
+		sessionIsActive := false
+		if bc.sessions != nil {
+			_, sessionIsActive = bc.sessions.GetSessionWithState(chatID, threadID, userID)
+		}
+		if sessionIsActive {
+			return ""
+		}
+	}
+
+	// 5. Default: inject
+	return continuity.FormatProjectWorkSection(state, RedactSecrets)
 }
 
 // accentReplacerForContinuation strips common Portuguese diacritics for
