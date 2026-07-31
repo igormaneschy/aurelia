@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.40.1] - 2026-07-31
+
+### Security
+- Pinned `esbuild` to `0.28.1` (override + direct dependency), fixing
+  GHSA-g7r4-m6w7-qqqr (low, build-time only) and deduplicating the `tsx`
+  nested copy. `npm audit` drops from 2 findings to 1.
+- Documented gap: `brace-expansion` 5.0.7 remains in the `pi-coding-agent`
+  tree (GHSA-mh99-v99m-4gvg, high). npm 10/11 overrides do not apply to
+  this nested chain (bug reproduced with every override syntax); the
+  attack vector is theoretical (no remote input reaches `minimatch`) and
+  the fix requires an upstream SDK bump.
+
+### Changed
+- `post-commit` hook moved to the OpenCode global hooksPath
+  (`~/.config/opencode/tools/git-hooks/post-commit`): `core.hooksPath`
+  redirects all hooks there, so the repo-local hook was never executed
+  and automatic deploys silently did not happen. The hook now runs via
+  `nohup` with diagnostics in `~/.aurelia/logs/post-commit.log`.
+
 ## [0.40.0] - 2026-07-31
 
 ### Changed

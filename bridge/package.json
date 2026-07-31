@@ -13,7 +13,8 @@
     "node": ">=22.19.0"
   },
   "overrides": {
-    "protobufjs": "7.6.5"
+    "protobufjs": "7.6.5",
+    "esbuild": "0.28.1"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.82.1",
@@ -21,7 +22,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "esbuild": "^0.28.0",
+    "esbuild": "0.28.1",
     "tsx": "^4.0.0",
     "typescript": "^5.7.0"
   }

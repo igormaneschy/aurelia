@@ -24,12 +24,13 @@ const bridgePackageJSON = `{
     "node": ">=22.19.0"
   },
   "overrides": {
-    "protobufjs": "7.6.5"
+    "protobufjs": "7.6.5",
+    "esbuild": "0.28.1"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "0.82.1",
     "@earendil-works/pi-coding-agent": "0.82.1",
-    "esbuild": "^0.28.0"
+    "esbuild": "0.28.1"
   }
 }
 `

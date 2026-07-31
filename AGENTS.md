@@ -101,7 +101,13 @@ This uses `make install` (build → `.new` → `mv` — never corrupts a running
 
 **Failure to rebuild + restart will produce false negatives during testing.** Treat this as part of "done".
 
-> **Pro tip:** A `post-commit` git hook is installed at `.git/hooks/post-commit` that runs `make deploy` automatically after every commit. If enabled, step 6 is automatic — just commit and the daemon updates itself.
+> **Pro tip:** A `post-commit` git hook runs `make deploy` automatically
+> after every commit. It lives in the OpenCode global hooks dir
+> (`~/.config/opencode/tools/git-hooks/post-commit`) because `core.hooksPath`
+> redirects all hooks there and `.git/hooks/post-commit` is never executed.
+> Runs async via `nohup` (never blocks git); output goes to
+> `~/.aurelia/logs/post-commit.log`. If enabled, step 6 is automatic — just
+> commit and the daemon updates itself.
 
 ## Architecture constraint
 
