@@ -1,8 +1,8 @@
 # Upgrade PI SDK 0.79.2 → 0.82.1
 
-**Status:** proposed  
-**Created:** 2026-07-31  
-**Owner:** Aurelia architecture  
+**Status:** proposed
+**Created:** 2026-07-31
+**Owner:** Aurelia architecture
 **Change type:** dependency/API migration
 
 ## Why

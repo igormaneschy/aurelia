@@ -1,8 +1,8 @@
 # Upgrade PI SDK 0.79.2 → 0.82.1 — Tasks
 
-**Change:** `upgrade-pi-sdk-0-82-1`  
-**Dependency graph:** `T0 → T1 → T2 → T3 → T4 → T5`  
-**Implementation branch:** `feature/upgrade-pi-sdk-0-82-1`  
+**Change:** `upgrade-pi-sdk-0-82-1`
+**Dependency graph:** `T0 → T1 → T2 → T3 → T4 → T5`
+**Implementation branch:** `feature/upgrade-pi-sdk-0-82-1`
 **Terminal boundary:** validação live no daemon; promoção/release ficam fora desta change até aprovação explícita.
 
 ## T0 — Baseline and preflight
