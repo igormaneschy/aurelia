@@ -33,7 +33,7 @@ func TestBridgePackageJSONCanBuildBundle(t *testing.T) {
 		Scripts      map[string]string `json:"scripts"`
 		Dependencies map[string]string `json:"dependencies"`
 		Engines      map[string]string `json:"engines"`
-		Overrides    map[string]string `json:"overrides"`
+		Overrides    map[string]any    `json:"overrides"`
 	}
 	if err := json.Unmarshal([]byte(bridgePackageJSON), &pkg); err != nil {
 		t.Fatalf("bridgePackageJSON is invalid JSON: %v", err)
@@ -51,11 +51,14 @@ func TestBridgePackageJSONCanBuildBundle(t *testing.T) {
 	if pkg.Engines["node"] != ">=22.19.0" {
 		t.Fatalf("Node engine must require >=22.19.0, got %q", pkg.Engines["node"])
 	}
-	if pkg.Overrides["protobufjs"] != "7.6.5" {
-		t.Fatalf("protobufjs override must be 7.6.5, got %q", pkg.Overrides["protobufjs"])
+	if v, _ := pkg.Overrides["protobufjs"].(string); v != "7.6.5" {
+		t.Fatalf("protobufjs override must be 7.6.5, got %q", v)
 	}
-	if pkg.Dependencies["esbuild"] == "" {
-		t.Fatal("missing esbuild dependency")
+	if v, _ := pkg.Overrides["esbuild"].(string); v != "0.28.1" {
+		t.Fatalf("esbuild override must be 0.28.1, got %q", v)
+	}
+	if pkg.Dependencies["esbuild"] != "0.28.1" {
+		t.Fatalf("esbuild dependency must be 0.28.1, got %q", pkg.Dependencies["esbuild"])
 	}
 }
 
