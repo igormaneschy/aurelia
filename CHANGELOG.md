@@ -4,6 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.40.0] - 2026-07-31
+
+### Changed
+- PI SDK upgraded `0.79.2` → `0.82.1`, migrating the bridge from
+  `AuthStorage`/`ModelRegistry` to `ModelRuntime` (`bridge/index.ts`,
+  `internal/bridge/bundle.ts`). Model resolution now uses `getModel` with an
+  exact-ID fallback; `list-models` uses `getAvailable()` with an explicit
+  network refresh. Node engine requirement raised to `>=22.19.0` and the
+  daemon dependency gate aligned to it.
+- `models-store.json` remains an isolated regular file in the PI agent
+  directory (never symlinked or migrated).
+- Legacy 0.79.2 session fixture (`bridge/testdata/pi-0.79.2-session.jsonl`)
+  added for session compatibility regression tests.
+
+### Security
+- Pinned `protobufjs` to `7.6.5` via npm override, fixing
+  GHSA-j3f2-48v5-ccww (CVE-2026-59877).
+
+### Fixed
+- Config-loading tests no longer depend on the developer's ambient shell
+  environment: `TestMain` in `internal/config`, `internal/onboarding`, and
+  `cmd/aurelia` clears provider API-key environment overrides before the
+  suite runs (pre-existing failures when the shell exports `OPENAI_API_KEY`,
+  `ZAI_API_KEY`, etc.).
+
 ## [0.39.3] - 2026-07-10
 
 ### Changed
