@@ -22,7 +22,7 @@ Tools / filesystem / web / APIs / projects
 
 | Capability | Details | Implementation |
 |---|---|---|
-| Model/Provider Resolution | Model selection, fallback, routing | `ModelRegistry.find()` in Bridge |
+| Model/Provider Resolution | Model selection, exact-ID fallback, routing | `ModelRuntime` in Bridge |
 | Session Runtime | Session lifecycle, compaction via `SettingsManager` | PI SDK manages `session_file`, compaction |
 | Tool Execution | Filesystem R/W, search, Bash, MCP tools | PI SDK `agent.tools`, `beforeToolCall` hooks |
 | Context File Loading | `CLAUDE.md`, `AGENTS.md`, `SKILL.md` from project | `DefaultResourceLoader(noContextFiles=false)` |

@@ -24,7 +24,7 @@ One persistent daemon, many projects, many prompt profiles.
 Before installing, ensure you have:
 
 - **Go** `1.26.5` — [go.dev](https://go.dev/)
-- **Node.js** `>=20.6.0` and **npm** `9+` — [nodejs.org](https://nodejs.org/)
+- **Node.js** `>=22.19.0` and **npm** `9+` — [nodejs.org](https://nodejs.org/)
   - *The PI SDK (inference engine) installs automatically via npm on first run*
   - *No need to install the PI CLI (`pi`) or run `pi /login`*
 - **git** `2+`
@@ -376,7 +376,7 @@ aurelia debug last --json             # Machine-readable JSON output
 Requirements:
 
 - Go `1.26.5`
-- Node.js `>=20.6.0` and npm `9+` (the PI SDK installs automatically on first run)
+- Node.js `>=22.19.0` and npm `9+` (the PI SDK installs automatically on first run)
 - Telegram bot token
 - One LLM provider:
   - **OpenRouter** — recommended (multi-model proxy, one key for many models)
@@ -588,7 +588,7 @@ Full guide: [docs/OPERATIONS.md](docs/OPERATIONS.md).
 |---------|----------|
 | Daemon exits immediately | Run `go run ./cmd/aurelia/ onboard` first |
 | "Token is invalid" during onboard | Verify token with @BotFather, ensure bot is not already running elsewhere |
-| Bridge fails to build | Check `node --version` ≥ 20.6 and `npm --version` ≥ 9 |
+| Bridge fails to build | Check `node --version` ≥ 22.19 and `npm --version` ≥ 9 |
 | "Dependency missing" error | Install the missing tool and re-run onboarding |
 | TUI cannot connect | Start/install the daemon first, then run `aurelia-tui`; local IPC uses `~/.aurelia/aurelia.sock` |
 | TUI timestamps look wrong after reload | Update to `v0.30.1+`; restored history preserves PI message timestamps |

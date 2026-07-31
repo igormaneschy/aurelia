@@ -23,10 +23,10 @@
 
 ## Bridge (TypeScript)
 
-- Runtime: Node.js `>=20.6.0` with `tsx` or `--experimental-strip-types`
-- SDK: `@earendil-works/pi-coding-agent` (latest, requires Node >=20.6.0 via engine field)
+- Runtime: Node.js `>=22.19.0` with `tsx` or `--experimental-strip-types`
+- SDK: `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` v0.82.1 (`ModelRuntime`, Node >=22.19.0)
 - TypeScript: ^5.7.0
-- Target: ES2022, ESNext modules
+- Target: Node 22, ESNext modules
 
 ## Testing
 

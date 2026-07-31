@@ -47,15 +47,15 @@
 **Service:** Local PI installation
 **Purpose:** Reuse auth, model registry, skills, extensions, sessions, and settings
 **Implementation:** `bridge/index.ts` via PI SDK
-**Configuration:** `~/.pi/agent/auth.json`, `~/.pi/agent/models.json`, `~/.pi/agent/settings.json`; Aurelia uses `~/.aurelia/pi-agent/` for isolation but symlinks `auth.json` and `models.json` to the PI CLI files
-**Authentication:** PI `AuthStorage` plus provider env vars (`ANTHROPIC_API_KEY`, `KIMI_API_KEY`, `OPENROUTER_API_KEY`, etc.)
+**Configuration:** `~/.pi/agent/auth.json`, `~/.pi/agent/models.json`, `~/.pi/agent/settings.json`; Aurelia uses `~/.aurelia/pi-agent/` for isolation, symlinks `auth.json` and `models.json` to the PI CLI files, and keeps `models-store.json` local
+**Authentication:** PI `ModelRuntime` plus provider env vars (`ANTHROPIC_API_KEY`, `KIMI_API_KEY`, `OPENROUTER_API_KEY`, etc.)
 
 **Notes:**
 1. Claude-specific Cloud MCP discovery was removed from the bridge during PI migration.
 2. Agent-defined `mcp_servers` remain in the config schema but need a PI extension/adapter for parity.
 3. PI built-in tools are mapped from Claude-style tool names (`Read` → `read`, `Glob` → `find`, etc.).
 4. PI owns model resolution, sessions, compaction, context-file loading, skills/extensions and tool execution. Aurelia owns Telegram UX, identity/persona, scoped memory, scheduling, audit/policy context and workflows.
-5. Telegram `/model` and natural-language `lista modelos` force-refresh the PI model registry and should match `pi --list-models`; stale isolated `models.json` copies are invalid and replaced by symlinks on startup.
+5. Telegram `/model` and natural-language `lista modelos` explicitly refresh `ModelRuntime` and should match `pi --list-models`; stale isolated `models.json` copies are invalid and replaced by symlinks on startup.
 
 ## Speech-to-Text (Groq)
 

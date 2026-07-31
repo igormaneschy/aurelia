@@ -3,11 +3,10 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSy
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import {
-  AuthStorage,
   createAgentSession,
   DefaultResourceLoader,
   getAgentDir,
-  ModelRegistry,
+  ModelRuntime,
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
@@ -1047,6 +1046,72 @@ function logAudit(entry: AuditEntry): void {
   writeAuditFile(line);
 }
 
+type BeforeToolCall = NonNullable<
+  Awaited<ReturnType<typeof createAgentSession>>["session"]["agent"]["beforeToolCall"]
+>;
+
+// Install the policy wrapper after AgentSession has installed extension hooks.
+// The returned teardown restores that original hook exactly, so extensions keep
+// their own interception lifecycle when Aurelia releases a chat session.
+export function installSecurityHook(
+  agent: { beforeToolCall?: BeforeToolCall },
+  security: SecurityContext,
+  audit: (entry: AuditEntry) => void = logAudit,
+): () => void {
+  const origBeforeToolCall = agent.beforeToolCall;
+  if (typeof origBeforeToolCall !== "function") {
+    throw new Error("security hook not available: PI SDK version too old");
+  }
+
+  const { chat_id, agent_name, profile, cwd } = security;
+  agent.beforeToolCall = async (ctx, signal) => {
+    const decision = evaluateToolPolicy(
+      ctx.toolCall.name,
+      ctx.args as Record<string, unknown>,
+      security,
+    );
+
+    audit({
+      decision: decision.decision,
+      tool_name: ctx.toolCall.name,
+      reason: decision.reason || "",
+      chat_id,
+      agent_name,
+      profile,
+      cwd,
+      redacted: true,
+    });
+
+    if (decision.decision === "block") {
+      redactedLog(`security block: tool=${ctx.toolCall.name} reason=${decision.reason}`);
+      return { block: true, reason: decision.reason };
+    }
+    if (decision.decision === "rewrite" && decision.input) {
+      if (typeof ctx.args === "object" && ctx.args !== null) {
+        Object.assign(ctx.args, decision.input);
+      }
+    }
+
+    // Extensions are invoked only after Aurelia's policy has allowed or
+    // rewritten the shared args object. A throwing extension is logged but
+    // cannot convert an allowed policy decision into an unexpected block.
+    try {
+      return await origBeforeToolCall(ctx, signal);
+    } catch (hookError) {
+      redactedLog(
+        `security: tool=${ctx.toolCall.name} extension hook threw, allowing: ${
+          hookError instanceof Error ? hookError.message : String(hookError)
+        }`,
+      );
+      return undefined;
+    }
+  };
+
+  return () => {
+    agent.beforeToolCall = origBeforeToolCall;
+  };
+}
+
 function textFromContent(content: unknown): string {
   if (!Array.isArray(content)) return "";
   return content
@@ -1103,8 +1168,8 @@ function sessionHistoryFromMessages(messages: unknown[], limit = 100): SessionHi
   return history.slice(history.length - limit);
 }
 
-function resolveModel(
-  registry: ModelRegistry,
+export function resolveModel(
+  modelRuntime: Pick<ModelRuntime, "getModel" | "getModels">,
   provider: string | undefined,
   modelID: string | undefined,
 ) {
@@ -1115,12 +1180,21 @@ function resolveModel(
 
   // Native PI SDK resolution
   if (mappedProvider) {
-    const found = registry.find(mappedProvider, mappedModel);
+    const found = modelRuntime.getModel(mappedProvider, mappedModel);
     if (found) return found;
   }
 
   // Fallback: exact ID match among all models
-  return registry.getAll().find((m) => m.id === mappedModel);
+  return modelRuntime.getModels().find((m) => m.id === mappedModel);
+}
+
+async function createModelRuntime(agentDir: string): Promise<ModelRuntime> {
+  return ModelRuntime.create({
+    authPath: join(agentDir, "auth.json"),
+    modelsPath: join(agentDir, "models.json"),
+    modelsStorePath: join(agentDir, "models-store.json"),
+    allowModelNetwork: false,
+  });
 }
 
 async function resolveSessionManager(opts: RequestOptions | undefined): Promise<SessionManager> {
@@ -1183,9 +1257,8 @@ async function createPiSessionInner(opts: RequestOptions | undefined) {
       })
     : SettingsManager.create(cwd, agentDir);
 
-  const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
-  const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
-  const model = resolveModel(modelRegistry, opts?.provider, opts?.model);
+  const modelRuntime = await createModelRuntime(agentDir);
+  const model = resolveModel(modelRuntime, opts?.provider, opts?.model);
   if (opts?.model && !model) {
     throw new Error(`Modelo não encontrado no PI registry: provider=${opts.provider ?? ""} model=${opts.model}. Use /model para listar os disponíveis.`);
   }
@@ -1217,8 +1290,7 @@ async function createPiSessionInner(opts: RequestOptions | undefined) {
   return createAgentSession({
     cwd,
     agentDir,
-    authStorage,
-    modelRegistry,
+    modelRuntime,
     model,
     resourceLoader,
     sessionManager,
@@ -1480,73 +1552,7 @@ async function handleQuery(req: Request): Promise<void> {
     // the extension runner. We wrap the existing hook to chain security before extensions.
     let unsubHook: (() => void) | undefined;
     if (opts?.security?.enabled) {
-      if (typeof liveSession.agent?.beforeToolCall !== "function") {
-        liveSession.dispose();
-        throw new Error("security hook not available: PI SDK version too old");
-      }
-      // Snapshot security config at install time so policy doesn't change mid-session.
-      const {
-        chat_id,
-        agent_name,
-        profile,
-        cwd,
-      } = opts.security!;
-      const origBeforeToolCall = liveSession.agent.beforeToolCall;
-      // The extension-runner hook installed by AgentSession._installAgentToolHooks()
-      // is always a function at this point (confirmed by the typeof guard above).
-      // We wrap it with a safe fallback so tools are never blocked by a missing hook.
-      const chainOrigHook: typeof origBeforeToolCall =
-        typeof origBeforeToolCall === "function"
-          ? (ctx, signal) => origBeforeToolCall(ctx, signal)
-          : async () => undefined;
-      liveSession.agent.beforeToolCall = async (ctx, signal) => {
-        const decision = evaluateToolPolicy(
-          ctx.toolCall.name,
-          ctx.args as Record<string, unknown>,
-          opts.security!,
-        );
-
-        logAudit({
-          decision: decision.decision,
-          tool_name: ctx.toolCall.name,
-          reason: decision.reason || "",
-          chat_id,
-          agent_name,
-          profile,
-          cwd,
-          redacted: true,
-        });
-
-        if (decision.decision === "block") {
-          redactedLog(`security block: tool=${ctx.toolCall.name} reason=${decision.reason}`);
-          return { block: true, reason: decision.reason };
-        }
-        if (decision.decision === "rewrite" && decision.input) {
-          if (typeof ctx.args === "object" && ctx.args !== null) {
-            Object.assign(ctx.args, decision.input);
-          }
-        }
-        // Chain to the existing extension-runner hook (installed by AgentSession).
-        // The safe wrapper ensures tools are never blocked by a missing/malfunctioning
-        // extension hook — if the hook is missing or throws, the tool is still allowed.
-        try {
-          return await chainOrigHook(ctx, signal);
-        } catch (hookError) {
-          redactedLog(
-            `security: tool=${ctx.toolCall.name} extension hook threw, allowing: ${
-              hookError instanceof Error ? hookError.message : String(hookError)
-            }`,
-          );
-          // Fallthrough: allow the tool despite extension hook failure so the model
-          // can continue working. The extension's tool_wrapper would also catch this,
-          // but we log it here for diagnostics.
-          return undefined;
-        }
-      };
-
-      unsubHook = () => {
-        liveSession.agent.beforeToolCall = origBeforeToolCall;
-      };
+      unsubHook = installSecurityHook(liveSession.agent, opts.security!);
     }
 
     // Store the chat session
@@ -2110,23 +2116,22 @@ async function handleRequest(line: string): Promise<void> {
     case "list-models": {
       try {
         const agentDir = piAgentDir() || getAgentDir();
-        const authStorage = AuthStorage.create(join(agentDir, "auth.json"));
-        const modelRegistry = ModelRegistry.create(authStorage, join(agentDir, "models.json"));
+        const modelRuntime = await createModelRuntime(agentDir);
         // When the caller explicitly asks for a refresh, force the PI SDK to
         // reload models.json and reset cached provider state. Without this,
         // edits to models.json or dynamic provider registrations may not be
         // reflected until the bridge process restarts.
         if (req.refresh) {
-          modelRegistry.refresh();
+          await modelRuntime.refresh({ allowNetwork: true });
         }
         // Only show models with configured auth (checks auth.json, env vars, and models.json apiKey fallback)
-        const available = await modelRegistry.getAvailable();
+        const available = await modelRuntime.getAvailable();
         // Filter: only expose models that resolveModel can find at query time.
         // This prevents the "model not found in PI registry" runtime error
         // when getAvailable() returns models that registry.find() cannot resolve
         // because of provider/model name mapping differences (see #220).
         const filtered = available.filter((m) => {
-          const found = resolveModel(modelRegistry, m.provider, m.id);
+          const found = resolveModel(modelRuntime, m.provider, m.id);
           if (!found) {
             redactedLog(`list-models: excluding unresolvable model provider=${m.provider} model=${m.id}`);
           }

@@ -89,8 +89,8 @@ func TestFormatStatus(t *testing.T) {
 		},
 		{
 			"found version too low",
-			DepStatus{Name: "Node.js", Found: true, VersionOK: false, Version: "16.0.0", MinVersion: "18.0.0"},
-			"[!!]  Node.js v16.0.0 (requires >= 18.0.0)",
+		DepStatus{Name: "Node.js", Found: true, VersionOK: false, Version: "16.0.0", MinVersion: "22.19.0"},
+		"[!!]  Node.js v16.0.0 (requires >= 22.19.0)",
 		},
 		{
 			"required missing",

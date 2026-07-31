@@ -3,6 +3,7 @@ package onboarding
 import (
 	"bufio"
 	"bytes"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -16,6 +17,32 @@ func init() {
 	validateToken = func(token string) (string, error) {
 		return "@testbot", nil
 	}
+}
+
+// TestMain isolates RunOnboard tests from ambient provider API-key and
+// Telegram token environment overrides applied by config.Load. The list
+// mirrors config.knownEnvProviders() in internal/config/config.go — keep
+// both in sync when providers are added.
+func TestMain(m *testing.M) {
+	for _, name := range []string{
+		"ANTHROPIC_API_KEY",
+		"GOOGLE_API_KEY",
+		"OPENAI_API_KEY",
+		"OPENCODE_GO_API_KEY",
+		"KIMI_API_KEY",
+		"KIMI_CODING_API_KEY",
+		"OPENROUTER_API_KEY",
+		"ZAI_API_KEY",
+		"ALIBABA_API_KEY",
+		"OLLAMA_API_KEY",
+		"GROQ_API_KEY",
+		"TELEGRAM_BOT_TOKEN",
+	} {
+		if err := os.Unsetenv(name); err != nil {
+			panic("onboarding test: unsetenv " + name + ": " + err.Error())
+		}
+	}
+	os.Exit(m.Run())
 }
 
 func TestRunOnboard_SavesInteractiveConfig(t *testing.T) {

@@ -11,6 +11,23 @@ import (
 	"github.com/igormaneschy/aurelia/internal/runtime"
 )
 
+// TestMain isolates the suite from ambient provider API-key and Telegram
+// token environment overrides. Load() applies these overrides from the
+// process environment (applyEnvOverrides), so tests must not depend on
+// what the developer's shell exports (e.g. OPENAI_API_KEY, ZAI_API_KEY).
+func TestMain(m *testing.M) {
+	for _, provider := range knownEnvProviders() {
+		name := providerAPIKeyEnv(provider)
+		if err := os.Unsetenv(name); err != nil {
+			panic("config test: unsetenv " + name + ": " + err.Error())
+		}
+	}
+	if err := os.Unsetenv("TELEGRAM_BOT_TOKEN"); err != nil {
+		panic("config test: unsetenv TELEGRAM_BOT_TOKEN: " + err.Error())
+	}
+	os.Exit(m.Run())
+}
+
 func TestLoad_CreatesDefaultAppConfigWhenMissing(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("AURELIA_HOME", tmpDir)
