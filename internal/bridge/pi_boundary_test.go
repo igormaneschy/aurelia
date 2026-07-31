@@ -116,7 +116,8 @@ func TestBridgeSettingsManager_inMemoryCompaction(t *testing.T) {
 // beforeToolCall hook, not the legacy Claude SDK session event pattern.
 func TestBridgeSecurityHook_usesBeforeToolCall(t *testing.T) {
 	// 1. Assignment: the hook is actively wrapped by assigning a new function.
-	if !activeCodeContains("liveSession.agent.beforeToolCall = async") {
+	if !activeCodeContains("export function installSecurityHook(") ||
+		!activeCodeContains("agent.beforeToolCall = async") {
 		t.Fatal("PI boundary violation: Security preflight must wrap " +
 			"session.agent.beforeToolCall (the PI SDK tool preflight hook) in active code, " +
 			"not merely mention it in comments. " +
@@ -125,14 +126,14 @@ func TestBridgeSecurityHook_usesBeforeToolCall(t *testing.T) {
 	}
 
 	// 2. Save: the original hook is captured before wrapping.
-	if !activeCodeContains("const origBeforeToolCall = liveSession.agent.beforeToolCall") {
+	if !activeCodeContains("const origBeforeToolCall = agent.beforeToolCall") {
 		t.Fatal("PI boundary violation: Security preflight must save the original " +
 			"session.agent.beforeToolCall into const origBeforeToolCall before wrapping. " +
 			"Without this, the extension-runner hook cannot be restored on teardown.")
 	}
 
 	// 3. Restore: the original hook is restored when the security wrapper is torn down.
-	if !activeCodeContains("liveSession.agent.beforeToolCall = origBeforeToolCall") {
+	if !activeCodeContains("agent.beforeToolCall = origBeforeToolCall") {
 		t.Fatal("PI boundary violation: Security preflight must restore the original " +
 			"session.agent.beforeToolCall from origBeforeToolCall on teardown. " +
 			"Without this, PI extensions remain bypassed after security is removed.")
@@ -209,8 +210,9 @@ func TestBridgeSessionFile_emitted(t *testing.T) {
 }
 
 // TestBridgeListModels_resolveModelFilter verifies data-flow invariants in the
-// list-models handler: models from getAvailable() must be filtered through
-// resolveModel before being exposed as selectable.
+// list-models handler: models from ModelRuntime.getAvailable() must be filtered
+// through the same ModelRuntime-backed resolveModel path before being exposed as
+// selectable.
 //
 // The assertions enforce:
 //  1. summary is NOT derived directly from available (which would skip filtering).
@@ -238,10 +240,10 @@ func TestBridgeListModels_resolveModelFilter(t *testing.T) {
 	// INVARIANT 2: The filter callback must call resolveModel to validate each model.
 	// The pattern 'resolveModel(modelRegistry, m.provider, m.id' is specific to the
 	// filter context (the createPiSession call uses opts?.provider, opts?.model).
-	if !activeCodeContains("resolveModel(modelRegistry, m.provider, m.id") {
+	if !activeCodeContains("resolveModel(modelRuntime, m.provider, m.id") {
 		t.Fatal("PI boundary violation: list-models filter must call resolveModel " +
 			"for each model to verify it can be found at query time. " +
-			"Expected 'resolveModel(modelRegistry, m.provider, m.id)' " +
+			"Expected 'resolveModel(modelRuntime, m.provider, m.id)' " +
 			"inside the filter callback.")
 	}
 
@@ -250,5 +252,24 @@ func TestBridgeListModels_resolveModelFilter(t *testing.T) {
 		t.Fatal("PI boundary violation: list-models handler must log " +
 			"a redacted diagnostic when resolveModel filtering excludes a model. " +
 			"Expected 'redactedLog(`list-models: excluding unresolvable model ...`)'.")
+	}
+}
+
+func TestBridgeModelRuntimeBoundary(t *testing.T) {
+	if !activeCodeContains("ModelRuntime.create({") {
+		t.Fatal("PI boundary violation: bridge must create ModelRuntime explicitly")
+	}
+	if !activeCodeContains("modelsStorePath: join(agentDir, \"models-store.json\")") {
+		t.Fatal("PI boundary violation: models-store.json must remain in Aurelia's isolated agent directory")
+	}
+	if !activeCodeContains("modelRuntime.getModel(mappedProvider, mappedModel)") ||
+		!activeCodeContains("modelRuntime.getModels().find((m) => m.id === mappedModel)") {
+		t.Fatal("PI boundary violation: model resolution must use qualified getModel then exact-ID getModels fallback")
+	}
+	if activeCodeContains("AuthStorage.create(") || activeCodeContains("ModelRegistry.create(") {
+		t.Fatal("PI boundary violation: bridge must not use removed AuthStorage or ModelRegistry construction")
+	}
+	if !activeCodeContains("await modelRuntime.refresh({ allowNetwork: true })") {
+		t.Fatal("PI boundary violation: catalog network refresh must be explicit")
 	}
 }

@@ -49,7 +49,7 @@
 ### PI SDK Boundary
 **Location:** `bridge/index.ts`, `internal/pipeline/prompt_builder.go`, `internal/session/store.go`
 **Purpose:** Keep the PI SDK as the cognitive/execution engine while Aurelia owns product continuity.
-**Implementation:** The Bridge uses PI-native `ModelRegistry`, `SessionManager`, `SettingsManager.compaction`, `DefaultResourceLoader(noContextFiles=false)`, and `session.agent.beforeToolCall`. Go tracks `session_file` per `SessionKey` for resume, injects Aurelia-specific prompt layers (persona, Telegram, memory, security context, continuity), and does not own model routing or context compaction. Automatic token-based rotation is forbidden; large sessions continue through the original PI `session_file` so SDK compaction preserves continuity.
+**Implementation:** The Bridge uses PI-native `ModelRuntime`, `SessionManager`, `SettingsManager.compaction`, `DefaultResourceLoader(noContextFiles=false)`, and `session.agent.beforeToolCall`. Go tracks `session_file` per `SessionKey` for resume, injects Aurelia-specific prompt layers (persona, Telegram, memory, security context, continuity), and does not own model routing or context compaction. Automatic token-based rotation is forbidden; large sessions continue through the original PI `session_file` so SDK compaction preserves continuity.
 **Rule:** If PI already owns an engine concern, Aurelia adapts/orchestrates it. If the concern is identity, UX, operational memory, project/user scoping, scheduling, audit or workflow state, Aurelia owns it. Transversal Wiki memory belongs to PI via `ai-memory` MCP, not an Aurelia MCP gateway.
 
 ### NDJSON Request Multiplexing

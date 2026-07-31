@@ -32,6 +32,8 @@ func TestBridgePackageJSONCanBuildBundle(t *testing.T) {
 	var pkg struct {
 		Scripts      map[string]string `json:"scripts"`
 		Dependencies map[string]string `json:"dependencies"`
+		Engines      map[string]string `json:"engines"`
+		Overrides    map[string]string `json:"overrides"`
 	}
 	if err := json.Unmarshal([]byte(bridgePackageJSON), &pkg); err != nil {
 		t.Fatalf("bridgePackageJSON is invalid JSON: %v", err)
@@ -41,6 +43,16 @@ func TestBridgePackageJSONCanBuildBundle(t *testing.T) {
 	}
 	if pkg.Dependencies["@earendil-works/pi-coding-agent"] == "" {
 		t.Fatal("missing PI SDK dependency")
+	}
+	if pkg.Dependencies["@earendil-works/pi-ai"] != "0.82.1" || pkg.Dependencies["@earendil-works/pi-coding-agent"] != "0.82.1" {
+		t.Fatalf("PI SDK dependency versions must be 0.82.1, got ai=%q coding-agent=%q",
+			pkg.Dependencies["@earendil-works/pi-ai"], pkg.Dependencies["@earendil-works/pi-coding-agent"])
+	}
+	if pkg.Engines["node"] != ">=22.19.0" {
+		t.Fatalf("Node engine must require >=22.19.0, got %q", pkg.Engines["node"])
+	}
+	if pkg.Overrides["protobufjs"] != "7.6.5" {
+		t.Fatalf("protobufjs override must be 7.6.5, got %q", pkg.Overrides["protobufjs"])
 	}
 	if pkg.Dependencies["esbuild"] == "" {
 		t.Fatal("missing esbuild dependency")
@@ -213,6 +225,12 @@ func readyBridgeTarget(t *testing.T) string {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(targetDir, "bundle.js"), []byte("// bundle"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// Symlink tests exercise only isolated-agent setup. Mark the placeholder
+	// bundle current so EnsureBridge does not perform an unrelated network npm
+	// install/build merely because the embedded source changed.
+	if err := os.WriteFile(sourceHashPath(targetDir), []byte(computeSourceHash()), 0600); err != nil {
 		t.Fatal(err)
 	}
 	return targetDir

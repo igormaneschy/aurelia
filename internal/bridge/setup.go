@@ -18,11 +18,17 @@ const bridgePackageJSON = `{
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild index.ts --bundle --platform=node --target=node18 --outfile=bundle.js --format=esm --banner:js=\"import { createRequire as __piCreateRequire } from 'module';const require = __piCreateRequire(import.meta.url);\""
+    "build": "esbuild index.ts --bundle --platform=node --target=node22 --supported:template-literal=false --outfile=bundle.js --format=esm --banner:js=\"import { createRequire as __piCreateRequire } from 'module';const require = __piCreateRequire(import.meta.url);\""
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "overrides": {
+    "protobufjs": "7.6.5"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.79.2",
-    "@earendil-works/pi-coding-agent": "0.79.2",
+    "@earendil-works/pi-ai": "0.82.1",
+    "@earendil-works/pi-coding-agent": "0.82.1",
     "esbuild": "^0.28.0"
   }
 }
