@@ -36,7 +36,7 @@ var depSpecs = []struct {
 	MinVersion string
 	InstallURL string
 }{
-	{"Node.js", "node", true, "18.0.0", "https://nodejs.org/"},
+	{"Node.js", "node", true, "22.19.0", "https://nodejs.org/"},
 	{"npm", "npm", true, "8.0.0", "https://nodejs.org/"},
 	{"git", "git", false, "2.0.0", "https://git-scm.com/"},
 	{"gh", "gh", false, "", "https://cli.github.com/"},
