@@ -174199,7 +174199,7 @@ var require_jiti = __commonJS({
         }, pathe_M_eThtNZ_dirname = function(e4) {
           const t4 = pathe_M_eThtNZ_normalizeWindowsPath(e4).replace(/\/$/, "").split("/").slice(0, -1);
           return 1 === t4.length && Je3.test(t4[0]) && (t4[0] += "/"), t4.join("/") || (isAbsolute5(e4) ? "/" : ".");
-        }, basename15 = function(e4, t4) {
+        }, basename16 = function(e4, t4) {
           const i3 = pathe_M_eThtNZ_normalizeWindowsPath(e4).split("/");
           let n8 = "";
           for (let e5 = i3.length - 1; e5 >= 0; e5--) {
@@ -174917,7 +174917,7 @@ var require_jiti = __commonJS({
         function getCache(e4, t4, i3) {
           if (!e4.opts.fsCache || !t4.filename) return i3();
           const n8 = " /* v".concat(Ti2, "-").concat(utils_hash(t4.source, 16), " */\n");
-          let a2 = "".concat(basename15(pathe_M_eThtNZ_dirname(t4.filename)), "-").concat((function(e5) {
+          let a2 = "".concat(basename16(pathe_M_eThtNZ_dirname(t4.filename)), "-").concat((function(e5) {
             const t5 = e5.split(Wt3).pop();
             if (!t5) return;
             const i4 = t5.lastIndexOf(".");
@@ -174963,7 +174963,7 @@ var require_jiti = __commonJS({
           return i3.startsWith("#!") && (i3 = "// " + i3), i3;
         }
         function eval_evalModule(t4, i3, n8 = {}) {
-          const a2 = n8.id || (n8.filename ? basename15(n8.filename) : "_jitiEval.".concat(n8.ext || (n8.async ? "mjs" : "js"))), c2 = n8.filename || jitiResolve(t4, a2, { async: n8.async }), l4 = n8.ext || extname(c2), y3 = n8.cache || t4.parentCache || {}, E3 = /\.[cm]?tsx?$/.test(l4), w3 = ".mjs" === l4 || ".js" === l4 && "module" === (function(e4) {
+          const a2 = n8.id || (n8.filename ? basename16(n8.filename) : "_jitiEval.".concat(n8.ext || (n8.async ? "mjs" : "js"))), c2 = n8.filename || jitiResolve(t4, a2, { async: n8.async }), l4 = n8.ext || extname(c2), y3 = n8.cache || t4.parentCache || {}, E3 = /\.[cm]?tsx?$/.test(l4), w3 = ".mjs" === l4 || ".js" === l4 && "module" === (function(e4) {
             for (; e4 && "." !== e4 && "/" !== e4; ) {
               e4 = pathe_M_eThtNZ_join(e4, "..");
               try {
@@ -175010,7 +175010,7 @@ var require_jiti = __commonJS({
                     (0, $e3.mkdirSync)(n10, { recursive: true });
                   } catch {
                   }
-                  const a4 = pathe_M_eThtNZ_join(n10, "".concat(basename15(i7, extname(i7)), "-").concat(Date.now(), "-").concat(Math.random().toString(36).slice(2), ".mjs"));
+                  const a4 = pathe_M_eThtNZ_join(n10, "".concat(basename16(i7, extname(i7)), "-").concat(Date.now(), "-").concat(Math.random().toString(36).slice(2), ".mjs"));
                   return (0, $e3.writeFileSync)(a4, t6), a4;
                 })(l5, n9), debug(t5, "[esm]", "[tempfile]", c4), a3(pathToFileURL3(c4))), E4 = y4 ? a3(y4).catch((e4) => {
                   if ("ENAMETOOLONG" !== e4?.code) throw e4;
@@ -235221,7 +235221,7 @@ var require_undici = __commonJS({
 import { createInterface as createInterface5 } from "node:readline";
 import { appendFileSync as appendFileSync4, existsSync as existsSync26, mkdirSync as mkdirSync13, renameSync as renameSync4, statSync as statSync11, truncateSync } from "node:fs";
 import { homedir as homedir12 } from "node:os";
-import { dirname as dirname25, join as join39, resolve as resolve15 } from "node:path";
+import { basename as basename15, dirname as dirname25, join as join39, resolve as resolve15 } from "node:path";
 
 // node_modules/@earendil-works/pi-coding-agent/dist/index.js
 var dist_exports3 = {};
@@ -293636,8 +293636,8 @@ function isDirectoryTarget(originalPath, repositoryPath) {
   if (originalPath.endsWith("/")) {
     return true;
   }
-  const basename15 = path13.posix.basename(repositoryPath);
-  return !basename15.includes(".");
+  const basename16 = path13.posix.basename(repositoryPath);
+  return !basename16.includes(".");
 }
 function normalizeChangelogLinkTarget(target, tag) {
   let canonicalTarget = target.replace(LEGACY_REPO_RE, "https://github.com/".concat(GITHUB_REPO));
@@ -307284,6 +307284,61 @@ function logAudit(entry) {
   process.stderr.write(line);
   writeAuditFile(line);
 }
+var AI_MEMORY_SERVER = "ai-memory";
+var MEMORY_TOOL_PREFIX = "memory_";
+function deriveProjectName(cwd) {
+  if (!cwd) return void 0;
+  let dir = resolve15(cwd);
+  for (; ; ) {
+    if (existsSync26(join39(dir, ".git"))) {
+      return basename15(dir);
+    }
+    const parent = dirname25(dir);
+    if (parent === dir) return void 0;
+    dir = parent;
+  }
+}
+function injectMcpProjectScope(toolName, args, cwd) {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args;
+  let targetTool;
+  let container;
+  if (toolName === "mcp") {
+    if (a.server !== AI_MEMORY_SERVER) return false;
+    const t2 = a.tool;
+    targetTool = typeof t2 === "string" ? t2 : void 0;
+    container = a.arguments;
+  } else if (toolName.startsWith(MEMORY_TOOL_PREFIX)) {
+    targetTool = toolName;
+    container = a;
+  }
+  if (!targetTool || !targetTool.startsWith(MEMORY_TOOL_PREFIX)) return false;
+  let wasString = false;
+  if (typeof container === "string") {
+    wasString = true;
+    try {
+      container = JSON.parse(container);
+    } catch {
+      return false;
+    }
+  }
+  if (typeof container !== "object" || container === null) return false;
+  const target = container;
+  if (target.project !== void 0 || target.workspace !== void 0 || target.scopes !== void 0 || target.global !== void 0) {
+    return false;
+  }
+  const project = deriveProjectName(cwd);
+  if (!project) return false;
+  target.project = project;
+  if (toolName === "mcp") {
+    a.arguments = wasString ? JSON.stringify(target) : target;
+  } else {
+    if (wasString) {
+      a.arguments = JSON.stringify(target);
+    }
+  }
+  return true;
+}
 function installSecurityHook(agent, security, audit = logAudit) {
   const origBeforeToolCall = agent.beforeToolCall;
   if (typeof origBeforeToolCall !== "function") {
@@ -307291,6 +307346,16 @@ function installSecurityHook(agent, security, audit = logAudit) {
   }
   const { chat_id, agent_name, profile, cwd } = security;
   agent.beforeToolCall = async (ctx, signal) => {
+    if (cwd) {
+      try {
+        const injected = injectMcpProjectScope(ctx.toolCall.name, ctx.args, cwd);
+        if (injected) {
+          redactedLog("mcp scope: injected project=".concat(deriveProjectName(cwd), " for tool=").concat(ctx.toolCall.name));
+        }
+      } catch (injectError) {
+        redactedLog("mcp scope: injection failed, continuing: ".concat(injectError instanceof Error ? injectError.message : String(injectError)));
+      }
+    }
     const decision = evaluateToolPolicy(
       ctx.toolCall.name,
       ctx.args,
@@ -308227,8 +308292,10 @@ function main2() {
 main2();
 export {
   DEFAULT_SENSITIVE_PATTERNS,
+  deriveProjectName,
   evaluateToolPolicy,
   gitHasSensitiveArgs,
+  injectMcpProjectScope,
   installSecurityHook,
   isDestructiveCommand,
   isExfiltrationCommand,
