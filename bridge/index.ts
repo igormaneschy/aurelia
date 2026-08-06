@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, truncateSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -1050,6 +1050,99 @@ type BeforeToolCall = NonNullable<
   Awaited<ReturnType<typeof createAgentSession>>["session"]["agent"]["beforeToolCall"]
 >;
 
+// ── ai-memory MCP scope injection ────────────────────────────────────────
+//
+// The ai-memory MCP server (remote HTTP at 127.0.0.1:49374) auto-resolves
+// the "active project" from the most recent lifecycle-hook activity it has
+// seen — NOT from the current conversation. The Aurelia daemon is a single
+// long-lived process (cwd fixed at ~/.aurelia) serving many chats across
+// many projects, so its MCP calls resolve to whichever project last wrote
+// hooks globally → queries return "stale" data or "not found".
+//
+// Fix: when the model calls an ai-memory tool through the unified `mcp`
+// proxy without an explicit scope, inject `project` derived from the
+// conversation's real cwd (SecurityContext.cwd), which the pipeline already
+// resolves per chat via effectiveCwdForContext.
+
+const AI_MEMORY_SERVER = "ai-memory";
+const MEMORY_TOOL_PREFIX = "memory_";
+
+// Walk up from `cwd` until a directory containing `.git` is found and return
+// its basename — matches ai-memory's project naming (basename of repo_path).
+export function deriveProjectName(cwd: string): string | undefined {
+  if (!cwd) return undefined;
+  let dir = resolve(cwd);
+  for (;;) {
+    if (existsSync(join(dir, ".git"))) {
+      return basename(dir);
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+}
+
+// Mutates `args` in place, returning true when a project was injected.
+// Handles both the unified `mcp` proxy ({server, tool, arguments}) and
+// direct memory_* tool names, plus string-JSON arguments.
+export function injectMcpProjectScope(
+  toolName: string,
+  args: unknown,
+  cwd: string,
+): boolean {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as Record<string, unknown>;
+
+  let targetTool: string | undefined;
+  let container: unknown;
+  if (toolName === "mcp") {
+    if (a.server !== AI_MEMORY_SERVER) return false;
+    const t = a.tool;
+    targetTool = typeof t === "string" ? t : undefined;
+    container = a.arguments;
+  } else if (toolName.startsWith(MEMORY_TOOL_PREFIX)) {
+    targetTool = toolName;
+    container = a;
+  }
+  if (!targetTool || !targetTool.startsWith(MEMORY_TOOL_PREFIX)) return false;
+
+  // Resolve the arguments container (object or JSON string).
+  let wasString = false;
+  if (typeof container === "string") {
+    wasString = true;
+    try {
+      container = JSON.parse(container);
+    } catch {
+      return false;
+    }
+  }
+  if (typeof container !== "object" || container === null) return false;
+  const target = container as Record<string, unknown>;
+
+  // Never override an explicit scope chosen by the model/user.
+  if (
+    target.project !== undefined ||
+    target.workspace !== undefined ||
+    target.scopes !== undefined ||
+    target.global !== undefined
+  ) {
+    return false;
+  }
+
+  const project = deriveProjectName(cwd);
+  if (!project) return false;
+  target.project = project;
+  if (toolName === "mcp") {
+    a.arguments = wasString ? JSON.stringify(target) : target;
+  } else {
+    // Direct memory_* tool: `a` IS the target container.
+    if (wasString) {
+      a.arguments = JSON.stringify(target);
+    }
+  }
+  return true;
+}
+
 // Install the policy wrapper after AgentSession has installed extension hooks.
 // The returned teardown restores that original hook exactly, so extensions keep
 // their own interception lifecycle when Aurelia releases a chat session.
@@ -1065,6 +1158,19 @@ export function installSecurityHook(
 
   const { chat_id, agent_name, profile, cwd } = security;
   agent.beforeToolCall = async (ctx, signal) => {
+    // Inject explicit ai-memory project scope from the conversation cwd so
+    // the MCP server does not auto-resolve a stale/global project.
+    if (cwd) {
+      try {
+        const injected = injectMcpProjectScope(ctx.toolCall.name, ctx.args, cwd);
+        if (injected) {
+          redactedLog(`mcp scope: injected project=${deriveProjectName(cwd)} for tool=${ctx.toolCall.name}`);
+        }
+      } catch (injectError) {
+        redactedLog(`mcp scope: injection failed, continuing: ${injectError instanceof Error ? injectError.message : String(injectError)}`);
+      }
+    }
+
     const decision = evaluateToolPolicy(
       ctx.toolCall.name,
       ctx.args as Record<string, unknown>,
