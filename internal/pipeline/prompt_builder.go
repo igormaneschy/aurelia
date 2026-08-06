@@ -126,6 +126,13 @@ func (bc *Service) buildSystemPrompt(userText string, profile *profiles.PromptPr
 	memorySection := bc.buildMemoryInstructions(chatID, threadID, userID, profile, isPrivateChat)
 	sections = append(sections, memorySection)
 
+	// ai-memory MCP scope — explicit project derived from the conversation cwd so
+	// the MCP server does not auto-resolve a stale/global project in parallel
+	// multi-project sessions.
+	if scopeSection := bc.buildAiMemoryScopeSection(profile, chatID, threadID, userID, isPrivateChat); scopeSection != "" {
+		sections = append(sections, scopeSection)
+	}
+
 	// Long-task guidance — prompt the model to checkpoint when the task looks complex
 	if looksLikeLongTask(userText, bc.effectiveCwdForContext(profile, chatID, threadID, userID, isPrivateChat) != "") {
 		sections = append(sections, "# Long Task Guidance\n\n"+longTaskGuidance())
@@ -352,6 +359,53 @@ func (bc *Service) topicMemoryDirCanonical(chatID int64, threadID int) string {
 		return bc.resolver.TopicMemoryDir(chatID, threadID)
 	}
 	return ""
+}
+
+// deriveProjectNameFromCwd returns the ai-memory project name for a working
+// directory: the basename of the nearest ancestor containing .git (directory
+// or file for worktrees). Falls back to the cwd basename for workspace
+// projects without git. Returns "" when cwd is empty.
+func deriveProjectNameFromCwd(cwd string) string {
+	if cwd == "" {
+		return ""
+	}
+	dir := filepath.Clean(cwd)
+	for {
+		if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+			return filepath.Base(dir)
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			// Reached filesystem root without finding .git — use the cwd basename.
+			return filepath.Base(filepath.Clean(cwd))
+		}
+		dir = parent
+	}
+}
+
+// buildAiMemoryScopeSection returns a system prompt block instructing the
+// model to always pass an explicit `project` scope to ai-memory MCP tools,
+// derived from the conversation cwd. The ai-memory server auto-resolves the
+// active project from recent hook activity, which is stale in parallel
+// multi-project sessions; an explicit project argument is the only reliable
+// scope. Returns "" when no project can be derived (chat mode, no cwd).
+func (bc *Service) buildAiMemoryScopeSection(profile *profiles.PromptProfile, chatID int64, threadID int, userID int64, isPrivateChat bool) string {
+	cwd := bc.effectiveCwdForContext(profile, chatID, threadID, userID, isPrivateChat)
+	if cwd == "" {
+		return ""
+	}
+	project := deriveProjectNameFromCwd(cwd)
+	if project == "" {
+		return ""
+	}
+	return fmt.Sprintf(`## ai-memory MCP scope
+
+The ai-memory MCP server is available through the `+"`mcp`"+` tool (server: "ai-memory"; tools: memory_query, memory_read_page, memory_write_page, memory_explore, memory_status, ...). Prefer it over the ai-memory CLI or raw file exploration for wiki/handoff lookups.
+
+The active project for this conversation is %s (cwd: %s). When calling ANY ai-memory tool, ALWAYS pass `+"`project: \"%s\"`"+` explicitly in the arguments — do NOT rely on the server's auto-resolved project, which can be stale in parallel multi-project sessions.
+
+- Cross-project searches: pass `+"`global: true`"+` instead.
+- If the user asks about another project, pass that project's name explicitly.`, project, cwd, project)
 }
 
 // buildMemoryInstructions returns the system prompt section for persistent memory.
