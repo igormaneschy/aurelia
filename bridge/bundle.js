@@ -307307,7 +307307,7 @@ function injectMcpProjectScope(toolName, args, cwd) {
     if (a.server !== AI_MEMORY_SERVER) return false;
     const t2 = a.tool;
     targetTool = typeof t2 === "string" ? t2 : void 0;
-    container = a.arguments;
+    container = a.args;
   } else if (toolName.startsWith(MEMORY_TOOL_PREFIX)) {
     targetTool = toolName;
     container = a;
@@ -307331,11 +307331,7 @@ function injectMcpProjectScope(toolName, args, cwd) {
   if (!project) return false;
   target.project = project;
   if (toolName === "mcp") {
-    a.arguments = wasString ? JSON.stringify(target) : target;
-  } else {
-    if (wasString) {
-      a.arguments = JSON.stringify(target);
-    }
+    a.args = wasString ? JSON.stringify(target) : target;
   }
   return true;
 }

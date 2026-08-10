@@ -1083,8 +1083,15 @@ export function deriveProjectName(cwd: string): string | undefined {
 }
 
 // Mutates `args` in place, returning true when a project was injected.
-// Handles both the unified `mcp` proxy ({server, tool, arguments}) and
+// Handles both the unified `mcp` proxy ({server, tool, args}) and
 // direct memory_* tool names, plus string-JSON arguments.
+//
+// The pi-mcp-adapter `mcp` proxy registers a single tool with parameters
+// { tool, args, server, ... } — the real tool arguments live under the
+// `args` key (object or JSON string), which is what the model sees in the
+// tool schema. There is no `arguments` key in the adapter envelope, so a
+// legacy `arguments`-shaped call would be ignored by the adapter's execute
+// (it only reads params.args) and injecting there would be pointless.
 export function injectMcpProjectScope(
   toolName: string,
   args: unknown,
@@ -1099,7 +1106,7 @@ export function injectMcpProjectScope(
     if (a.server !== AI_MEMORY_SERVER) return false;
     const t = a.tool;
     targetTool = typeof t === "string" ? t : undefined;
-    container = a.arguments;
+    container = a.args;
   } else if (toolName.startsWith(MEMORY_TOOL_PREFIX)) {
     targetTool = toolName;
     container = a;
@@ -1133,13 +1140,9 @@ export function injectMcpProjectScope(
   if (!project) return false;
   target.project = project;
   if (toolName === "mcp") {
-    a.arguments = wasString ? JSON.stringify(target) : target;
-  } else {
-    // Direct memory_* tool: `a` IS the target container.
-    if (wasString) {
-      a.arguments = JSON.stringify(target);
-    }
+    a.args = wasString ? JSON.stringify(target) : target;
   }
+  // Direct memory_* tool: `a` IS the target container, already mutated.
   return true;
 }
 
