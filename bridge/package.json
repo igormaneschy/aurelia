@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "npx tsx index.ts",
-    "build": "esbuild index.ts --bundle --platform=node --target=node22 --supported:template-literal=false --outfile=bundle.js --format=esm --banner:js=\"import { createRequire as __piCreateRequire } from 'module';const require = __piCreateRequire(import.meta.url);\"",
+    "build": "esbuild index.ts --bundle --platform=node --target=node22 --supported:template-literal=false --external:@earendil-works/* --outfile=bundle.js --format=esm --banner:js=\"import { createRequire as __piCreateRequire } from 'module';const require = __piCreateRequire(import.meta.url);\"",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test --test-force-exit policy.test.ts session.test.ts mcp-scope.test.ts"
   },

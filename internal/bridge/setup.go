@@ -12,13 +12,25 @@ import (
 	"time"
 )
 
+// bridgePackageJSON is the package.json written into the bridge target dir.
+//
+// The build script must keep `--external:@earendil-works/*`: the PI SDK's
+// extension loader computes import aliases relative to its own
+// import.meta.url (see getAliases in the SDK). When the SDK is BUNDLED into
+// bundle.js, that URL is the bundle file, so aliases resolve to a non-existent
+// index.js and every extension (pi-mcp-adapter → `mcp`, pi-web-access →
+// web_search) fails to load with "Cannot find module". Externalizing keeps
+// the SDK in node_modules, so the loader runs from
+// node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/ and its
+// aliases resolve correctly. Without this, the model never sees the `mcp`
+// tool and ai-memory MCP scope injection can never fire.
 const bridgePackageJSON = `{
   "name": "aurelia-bridge",
   "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "esbuild index.ts --bundle --platform=node --target=node22 --supported:template-literal=false --outfile=bundle.js --format=esm --banner:js=\"import { createRequire as __piCreateRequire } from 'module';const require = __piCreateRequire(import.meta.url);\""
+    "build": "esbuild index.ts --bundle --platform=node --target=node22 --supported:template-literal=false --external:@earendil-works/* --outfile=bundle.js --format=esm --banner:js=\"import { createRequire as __piCreateRequire } from 'module';const require = __piCreateRequire(import.meta.url);\""
   },
   "engines": {
     "node": ">=22.19.0"
@@ -391,9 +403,15 @@ func sourceHashPath(targetDir string) string {
 	return filepath.Join(targetDir, ".source-hash")
 }
 
-// computeSourceHash returns the SHA-256 hash of the embedded TypeScript source.
+// computeSourceHash returns the SHA-256 hash of the embedded TypeScript
+// source. The bridge package.json is included so a build-script change
+// (e.g. --external flags) also forces a bundle rebuild — otherwise an
+// existing target keeps its stale bundle because the TS source is unchanged.
 func computeSourceHash() string {
-	return fmt.Sprintf("%x", sha256.Sum256(EmbeddedBridgeTS))
+	h := sha256.New()
+	_, _ = h.Write(EmbeddedBridgeTS)
+	_, _ = h.Write([]byte(bridgePackageJSON))
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 // isSourceHashCurrent returns true if the stored hash matches the current source hash.
