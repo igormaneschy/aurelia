@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.40.2] - 2026-08-11
+
+### Fixed
+- Bridge session teardown now emits `session_shutdown` to extensions
+  before disposal (mirroring the SDK's `AgentSessionRuntime.dispose()`
+  order), preventing MCP owner/client/stdio leaks when a session ends
+  (cancel, timeout, idle, abort, or replacement). Teardown is awaited,
+  idempotent, and error-swallowing so it never replaces the user-visible
+  result.
+- Bridge explicitly binds extensions (`bindExtensions({ mode: "print" })`)
+  before the first prompt so `pi-mcp-adapter` initializes from
+  `session_start`; bind failures tear down the session while preserving
+  the original error.
+- Bridge chat sessions are now owner-tagged: a stale request can no
+  longer dispose or remove a replacement session registered by a newer
+  query for the same chat.
+- Bridge bundle externalizes the PI SDK (`--external:@earendil-works/*`),
+  fixing extension loading (`mcp`, `web_search`) that broke when the SDK
+  was bundled.
+
+### Changed
+- ai-memory project scope is injected from the conversation cwd via the
+  `pi-mcp-adapter` args envelope, keeping memory queries scoped to the
+  active project.
+- Pipeline instructs the model to pass an explicit ai-memory project
+  scope for memory tools.
+
 ## [0.40.1] - 2026-07-31
 
 ### Security
