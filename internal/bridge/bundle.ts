@@ -84,11 +84,26 @@ const sessionByID = new Map<string, SessionLookup>();
 let lastSessionID = "";
 
 interface ActiveRequest {
-  cancel(reason: string): void;
+  cancel(reason: string): Promise<void>;
+}
+
+type PiAgentSession = Awaited<ReturnType<typeof createAgentSession>>["session"];
+type ChatSessionOwner = symbol;
+
+// Public AgentSession members used by the bridge lifecycle adapter. Keeping
+// this boundary structural also makes it possible to exercise teardown with a
+// deterministic fake without depending on PI SDK internals.
+export interface BridgeSession {
+  bindExtensions(bindings: { mode: "print" }): Promise<void>;
+  extensionRunner: {
+    emit(event: { type: "session_shutdown"; reason: "quit" }): Promise<unknown>;
+  };
+  dispose(): void;
 }
 
 interface ChatSessionState {
-  session: Awaited<ReturnType<typeof createPiSession>>["session"];
+  session: PiAgentSession;
+  owner: ChatSessionOwner;
   sessionId: string;
   sessionFile: string | undefined;
   currentReqId: string;
@@ -107,25 +122,196 @@ interface SessionHistoryMessage {
 const activeRequests = new Map<string, ActiveRequest>();
 const chatSessions = new Map<string, ChatSessionState>();
 
+const chatSessionOwners = new Map<string, ChatSessionOwner>();
+
+/**
+ * Publish a session only while its request still owns the chat key.
+ *
+ * The bridge's query setup awaits extension binding. A newer query can claim
+ * the same key during that await, so the ownership check must be adjacent to
+ * the map insertion rather than performed only before the await.
+ */
+export function registerSessionIfOwner<T>(
+  owners: ReadonlyMap<string, ChatSessionOwner>,
+  sessions: Map<string, T>,
+  key: string,
+  owner: ChatSessionOwner,
+  session: T,
+): boolean {
+  if (owners.get(key) !== owner) return false;
+  sessions.set(key, session);
+  return true;
+}
+
+/**
+ * Remove a session only if the caller still owns the chat key.
+ *
+ * Returning the removed value lets the caller dispose exactly that session;
+ * a stale caller gets no value and therefore cannot dispose the replacement.
+ */
+export function removeSessionIfOwner<T>(
+  owners: ReadonlyMap<string, ChatSessionOwner>,
+  sessions: Map<string, T>,
+  key: string,
+  owner: ChatSessionOwner,
+): T | undefined {
+  if (owners.get(key) !== owner) return undefined;
+  const session = sessions.get(key);
+  if (session === undefined) return undefined;
+  sessions.delete(key);
+  return session;
+}
+
+interface PendingChatCleanup {
+  owner: ChatSessionOwner;
+  promise: Promise<void>;
+}
+
+const pendingChatCleanups = new Map<string, PendingChatCleanup>();
+
+function claimChatSessionOwner(key: string): ChatSessionOwner {
+  const owner = Symbol(`chat-session:${key}`);
+  chatSessionOwners.set(key, owner);
+  return owner;
+}
+
+function ownsChatSession(key: string, owner: ChatSessionOwner): boolean {
+  return chatSessionOwners.get(key) === owner;
+}
+
+interface BridgeSessionLifecycle {
+  // Extension modules are loaded by resourceLoader.reload() before the
+  // session's bindExtensions() call. Keep that fact separate from binding
+  // completion so a canceled pre-bind session still gets session_shutdown.
+  extensionRuntimeLoaded: boolean;
+  extensionActivationStarted: boolean;
+  bindingCompleted: boolean;
+  teardownPromise?: Promise<void>;
+}
+
+const bridgeSessionLifecycles = new WeakMap<BridgeSession, BridgeSessionLifecycle>();
+
+function bridgeSessionLifecycleFor(session: BridgeSession): BridgeSessionLifecycle {
+  const existing = bridgeSessionLifecycles.get(session);
+  if (existing) return existing;
+
+  const lifecycle: BridgeSessionLifecycle = {
+    extensionRuntimeLoaded: false,
+    extensionActivationStarted: false,
+    bindingCompleted: false,
+  };
+  bridgeSessionLifecycles.set(session, lifecycle);
+  return lifecycle;
+}
+
+function markBridgeSessionExtensionRuntimeLoaded(session: BridgeSession): void {
+  bridgeSessionLifecycleFor(session).extensionRuntimeLoaded = true;
+}
+
+/**
+ * Tear down a session through the public PI SDK lifecycle contract.
+ *
+ * AgentSession.dispose() only removes session-local listeners/resources. The
+ * SDK's print/RPC hosts use AgentSessionRuntime.dispose(), which emits the
+ * async session_shutdown extension event first. The bridge owns AgentSession
+ * directly, so it mirrors that public ordering through the documented
+ * session.extensionRunner getter and ExtensionRunner.emit() method.
+ *
+ * A session returned by the SDK factory is marked as having a loaded
+ * extension runtime because resourceLoader.reload() runs before the bridge
+ * can observe the session. Therefore pre-bind cancellation is covered too.
+ * Once activation starts, even a rejected/partially-completed bind must
+ * receive shutdown.
+ * Cleanup errors are logged and swallowed so teardown cannot replace the
+ * existing user-visible request result or error.
+ */
+export async function disposeBridgeSession(session: BridgeSession): Promise<void> {
+  const lifecycle = bridgeSessionLifecycleFor(session);
+  if (!lifecycle.teardownPromise) {
+    // Defer the body until after the promise is stored. This makes concurrent
+    // callers share one shutdown/dispose sequence and prevents re-entrancy
+    // from an extension shutdown handler from starting a second sequence.
+    lifecycle.teardownPromise = Promise.resolve().then(async () => {
+      if (lifecycle.extensionRuntimeLoaded || lifecycle.extensionActivationStarted) {
+        try {
+          await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+        } catch (err: unknown) {
+          redactedLog(
+            `session teardown: session_shutdown failed: ${err instanceof Error ? err.message : String(err)}`,
+          );
+        }
+      }
+
+      try {
+        session.dispose();
+      } catch (err: unknown) {
+        redactedLog(
+          `session teardown: dispose failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    });
+  }
+  await lifecycle.teardownPromise;
+}
+
 function chatKey(chatID: number, threadID: number, userID = 0): string {
   return `${chatID}:${threadID}:${userID}`;
 }
 
-function cleanupChatSession(key: string): void {
+function cleanupChatSession(key: string, expectedOwner?: ChatSessionOwner): Promise<void> {
   const cs = chatSessions.get(key);
-  if (!cs) return;
-  clearTimeout(cs.idleTimer);
-  try { cs.unsubPersistent(); } catch {}
-  try { if (cs.unsubHook) cs.unsubHook(); } catch {}
-  try { cs.session.dispose(); } catch {}
-  chatSessions.delete(key);
+  if (expectedOwner && cs && cs.owner !== expectedOwner) return Promise.resolve();
+
+  const pending = pendingChatCleanups.get(key);
+  if (pending) {
+    if (expectedOwner && pending.owner !== expectedOwner) {
+      if (!cs) return Promise.resolve();
+      return pending.promise.then(() => cleanupChatSession(key, expectedOwner));
+    }
+    if (!expectedOwner && cs && pending.owner !== cs.owner) {
+      return pending.promise.then(() => cleanupChatSession(key));
+    }
+    return pending.promise;
+  }
+
+  if (!cs) return Promise.resolve();
+  if (expectedOwner && cs.owner !== expectedOwner) return Promise.resolve();
+
+  // Remove the entry before awaiting async extension cleanup. A failed query
+  // must never leave its disposed/replaced session addressable by steer,
+  // follow-up, or abort requests.
+  if (expectedOwner) {
+    if (!removeSessionIfOwner(chatSessionOwners, chatSessions, key, expectedOwner)) {
+      return Promise.resolve();
+    }
+  } else {
+    chatSessions.delete(key);
+  }
+  if (chatSessionOwners.get(key) === cs.owner) chatSessionOwners.delete(key);
+
+  const cleanup = Promise.resolve().then(async () => {
+    clearTimeout(cs.idleTimer);
+    try { cs.unsubPersistent(); } catch {}
+    try { if (cs.unsubHook) cs.unsubHook(); } catch {}
+    await disposeBridgeSession(cs.session);
+  });
+  pendingChatCleanups.set(key, { owner: cs.owner, promise: cleanup });
+  void cleanup.then(
+    () => {
+      if (pendingChatCleanups.get(key)?.promise === cleanup) pendingChatCleanups.delete(key);
+    },
+    () => {
+      if (pendingChatCleanups.get(key)?.promise === cleanup) pendingChatCleanups.delete(key);
+    },
+  );
+  return cleanup;
 }
 
 function startIdleTimer(cs: ChatSessionState, key: string): void {
   clearTimeout(cs.idleTimer);
-  cs.idleTimer = setTimeout(() => {
+  cs.idleTimer = setTimeout(async () => {
     log(`idle timeout: cleaning up session ${cs.sessionId} for chat ${key}`);
-    cleanupChatSession(key);
+    await cleanupChatSession(key, cs.owner);
   }, 30 * 60 * 1000); // 30 minutes
 }
 
@@ -1350,7 +1536,9 @@ async function createPiSession(opts: RequestOptions | undefined) {
   await prev;
 
   try {
-    return await createPiSessionInner(opts);
+    const created = await createPiSessionInner(opts);
+    markBridgeSessionExtensionRuntimeLoaded(created.session);
+    return created;
   } finally {
     release!();
   }
@@ -1408,6 +1596,152 @@ async function createPiSessionInner(opts: RequestOptions | undefined) {
   });
 }
 
+// The SDK's print and RPC modes explicitly bind extensions before their first
+// turn. The bridge is headless, so print mode provides the same lifecycle
+// event without inventing a UI context. In particular, pi-mcp-adapter starts
+// its lazy server initialization from the session_start event.
+export async function bindBridgeSessionExtensions(
+  session: BridgeSession,
+): Promise<void> {
+  const lifecycle = bridgeSessionLifecycleFor(session);
+  if (lifecycle.bindingCompleted) return;
+
+  lifecycle.extensionActivationStarted = true;
+  try {
+    await session.bindExtensions({ mode: "print" });
+    lifecycle.bindingCompleted = true;
+  } catch (err: unknown) {
+    // bindExtensions emits session_start before it finishes resource setup.
+    // If a later initialization step fails, give already-started extensions
+    // the matching shutdown event before preserving the original bind error.
+    await disposeBridgeSession(session);
+    throw err;
+  }
+}
+
+interface InFlightBridgeSessionBind {
+  session: BridgeSession;
+  promise: Promise<void>;
+}
+
+/**
+ * Coordinates one query's created session with cancellation.
+ *
+ * handleQuery cannot publish a ChatSessionState until extension binding has
+ * completed, so key-based cleanup alone cannot find a session while binding
+ * is gated. This controller keeps the exact session and bind promise owned by
+ * the request; cancel() waits for creation and binding to settle, then tears
+ * down that exact session. The controller is intentionally independent from
+ * provider calls, timers, and the global chat-session map so the race is
+ * deterministic to exercise.
+ */
+export interface BridgeSessionRequestLifecycle {
+  createSession<T extends { session: BridgeSession }>(factory: () => Promise<T>): Promise<T>;
+  trackSession(session: BridgeSession): void;
+  markSessionCreationComplete(): void;
+  isCanceled(): boolean;
+  bindSession(session: BridgeSession): Promise<void>;
+  cancel(): Promise<void>;
+}
+
+export function createBridgeSessionRequestLifecycle(): BridgeSessionRequestLifecycle {
+  let trackedSession: BridgeSession | undefined;
+  let sessionCreationComplete = false;
+  let resolveSessionCreation!: () => void;
+  const sessionCreated = new Promise<void>((resolve) => {
+    resolveSessionCreation = resolve;
+  });
+  let canceled = false;
+  let inFlightBind: InFlightBridgeSessionBind | undefined;
+  let cancelPromise: Promise<void> | undefined;
+
+  const trackSession = (session: BridgeSession): void => {
+    if (trackedSession && trackedSession !== session) {
+      throw new Error("bridge request cannot track more than one session");
+    }
+    trackedSession = session;
+    markBridgeSessionExtensionRuntimeLoaded(session);
+  };
+
+  const markSessionCreationComplete = (): void => {
+    if (sessionCreationComplete) return;
+    sessionCreationComplete = true;
+    resolveSessionCreation();
+  };
+
+  const createSession = async <T extends { session: BridgeSession }>(
+    factory: () => Promise<T>,
+  ): Promise<T> => {
+    try {
+      const created = await factory();
+      trackSession(created.session);
+      return created;
+    } finally {
+      // The SDK factory is not cancelable. Resolving this in a finally block
+      // makes both success and rejection observable to cancel(), without
+      // changing the factory's provider/error semantics.
+      markSessionCreationComplete();
+    }
+  };
+
+  const bindSession = async (session: BridgeSession): Promise<void> => {
+    if (trackedSession !== session) {
+      throw new Error("bridge request bind does not match its tracked session");
+    }
+    if (canceled) {
+      await disposeBridgeSession(session);
+      throw new Error("request canceled");
+    }
+
+    // Calling bindBridgeSessionExtensions() has no await before it returns;
+    // install the exact-session record before any other request callback can
+    // run. cancel() then serializes disposal after this promise settles.
+    const bindPromise = bindBridgeSessionExtensions(session);
+    const pending: InFlightBridgeSessionBind = { session, promise: bindPromise };
+    inFlightBind = pending;
+    try {
+      await bindPromise;
+    } finally {
+      if (inFlightBind === pending) inFlightBind = undefined;
+    }
+  };
+
+  const cancel = (): Promise<void> => {
+    canceled = true;
+    if (!cancelPromise) {
+      cancelPromise = (async () => {
+        // If cancellation wins while createPiSession is still loading
+        // extensions, wait until the created session is observable before
+        // deciding whether exact cleanup is needed.
+        await sessionCreated;
+
+        const pending = inFlightBind;
+        if (pending) {
+          try {
+            await pending.promise;
+          } catch {
+            // bindBridgeSessionExtensions preserves and rethrows the bind
+            // error to handleQuery; cancellation must still finish teardown.
+          }
+        }
+        if (trackedSession) {
+          await disposeBridgeSession(trackedSession);
+        }
+      })();
+    }
+    return cancelPromise;
+  };
+
+  return {
+    createSession,
+    trackSession,
+    markSessionCreationComplete,
+    isCanceled: () => canceled,
+    bindSession,
+    cancel,
+  };
+}
+
 // ── Handle a single query command ────────────────────────────────────────────
 
 async function handleQuery(req: Request): Promise<void> {
@@ -1417,6 +1751,7 @@ async function handleQuery(req: Request): Promise<void> {
   const threadID = opts?.thread_id ?? opts?.security?.thread_id ?? 0;
   const userID = opts?.user_id ?? opts?.security?.user_id ?? 0;
   const cKey = chatKey(chatID, threadID, userID);
+  const sessionOwner = claimChatSessionOwner(cKey);
   const emitReq = (obj: OutEvent) => emit({ ...obj, request_id: reqId });
 
   // Redact BEFORE truncation so secrets straddling the boundary aren't
@@ -1434,6 +1769,7 @@ async function handleQuery(req: Request): Promise<void> {
   let session: Awaited<ReturnType<typeof createPiSession>>["session"] | undefined;
   let healthTimer: ReturnType<typeof setInterval> | undefined;
   const startedAt = Date.now();
+  const sessionLifecycle = createBridgeSessionRequestLifecycle();
 
   const emitTerminalError = (message: string): void => {
     if (terminalEmitted) return;
@@ -1441,24 +1777,28 @@ async function handleQuery(req: Request): Promise<void> {
     emitReq({ event: "error", message: redactSDKError(message) });
   };
 
-  const cancelActive = (reason: string): void => {
+  const cancelActive = async (reason: string): Promise<void> => {
     if (canceled) return;
     canceled = true;
     redactedLog(`query cancel — rid=${reqId} reason=${reason}`);
-    cleanupChatSession(cKey);
+    const cleanup = cleanupChatSession(cKey, sessionOwner);
     emitTerminalError(reason);
     activeRequests.delete(reqId);
+    await Promise.all([cleanup, sessionLifecycle.cancel()]);
   };
 
   activeRequests.set(reqId, { cancel: cancelActive });
-  timeout = setTimeout(() => {
+  timeout = setTimeout(async () => {
     redactedLog(`query timeout — rid=${reqId} no result after 30 minutes`);
-    cancelActive("query timeout: no result after 30 minutes");
+    await cancelActive("query timeout: no result after 30 minutes");
   }, timeoutMs);
 
   try {
     // Clean up any existing session for this chat
-    cleanupChatSession(cKey);
+    await cleanupChatSession(cKey);
+    if (canceled || !ownsChatSession(cKey, sessionOwner)) {
+      throw new Error("request canceled");
+    }
 
     // Compute effective tools before session creation so we can report
     // the full list (including extension tools like mcp, code_search, etc.)
@@ -1469,11 +1809,19 @@ async function handleQuery(req: Request): Promise<void> {
       opts?.disallowed_tools,
     ) ?? [];
 
-    const piSession = await createPiSession(opts);
+    const piSession = await sessionLifecycle.createSession(() => createPiSession(opts));
     const liveSession = piSession.session;
     session = liveSession;
-    if (canceled) {
-      liveSession.dispose();
+    if (canceled || !ownsChatSession(cKey, sessionOwner)) {
+      await disposeBridgeSession(liveSession);
+      throw new Error("request canceled");
+    }
+    await sessionLifecycle.bindSession(liveSession);
+    if (canceled || !ownsChatSession(cKey, sessionOwner)) {
+      // This request became stale while extension binding was pending. It
+      // never owned chatSessions, so dispose this exact session directly;
+      // key-only cleanup could remove the replacement session.
+      await disposeBridgeSession(liveSession);
       throw new Error("request canceled");
     }
 
@@ -1667,6 +2015,7 @@ async function handleQuery(req: Request): Promise<void> {
     // Store the chat session
     const cs: ChatSessionState = {
       session: liveSession,
+      owner: sessionOwner,
       sessionId: sessionID,
       sessionFile: liveSession.sessionFile,
       currentReqId: reqId,
@@ -1674,11 +2023,19 @@ async function handleQuery(req: Request): Promise<void> {
       unsubHook,
       createdAt: Date.now(),
     };
-    chatSessions.set(cKey, cs);
+    if (!registerSessionIfOwner(chatSessionOwners, chatSessions, cKey, sessionOwner, cs)) {
+      await disposeBridgeSession(liveSession);
+      throw new Error("request canceled");
+    }
 
     // Re-check cancel after storing — guards race between session setup and cancel
-    if (canceled) {
-      cleanupChatSession(cKey);
+    if (canceled || !ownsChatSession(cKey, sessionOwner)) {
+      const current = chatSessions.get(cKey);
+      if (current?.session === liveSession && current.owner === sessionOwner) {
+        await cleanupChatSession(cKey, sessionOwner);
+      } else {
+        await disposeBridgeSession(liveSession);
+      }
       throw new Error("request canceled");
     }
 
@@ -1765,14 +2122,23 @@ async function handleQuery(req: Request): Promise<void> {
 
       // Start idle timer — session stays alive for subsequent steer/followUp/abort
       const currentCs = chatSessions.get(cKey);
-      if (currentCs) {
+      if (currentCs?.owner === sessionOwner) {
         startIdleTimer(currentCs, cKey);
       }
     }
   } catch (err: unknown) {
-    // If session was created but never stored in chatSessions (setup failure), dispose it
-    if (session && !chatSessions.has(cKey)) {
-      try { session.dispose(); } catch {}
+    // Remove a failed session whether setup stopped before storage or failed
+    // after it was stored. Never clean a newer replacement for this request.
+    if (session) {
+      const current = chatSessions.get(cKey);
+      if (current?.session === session && current.owner === sessionOwner && ownsChatSession(cKey, sessionOwner)) {
+        await cleanupChatSession(cKey, sessionOwner);
+      } else {
+        // The request may have been superseded after it lost ownership. Do
+        // not use key-only cleanup here: the key may now address a newer
+        // session, or no session may have been registered at all.
+        await disposeBridgeSession(session);
+      }
     }
     if (!terminalEmitted) {
       const rawErrMsg = err instanceof Error ? err.message : String(err);
@@ -1787,6 +2153,10 @@ async function handleQuery(req: Request): Promise<void> {
     if (timeout) clearTimeout(timeout);
     if (healthTimer) clearInterval(healthTimer);
     activeRequests.delete(reqId);
+    sessionLifecycle.markSessionCreationComplete();
+    if (!chatSessions.has(cKey) && ownsChatSession(cKey, sessionOwner)) {
+      chatSessionOwners.delete(cKey);
+    }
     // Session is NOT disposed here when stored — it stays in chatSessions for steer/followUp/abort
   }
 }
@@ -1876,7 +2246,7 @@ async function handleAbort(req: Request): Promise<void> {
     redactedLog(`abort error: rid=${reqId} ${errMsg}`);
     emitReq({ event: "error", message: redactSDKError(errMsg) });
   } finally {
-    cleanupChatSession(cKey);
+    await cleanupChatSession(cKey, cs.owner);
   }
 }
 
@@ -1916,6 +2286,7 @@ async function handleGetSessionStats(req: Request): Promise<void> {
     // Open or resolve session temporarily; do not retain in chatSessions.
     piSession = await createPiSession(req.options);
     const session = piSession.session;
+    await bindBridgeSessionExtensions(session);
 
     const stats = session.getSessionStats();
     const usage = stats.contextUsage;
@@ -1946,7 +2317,7 @@ async function handleGetSessionStats(req: Request): Promise<void> {
   } finally {
     // Dispose of the temporary session even on error paths.
     if (piSession) {
-      try { piSession.session.dispose(); } catch { /* ignore */ }
+      await disposeBridgeSession(piSession.session);
     }
   }
 }
@@ -1972,6 +2343,7 @@ async function handleGetSessionHistory(req: Request): Promise<void> {
   try {
     const piSession = await createPiSession({ ...opts, continue: false });
     session = piSession.session;
+    await bindBridgeSessionExtensions(session);
     const messages = session.state.messages ?? [];
     const history = sessionHistoryFromMessages(messages, 100);
     emitReq({ event: "result", content: JSON.stringify(history) });
@@ -1981,7 +2353,7 @@ async function handleGetSessionHistory(req: Request): Promise<void> {
     emitReq({ event: "error", message: `get-session-history failed: ${redactSDKError(errMsg)}` });
   } finally {
     if (session) {
-      try { session.dispose(); } catch {}
+      await disposeBridgeSession(session);
     }
   }
 }
@@ -1997,6 +2369,7 @@ async function handleCompactSession(req: Request): Promise<void> {
   try {
     piSession = await createPiSession(req.options);
     const session = piSession.session;
+    await bindBridgeSessionExtensions(session);
 
     let terminalEmitted = false;
 
@@ -2050,7 +2423,7 @@ async function handleCompactSession(req: Request): Promise<void> {
   } finally {
     if (unsub) try { unsub(); } catch { /* ignore */ }
     if (piSession) {
-      try { piSession.session.dispose(); } catch { /* ignore */ }
+      await disposeBridgeSession(piSession.session);
     }
   }
 }
@@ -2090,6 +2463,7 @@ async function handleRotateSession(req: Request): Promise<void> {
     // 1. Open current session to get stats and generate summary
     oldPiSession = await createPiSession(opts);
     const oldSession = oldPiSession.session;
+    await bindBridgeSessionExtensions(oldSession);
 
     // Get stats for summary context
     const stats = oldSession.getSessionStats();
@@ -2110,7 +2484,7 @@ async function handleRotateSession(req: Request): Promise<void> {
     emitReq({ event: "system", message: "Generating session summary..." });
 
     // Dispose old session (don't need to keep it alive after compaction)
-    oldSession.dispose();
+    await disposeBridgeSession(oldSession);
     oldPiSession = undefined; // Mark as disposed for the finally block
 
     // 2. Create a new fresh session with same options (cwd, model, tools, security)
@@ -2122,6 +2496,7 @@ async function handleRotateSession(req: Request): Promise<void> {
 
     newPiSession = await createPiSession(newOpts);
     const newSession = newPiSession.session;
+    await bindBridgeSessionExtensions(newSession);
     const newFile = newSession.sessionFile;
     const newId = newSession.sessionId;
 
@@ -2154,7 +2529,7 @@ ${summary}
 
     // Dispose the new session — the Go side will store the new file path
     // and the bridge will open it fresh on the next query.
-    newSession.dispose();
+    await disposeBridgeSession(newSession);
     newPiSession = undefined; // Mark as disposed for the finally block
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
@@ -2163,10 +2538,10 @@ ${summary}
   } finally {
     // Clean up any session that wasn't disposed on the happy path.
     if (oldPiSession) {
-      try { oldPiSession.session.dispose(); } catch { /* ignore */ }
+      await disposeBridgeSession(oldPiSession.session);
     }
     if (newPiSession) {
-      try { newPiSession.session.dispose(); } catch { /* ignore */ }
+      await disposeBridgeSession(newPiSession.session);
     }
   }
 }
@@ -2217,7 +2592,7 @@ async function handleRequest(line: string): Promise<void> {
         emitReq({ event: "result", content: `request ${target} is not active` });
         return;
       }
-      active.cancel("request canceled");
+      await active.cancel("request canceled");
       emitReq({ event: "result", content: `request ${target} canceled` });
       break;
     }

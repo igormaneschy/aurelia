@@ -18,32 +18,122 @@ var sessionByID = /* @__PURE__ */ new Map();
 var lastSessionID = "";
 var activeRequests = /* @__PURE__ */ new Map();
 var chatSessions = /* @__PURE__ */ new Map();
+var chatSessionOwners = /* @__PURE__ */ new Map();
+function registerSessionIfOwner(owners, sessions, key, owner, session) {
+  if (owners.get(key) !== owner) return false;
+  sessions.set(key, session);
+  return true;
+}
+function removeSessionIfOwner(owners, sessions, key, owner) {
+  if (owners.get(key) !== owner) return void 0;
+  const session = sessions.get(key);
+  if (session === void 0) return void 0;
+  sessions.delete(key);
+  return session;
+}
+var pendingChatCleanups = /* @__PURE__ */ new Map();
+function claimChatSessionOwner(key) {
+  const owner = Symbol("chat-session:".concat(key));
+  chatSessionOwners.set(key, owner);
+  return owner;
+}
+function ownsChatSession(key, owner) {
+  return chatSessionOwners.get(key) === owner;
+}
+var bridgeSessionLifecycles = /* @__PURE__ */ new WeakMap();
+function bridgeSessionLifecycleFor(session) {
+  const existing = bridgeSessionLifecycles.get(session);
+  if (existing) return existing;
+  const lifecycle = {
+    extensionRuntimeLoaded: false,
+    extensionActivationStarted: false,
+    bindingCompleted: false
+  };
+  bridgeSessionLifecycles.set(session, lifecycle);
+  return lifecycle;
+}
+function markBridgeSessionExtensionRuntimeLoaded(session) {
+  bridgeSessionLifecycleFor(session).extensionRuntimeLoaded = true;
+}
+async function disposeBridgeSession(session) {
+  const lifecycle = bridgeSessionLifecycleFor(session);
+  if (!lifecycle.teardownPromise) {
+    lifecycle.teardownPromise = Promise.resolve().then(async () => {
+      if (lifecycle.extensionRuntimeLoaded || lifecycle.extensionActivationStarted) {
+        try {
+          await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+        } catch (err) {
+          redactedLog(
+            "session teardown: session_shutdown failed: ".concat(err instanceof Error ? err.message : String(err))
+          );
+        }
+      }
+      try {
+        session.dispose();
+      } catch (err) {
+        redactedLog(
+          "session teardown: dispose failed: ".concat(err instanceof Error ? err.message : String(err))
+        );
+      }
+    });
+  }
+  await lifecycle.teardownPromise;
+}
 function chatKey(chatID, threadID, userID = 0) {
   return "".concat(chatID, ":").concat(threadID, ":").concat(userID);
 }
-function cleanupChatSession(key) {
+function cleanupChatSession(key, expectedOwner) {
   const cs = chatSessions.get(key);
-  if (!cs) return;
-  clearTimeout(cs.idleTimer);
-  try {
-    cs.unsubPersistent();
-  } catch {
+  if (expectedOwner && cs && cs.owner !== expectedOwner) return Promise.resolve();
+  const pending = pendingChatCleanups.get(key);
+  if (pending) {
+    if (expectedOwner && pending.owner !== expectedOwner) {
+      if (!cs) return Promise.resolve();
+      return pending.promise.then(() => cleanupChatSession(key, expectedOwner));
+    }
+    if (!expectedOwner && cs && pending.owner !== cs.owner) {
+      return pending.promise.then(() => cleanupChatSession(key));
+    }
+    return pending.promise;
   }
-  try {
-    if (cs.unsubHook) cs.unsubHook();
-  } catch {
+  if (!cs) return Promise.resolve();
+  if (expectedOwner && cs.owner !== expectedOwner) return Promise.resolve();
+  if (expectedOwner) {
+    if (!removeSessionIfOwner(chatSessionOwners, chatSessions, key, expectedOwner)) {
+      return Promise.resolve();
+    }
+  } else {
+    chatSessions.delete(key);
   }
-  try {
-    cs.session.dispose();
-  } catch {
-  }
-  chatSessions.delete(key);
+  if (chatSessionOwners.get(key) === cs.owner) chatSessionOwners.delete(key);
+  const cleanup = Promise.resolve().then(async () => {
+    clearTimeout(cs.idleTimer);
+    try {
+      cs.unsubPersistent();
+    } catch {
+    }
+    try {
+      if (cs.unsubHook) cs.unsubHook();
+    } catch {
+    }
+    await disposeBridgeSession(cs.session);
+  });
+  pendingChatCleanups.set(key, { owner: cs.owner, promise: cleanup });
+  void cleanup.then(
+    () => {
+      if (pendingChatCleanups.get(key)?.promise === cleanup) pendingChatCleanups.delete(key);
+    },
+    () => {
+      if (pendingChatCleanups.get(key)?.promise === cleanup) pendingChatCleanups.delete(key);
+    }
+  );
+  return cleanup;
 }
 function startIdleTimer(cs, key) {
   clearTimeout(cs.idleTimer);
-  cs.idleTimer = setTimeout(() => {
+  cs.idleTimer = setTimeout(async () => {
     log("idle timeout: cleaning up session ".concat(cs.sessionId, " for chat ").concat(key));
-    cleanupChatSession(key);
+    await cleanupChatSession(key, cs.owner);
   }, 30 * 60 * 1e3);
 }
 function rememberSession(id, lookup) {
@@ -870,7 +960,9 @@ async function createPiSession(opts) {
   });
   await prev;
   try {
-    return await createPiSessionInner(opts);
+    const created = await createPiSessionInner(opts);
+    markBridgeSessionExtensionRuntimeLoaded(created.session);
+    return created;
   } finally {
     release();
   }
@@ -913,6 +1005,94 @@ async function createPiSessionInner(opts) {
     tools: effectiveTools
   });
 }
+async function bindBridgeSessionExtensions(session) {
+  const lifecycle = bridgeSessionLifecycleFor(session);
+  if (lifecycle.bindingCompleted) return;
+  lifecycle.extensionActivationStarted = true;
+  try {
+    await session.bindExtensions({ mode: "print" });
+    lifecycle.bindingCompleted = true;
+  } catch (err) {
+    await disposeBridgeSession(session);
+    throw err;
+  }
+}
+function createBridgeSessionRequestLifecycle() {
+  let trackedSession;
+  let sessionCreationComplete = false;
+  let resolveSessionCreation;
+  const sessionCreated = new Promise((resolve2) => {
+    resolveSessionCreation = resolve2;
+  });
+  let canceled = false;
+  let inFlightBind;
+  let cancelPromise;
+  const trackSession = (session) => {
+    if (trackedSession && trackedSession !== session) {
+      throw new Error("bridge request cannot track more than one session");
+    }
+    trackedSession = session;
+    markBridgeSessionExtensionRuntimeLoaded(session);
+  };
+  const markSessionCreationComplete = () => {
+    if (sessionCreationComplete) return;
+    sessionCreationComplete = true;
+    resolveSessionCreation();
+  };
+  const createSession = async (factory) => {
+    try {
+      const created = await factory();
+      trackSession(created.session);
+      return created;
+    } finally {
+      markSessionCreationComplete();
+    }
+  };
+  const bindSession = async (session) => {
+    if (trackedSession !== session) {
+      throw new Error("bridge request bind does not match its tracked session");
+    }
+    if (canceled) {
+      await disposeBridgeSession(session);
+      throw new Error("request canceled");
+    }
+    const bindPromise = bindBridgeSessionExtensions(session);
+    const pending = { session, promise: bindPromise };
+    inFlightBind = pending;
+    try {
+      await bindPromise;
+    } finally {
+      if (inFlightBind === pending) inFlightBind = void 0;
+    }
+  };
+  const cancel = () => {
+    canceled = true;
+    if (!cancelPromise) {
+      cancelPromise = (async () => {
+        await sessionCreated;
+        const pending = inFlightBind;
+        if (pending) {
+          try {
+            await pending.promise;
+          } catch {
+          }
+        }
+        if (trackedSession) {
+          await disposeBridgeSession(trackedSession);
+        }
+      })();
+    }
+    return cancelPromise;
+  };
+  return {
+    createSession,
+    trackSession,
+    markSessionCreationComplete,
+    isCanceled: () => canceled,
+    bindSession,
+    cancel
+  };
+}
 async function handleQuery(req) {
   const reqId = req.request_id || "";
   const opts = req.options;
@@ -920,6 +1100,7 @@ async function handleQuery(req) {
   const threadID = opts?.thread_id ?? opts?.security?.thread_id ?? 0;
   const userID = opts?.user_id ?? opts?.security?.user_id ?? 0;
   const cKey = chatKey(chatID, threadID, userID);
+  const sessionOwner = claimChatSessionOwner(cKey);
   const emitReq = (obj) => emit({ ...obj, request_id: reqId });
   const redactedPrompt = redactSDKError(req.prompt);
   redactedLog(
@@ -933,35 +1114,45 @@ async function handleQuery(req) {
   let session;
   let healthTimer;
   const startedAt = Date.now();
+  const sessionLifecycle = createBridgeSessionRequestLifecycle();
   const emitTerminalError = (message) => {
     if (terminalEmitted) return;
     terminalEmitted = true;
     emitReq({ event: "error", message: redactSDKError(message) });
   };
-  const cancelActive = (reason) => {
+  const cancelActive = async (reason) => {
     if (canceled) return;
     canceled = true;
     redactedLog("query cancel \u2014 rid=".concat(reqId, " reason=").concat(reason));
-    cleanupChatSession(cKey);
+    const cleanup = cleanupChatSession(cKey, sessionOwner);
     emitTerminalError(reason);
     activeRequests.delete(reqId);
+    await Promise.all([cleanup, sessionLifecycle.cancel()]);
   };
   activeRequests.set(reqId, { cancel: cancelActive });
-  timeout = setTimeout(() => {
+  timeout = setTimeout(async () => {
     redactedLog("query timeout \u2014 rid=".concat(reqId, " no result after 30 minutes"));
-    cancelActive("query timeout: no result after 30 minutes");
+    await cancelActive("query timeout: no result after 30 minutes");
   }, timeoutMs);
   try {
-    cleanupChatSession(cKey);
+    await cleanupChatSession(cKey);
+    if (canceled || !ownsChatSession(cKey, sessionOwner)) {
+      throw new Error("request canceled");
+    }
     const effectiveToolNames = translateAllowedTools(
       opts?.allowed_tools,
       opts?.disallowed_tools
     ) ?? [];
-    const piSession = await createPiSession(opts);
+    const piSession = await sessionLifecycle.createSession(() => createPiSession(opts));
     const liveSession = piSession.session;
     session = liveSession;
-    if (canceled) {
-      liveSession.dispose();
+    if (canceled || !ownsChatSession(cKey, sessionOwner)) {
+      await disposeBridgeSession(liveSession);
+      throw new Error("request canceled");
+    }
+    await sessionLifecycle.bindSession(liveSession);
+    if (canceled || !ownsChatSession(cKey, sessionOwner)) {
+      await disposeBridgeSession(liveSession);
       throw new Error("request canceled");
     }
     const sessionID = liveSession.sessionId;
@@ -1126,6 +1317,7 @@ async function handleQuery(req) {
     }
     const cs = {
       session: liveSession,
+      owner: sessionOwner,
       sessionId: sessionID,
       sessionFile: liveSession.sessionFile,
       currentReqId: reqId,
@@ -1133,9 +1325,17 @@ async function handleQuery(req) {
       unsubHook,
       createdAt: Date.now()
     };
-    chatSessions.set(cKey, cs);
-    if (canceled) {
-      cleanupChatSession(cKey);
+    if (!registerSessionIfOwner(chatSessionOwners, chatSessions, cKey, sessionOwner, cs)) {
+      await disposeBridgeSession(liveSession);
+      throw new Error("request canceled");
+    }
+    if (canceled || !ownsChatSession(cKey, sessionOwner)) {
+      const current = chatSessions.get(cKey);
+      if (current?.session === liveSession && current.owner === sessionOwner) {
+        await cleanupChatSession(cKey, sessionOwner);
+      } else {
+        await disposeBridgeSession(liveSession);
+      }
       throw new Error("request canceled");
     }
     try {
@@ -1198,15 +1398,17 @@ async function handleQuery(req) {
         output_tokens: stats.tokens.output
       });
       const currentCs = chatSessions.get(cKey);
-      if (currentCs) {
+      if (currentCs?.owner === sessionOwner) {
         startIdleTimer(currentCs, cKey);
       }
     }
   } catch (err) {
-    if (session && !chatSessions.has(cKey)) {
-      try {
-        session.dispose();
-      } catch {
+    if (session) {
+      const current = chatSessions.get(cKey);
+      if (current?.session === session && current.owner === sessionOwner && ownsChatSession(cKey, sessionOwner)) {
+        await cleanupChatSession(cKey, sessionOwner);
+      } else {
+        await disposeBridgeSession(session);
       }
     }
     if (!terminalEmitted) {
@@ -1220,6 +1422,10 @@ async function handleQuery(req) {
     if (timeout) clearTimeout(timeout);
     if (healthTimer) clearInterval(healthTimer);
     activeRequests.delete(reqId);
+    sessionLifecycle.markSessionCreationComplete();
+    if (!chatSessions.has(cKey) && ownsChatSession(cKey, sessionOwner)) {
+      chatSessionOwners.delete(cKey);
+    }
   }
 }
 async function handleSteer(req) {
@@ -1293,7 +1499,7 @@ async function handleAbort(req) {
     redactedLog("abort error: rid=".concat(reqId, " ").concat(errMsg));
     emitReq({ event: "error", message: redactSDKError(errMsg) });
   } finally {
-    cleanupChatSession(cKey);
+    await cleanupChatSession(cKey, cs.owner);
   }
 }
 async function handleGetState(req) {
@@ -1324,6 +1530,7 @@ async function handleGetSessionStats(req) {
   try {
     piSession = await createPiSession(req.options);
     const session = piSession.session;
+    await bindBridgeSessionExtensions(session);
     const stats = session.getSessionStats();
     const usage = stats.contextUsage;
     emitReq({
@@ -1351,10 +1558,7 @@ async function handleGetSessionStats(req) {
     emitReq({ event: "error", message: redactSDKError(errMsg) });
   } finally {
     if (piSession) {
-      try {
-        piSession.session.dispose();
-      } catch {
-      }
+      await disposeBridgeSession(piSession.session);
     }
   }
 }
@@ -1375,6 +1579,7 @@ async function handleGetSessionHistory(req) {
   try {
     const piSession = await createPiSession({ ...opts, continue: false });
     session = piSession.session;
+    await bindBridgeSessionExtensions(session);
     const messages = session.state.messages ?? [];
     const history = sessionHistoryFromMessages(messages, 100);
     emitReq({ event: "result", content: JSON.stringify(history) });
@@ -1384,10 +1589,7 @@ async function handleGetSessionHistory(req) {
     emitReq({ event: "error", message: "get-session-history failed: ".concat(redactSDKError(errMsg)) });
   } finally {
     if (session) {
-      try {
-        session.dispose();
-      } catch {
-      }
+      await disposeBridgeSession(session);
     }
   }
 }
@@ -1399,6 +1601,7 @@ async function handleCompactSession(req) {
   try {
     piSession = await createPiSession(req.options);
     const session = piSession.session;
+    await bindBridgeSessionExtensions(session);
     let terminalEmitted = false;
     unsub = session.subscribe((event) => {
       if (terminalEmitted) return;
@@ -1446,10 +1649,7 @@ async function handleCompactSession(req) {
     } catch {
     }
     if (piSession) {
-      try {
-        piSession.session.dispose();
-      } catch {
-      }
+      await disposeBridgeSession(piSession.session);
     }
   }
 }
@@ -1469,6 +1669,7 @@ async function handleRotateSession(req) {
   try {
     oldPiSession = await createPiSession(opts);
     const oldSession = oldPiSession.session;
+    await bindBridgeSessionExtensions(oldSession);
     const stats = oldSession.getSessionStats();
     const compactionResult = await oldSession.compact(
       "Summarize the session's goal, current state, completed work, in-progress items, key decisions, files read/modified, and next actions."
@@ -1478,7 +1679,7 @@ async function handleRotateSession(req) {
     const oldFile = oldSession.sessionFile;
     redactedLog("rotate: old session id=".concat(sessionId, " file=").concat(oldFile, " tokens=").concat(stats.tokens.total));
     emitReq({ event: "system", message: "Generating session summary..." });
-    oldSession.dispose();
+    await disposeBridgeSession(oldSession);
     oldPiSession = void 0;
     const newOpts = { ...opts };
     newOpts.resume = void 0;
@@ -1486,6 +1687,7 @@ async function handleRotateSession(req) {
     newOpts.persist_session = true;
     newPiSession = await createPiSession(newOpts);
     const newSession = newPiSession.session;
+    await bindBridgeSessionExtensions(newSession);
     const newFile = newSession.sessionFile;
     const newId = newSession.sessionId;
     redactedLog("rotate: new session id=".concat(newId, " file=").concat(newFile));
@@ -1504,7 +1706,7 @@ async function handleRotateSession(req) {
         tokens_before: stats.tokens.total
       })
     });
-    newSession.dispose();
+    await disposeBridgeSession(newSession);
     newPiSession = void 0;
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
@@ -1512,16 +1714,10 @@ async function handleRotateSession(req) {
     emitReq({ event: "error", message: redactSDKError(errMsg) });
   } finally {
     if (oldPiSession) {
-      try {
-        oldPiSession.session.dispose();
-      } catch {
-      }
+      await disposeBridgeSession(oldPiSession.session);
     }
     if (newPiSession) {
-      try {
-        newPiSession.session.dispose();
-      } catch {
-      }
+      await disposeBridgeSession(newPiSession.session);
     }
   }
 }
@@ -1563,7 +1759,7 @@ async function handleRequest(line) {
         emitReq({ event: "result", content: "request ".concat(target, " is not active") });
         return;
       }
-      active.cancel("request canceled");
+      await active.cancel("request canceled");
       emitReq({ event: "result", content: "request ".concat(target, " canceled") });
       break;
     }
@@ -1674,7 +1870,10 @@ function main() {
 main();
 export {
   DEFAULT_SENSITIVE_PATTERNS,
+  bindBridgeSessionExtensions,
+  createBridgeSessionRequestLifecycle,
   deriveProjectName,
+  disposeBridgeSession,
   evaluateToolPolicy,
   gitHasSensitiveArgs,
   injectMcpProjectScope,
@@ -1689,6 +1888,8 @@ export {
   redactAuditPath,
   redactSDKError,
   redactedCommandExcerpt,
+  registerSessionIfOwner,
+  removeSessionIfOwner,
   resolveModel,
   translateAllowedTools,
   waitForPendingMessageCount
