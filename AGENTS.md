@@ -20,9 +20,11 @@ cp bundle.js ../internal/bridge/bundle.js
 
 Note: The `npm run build` script includes `--banner:js` with `createRequire` to support PI SDK dependencies that use dynamic `require()`. Do not remove it.
 
+Note: The build script also includes `--external:@earendil-works/*`. The PI SDK's extension loader (`getAliases`) computes import aliases relative to its own `import.meta.url`; bundling the SDK breaks extension loading (pi-mcp-adapter → `mcp` tool, pi-web-access → `web_search`), so the SDK must stay in `node_modules`. Do not remove `--external` either.
+
 Explicit equivalent:
 ```bash
-cd bridge && npx esbuild index.ts --bundle --platform=node --target=node18 --outfile=bundle.js --format=esm --banner:js="import { createRequire as __piCreateRequire } from 'module';const require = __piCreateRequire(import.meta.url);"
+cd bridge && npx esbuild index.ts --bundle --platform=node --target=node22 --supported:template-literal=false --external:@earendil-works/* --outfile=bundle.js --format=esm --banner:js="import { createRequire as __piCreateRequire } from 'module';const require = __piCreateRequire(import.meta.url);"
 cp bundle.js ../internal/bridge/bundle.js
 ```
 

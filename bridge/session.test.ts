@@ -3,7 +3,12 @@ import assert from "node:assert";
 import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
+  bindBridgeSessionExtensions,
+  createBridgeSessionRequestLifecycle,
+  disposeBridgeSession,
   installSecurityHook,
+  removeSessionIfOwner,
+  registerSessionIfOwner,
   resolveModel,
   SecurityContext,
   waitForPendingMessageCount,
@@ -77,6 +82,363 @@ describe("PI 0.79.2 JSONL compatibility", () => {
       modelId: "claude-sonnet-4-5",
     });
     assert.strictEqual(context.thinkingLevel, "high");
+  });
+});
+
+describe("bridge extension lifecycle binding", () => {
+  it("runs an adapter-style session_start handler before the first prompt", async () => {
+    const order: string[] = [];
+    let adapterInitialized = false;
+    let bindingCalls = 0;
+    const sessionStartHandlers = [async () => {
+      order.push("session_start");
+      adapterInitialized = true;
+    }];
+    const session = {
+      async bindExtensions(bindings: { mode: "print" }) {
+        bindingCalls += 1;
+        assert.deepStrictEqual(bindings, { mode: "print" });
+        order.push("bind");
+        for (const handler of sessionStartHandlers) await handler();
+      },
+      extensionRunner: { async emit() {} },
+      dispose() {},
+      async prompt(_text: string) {
+        assert.strictEqual(adapterInitialized, true, "session_start must initialize the adapter before prompt");
+        order.push("prompt");
+      },
+    };
+
+    await bindBridgeSessionExtensions(session);
+    await session.prompt("first turn");
+
+    assert.strictEqual(bindingCalls, 1);
+    assert.deepStrictEqual(order, ["bind", "session_start", "prompt"]);
+  });
+
+  it("propagates extension initialization failures", async () => {
+    const failure = new Error("MCP initialization failed");
+    const session = {
+      async bindExtensions(_bindings: { mode: "print" }): Promise<void> {
+        throw failure;
+      },
+      extensionRunner: { async emit() {} },
+      dispose() {},
+    };
+
+    await assert.rejects(bindBridgeSessionExtensions(session), failure);
+  });
+
+  it("awaits session_shutdown before disposing a bound session", async () => {
+    const order: string[] = [];
+    let releaseShutdown!: () => void;
+    let markShutdownStarted!: () => void;
+    const shutdownStarted = new Promise<void>((resolve) => { markShutdownStarted = resolve; });
+    const shutdownGate = new Promise<void>((resolve) => { releaseShutdown = resolve; });
+    let disposeCalls = 0;
+    const session = {
+      async bindExtensions(_bindings: { mode: "print" }): Promise<void> {
+        order.push("session_start");
+      },
+      extensionRunner: {
+        async emit(event: { type: "session_shutdown"; reason: "quit" }): Promise<void> {
+          assert.deepStrictEqual(event, { type: "session_shutdown", reason: "quit" });
+          order.push("session_shutdown:start");
+          markShutdownStarted();
+          await shutdownGate;
+          order.push("session_shutdown:end");
+        },
+      },
+      dispose(): void {
+        disposeCalls += 1;
+        order.push("dispose");
+      },
+    };
+
+    await bindBridgeSessionExtensions(session);
+    const teardown = disposeBridgeSession(session);
+    await shutdownStarted;
+
+    assert.strictEqual(disposeCalls, 0, "dispose must wait for the async shutdown event");
+    releaseShutdown();
+    await teardown;
+    assert.deepStrictEqual(order, [
+      "session_start",
+      "session_shutdown:start",
+      "session_shutdown:end",
+      "dispose",
+    ]);
+  });
+
+  it("shares one awaited teardown across repeated calls", async () => {
+    let shutdownCalls = 0;
+    let disposeCalls = 0;
+    const session = {
+      async bindExtensions(_bindings: { mode: "print" }): Promise<void> {},
+      extensionRunner: {
+        async emit(_event: { type: "session_shutdown"; reason: "quit" }): Promise<void> {
+          shutdownCalls += 1;
+        },
+      },
+      dispose(): void {
+        disposeCalls += 1;
+      },
+    };
+
+    const lifecycle = createBridgeSessionRequestLifecycle();
+    await lifecycle.createSession(async () => ({ session }));
+    await lifecycle.bindSession(session);
+    await Promise.all([lifecycle.cancel(), lifecycle.cancel(), lifecycle.cancel()]);
+
+    assert.strictEqual(shutdownCalls, 1);
+    assert.strictEqual(disposeCalls, 1);
+  });
+
+  it("cleans up a partially bound session while preserving the bind error", async () => {
+    const failure = new Error("MCP initialization failed after session_start");
+    const order: string[] = [];
+    let disposeCalls = 0;
+    const session = {
+      async bindExtensions(_bindings: { mode: "print" }): Promise<void> {
+        order.push("session_start");
+        throw failure;
+      },
+      extensionRunner: {
+        async emit(event: { type: "session_shutdown"; reason: "quit" }): Promise<void> {
+          assert.deepStrictEqual(event, { type: "session_shutdown", reason: "quit" });
+          order.push("session_shutdown");
+        },
+      },
+      dispose(): void {
+        disposeCalls += 1;
+        order.push("dispose");
+      },
+    };
+
+    const lifecycle = createBridgeSessionRequestLifecycle();
+    await lifecycle.createSession(async () => ({ session }));
+    await assert.rejects(lifecycle.bindSession(session), failure);
+    await lifecycle.cancel();
+
+    assert.deepStrictEqual(order, ["session_start", "session_shutdown", "dispose"]);
+    assert.strictEqual(disposeCalls, 1);
+  });
+
+  it("shuts down a created extension runtime canceled before binding starts", async () => {
+    const order: string[] = [];
+    let bindCalls = 0;
+    let disposeCalls = 0;
+    const session = {
+      async bindExtensions(_bindings: { mode: "print" }): Promise<void> {
+        bindCalls += 1;
+      },
+      extensionRunner: {
+        async emit(event: { type: "session_shutdown"; reason: "quit" }): Promise<void> {
+          assert.deepStrictEqual(event, { type: "session_shutdown", reason: "quit" });
+          order.push("session_shutdown");
+        },
+      },
+      dispose(): void {
+        disposeCalls += 1;
+        order.push("dispose");
+      },
+    };
+
+    const lifecycle = createBridgeSessionRequestLifecycle();
+    await lifecycle.createSession(async () => ({ session }));
+    await lifecycle.cancel();
+
+    assert.strictEqual(bindCalls, 0, "pre-bind cancellation must not activate the session");
+    assert.deepStrictEqual(order, ["session_shutdown", "dispose"]);
+    assert.strictEqual(disposeCalls, 1);
+
+    await assert.rejects(lifecycle.bindSession(session), /request canceled/);
+    assert.strictEqual(bindCalls, 0, "a canceled request must never start a late bind");
+    assert.deepStrictEqual(order, ["session_shutdown", "dispose"]);
+  });
+
+  it("resolves cancellation when the non-cancelable session factory rejects", async () => {
+    const failure = new Error("provider setup failed");
+    let releaseFactory!: () => void;
+    const factoryGate = new Promise<void>((resolve) => { releaseFactory = resolve; });
+    const lifecycle = createBridgeSessionRequestLifecycle();
+
+    const creation = lifecycle.createSession(async () => {
+      await factoryGate;
+      throw failure;
+    });
+    const cancellation = lifecycle.cancel();
+
+    let cancellationSettled = false;
+    const observedCancellation = cancellation.then(() => { cancellationSettled = true; });
+    await Promise.resolve();
+    assert.strictEqual(cancellationSettled, false, "cancel must wait for the factory outcome");
+
+    const observedCreation = assert.rejects(creation, (err: unknown) => err === failure);
+    releaseFactory();
+    await observedCreation;
+    await observedCancellation;
+    assert.strictEqual(cancellationSettled, true);
+  });
+
+  it("waits for a gated bind before exact-session cancellation cleanup", async () => {
+    const order: string[] = [];
+    let releaseBind!: () => void;
+    let markBindStarted!: () => void;
+    const bindStarted = new Promise<void>((resolve) => { markBindStarted = resolve; });
+    const bindGate = new Promise<void>((resolve) => { releaseBind = resolve; });
+    let disposeCalls = 0;
+    const session = {
+      async bindExtensions(_bindings: { mode: "print" }): Promise<void> {
+        order.push("bind:start");
+        markBindStarted();
+        await bindGate;
+        order.push("bind:end");
+      },
+      extensionRunner: {
+        async emit(_event: { type: "session_shutdown"; reason: "quit" }): Promise<void> {
+          order.push("session_shutdown");
+        },
+      },
+      dispose(): void {
+        disposeCalls += 1;
+        order.push("dispose");
+      },
+    };
+
+    const lifecycle = createBridgeSessionRequestLifecycle();
+    await lifecycle.createSession(async () => ({ session }));
+    const bind = lifecycle.bindSession(session);
+    await bindStarted;
+
+    let cancelSettled = false;
+    const cancel = lifecycle.cancel().then(() => { cancelSettled = true; });
+    assert.strictEqual(cancelSettled, false, "cancellation must remain pending while bind is gated");
+    assert.strictEqual(disposeCalls, 0, "session must not dispose before bind settles");
+
+    releaseBind();
+    await Promise.all([bind, cancel]);
+
+    assert.strictEqual(cancelSettled, true);
+    assert.deepStrictEqual(order, ["bind:start", "bind:end", "session_shutdown", "dispose"]);
+    assert.strictEqual(disposeCalls, 1);
+  });
+
+  it("keeps a replacement registered while cancellation settles a stale gated bind", async () => {
+    const key = "chat:thread:user";
+    const owners = new Map<string, symbol>();
+    const sessions = new Map<string, object>();
+    const staleOwner = Symbol("stale");
+    const newerOwner = Symbol("newer");
+    owners.set(key, staleOwner);
+
+    let releaseBind!: () => void;
+    let markBindStarted!: () => void;
+    const bindStarted = new Promise<void>((resolve) => { markBindStarted = resolve; });
+    const bindGate = new Promise<void>((resolve) => { releaseBind = resolve; });
+    let staleDisposeCalls = 0;
+    let newerDisposeCalls = 0;
+
+    const staleSession = {
+      async bindExtensions(_bindings: { mode: "print" }): Promise<void> {
+        markBindStarted();
+        await bindGate;
+      },
+      extensionRunner: { async emit() {} },
+      dispose(): void { staleDisposeCalls += 1; },
+    };
+    const newerSession = {
+      async bindExtensions(_bindings: { mode: "print" }): Promise<void> {},
+      extensionRunner: { async emit() {} },
+      dispose(): void { newerDisposeCalls += 1; },
+    };
+
+    const staleLifecycle = createBridgeSessionRequestLifecycle();
+    await staleLifecycle.createSession(async () => ({ session: staleSession }));
+    const staleBind = staleLifecycle.bindSession(staleSession);
+    await bindStarted;
+
+    owners.set(key, newerOwner);
+    const newerLifecycle = createBridgeSessionRequestLifecycle();
+    await newerLifecycle.createSession(async () => ({ session: newerSession }));
+    await newerLifecycle.bindSession(newerSession);
+    assert.strictEqual(registerSessionIfOwner(owners, sessions, key, newerOwner, newerSession), true);
+
+    let cancelSettled = false;
+    const staleCancel = staleLifecycle.cancel().then(() => { cancelSettled = true; });
+    assert.strictEqual(cancelSettled, false);
+    assert.strictEqual(sessions.get(key), newerSession);
+
+    releaseBind();
+    await Promise.all([staleBind, staleCancel]);
+
+    // This is the publication step used by handleQuery after its awaited
+    // bind. A canceled stale request must fail it even after the gate opens.
+    assert.strictEqual(registerSessionIfOwner(owners, sessions, key, staleOwner, staleSession), false);
+    assert.strictEqual(sessions.get(key), newerSession);
+    assert.strictEqual(staleDisposeCalls, 1);
+    assert.strictEqual(newerDisposeCalls, 0);
+
+    await disposeBridgeSession(newerSession);
+    assert.strictEqual(newerDisposeCalls, 1);
+  });
+
+  it("does not publish a stale gated bind over a newer chat session", async () => {
+    const key = "chat:thread:user";
+    const owners = new Map<string, symbol>();
+    const sessions = new Map<string, object>();
+    const staleOwner = Symbol("stale");
+    const newerOwner = Symbol("newer");
+    owners.set(key, staleOwner);
+
+    let releaseBind!: () => void;
+    let markBindStarted!: () => void;
+    const bindStarted = new Promise<void>((resolve) => { markBindStarted = resolve; });
+    const bindGate = new Promise<void>((resolve) => { releaseBind = resolve; });
+    let staleDisposeCalls = 0;
+    let newerDisposeCalls = 0;
+
+    const staleSession = {
+      async bindExtensions(_bindings: { mode: "print" }): Promise<void> {
+        markBindStarted();
+        await bindGate;
+      },
+      extensionRunner: { async emit() {} },
+      dispose(): void { staleDisposeCalls += 1; },
+    };
+    const newerSession = {
+      async bindExtensions(_bindings: { mode: "print" }): Promise<void> {},
+      extensionRunner: { async emit() {} },
+      dispose(): void { newerDisposeCalls += 1; },
+    };
+
+    const staleLifecycle = createBridgeSessionRequestLifecycle();
+    await staleLifecycle.createSession(async () => ({ session: staleSession }));
+    const staleBind = staleLifecycle.bindSession(staleSession);
+
+    await bindStarted;
+    owners.set(key, newerOwner);
+    const newerLifecycle = createBridgeSessionRequestLifecycle();
+    await newerLifecycle.createSession(async () => ({ session: newerSession }));
+    await newerLifecycle.bindSession(newerSession);
+    assert.strictEqual(registerSessionIfOwner(owners, sessions, key, newerOwner, newerSession), true);
+    assert.strictEqual(removeSessionIfOwner(owners, sessions, key, staleOwner), undefined);
+    assert.strictEqual(sessions.get(key), newerSession, "stale cleanup must not remove the newer session");
+    assert.strictEqual(newerDisposeCalls, 0, "stale cleanup must not dispose the newer session");
+
+    releaseBind();
+    await staleBind;
+    assert.strictEqual(registerSessionIfOwner(owners, sessions, key, staleOwner, staleSession), false);
+    await staleLifecycle.cancel();
+    assert.strictEqual(sessions.get(key), newerSession, "newer ownership must remain registered");
+    assert.strictEqual(staleDisposeCalls, 1, "stale session must be disposed once");
+    assert.strictEqual(newerDisposeCalls, 0, "newer session must remain live");
+
+    await staleLifecycle.cancel();
+    await newerLifecycle.cancel();
+    await newerLifecycle.cancel();
+    assert.strictEqual(staleDisposeCalls, 1, "stale teardown must be idempotent");
+    assert.strictEqual(newerDisposeCalls, 1, "newer teardown must be idempotent");
   });
 });
 
