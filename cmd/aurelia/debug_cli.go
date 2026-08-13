@@ -375,6 +375,12 @@ func printRunDetail(r *runlog.RunRecord, events []runlog.RunEvent) {
 	if r.ParentRunID != "" {
 		fmt.Printf("  Parent:       %s\n", r.ParentRunID)
 	}
+	if r.FirstFeedbackMs > 0 || r.MaxSilenceMs > 0 || r.StallCount > 0 || r.SteerCount > 0 {
+		fmt.Printf("  First feedback: %s\n", time.Duration(r.FirstFeedbackMs)*time.Millisecond)
+		fmt.Printf("  Max silêncio:   %s\n", time.Duration(r.MaxSilenceMs)*time.Millisecond)
+		fmt.Printf("  Stalls:         %d\n", r.StallCount)
+		fmt.Printf("  Steers:         %d\n", r.SteerCount)
+	}
 
 	if len(events) > 0 {
 		fmt.Println("\nTimeline:")
@@ -425,6 +431,18 @@ func printMetricsTable(m *runlog.MetricsResult, days int) {
 	if m.DurationP50Ms > 0 {
 		fmt.Printf("\n  Duração p50:  %s\n", time.Duration(m.DurationP50Ms)*time.Millisecond)
 		fmt.Printf("  Duração p95:  %s\n", time.Duration(m.DurationP95Ms)*time.Millisecond)
+	}
+
+	// Long-session aggregates.
+	if m.StallsTotal > 0 || m.SteersTotal > 0 || m.AvgFirstFeedbackMs > 0 || m.AvgMaxSilenceMs > 0 {
+		fmt.Printf("\n  Stalls:       %d\n", m.StallsTotal)
+		fmt.Printf("  Steers:       %d\n", m.SteersTotal)
+		if m.AvgFirstFeedbackMs > 0 {
+			fmt.Printf("  First feedback (méd): %s\n", time.Duration(m.AvgFirstFeedbackMs)*time.Millisecond)
+		}
+		if m.AvgMaxSilenceMs > 0 {
+			fmt.Printf("  Max silêncio (méd):   %s\n", time.Duration(m.AvgMaxSilenceMs)*time.Millisecond)
+		}
 	}
 
 	// Breakdowns

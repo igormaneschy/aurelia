@@ -194,4 +194,3 @@ func (bc *Service) InvalidateMemoryDirs(chatID int64, threadID int, userID int64
 	bc.InvalidateMemorySession(chatID, threadID, userID)
 	bc.InvalidateMemoryOverlay(cwd)
 }
-

@@ -20,15 +20,10 @@ import (
 )
 
 const (
-	eventChannelBuffer = 128
-	maxNDJSONLineSize  = 10 * 1024 * 1024 // 10 MB safety limit per NDJSON line
+	eventChannelBuffer    = 128
+	maxNDJSONLineSize     = 10 * 1024 * 1024 // 10 MB safety limit per NDJSON line
+	maxBridgeRequestBytes = 256 * 1024
 )
-
-// safeClose closes a channel, recovering from panic if already closed.
-func safeClose(ch chan Event) {
-	defer func() { _ = recover() }()
-	close(ch)
-}
 
 // Bridge manages a long-lived TypeScript bridge process and communicates via
 // stdin/stdout using NDJSON. Multiple requests are multiplexed over a single
@@ -68,7 +63,8 @@ type Bridge struct {
 	// inherits os.Environ() (insecure — leaks daemon secrets).
 	envAllowlist []string
 
-	slots *requestSlotTracker
+	slots        *requestSlotTracker
+	streamBudget *aggregateStreamBudget
 }
 
 // New creates a Bridge that runs in bridgeDir.
@@ -85,12 +81,13 @@ func New(bridgeDir string, bundlePath string) *Bridge {
 	done := make(chan struct{})
 	close(done) // closed = no process running, Stop() won't block
 	return &Bridge{
-		bridgeDir: bridgeDir,
-		command:   cmd,
-		args:      args,
-		pending:   make(map[string]*requestStream),
-		done:      done,
-		slots:     newRequestSlotTracker(),
+		bridgeDir:    bridgeDir,
+		command:      cmd,
+		args:         args,
+		pending:      make(map[string]*requestStream),
+		done:         done,
+		slots:        newRequestSlotTracker(),
+		streamBudget: newAggregateStreamBudget(),
 	}
 }
 
@@ -184,9 +181,10 @@ func (b *Bridge) readLoop() {
 
 		var ev Event
 		if parseErr := json.Unmarshal(buf, &ev); parseErr != nil {
-			log.Printf("bridge: failed to parse NDJSON line: %v", parseErr)
+			log.Printf("bridge: failed to parse NDJSON line: %s", boundedEventText(parseErr.Error(), 512))
 			continue
 		}
+		ev = normalizeEvent(ev)
 		rid := ev.RequestID
 
 		b.pendingMu.Lock()
@@ -280,23 +278,15 @@ func (b *Bridge) readLoop() {
 }
 
 func (b *Bridge) sendTerminalEvent(stream *requestStream, ev Event, rid string) {
-	if stream.deliver(ev) {
-		return
+	dropped, ok := stream.deliverTerminal(ev)
+	if dropped > 0 {
+		b.droppedEvents.Add(uint64(dropped))
+		slog.Warn("bridge: dropped buffered events to deliver terminal", "count", dropped, "type", ev.Type, "rid", rid)
 	}
-
-	// Preserve terminal delivery by evicting one buffered non-terminal event
-	// into overflow when possible instead of dropping result/error.
-	if dropped, ok := stream.evictOneForTerminal(); ok {
-		if dropped.Type != "" {
-			b.droppedEvents.Add(1)
-			slog.Warn("bridge: dropped buffered event to deliver terminal", "type", dropped.Type, "rid", rid)
-		}
-		if stream.deliver(ev) {
-			return
-		}
+	if !ok {
+		b.droppedEvents.Add(1)
+		slog.Error("bridge: terminal event could not be delivered", "type", ev.Type, "rid", rid)
 	}
-	b.droppedEvents.Add(1)
-	slog.Error("bridge: terminal event could not be delivered", "type", ev.Type, "rid", rid)
 }
 
 // Stop kills the bridge process. Safe to call multiple times.
@@ -433,6 +423,35 @@ func (b *Bridge) DroppedEvents() uint64 {
 // channel of events for that request. The process stays alive after the
 // request completes.
 func (b *Bridge) Execute(ctx context.Context, req Request) (<-chan Event, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	// Assign/validate the transport identity and command schema before starting
+	// the child or touching pending state. Invalid values must fail closed, not
+	// become a shared empty routing key.
+	if req.RequestID == "" {
+		req.RequestID = fmt.Sprintf("req-%d", b.reqCounter.Add(1))
+	} else if !validRequestID(req.RequestID) {
+		return nil, fmt.Errorf("bridge: invalid request_id")
+	}
+	if req.TargetRequestID != "" && !validRequestID(req.TargetRequestID) {
+		return nil, fmt.Errorf("bridge: invalid target_request_id")
+	}
+	if err := validateBridgeRequest(req); err != nil {
+		return nil, err
+	}
+	payload, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("bridge: marshal request: %w", err)
+	}
+	if len(payload) > maxBridgeRequestBytes {
+		return nil, fmt.Errorf("bridge: request exceeds maximum serialized size (%d bytes)", maxBridgeRequestBytes)
+	}
+
 	b.mu.Lock()
 	if !b.started {
 		if err := b.startLocked(); err != nil {
@@ -442,19 +461,33 @@ func (b *Bridge) Execute(ctx context.Context, req Request) (<-chan Event, error)
 	}
 	b.mu.Unlock()
 
-	// Assign request_id if not set.
-	if req.RequestID == "" {
-		req.RequestID = fmt.Sprintf("req-%d", b.reqCounter.Add(1))
+	b.mu.Lock()
+	if b.streamBudget == nil {
+		b.streamBudget = newAggregateStreamBudget()
 	}
-
-	payload, err := json.Marshal(req)
-	if err != nil {
-		return nil, fmt.Errorf("bridge: marshal request: %w", err)
+	streamBudget := b.streamBudget
+	b.mu.Unlock()
+	controlStream := req.Command == "cancel"
+	var acquired bool
+	if controlStream {
+		acquired = streamBudget.acquireControl()
+	} else {
+		acquired = streamBudget.acquire()
 	}
-
-	stream := newRequestStream(eventChannelBuffer)
+	if !acquired {
+		return nil, fmt.Errorf("bridge: too many active request streams")
+	}
+	stream := newRequestStream(eventChannelBuffer, streamBudget)
+	if controlStream {
+		stream = newControlRequestStream(eventChannelBuffer, streamBudget)
+	}
 
 	b.pendingMu.Lock()
+	if _, exists := b.pending[req.RequestID]; exists {
+		b.pendingMu.Unlock()
+		stream.close()
+		return nil, fmt.Errorf("bridge: duplicate pending request_id")
+	}
 	b.pending[req.RequestID] = stream
 	b.pendingMu.Unlock()
 
@@ -498,12 +531,16 @@ func (b *Bridge) Execute(ctx context.Context, req Request) (<-chan Event, error)
 	}
 
 	// Wrap channel with context cancellation.
+	// The event payload is normalized to maxEventPayloadBytes, so this fixed
+	// channel is a bounded (and explicit) additional byte budget for the
+	// consumer-facing proxy: eventChannelBuffer * maxEventPayloadBytes.
 	out := make(chan Event, eventChannelBuffer)
 	go func() {
 		cleanupPending := func() {
 			b.pendingMu.Lock()
 			delete(b.pending, req.RequestID)
 			b.pendingMu.Unlock()
+			stream.close()
 		}
 		defer func() {
 			if trackPriority {
@@ -516,6 +553,7 @@ func (b *Bridge) Execute(ctx context.Context, req Request) (<-chan Event, error)
 				cleanupPending()
 			}
 		}()
+		defer stream.discardQueued()
 		defer close(out)
 
 		// Hard timeout to prevent goroutine leak if bridge process hangs
@@ -559,6 +597,7 @@ func (b *Bridge) Execute(ctx context.Context, req Request) (<-chan Event, error)
 					drainOverflow()
 					return
 				}
+				stream.consumeFast(ev)
 				if !forward(ev) {
 					return
 				}
@@ -579,6 +618,7 @@ func (b *Bridge) Execute(ctx context.Context, req Request) (<-chan Event, error)
 					drainOverflow()
 					return
 				}
+				stream.consumeFast(ev)
 				if !forward(ev) {
 					return
 				}
@@ -599,8 +639,8 @@ func (b *Bridge) Execute(ctx context.Context, req Request) (<-chan Event, error)
 
 // CancelRequest asks the bridge process to cancel an in-flight request.
 func (b *Bridge) CancelRequest(ctx context.Context, requestID string) error {
-	if requestID == "" {
-		return nil
+	if !validRequestID(requestID) {
+		return fmt.Errorf("bridge: invalid cancellation request_id")
 	}
 	ev, err := b.ExecuteSync(ctx, Request{Command: "cancel", TargetRequestID: requestID})
 	if err != nil {
@@ -702,38 +742,6 @@ func (b *Bridge) RotateSession(ctx context.Context, opts RequestOptions) (*Rotat
 	var result RotateSessionResult
 	if err := json.Unmarshal([]byte(ev.Content), &result); err != nil {
 		return nil, fmt.Errorf("bridge: rotate-session parse: %w", err)
-	}
-	return &result, nil
-}
-
-// CompactSessionResult holds the result of a compact-session command.
-type CompactSessionResult struct {
-	Success      bool   `json:"success"`
-	TokensBefore int    `json:"tokens_before"`
-	Summary      string `json:"summary,omitempty"`
-	SessionID    string `json:"session_id,omitempty"`
-	SessionFile  string `json:"session_file,omitempty"`
-}
-
-// CompactSession requests proactive compaction of a PI session.
-// Returns the compaction result with tokens before/after.
-func (b *Bridge) CompactSession(ctx context.Context, opts RequestOptions) (*CompactSessionResult, error) {
-	ev, err := b.ExecuteSync(ctx, Request{
-		Command: "compact-session",
-		Options: opts,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("bridge: compact-session: %w", err)
-	}
-	if ev.Type == "error" {
-		return nil, fmt.Errorf("bridge: compact-session error: %s", ev.Message)
-	}
-	if ev.Content == "" {
-		return nil, nil
-	}
-	var result CompactSessionResult
-	if err := json.Unmarshal([]byte(ev.Content), &result); err != nil {
-		return nil, fmt.Errorf("bridge: compact-session parse: %w", err)
 	}
 	return &result, nil
 }

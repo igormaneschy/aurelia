@@ -60,7 +60,7 @@ func (o *tuiOutput) StartTyping(_ int64, _ int) func() {
 }
 
 func (o *tuiOutput) NewProgress(_ int64, _ int) pipeline.ProgressReporter {
-	return &tuiProgress{out: o}
+	return &tuiProgress{out: o, startTime: time.Now()}
 }
 
 func (o *tuiOutput) SendError(_ int64, _ int, text string) error {
@@ -91,11 +91,13 @@ func (o *tuiOutput) ConfirmMessage(_ int64, _ int) {
 	o.markDone()
 }
 
-// tuiProgress streams assistant progress to the TUI via stream_chunk events.
-// It tracks the last reported text to emit only deltas, avoiding duplication.
+// tuiProgress streams assistant progress to the TUI. Real assistant text
+// goes through stream_chunk events; tool/state changes go through dedicated
+// EventTypeProgress events so technical markers never pollute the transcript.
 type tuiProgress struct {
-	out      *tuiOutput
-	lastText string
+	out       *tuiOutput
+	lastText  string
+	startTime time.Time
 }
 
 func (p *tuiProgress) ReportText(text string) {
@@ -114,16 +116,27 @@ func (p *tuiProgress) ReportText(text string) {
 	p.lastText = text
 }
 
-func (p *tuiProgress) ReportTool(toolName, detail string) {
-	body := fmt.Sprintf("\n🔧 %s\n", toolName)
-	if detail != "" {
-		body = fmt.Sprintf("\n🔧 %s|%s\n", toolName, detail)
+// emitProgress marshals and sends an EventTypeProgress event.
+func (p *tuiProgress) emitProgress(payload ipc.ProgressPayload) {
+	payload.ElapsedMs = time.Since(p.startTime).Milliseconds()
+	body, err := json.Marshal(payload)
+	if err != nil {
+		log.Printf("tui: progress marshal error: %v", err)
+		return
 	}
-	_ = p.out.send(ipc.IPCEvent{Type: ipc.EventTypeStreamChunk, Body: body})
+	_ = p.out.send(ipc.IPCEvent{Type: ipc.EventTypeProgress, Body: string(body)})
+}
+
+func (p *tuiProgress) ReportTool(toolName, detail string) {
+	p.emitProgress(ipc.ProgressPayload{State: string(pipeline.ProgressStateWorking), ToolName: toolName, Detail: detail})
 }
 
 func (p *tuiProgress) ReportToolResult(_ string) {
-	_ = p.out.send(ipc.IPCEvent{Type: ipc.EventTypeStreamChunk, Body: "\n✅ tool_done\n"})
+	p.emitProgress(ipc.ProgressPayload{State: string(pipeline.ProgressStateWorking), ToolDone: true})
+}
+
+func (p *tuiProgress) ReportState(state pipeline.ProgressState, detail string) {
+	p.emitProgress(ipc.ProgressPayload{State: string(state), Detail: detail})
 }
 
 func (p *tuiProgress) Delete() {}

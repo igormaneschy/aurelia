@@ -31,6 +31,12 @@ type MetricsResult struct {
 	DurationP50Ms float64
 	DurationP95Ms float64
 
+	// Long-session aggregates over the window (zero for windows without data).
+	StallsTotal        int64   // sum of stall_count
+	SteersTotal        int64   // sum of steer_count
+	AvgFirstFeedbackMs float64 // AVG(first_feedback_ms) over runs with first_feedback_ms > 0
+	AvgMaxSilenceMs    float64 // AVG(max_silence_ms) over runs with max_silence_ms > 0
+
 	// Breakdowns
 	ProviderBreakdown []BreakdownItem
 	ModelBreakdown    []BreakdownItem
@@ -140,6 +146,22 @@ func (s *SQLiteStore) Metrics(ctx context.Context, filter MetricsFilter) (*Metri
 
 	// ── Provider breakdown ──
 	m.ProviderBreakdown = s.breakdown(ctx, "provider", filter)
+
+	// ── Long-session aggregates ──
+	row = s.db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(SUM(stall_count), 0),
+			COALESCE(SUM(steer_count), 0),
+			COALESCE(AVG(CASE WHEN first_feedback_ms > 0 THEN first_feedback_ms END), 0),
+			COALESCE(AVG(CASE WHEN max_silence_ms > 0 THEN max_silence_ms END), 0)
+		FROM run_journal
+		WHERE started_at >= ? AND started_at < ?`,
+		filter.Since.Unix(), filter.Until.Unix())
+
+	if err := row.Scan(&m.StallsTotal, &m.SteersTotal,
+		&m.AvgFirstFeedbackMs, &m.AvgMaxSilenceMs); err != nil {
+		return nil, fmt.Errorf("metrics long-session aggregates: %w", err)
+	}
 
 	// ── Model breakdown ──
 	m.ModelBreakdown = s.breakdown(ctx, "model", filter)

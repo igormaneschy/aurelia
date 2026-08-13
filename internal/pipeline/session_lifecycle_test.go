@@ -364,16 +364,16 @@ type recordingOutput struct {
 	texts []string
 }
 
-func (r *recordingOutput) StartTyping(_ int64, _ int) func()           { return func() {} }
-func (r *recordingOutput) NewProgress(_ int64, _ int) ProgressReporter { return &fakeProgress{} }
-func (r *recordingOutput) SendError(_ int64, _ int, text string) error { return nil }
+func (r *recordingOutput) StartTyping(_ int64, _ int) func()                    { return func() {} }
+func (r *recordingOutput) NewProgress(_ int64, _ int) ProgressReporter          { return &fakeProgress{} }
+func (r *recordingOutput) SendError(_ int64, _ int, text string) error          { return nil }
 func (r *recordingOutput) SendReply(_ int64, _ int, text string) (int64, error) { return 0, nil }
 func (r *recordingOutput) SendText(_ int64, _ int, text string) (transport.MessageHandle, error) {
 	r.texts = append(r.texts, text)
 	return nil, nil
 }
 func (r *recordingOutput) DeleteMessage(_ transport.MessageHandle) {}
-func (r *recordingOutput) ConfirmMessage(_ int64, _ int) {}
+func (r *recordingOutput) ConfirmMessage(_ int64, _ int)           {}
 
 func TestApplyLifecycle_ColdStoreSendsNoRotateNotices(t *testing.T) {
 	// Cold/inactive sessions without suspect failures go directly to

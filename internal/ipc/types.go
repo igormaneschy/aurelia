@@ -108,6 +108,10 @@ const (
 	EventTypeProjectState = "project_state"
 	// EventTypeModels returns JSON-encoded []TUIModelEntry in Body.
 	EventTypeModels = "models"
+	// EventTypeProgress returns a JSON-encoded ProgressPayload in Body.
+	// Carries surface-neutral run progress so the TUI can update its visual
+	// indicator without technical markers polluting the transcript.
+	EventTypeProgress = "progress"
 )
 
 // TUIModelEntry is a provider/model pair for the TUI model wizard catalog.
@@ -206,4 +210,18 @@ type ProjectStateRun struct {
 	AgentName  string    `json:"agent_name,omitempty"`
 	StartedAt  time.Time `json:"started_at"`
 	DurationMs int64     `json:"duration_ms,omitempty"`
+}
+
+// ProgressPayload is the JSON payload for EventTypeProgress.
+// State values mirror pipeline.ProgressState ("working", "waiting",
+// "stall_warning", "stall_urgent", "done", "canceled", "failed").
+type ProgressPayload struct {
+	State  string `json:"state"`
+	Detail string `json:"detail,omitempty"`
+	// ToolName carries the active tool for the "working" state.
+	ToolName string `json:"tool_name,omitempty"`
+	// ToolDone marks the last active tool as finished.
+	ToolDone bool `json:"tool_done,omitempty"`
+	// ElapsedMs is the run elapsed time at emission.
+	ElapsedMs int64 `json:"elapsed_ms,omitempty"`
 }

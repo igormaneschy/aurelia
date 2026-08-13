@@ -58,9 +58,9 @@ func TestApplyLifecycle_TokenGuardImmediateRotate(t *testing.T) {
 	}
 	s.testRotateSession = func(_ context.Context, _ int64, _ int, _ int64, _ bridge.RequestOptions) (*bridge.RotateSessionResult, error) {
 		return &bridge.RotateSessionResult{
-			Success:         true,
-			OldSessionFile:  sessionFile,
-			NewSessionFile:  sessionFile,
+			Success:        true,
+			OldSessionFile: sessionFile,
+			NewSessionFile: sessionFile,
 		}, nil
 	}
 

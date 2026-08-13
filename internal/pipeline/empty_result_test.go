@@ -2,12 +2,12 @@ package pipeline
 
 import (
 	"context"
-	"strings"
-	"sync"
-	"testing"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/session"
+	"strings"
+	"sync"
+	"testing"
 )
 
 func TestEmptyResultHadWork_NoWork_ReturnsFalse(t *testing.T) {

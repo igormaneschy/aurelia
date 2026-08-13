@@ -34,7 +34,7 @@ func newRequestSlotTracker() *requestSlotTracker {
 
 func commandBypassesPriorityQueue(cmd string) bool {
 	switch cmd {
-	case "ping", "cancel", "abort", "get-env", "list-models":
+	case "ping", "cancel", "abort", "list-models":
 		return true
 	default:
 		return false

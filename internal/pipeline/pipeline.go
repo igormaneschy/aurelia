@@ -12,12 +12,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/igormaneschy/aurelia/pkg/idgen"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/security"
+	"github.com/igormaneschy/aurelia/pkg/idgen"
 )
 
 // ModelCataloger checks whether a given provider/model supports images
@@ -113,27 +113,38 @@ func (b *bridgeModelCataloger) ModelSupportsImagesByID(ctx context.Context, mode
 // runLogState tracks per-run state for the run journal.
 // mu serializes summary mutations independently of the runLogState map lock,
 // preventing data races between recordToolUse/recordToolResult and completeRunLog.
-type runLogState struct {
-	mu               sync.Mutex
-	runID            string
-	summary          strings.Builder
-	summaryCount     int
-	wg               sync.WaitGroup // tracks in-flight DB updates
-	partialAssistant string         // last partial assistant text, for checkpoint on timeout
-	writeToolsUsed   bool           // Write/Edit tools may have changed memory files
-	pendingEvents    []runlog.RunEvent
-}
-
 // activeRun is stored in activeSessions to carry both a cancel function
 // and an ownership token. Cancel/supersede paths extract the cancel func
 // via extractCancelFn; the token is used for ownership-safe cleanup.
 type activeRun struct {
 	token  any
 	cancel context.CancelFunc
+	// mu serializes supersession with durable post-terminal mutations. A stale
+	// run must not pass an ownership check and then write after its token has
+	// been replaced by a newer run.
+	mu          sync.RWMutex
+	superseded  bool
+	finalized   bool
+	finalizer   *terminalFinalization
+	runLogState *runLogState
 }
 
 func newActiveRun() *activeRun {
 	return &activeRun{token: &activeRun{}}
+}
+
+// activeRunSlotMu serializes active-session replacement with the ownership
+// check immediately adjacent to a durable mutation. sync.Map alone cannot
+// make "is this still the current owner?" plus a subsequent store atomic.
+var activeRunSlotMu sync.Mutex
+
+func markRunSuperseded(run *activeRun) {
+	if run == nil {
+		return
+	}
+	run.mu.Lock()
+	run.superseded = true
+	run.mu.Unlock()
 }
 
 // extractCancelFn returns the cancel func from an activeSessions value.
@@ -270,7 +281,9 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 	reservedCtx, reservedCancel := context.WithCancel(context.Background())
 	run.cancel = reservedCancel
 
+	activeRunSlotMu.Lock()
 	_, loaded := s.activeSessions.LoadOrStore(key, run)
+	activeRunSlotMu.Unlock()
 	if !loaded {
 		// We reserved the slot — start the run.
 		go func() {
@@ -294,11 +307,16 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 	switch classifyConcurrentMessage(text) {
 	case concurrentCancel:
 		// Stop the old goroutine so it doesn't retry after abort
+		activeRunSlotMu.Lock()
 		if val, loaded := s.activeSessions.LoadAndDelete(key); loaded {
+			if oldRun, ok := val.(*activeRun); ok {
+				markRunSuperseded(oldRun)
+			}
 			if cancelFn := extractCancelFn(val); cancelFn != nil {
 				cancelFn()
 			}
 		}
+		activeRunSlotMu.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), bridgeCommandTimeout)
 		defer cancel()
 		_, err := s.bridge.ExecuteSync(ctx, bridge.Request{
@@ -310,23 +328,43 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 			},
 		})
 		if err != nil {
-			log.Printf("pipeline: abort failed for chat=%d: %v", chatID, err)
+			log.Printf("pipeline: abort failed for chat=%d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
 		}
 		if _, err := s.output.SendText(chatID, threadID, "🛑 Interrompendo o pedido anterior."); err != nil {
-			log.Printf("pipeline: SendText(cancel) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
+			log.Printf("pipeline: SendText(cancel) failed for chat=%d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
 		}
 		s.output.ConfirmMessage(chatID, messageID)
 
 	case concurrentSupersede:
-		// Stop the old goroutine; the superseding message starts fresh
+		// Stop the old goroutine; the superseding message starts fresh. Reserve
+		// the replacement slot before the steer request so Cancel/CancelAll cannot
+		// observe an empty slot and then lose the cancellation race.
+		activeRunSlotMu.Lock()
 		if val, loaded := s.activeSessions.LoadAndDelete(key); loaded {
+			if oldRun, ok := val.(*activeRun); ok {
+				markRunSuperseded(oldRun)
+			}
 			if cancelFn := extractCancelFn(val); cancelFn != nil {
 				cancelFn()
 			}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), bridgeCommandTimeout)
-		defer cancel()
-		_, err := s.bridge.ExecuteSync(ctx, bridge.Request{
+		supersedeRun := newActiveRun()
+		supersedeCtx, supersedeCancel := context.WithCancel(context.Background())
+		supersedeRun.cancel = supersedeCancel
+		if _, loaded := s.activeSessions.LoadOrStore(key, supersedeRun); loaded {
+			activeRunSlotMu.Unlock()
+			supersedeCancel()
+			log.Printf("pipeline: supersede raced with another run for key=%s", key)
+			if _, err := s.output.SendText(chatID, threadID, "⚠️ Outra solicitação já está em andamento. Tente novamente."); err != nil {
+				log.Printf("pipeline: SendText(supersede race) failed for chat=%d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
+			}
+			s.output.ConfirmMessage(chatID, messageID)
+			break
+		}
+		activeRunSlotMu.Unlock()
+
+		steerCtx, steerCancel := context.WithTimeout(supersedeCtx, bridgeCommandTimeout)
+		_, err := s.bridge.ExecuteSync(steerCtx, bridge.Request{
 			Command: "steer",
 			Prompt:  text,
 			Options: bridge.RequestOptions{
@@ -335,28 +373,19 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 				UserID:   userID,
 			},
 		})
+		steerCancel()
 		if err != nil {
-			log.Printf("pipeline: steer failed for chat=%d: %v", chatID, err)
+			log.Printf("pipeline: steer failed for chat=%d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
+		}
+		if !s.activeRunStillOwned(chatID, threadID, userID, supersedeRun) {
+			s.output.ConfirmMessage(chatID, messageID)
+			break
 		}
 		if _, err := s.output.SendText(chatID, threadID, "🔁 Interrompi o pedido anterior e vou seguir com sua correção."); err != nil {
-			log.Printf("pipeline: SendText(supersede) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
+			log.Printf("pipeline: SendText(supersede) failed for chat=%d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
 		}
 		s.output.ConfirmMessage(chatID, messageID)
 		// Start a new goroutine to process the steered session.
-		// Store a fresh activeRun atomically before launching so the run is
-		// tracked from the start; if another goroutine raced in, cancel and abort.
-		supersedeRun := newActiveRun()
-		supersedeCtx, supersedeCancel := context.WithCancel(context.Background())
-		supersedeRun.cancel = supersedeCancel
-		if _, loaded := s.activeSessions.LoadOrStore(key, supersedeRun); loaded {
-			// Another run appeared before we could store ours — rare race.
-			supersedeCancel()
-			log.Printf("pipeline: supersede raced with another run for key=%s", key)
-			if _, err := s.output.SendText(chatID, threadID, "⚠️ Outra solicitação já está em andamento. Tente novamente."); err != nil {
-				log.Printf("pipeline: SendText(supersede race) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
-			}
-			break
-		}
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
@@ -379,10 +408,10 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 			},
 		})
 		if err != nil {
-			log.Printf("pipeline: follow-up failed for chat=%d: %v", chatID, err)
+			log.Printf("pipeline: follow-up failed for chat=%d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
 		}
 		if _, err := s.output.SendText(chatID, threadID, "📥 Adicionado à fila. Processo após concluir o atual."); err != nil {
-			log.Printf("pipeline: SendText(follow-up) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
+			log.Printf("pipeline: SendText(follow-up) failed for chat=%d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
 		}
 		s.output.ConfirmMessage(chatID, messageID)
 
@@ -408,7 +437,7 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 					desc += fmt.Sprintf("\n📥 Fila: %d mensagens aguardando.", state.PendingCount)
 				}
 				if _, err := s.output.SendText(chatID, threadID, desc); err != nil {
-					log.Printf("pipeline: SendText(status) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
+					log.Printf("pipeline: SendText(status) failed for chat=%d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
 				}
 			}
 		}
@@ -422,77 +451,6 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 // ownership of the activeSessions slot. The reserved cancel func is used to cancel
 // the run. On cleanup, the map entry is only deleted if it still belongs to this run
 // (checked via Load + pointer comparison on the ownership token).
-func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, reservedCtx context.Context, reservedCancel context.CancelFunc) {
-	key := sessionKey(input.chatID, input.threadID, input.userID)
-	defer func() {
-		s.activeSessions.CompareAndDelete(key, run)
-	}()
-	defer reservedCancel()
-	_ = reservedCtx
-
-	// Resolve effective Prompt Profile: @name > active mode > general.
-	activeMode := s.userActiveMode(input.userID)
-	profile, userText, resolveErr := s.resolveEffectiveProfile(input.text, activeMode, input.userID, s.isOwnerUser(input.userID))
-	if resolveErr != nil {
-		if pfErr, ok := resolveErr.(*profiles.ErrProfileNotFound); ok {
-			log.Printf("pipeline: unknown @profile chat=%d name=%s", input.chatID, pfErr.Name)
-			if err := s.output.SendError(input.chatID, input.threadID,
-				fmt.Sprintf("Perfil @%s não encontrado. Use /agents para ver os perfis disponíveis.", pfErr.Name)); err != nil {
-				log.Printf("pipeline: SendError(unknown profile) failed for chat=%d: %v", input.chatID, redactSecrets(err.Error()))
-			}
-		} else if deniedErr, ok := resolveErr.(*profiles.ErrProfileNotAllowed); ok {
-			log.Printf("pipeline: forbidden @profile chat=%d name=%s user=%d", input.chatID, deniedErr.Name, input.userID)
-			if err := s.output.SendError(input.chatID, input.threadID,
-				fmt.Sprintf("Perfil @%s não encontrado ou indisponível. Use /agents para ver os perfis disponíveis.", deniedErr.Name)); err != nil {
-				log.Printf("pipeline: SendError(forbidden profile) failed for chat=%d: %v", input.chatID, redactSecrets(err.Error()))
-			}
-		} else {
-			log.Printf("pipeline: profile resolution error chat=%d: %v", input.chatID, resolveErr)
-		}
-		s.output.ConfirmMessage(input.chatID, input.messageID)
-		return
-	}
-
-	if s.checkProjectPreflight(input, profile, userText) {
-		return
-	}
-
-	systemPrompt, err := s.buildSystemPrompt(userText, profile, input.chatID, input.messageID, input.threadID, input.userID, input.isPrivateChat)
-	if err != nil {
-		log.Printf("Failed to build system prompt: %s", redactSecrets(err.Error()))
-		if err := s.output.SendError(input.chatID, input.threadID, "Falha ao montar o prompt de sistema."); err != nil {
-			log.Printf("pipeline: SendError(system prompt) failed for chat=%d: %v", input.chatID, redactSecrets(err.Error()))
-		}
-		s.output.ConfirmMessage(input.chatID, input.messageID)
-		return
-	}
-
-	req := s.buildBridgeRequest(userText, systemPrompt, profile, input.chatID, input.threadID, input.userID, input.isPrivateChat)
-	req.RequestID = fmt.Sprintf("run-%d", time.Now().UnixNano())
-	req.Options.Images = input.images
-	s.applyVisionFallback(reservedCtx, &req, input.images)
-
-	if lcResult := s.applyLifecycle(reservedCtx, &req, input.chatID, input.threadID, input.userID); lcResult.SkipExecution {
-		log.Printf("lifecycle: execution skipped for chat=%d: %s", input.chatID, lcResult.ErrorMessage)
-		if lcResult.ErrorMessage != "" {
-			if err := s.output.SendError(input.chatID, input.threadID, lcResult.ErrorMessage); err != nil {
-				log.Printf("pipeline: SendError(lifecycle) failed for chat=%d: %v", input.chatID, redactSecrets(err.Error()))
-			}
-		}
-		s.output.ConfirmMessage(input.chatID, input.messageID)
-		return
-	}
-
-	warnThreshold := toolCallWarningThreshold
-	critThreshold := toolCallCriticalThreshold
-	if profile != nil && profile.ToolBudget > 0 {
-		warnThreshold = profile.ToolBudget
-		critThreshold = profile.ToolBudget * 5 / 2
-	}
-
-	s.executeAsync(reservedCtx, input.chatID, input.threadID, input.messageID, req, userText, input.userID, input.isPrivateChat, warnThreshold, critThreshold)
-}
-
 // userActiveMode returns the normalized active mode from the user's profile.
 // Returns "" for general/default mode or when the store is unavailable.
 func (s *Service) userActiveMode(userID int64) string {
@@ -760,271 +718,10 @@ func appendUniqueTools(existing []string, additions ...string) []string {
 // executeAsync runs bridge execution with typing/progress reporting.
 // warningThreshold and criticalThreshold override the global tool call limits
 // when > 0 (set by agent tool_budget). Use 0 for defaults.
-func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID int, messageID int, req bridge.Request, userText string, userID int64, isPrivateChat bool, warningThreshold int, criticalThreshold int) {
-	stopTyping := s.output.StartTyping(chatID, threadID)
-	defer stopTyping()
-
-	progress := s.output.NewProgress(chatID, threadID)
-	defer progress.Delete()
-
-	ctx, cancel := context.WithCancel(parentCtx)
-	defer cancel()
-	timeoutTracker := newRunTimeoutTracker()
-
-	// steerDuringExecution sends a steer command to the active bridge session.
-	// This injects a message into the model's context without canceling execution.
-	steerDuringExecution := func(msg string) {
-		steerCtx, steerCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer steerCancel()
-		_, err := s.bridge.ExecuteSync(steerCtx, bridge.Request{
-			Command: "steer",
-			Prompt:  msg,
-			Options: bridge.RequestOptions{
-				ChatID:   chatID,
-				ThreadID: threadID,
-				UserID:   userID,
-			},
-		})
-		if err != nil {
-			log.Printf("pipeline: steer failed during execution chat=%d: %v", chatID, err)
-		}
-	}
-	toolTracker := newToolCallTracker(chatID, threadID, s.output, steerDuringExecution, warningThreshold, criticalThreshold)
-	loopDetect := newLoopDetector(chatID, threadID, s.output, steerDuringExecution)
-	s.SetActiveToolState(chatID, threadID, userID, toolTracker, loopDetect)
-	defer s.ClearActiveToolState(chatID, threadID, userID)
-
-	// Max timeout goroutine — safety net after 30min
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("pipeline: panic in maxTimeout goroutine: %v", r)
-			}
-		}()
-		timer := time.NewTimer(bridgeExecutionTimeout)
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-			timeoutTracker.mark(timeoutOriginMaxExecution)
-			log.Printf("pipeline: max execution timeout (%s) reached chat=%d thread=%d user=%d",
-				bridgeExecutionTimeout, chatID, threadID, userID)
-			cancel()
-		case <-ctx.Done():
-		}
-	}()
-
-	// Timeout warning goroutine — warns user 5min before hard timeout.
-	// Does NOT cancel — only notifies. The max timeout goroutine above
-	// handles the actual 30-min cancellation.
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("pipeline: panic in timeoutWarning goroutine: %v", r)
-			}
-		}()
-		timer := time.NewTimer(bridgeExecutionTimeout - timeoutWarningLead)
-		defer timer.Stop()
-		select {
-		case <-timer.C:
-			// Send Telegram warning to user
-			userMsg := fmt.Sprintf(
-				"⏰ Aproximando do limite de tempo de %s. "+
-					"Vou concluir o que tenho e apresentar um resumo parcial.",
-				bridgeExecutionTimeout)
-			if _, err := s.output.SendText(chatID, threadID, userMsg); err != nil {
-				log.Printf("pipeline: SendText(timeout warning) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
-			}
-			// Steer the model to wrap up — this injects into the active model context
-			steerDuringExecution(fmt.Sprintf(
-				"Você está próximo do limite de tempo de %s. "+
-					"Conclua imediatamente o que está fazendo e apresente um resumo parcial "+
-					"do que conseguiu até agora.",
-				bridgeExecutionTimeout))
-		case <-ctx.Done():
-		}
-	}()
-
-	cancelDone := s.cancelBridgeOnContextDone(ctx, req.RequestID)
-	defer cancelDone()
-
-	// Start runlog entry with extended observability context
-	cwd := s.effectiveCwd(nil, chatID, threadID)
-	agentName := ""
-	profile := ""
-	if req.Options.Security != nil {
-		agentName = req.Options.Security.AgentName
-		profile = req.Options.Security.Profile
-	}
-	runLogStarted := s.startRunLog(startRunLogParams{
-		ChatID:      chatID,
-		ThreadID:    threadID,
-		RequestID:   req.RequestID,
-		MessageID:   messageID,
-		CWD:         cwd,
-		Prompt:      userText,
-		UserID:      userID,
-		AgentName:   agentName,
-		Provider:    req.Options.Provider,
-		Model:       req.Options.Model,
-		Profile:     profile,
-		EntryPoint:  s.entryPoint,
-	})
-	var processDeathRunID string // captured before completeRunLog for retry events
-
-	// Record bridge_request_started event if the runlog started successfully.
-	if runLogStarted {
-		s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent("",
-			observability.PhaseBridgeRequestStarted,
-			fmt.Sprintf("request_id=%s provider=%s model=%s", req.RequestID, req.Options.Provider, req.Options.Model)))
-	}
-
-	var ch <-chan bridge.Event
-	ch, usedFallback, err := s.executeQuery(ctx, req, func(msg string) {
-		if _, sendErr := s.output.SendText(chatID, threadID, msg); sendErr != nil {
-			log.Printf("pipeline: SendText(fallback status) failed for chat=%d: %v", chatID, redactSecrets(sendErr.Error()))
-		}
-	})
-	if usedFallback && runLogStarted {
-		s.recordPipelineEvent(chatID, threadID, userID, observability.NewWarnEvent("",
-			observability.PhaseFallbackResult,
-			fmt.Sprintf("provider=%s model=%s", req.Options.Provider, req.Options.Model)))
-	}
-
-	if ch != nil {
-		ch = idleTimeoutWrapper(ctx, ch, s.getIdleTimeout(), cancel, func() {
-			timeoutTracker.mark(timeoutOriginIdleBridge)
-		})
-	}
-
-	var outcome Outcome
-	if err != nil {
-		if errors.Is(err, errProcessDeath) {
-			// Record process death event; recovery below will handle it.
-			if runLogStarted {
-				s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent("",
-					observability.PhaseBridgeProcessDeath, "bridge process exited during Execute"))
-			}
-		} else if errors.Is(err, context.Canceled) {
-			if handled := s.handleContextOutcome(parentCtx, ctx, chatID, threadID, userID, isPrivateChat, timeoutTracker); handled {
-				s.output.ConfirmMessage(chatID, messageID)
-				return
-			}
-			log.Printf("pipeline: run canceled by user chat=%d thread=%d user=%d", chatID, threadID, userID)
-			if runLogStarted {
-				s.patchContinuityFailure(chatID, threadID, "canceled", "cancelado pelo usuário", userID, isPrivateChat)
-				s.completeRunLog(chatID, threadID, userID, runlog.RunCanceled, "", "cancelado pelo usuário")
-			}
-			return
-		} else {
-			log.Printf("Bridge execute error: %s", redactSecrets(err.Error()))
-			if runLogStarted {
-				redacted := redactSecrets(err.Error())
-				s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent("",
-					observability.PhaseBridgeExecuteError, redacted))
-				s.patchContinuityFailure(chatID, threadID, "failed", redacted, userID, isPrivateChat)
-				s.completeRunLog(chatID, threadID, userID, runlog.RunFailed, "", redacted)
-			}
-			s.output.ConfirmMessage(chatID, messageID)
-			return
-		}
-	} else {
-		toolUseSignal := make(chan struct{}, 16)
-		go heartbeatMonitor(ctx.Done(), toolUseSignal, toolTracker, chatID, threadID, s.output)
-		outcome = s.ProcessBridgeEvents(chatID, threadID, messageID, ch, progress, userText, toolUseSignal, userID, isPrivateChat, toolTracker, loopDetect)
-		if handled := s.handleContextOutcome(parentCtx, ctx, chatID, threadID, userID, isPrivateChat, timeoutTracker); handled {
-			s.output.ConfirmMessage(chatID, messageID)
-			return
-		}
-		if outcome == OutcomeSuccess {
-			s.bridgeFailures.reset()
-			return
-		}
-		if outcome != OutcomeProcessDeath {
-			if runLogStarted {
-				s.patchContinuityFailure(chatID, threadID, "failed", "", userID, isPrivateChat)
-				s.completeRunLog(chatID, threadID, userID, runlog.RunFailed, "", "")
-			}
-			return
-		}
-	}
-
-	s.bridgeFailures.record()
-	log.Printf("bridge: process died mid-request, retrying for chat=%d thread=%d", chatID, threadID)
-
-	// Mark process death in session store for lifecycle evaluation
-	if s.sessions != nil {
-		s.sessions.MarkProcessDeath(chatID, threadID, userID)
-	}
-
-	if runLogStarted {
-		processDeathRunID = s.getRunID(chatID, threadID, userID)
-		s.patchContinuityFailure(chatID, threadID, "failed", "process death, retrying", userID, isPrivateChat)
-		s.completeRunLog(chatID, threadID, userID, runlog.RunFailed, "", "process death, retrying")
-		s.recordPipelineEvent(chatID, threadID, userID, observability.NewWarnEvent(processDeathRunID,
-			observability.PhaseRetryStarted, "process death recovery, retrying"))
-	}
-
-	if s.bridgeFailures.inCooldown() {
-		remaining := s.bridgeFailures.cooldownRemaining()
-		log.Printf("bridge: in cooldown, skipping retry for chat=%d", chatID)
-		if err := s.output.SendError(chatID, threadID, bridgeCooldownMessage(remaining)); err != nil {
-			log.Printf("pipeline: SendError(cooldown) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
-		}
-		s.output.ConfirmMessage(chatID, messageID)
-		return
-	}
-
-	reconnectMsg, sErr := s.output.SendText(chatID, threadID, "⚡ Reconectando...")
-	if sErr != nil {
-		log.Printf("pipeline: SendText(reconnect) failed for chat=%d: %v", chatID, redactSecrets(sErr.Error()))
-	}
-
-	retryReq := req
-	retryReq.Options.Continue = false
-	retryReq.RequestID = ""
-	if sid := s.sessions.GetSession(chatID, threadID, userID); sid != "" {
-		retryReq.Options.Resume = sid
-		log.Printf("bridge: retry with resume file=%s", filepath.Base(sid))
-	}
-
-	// Intentionally uses s.bridge.Execute (not s.executeQuery) here because
-	// process-death recovery has its own retry/fallback discipline — the bridge
-	// process was restarted by s.bridge's readLoop death callback, so a single
-	// retry suffices. Using executeQuery's retry+fallback would add latency and
-	// risk confusing the user with duplicate "reconnecting" messages.
-	ch, err = s.bridge.Execute(ctx, retryReq)
-	s.output.DeleteMessage(reconnectMsg)
-	if err != nil {
-		log.Printf("bridge: retry failed for chat=%d: %s", chatID, redactSecrets(err.Error()))
-		s.patchContinuitySessionCold(chatID, threadID, "bridge retry failed: "+redactSecrets(err.Error()), userID, isPrivateChat)
-		if runLogStarted {
-			s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent(processDeathRunID,
-				observability.PhaseRetryFailed, "retry failed: process death persisted"))
-		}
-		if err := s.output.SendError(chatID, threadID, bridgeRetryFailedMessage); err != nil {
-			log.Printf("pipeline: SendError(retry failed) for chat=%d: %v", chatID, redactSecrets(err.Error()))
-		}
-		s.output.ConfirmMessage(chatID, messageID)
-		return
-	}
-
-	if ch != nil {
-		ch = idleTimeoutWrapper(ctx, ch, s.getIdleTimeout(), cancel, func() {
-			timeoutTracker.mark(timeoutOriginIdleBridge)
-		})
-	}
-
-	toolUseSignal := make(chan struct{}, 16)
-	go heartbeatMonitor(ctx.Done(), toolUseSignal, toolTracker, chatID, threadID, s.output)
-	outcome = s.ProcessBridgeEvents(chatID, threadID, messageID, ch, progress, userText, toolUseSignal, userID, isPrivateChat, toolTracker, loopDetect)
-	if handled := s.handleContextOutcome(parentCtx, ctx, chatID, threadID, userID, isPrivateChat, timeoutTracker); handled {
-		s.output.ConfirmMessage(chatID, messageID)
-		return
-	}
-	s.handleRetryOutcome(chatID, threadID, messageID, outcome, userID, isPrivateChat)
-}
-
 func (s *Service) cancelBridgeOnContextDone(ctx context.Context, requestID string) func() {
+	if s == nil || s.bridge == nil || ctx == nil || requestID == "" {
+		return func() {}
+	}
 	done := make(chan struct{})
 	go func() {
 		defer func() {
@@ -1037,7 +734,7 @@ func (s *Service) cancelBridgeOnContextDone(ctx context.Context, requestID strin
 			cancelCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			if err := s.bridge.CancelRequest(cancelCtx, requestID); err != nil {
-				log.Printf("bridge: cancel request %s failed: %s", requestID, redactSecrets(err.Error()))
+				log.Printf("bridge: cancel request %s failed: %s", requestID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
 			}
 		case <-done:
 		}
@@ -1045,85 +742,111 @@ func (s *Service) cancelBridgeOnContextDone(ctx context.Context, requestID strin
 	return func() { close(done) }
 }
 
-func (s *Service) handleContextOutcome(parentCtx context.Context, ctx context.Context, chatID int64, threadID int, userID int64, isPrivateChat bool, tracker ...*runTimeoutTracker) bool {
+func (s *Service) handleContextOutcome(parentCtx context.Context, ctx context.Context, chatID int64, threadID int, userID int64, isPrivateChat bool, tracker *runTimeoutTracker, owners ...runOwnership) bool {
 	if parentCtx.Err() != nil {
+		claimedOwnership, claimed := s.claimRunFinalization(chatID, threadID, userID, owners...)
+		if !claimed {
+			return true
+		}
+		ownership := claimedOwnership
+		if !s.withCurrentRunOwnership(chatID, threadID, userID, []runOwnership{ownership}, func() {}) {
+			s.cancelClaimedRunLog(pipelineInput{chatID: chatID, threadID: threadID, userID: userID}, ownership)
+			return true
+		}
 		log.Printf("pipeline: run canceled chat=%d thread=%d user=%d", chatID, threadID, userID)
-		runID := s.getRunID(chatID, threadID, userID)
-		s.patchContinuityFailure(chatID, threadID, "canceled", "cancelado pelo usuário", userID, isPrivateChat)
-		s.completeRunLog(chatID, threadID, userID, runlog.RunCanceled, "", "cancelado pelo usuário")
+		runID := s.getRunID(chatID, threadID, userID, ownership)
+		const reason = "user_cancel"
+		s.patchContinuityFailure(chatID, threadID, "canceled", reason, userID, isPrivateChat, ownership)
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent(runID,
-			observability.PhaseRunCanceled, "cancelado pelo usuário"))
+			observability.PhaseRunCanceled, reason), ownership)
+		s.completeRunLog(chatID, threadID, userID, runlog.RunCanceled, "", reason, ownership)
 		return true
 	}
 	if ctx.Err() != nil {
-		origin, elapsed := timeoutDetails(tracker...)
+		claimedOwnership, claimed := s.claimRunFinalization(chatID, threadID, userID, owners...)
+		if !claimed {
+			return true
+		}
+		ownership := claimedOwnership
+		if !s.withCurrentRunOwnership(chatID, threadID, userID, []runOwnership{ownership}, func() {}) {
+			s.cancelClaimedRunLog(pipelineInput{chatID: chatID, threadID: threadID, userID: userID}, ownership)
+			return true
+		}
+		origin, elapsed := timeoutDetails(tracker)
 		log.Printf("pipeline: run timeout origin=%s elapsed=%s chat=%d thread=%d user=%d", origin, elapsed.Round(time.Second), chatID, threadID, userID)
-		runID := s.getRunID(chatID, threadID, userID)
-		s.patchContinuityFailure(chatID, threadID, "timed_out", origin, userID, isPrivateChat)
-		s.completeRunLog(chatID, threadID, userID, runlog.RunTimedOut, "", origin)
+		runID := s.getRunID(chatID, threadID, userID, ownership)
+		s.patchContinuityFailure(chatID, threadID, "timed_out", origin, userID, isPrivateChat, ownership)
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent(runID,
 			observability.PhaseRunTimedOut,
-			fmt.Sprintf("origin=%s elapsed=%s", origin, elapsed.Round(time.Second))))
+			fmt.Sprintf("origin=%s elapsed=%s", origin, elapsed.Round(time.Second))), ownership)
+		s.completeRunLog(chatID, threadID, userID, runlog.RunTimedOut, "", origin, ownership)
 		if s.sessions != nil {
-			s.sessions.MarkFailure(chatID, threadID, userID, origin)
+			s.withCurrentRunOwnership(chatID, threadID, userID, []runOwnership{ownership}, func() {
+				s.sessions.MarkFailure(chatID, threadID, userID, origin)
+			})
 		}
-		if err := s.output.SendError(chatID, threadID, buildTimeoutMessage(origin)); err != nil {
-			log.Printf("pipeline: SendError(timeout) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
+		if s.activeRunStillOwned(chatID, threadID, userID, ownership.owner) {
+			if err := s.output.SendError(chatID, threadID, buildTimeoutMessage(origin)); err != nil {
+				log.Printf("pipeline: SendError(timeout) failed for chat=%d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
+			}
 		}
 		return true
 	}
 	return false
 }
 
-func timeoutDetails(trackers ...*runTimeoutTracker) (string, time.Duration) {
-	if len(trackers) == 0 {
-		return timeoutOriginUnknown, 0
-	}
-	return trackers[0].snapshot()
+// progressSilenceDetail formats a bounded silence duration for progress
+// state detail. The duration is clamped by the caller; this only formats.
+func progressSilenceDetail(silentMs int64) string {
+	d := time.Duration(silentMs) * time.Millisecond
+	return fmt.Sprintf("silêncio de %s", d.Round(time.Second))
 }
 
-func (s *Service) handleRetryOutcome(chatID int64, threadID int, messageID int, outcome Outcome, userID int64, isPrivateChat bool) {
-	switch outcome {
-	case OutcomeSuccess:
-		s.bridgeFailures.reset()
-	case OutcomeProcessDeath:
-		s.bridgeFailures.record()
-		if s.sessions != nil {
-			s.sessions.MarkProcessDeath(chatID, threadID, userID)
-		}
-		s.patchContinuitySessionCold(chatID, threadID, "bridge retry process death", userID, isPrivateChat)
-		if err := s.output.SendError(chatID, threadID, bridgeRetryFailedMessage); err != nil {
-			log.Printf("pipeline: SendError(retry outcome) failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
-		}
-		s.output.ConfirmMessage(chatID, messageID)
-	}
-}
-
-// buildHeartbeatMessage formats the user-visible heartbeat message.
+// buildHeartbeatMessage formats the human detail for the waiting state.
 // Per Long Flow UX v2: human progress language, no technical terms like
-// "chamadas de ferramenta" or tool counts.
+// "chamadas de ferramenta" or tool counts. Milestones escalate with elapsed
+// time so long silences get progressively warmer copy.
 func buildHeartbeatMessage(elapsed time.Duration, beatCount, toolCount int) string {
 	if toolCount > 0 && beatCount%heartbeatToolThreshold == 0 {
-		return fmt.Sprintf("⏱️ %s — Ainda estou trabalhando no pedido. Vou consolidar o progresso em breve.", elapsed)
+		return fmt.Sprintf("Ainda estou trabalhando no pedido. Vou consolidar o progresso em breve (%s).", elapsed)
 	}
-	return fmt.Sprintf("⏱️ %s — Ainda estou processando.", elapsed)
+	switch {
+	case elapsed >= 3*time.Minute:
+		return fmt.Sprintf("Continua processando — obrigado pela paciência (%s).", elapsed)
+	case elapsed >= 1*time.Minute:
+		return fmt.Sprintf("Ainda estou trabalhando no pedido (%s).", elapsed)
+	default:
+		return fmt.Sprintf("Ainda estou processando (%s).", elapsed)
+	}
 }
 
-// heartbeatMonitor sends a "still thinking" update when no tool_use event
-// arrives within heartbeatThreshold. It resets on each tool_use event so the
-// user only sees the message when the model is thinking without tools.
+// heartbeatMonitor sends a "still thinking" state when no tool_use event
+// arrives within threshold. It resets on each tool_use event so the user
+// only sees the state when the model is thinking without tools. The state
+// goes through the surface-neutral ProgressReporter; adapters decide how to
+// render it (Telegram edits the receipt, TUI shows an indicator) instead of
+// sending separate chat messages.
 // Stopped by doneCh (e.g., ctx.Done()).
-func heartbeatMonitor(doneCh <-chan struct{}, toolUseSignal <-chan struct{}, toolTracker *toolCallTracker, chatID int64, threadID int, output Output) {
+func heartbeatMonitor(doneCh <-chan struct{}, toolUseSignal <-chan struct{}, toolTracker *toolCallTracker, progress ProgressReporter) {
+	heartbeatMonitorWithIntervals(doneCh, toolUseSignal, toolTracker, progress, heartbeatInterval, heartbeatThreshold)
+}
+
+// heartbeatMonitorWithIntervals is heartbeatMonitor with injectable tick
+// interval/threshold so tests can drive the state machine quickly.
+func heartbeatMonitorWithIntervals(doneCh <-chan struct{}, toolUseSignal <-chan struct{}, toolTracker *toolCallTracker, progress ProgressReporter, interval, threshold time.Duration) {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("pipeline: panic in heartbeatMonitor: %v", r)
 		}
 	}()
 
+	if progress == nil {
+		return
+	}
 	lastTool := time.Now()
 	beatSent := false
 	beatCount := 0
-	ticker := time.NewTicker(heartbeatInterval)
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
@@ -1134,14 +857,11 @@ func heartbeatMonitor(doneCh <-chan struct{}, toolUseSignal <-chan struct{}, too
 			lastTool = time.Now()
 			beatSent = false
 		case <-ticker.C:
-			if time.Since(lastTool) >= heartbeatThreshold && !beatSent {
+			if time.Since(lastTool) >= threshold && !beatSent {
 				elapsed := time.Since(lastTool).Round(time.Second)
 				beatCount++
 				toolCount := toolTracker.countLocked()
-				msg := buildHeartbeatMessage(elapsed, beatCount, toolCount)
-				if _, err := output.SendText(chatID, threadID, msg); err != nil {
-					log.Printf("pipeline: heartbeat SendText failed for chat=%d: %v", chatID, redactSecrets(err.Error()))
-				}
+				progress.ReportState(ProgressStateWaiting, buildHeartbeatMessage(elapsed, beatCount, toolCount))
 				beatSent = true
 			}
 		}
@@ -1152,7 +872,8 @@ func heartbeatMonitor(doneCh <-chan struct{}, toolUseSignal <-chan struct{}, too
 // toolUseSignal, if non-nil, receives a signal on every tool_use event so a
 // caller can monitor thinking gaps (heartbeat).
 // toolTracker, if non-nil, is used to count tool calls and warn on explosion.
-func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int, ch <-chan bridge.Event, progress ProgressReporter, userText string, toolUseSignal chan<- struct{}, userID int64, isPrivateChat bool, toolTracker *toolCallTracker, loopDetect *loopDetector) Outcome {
+func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int, ch <-chan bridge.Event, progress ProgressReporter, userText string, toolUseSignal chan<- struct{}, userID int64, isPrivateChat bool, toolTracker *toolCallTracker, loopDetect *loopDetector, owners ...runOwnership) Outcome {
+	ownership := firstRunOwnership(owners)
 	var (
 		assistantText       strings.Builder
 		lastStreamFlush     = time.Now()
@@ -1160,40 +881,40 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 	)
 
 	for ev := range ch {
+		if len(owners) > 0 && ownership.finalizer == nil && !s.activeRunStillOwned(chatID, threadID, userID, ownership.owner) {
+			if progress != nil {
+				progress.ReportState(ProgressStateCanceled, "")
+			}
+			return OutcomeCanceled
+		}
 		switch ev.Type {
 		case "system":
-			s.handleSystemEvent(chatID, threadID, ev, userID)
+			s.handleSystemEvent(chatID, threadID, ev, userID, ownership)
 			if ev.SessionID != "" {
-				s.updateRunLogSession(chatID, threadID, userID, ev.SessionID)
+				s.updateRunLogSession(chatID, threadID, userID, ev.SessionID, ownership)
 			}
 			if ev.SessionFile != "" {
-				s.updateRunLogSessionFile(chatID, threadID, userID, ev.SessionFile)
+				s.updateRunLogSessionFile(chatID, threadID, userID, ev.SessionFile, ownership)
 			}
 			// Record bridge_system event with model info and available tool names.
 			if s.runLog != nil {
-				modelInfo := ev.Model
-				sessionFile := ev.SessionFile
-				msg := fmt.Sprintf("model=%s session=%s", modelInfo, filepath.Base(sessionFile))
-				if len(ev.Tools) > 0 {
-					msg += fmt.Sprintf(" tools=[%s]", strings.Join(ev.Tools, ", "))
-				}
+				msg := fmt.Sprintf("model=%s session=%s", sanitizeForPersistence(ev.Model, 256), filepath.Base(ev.SessionFile))
 				s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent("",
-					observability.PhaseBridgeSystem, msg))
+					observability.PhaseBridgeSystem, msg), ownership)
 			}
 		case "tool_use":
-			toolName := ev.Name
-			if toolName == "" {
-				toolName = "tool"
-			}
+			toolName := normalizeToolLabel(ev.Name)
+			s.trackRunFeedback(chatID, threadID, userID, bridgeEventTime(ev), ownership)
 			// Flush pending thought block before showing tool
 			if progress != nil {
 				if text := strings.TrimSpace(assistantText.String()); text != "" {
 					progress.ReportText(text)
 				}
+				progress.ReportState(ProgressStateWorking, "")
 				progress.ReportTool(toolName, SummarizeToolInput(toolName, ev.Input))
 			}
 			lastStreamFlush = time.Now()
-			s.recordToolUse(chatID, threadID, userID, toolName)
+			s.recordToolUse(chatID, threadID, userID, toolName, ownership)
 			// Track tool call count and warn on explosion thresholds
 			if toolTracker != nil {
 				toolTracker.increment(toolName)
@@ -1203,13 +924,18 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 				if isLoop, pattern := loopDetect.record(toolName, ev.Input); isLoop {
 					s.recordPipelineEvent(chatID, threadID, userID, observability.NewWarnEvent("",
 						observability.PhaseLoopDetected,
-						fmt.Sprintf("tool=%s pattern=%s", toolName, pattern)))
+						fmt.Sprintf("tool=%s pattern=%s", toolName, pattern)), ownership)
 				}
 			}
 			// Record bridge_tool_use event.
-			s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent("",
+			toolStartEvent := observability.NewEvent("",
 				observability.PhaseBridgeToolUse,
-				fmt.Sprintf("tool=%s", toolName)))
+				fmt.Sprintf("tool=%s", toolName))
+			toolStartEvent.MetadataJSON = telemetryMetadata(map[string]any{
+				"tool_call_id": safeTelemetryID(ev.ToolCallID),
+				"ts_iso":       safeTelemetryTimestamp(ev.Timestamp),
+			})
+			s.recordPipelineEvent(chatID, threadID, userID, toolStartEvent, ownership)
 			if toolUseSignal != nil {
 				select {
 				case toolUseSignal <- struct{}{}:
@@ -1218,25 +944,43 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 			}
 
 		case "tool_result":
+			s.trackRunFeedback(chatID, threadID, userID, bridgeEventTime(ev), ownership)
 			// Append a truncated, redacted summary to the tool tracking state.
 			// Also show the summary in the live progress display.
 			content := eventContent(ev)
 			summary := summarizeToolResult(content)
 			if summary != "" {
 				if s.runLog != nil {
-					s.recordToolResult(chatID, threadID, userID, summary)
+					s.recordToolResult(chatID, threadID, userID, summary, ownership)
 				}
 				if progress != nil {
 					progress.ReportToolResult(summary)
 				}
 			}
-			// Record bridge_tool_result event.
-			s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent("",
-				observability.PhaseBridgeToolResult, summary))
+			// Record bridge_tool_result event; duration_ms telemetry is
+			// persisted in metadata only when the Bridge observed a pair
+			// (duration_measured=true, present even for 0ms).
+			toolResultEvent := observability.NewEvent("",
+				observability.PhaseBridgeToolResult, "tool_result")
+			toolID := safeTelemetryID(ev.ToolCallID)
+			toolResultEvent.MetadataJSON = telemetryMetadata(map[string]any{
+				"tool_call_id": toolID,
+				"ts_iso":       safeTelemetryTimestamp(ev.Timestamp),
+			})
+			if ev.DurationMeasured && ev.DurationMs >= 0 && ev.DurationMs <= 24*time.Hour.Milliseconds() {
+				toolResultEvent.MetadataJSON = telemetryMetadata(map[string]any{
+					"tool_call_id":      toolID,
+					"ts_iso":            safeTelemetryTimestamp(ev.Timestamp),
+					"duration_measured": true,
+					"duration_ms":       ev.DurationMs,
+				})
+			}
+			s.recordPipelineEvent(chatID, threadID, userID, toolResultEvent, ownership)
 
 		case "assistant":
+			s.trackRunFeedback(chatID, threadID, userID, bridgeEventTime(ev), ownership)
 			delta := eventContent(ev)
-			assistantText.WriteString(delta)
+			appendAssistantText(&assistantText, delta)
 
 			// Periodic flush — send full accumulated text so nothing is lost
 			if time.Since(lastStreamFlush) >= streamFlushInterval {
@@ -1246,18 +990,81 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 					}
 				}
 				// Save partial assistant text for checkpoint on timeout
-				s.savePartialAssistant(chatID, threadID, userID, assistantText.String())
+				s.savePartialAssistant(chatID, threadID, userID, assistantText.String(), ownership)
 				lastStreamFlush = time.Now()
 			}
 		case "result":
-			return s.handleResultEvent(chatID, threadID, messageID, ev, &assistantText, userText, userID, isPrivateChat)
+			if progress != nil {
+				progress.ReportState(ProgressStateDone, "")
+			}
+			return s.handleResultEvent(chatID, threadID, messageID, ev, &assistantText, userText, userID, isPrivateChat, ownership)
 		case "error":
-			return s.handleErrorEvent(chatID, threadID, messageID, ev, userID, isPrivateChat)
+			if progress != nil {
+				progress.ReportState(ProgressStateFailed, "")
+			}
+			return s.handleErrorEvent(chatID, threadID, messageID, ev, userID, isPrivateChat, ownership)
 		case "compaction_start", "compaction_end":
 			// Compaction events reset idle timer and provide observability.
+			// Telemetry only — never classified as productive feedback.
+			// Only bounded values are persisted: enum reason, static
+			// error_class, success, token deltas and the effectiveness
+			// classification. Raw SDK reason/error text never reaches the
+			// timeline.
 			if s.runLog != nil {
-				s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent("",
-					observability.PhaseBridgeSystem, fmt.Sprintf("event=%s", ev.Type)))
+				s.recordCompactionEvent(chatID, threadID, userID, bridge.CompactSessionEvent{
+					Type:             ev.Type,
+					RequestID:        ev.RequestID,
+					Reason:           ev.Reason,
+					Success:          ev.Success,
+					ErrorClass:       ev.ErrorClass,
+					TokensBefore:     ev.TokensBefore,
+					TokensAfter:      ev.TokensAfter,
+					DeltaTokens:      ev.DeltaTokens,
+					DurationMeasured: ev.DurationMeasured,
+					DurationMs:       ev.DurationMs,
+					Timestamp:        ev.Timestamp,
+				}, ownership)
+			}
+		case "stall", "steer":
+			// bridge_health telemetry. Redacted, correlated by run/request,
+			// and never treated as productive feedback or user text.
+			severity := normalizeSeverity(ev.Severity)
+			silentMs := ev.SilentMs
+			if silentMs < 0 {
+				silentMs = 0
+			} else if silentMs > int64(24*time.Hour/time.Millisecond) {
+				silentMs = int64(24 * time.Hour / time.Millisecond)
+			}
+			// Surface-neutral states: stall maps to warning/urgent, steer
+			// resumes the run back to working.
+			if progress != nil {
+				switch {
+				case ev.Type == "steer":
+					progress.ReportState(ProgressStateWorking, "")
+				case severity == "urgent":
+					progress.ReportState(ProgressStateStallUrgent, progressSilenceDetail(silentMs))
+				default:
+					progress.ReportState(ProgressStateStallWarning, progressSilenceDetail(silentMs))
+				}
+			}
+			if s.runLog != nil {
+				s.countBridgeTelemetry(chatID, threadID, userID, ev.Type, ownership)
+				phase := observability.PhaseBridgeStall
+				if ev.Type == "steer" {
+					phase = observability.PhaseBridgeSteer
+				}
+				level := observability.NewWarnEvent("", phase,
+					fmt.Sprintf("event=%s severity=%s silent_ms=%d", ev.Type, severity, silentMs))
+				meta := map[string]any{"source": "bridge_health"}
+				if ts := safeTelemetryTimestamp(ev.Timestamp); ts != "" {
+					meta["ts_iso"] = ts
+				}
+				meta["severity"] = severity
+				if silentMs > 0 {
+					meta["silent_ms"] = silentMs
+				}
+				level.MetadataJSON = telemetryMetadata(meta)
+				s.recordPipelineEvent(chatID, threadID, userID, level, ownership)
 			}
 		case "turn_start":
 			// Reset loop detector so a new turn can re-trigger loop warnings.
@@ -1270,11 +1077,8 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 			// Retry events reset idle timer.
 			if s.runLog != nil {
 				msg := fmt.Sprintf("event=%s", ev.Type)
-				if ev.Content != "" {
-					msg += " " + ev.Content
-				}
 				s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent("",
-					observability.PhaseBridgeSystem, msg))
+					observability.PhaseBridgeSystem, msg), ownership)
 			}
 		default:
 			log.Printf("Bridge event (ignored): %s", ev.Type)
@@ -1284,19 +1088,35 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 	return OutcomeProcessDeath
 }
 
-func (s *Service) handleSystemEvent(chatID int64, threadID int, ev bridge.Event, userID int64) {
+func (s *Service) handleSystemEvent(chatID int64, threadID int, ev bridge.Event, userID int64, owners ...runOwnership) {
 	if ev.SessionFile == "" {
 		return
 	}
-	s.sessions.SetSession(chatID, threadID, userID, ev.SessionFile)
-	s.patchContinuitySessionID(chatID, threadID, ev.SessionFile, userID)
+	if !s.withRunOwnership(chatID, threadID, userID, owners, func() {
+		if s.sessions != nil {
+			s.sessions.SetSession(chatID, threadID, userID, ev.SessionFile)
+		}
+	}) {
+		return
+	}
+	s.patchContinuitySessionID(chatID, threadID, ev.SessionFile, userID, owners...)
 }
 
 func eventContent(ev bridge.Event) string {
 	return ev.ContentText()
 }
 
-func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, ev bridge.Event, assistantText *strings.Builder, userText string, userID int64, isPrivateChat bool) Outcome {
+func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, ev bridge.Event, assistantText *strings.Builder, userText string, userID int64, isPrivateChat bool, owners ...runOwnership) Outcome {
+	ownership := firstRunOwnership(owners)
+	if ownership.finalizer == nil {
+		var claimed bool
+		ownership, claimed = s.claimRunFinalization(chatID, threadID, userID, owners...)
+		if !claimed {
+			return OutcomeCanceled
+		}
+	}
+	// Terminal bridge event: counts as surface-updating feedback.
+	s.trackRunFeedback(chatID, threadID, userID, bridgeEventTime(ev), ownership)
 	content := eventContent(ev)
 	if content != "" {
 		prior := assistantText.String()
@@ -1306,25 +1126,41 @@ func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, e
 				ev := observability.NewWarnEvent("", observability.PhaseBridgeContentDiverges, div.message())
 				ev.MetadataJSON = div.metadataJSON()
 				return ev
-			}())
+			}(), ownership)
 		}
 		// Result content is authoritative over streamed deltas.
 		assistantText.Reset()
-		assistantText.WriteString(content)
+		appendAssistantText(assistantText, content)
 	}
 
 	// Store session file path as fallback in case the system event was missed.
 	if ev.SessionFile != "" {
-		existing := s.sessions.GetSession(chatID, threadID, userID)
+		existing := ""
+		if s.sessions != nil {
+			existing = s.sessions.GetSession(chatID, threadID, userID)
+		}
 		if existing == "" {
-			s.sessions.SetSession(chatID, threadID, userID, ev.SessionFile)
-			s.patchContinuitySessionID(chatID, threadID, ev.SessionFile, userID)
+			if !s.withCurrentRunOwnership(chatID, threadID, userID, []runOwnership{ownership}, func() {
+				if s.sessions != nil {
+					s.sessions.SetSession(chatID, threadID, userID, ev.SessionFile)
+				}
+			}) {
+				// A stale owner may still finish its detached runlog, but cannot
+				// install its session or continuity state into the replacement slot.
+				s.cancelClaimedRunLog(pipelineInput{chatID: chatID, threadID: threadID, userID: userID}, ownership)
+				return OutcomeCanceled
+			}
+			if !s.activeRunStillOwned(chatID, threadID, userID, ownership.owner) {
+				s.cancelClaimedRunLog(pipelineInput{chatID: chatID, threadID: threadID, userID: userID}, ownership)
+				return OutcomeCanceled
+			}
+			s.patchContinuitySessionID(chatID, threadID, ev.SessionFile, userID, ownership)
 		}
 		// Also persist session_file to runlog as fallback in case the system
 		// event was missed or arrived before the runlog entry existed. This is
 		// an intentional redundant write — the value is idempotent (same
 		// session_file), and the DB update is a no-op when the value is unchanged.
-		s.updateRunLogSessionFile(chatID, threadID, userID, ev.SessionFile)
+		s.updateRunLogSessionFile(chatID, threadID, userID, ev.SessionFile, ownership)
 	}
 
 	s.recordUsage(chatID, threadID, ev, userID)
@@ -1333,59 +1169,69 @@ func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, e
 	s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent("",
 		observability.PhaseBridgeResult,
 		fmt.Sprintf("tokens_in=%d tokens_out=%d cost=$%.4f turns=%d",
-			ev.InputTokens, ev.OutputTokens, ev.CostUSD, ev.NumTurns)))
+			ev.InputTokens, ev.OutputTokens, ev.CostUSD, ev.NumTurns)), ownership)
 
 	finalText := strings.TrimSpace(assistantText.String())
 
 	if finalText == "" {
-		toolSummary := s.getRunToolSummary(chatID, threadID, userID)
-		return s.handleEmptyResult(chatID, threadID, messageID, ev, userText, toolSummary, userID, isPrivateChat)
+		toolSummary := s.getRunToolSummary(chatID, threadID, userID, ownership)
+		return s.handleEmptyResult(chatID, threadID, messageID, ev, userText, toolSummary, userID, isPrivateChat, ownership)
 	}
 
 	// Capture runID before completeRunLog cleans up runLogStates.
-	successRunID := s.getRunID(chatID, threadID, userID)
-	s.completeRunLog(chatID, threadID, userID, runlog.RunCompleted, finalText, "")
-	// Record run_completed event using captured runID since completeRunLog
-	// deleted the in-memory runLogStates entry.
+	successRunID := s.getRunID(chatID, threadID, userID, ownership)
+	// Record run_completed while the state is pending so SQLite includes it in
+	// the atomic terminal completion batch.
 	s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent(successRunID,
-		observability.PhaseRunCompleted, "status=completed"))
+		observability.PhaseRunCompleted, "status=completed"), ownership)
+	s.completeRunLog(chatID, threadID, userID, runlog.RunCompleted, finalText, "", ownership)
 
-	return s.handleNormalReply(chatID, threadID, messageID, finalText, successRunID, userText, userID, isPrivateChat)
+	return s.handleNormalReply(chatID, threadID, messageID, finalText, successRunID, userText, userID, isPrivateChat, ownership)
 }
 
 // handleEmptyResult handles the case where the bridge returned no text.
 // It distinguishes between "worked but empty" (tokens consumed) and "no work at all".
-func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, ev bridge.Event, userText string, toolSummary string, userID int64, isPrivateChat bool) Outcome {
+func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, ev bridge.Event, userText string, toolSummary string, userID int64, isPrivateChat bool, owners ...runOwnership) Outcome {
+	ownership := firstRunOwnership(owners)
 	if emptyResultHadWork(ev) {
 		log.Printf("bridge: empty result after work chat=%d thread=%d request=%s turns=%d cost=$%.4f in=%d out=%d",
 			chatID, threadID, ev.RequestID, ev.NumTurns, ev.CostUSD, ev.InputTokens, ev.OutputTokens)
 
 		// Mark empty result so next turn does not Continue into a suspect session.
 		// Skip billing errors — they're provider issues, not session failures.
-		if s.sessions != nil && !isBillingError(ev.Message) && !isBillingError(ev.Content) {
-			s.sessions.MarkEmptyResult(chatID, threadID, userID)
+		if !s.withCurrentRunOwnership(chatID, threadID, userID, []runOwnership{ownership}, func() {
+			if s.sessions != nil && !isBillingError(ev.Message) && !isBillingError(ev.Content) {
+				s.sessions.MarkEmptyResult(chatID, threadID, userID)
+			}
+		}) {
+			s.cancelClaimedRunLog(pipelineInput{chatID: chatID, threadID: threadID, userID: userID}, ownership)
+			return OutcomeCanceled
 		}
 
-		emptyWorkRunID := s.getRunID(chatID, threadID, userID)
-		s.patchContinuityFailure(chatID, threadID, "failed", "empty result after work", userID, isPrivateChat)
-		s.completeRunLog(chatID, threadID, userID, runlog.RunFailed, "", "empty result after work")
+		emptyWorkRunID := s.getRunID(chatID, threadID, userID, ownership)
+		s.patchContinuityFailure(chatID, threadID, "failed", "empty_result", userID, isPrivateChat, owners...)
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent(emptyWorkRunID,
-			observability.PhaseRunFailed, "empty result after work"))
+			observability.PhaseRunFailed, "empty_result"), ownership)
+		s.completeRunLog(chatID, threadID, userID, runlog.RunFailed, "", "empty_result", ownership)
 
 		recoveryMsg := buildEmptyResultRecoveryMessage(toolSummary)
-		if err := s.output.SendError(chatID, threadID, recoveryMsg); err != nil {
-			log.Printf("Failed to send recovery message to chat %d: %v", chatID, redactSecrets(err.Error()))
+		if s.activeRunStillOwned(chatID, threadID, userID, ownership.owner) {
+			if err := s.output.SendError(chatID, threadID, recoveryMsg); err != nil {
+				log.Printf("Failed to send recovery message to chat %d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
+			}
 		}
 	} else {
 		log.Printf("bridge: empty result (no work) chat=%d thread=%d request=%s",
 			chatID, threadID, ev.RequestID)
-		emptyNoWorkRunID := s.getRunID(chatID, threadID, userID)
-		s.patchContinuityFailure(chatID, threadID, "failed", "empty result", userID, isPrivateChat)
-		s.completeRunLog(chatID, threadID, userID, runlog.RunFailed, "", "empty result")
+		emptyNoWorkRunID := s.getRunID(chatID, threadID, userID, ownership)
+		s.patchContinuityFailure(chatID, threadID, "failed", "empty_result", userID, isPrivateChat, owners...)
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent(emptyNoWorkRunID,
-			observability.PhaseRunFailed, "empty result"))
-		if err := s.output.SendError(chatID, threadID, bridgeEmptyResultMessage); err != nil {
-			log.Printf("Failed to send empty-result error to chat %d: %v", chatID, redactSecrets(err.Error()))
+			observability.PhaseRunFailed, "empty_result"), ownership)
+		s.completeRunLog(chatID, threadID, userID, runlog.RunFailed, "", "empty_result", ownership)
+		if s.activeRunStillOwned(chatID, threadID, userID, ownership.owner) {
+			if err := s.output.SendError(chatID, threadID, bridgeEmptyResultMessage); err != nil {
+				log.Printf("Failed to send empty-result error to chat %d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
+			}
 		}
 	}
 
@@ -1395,16 +1241,19 @@ func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, e
 
 // handleNormalReply sends the assistant's text response to the chat as a
 // normal reply and finalizes the turn.
-func (s *Service) handleNormalReply(chatID int64, threadID int, messageID int, safeFinalText string, successRunID string, userText string, userID int64, isPrivateChat bool) Outcome {
+func (s *Service) handleNormalReply(chatID int64, threadID int, messageID int, safeFinalText string, successRunID string, userText string, userID int64, isPrivateChat bool, owners ...runOwnership) Outcome {
+	if len(owners) > 0 && !s.activeRunStillOwned(chatID, threadID, userID, firstRunOwnership(owners).owner) {
+		return OutcomeCanceled
+	}
 	outboundMsgID, err := s.output.SendReply(chatID, threadID, safeFinalText)
 	if err != nil {
-		log.Printf("Failed to send reply to chat %d: %v", chatID, redactSecrets(err.Error()))
+		log.Printf("Failed to send reply to chat %d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
 	}
 	if outboundMsgID != 0 && successRunID != "" {
-		s.updateRunLogOutboundMessage(successRunID, outboundMsgID)
+		s.updateRunLogOutboundMessage(chatID, threadID, userID, successRunID, outboundMsgID, owners...)
 	}
 	s.output.ConfirmMessage(chatID, messageID)
-	s.afterSuccessfulTurn(chatID, threadID, userText, safeFinalText, successRunID, userID, isPrivateChat)
+	s.afterSuccessfulTurn(chatID, threadID, userText, safeFinalText, successRunID, userID, isPrivateChat, owners...)
 	return OutcomeSuccess
 }
 
@@ -1427,18 +1276,19 @@ func runLogKey(chatID int64, threadID int, userID int64) string {
 // startRunLogParams carries the extended context needed to populate a
 // run_journal start row. All fields are populated before Bridge execution.
 type startRunLogParams struct {
-	ChatID      int64
-	ThreadID    int
-	RequestID   string
-	MessageID   int
-	CWD         string
-	Prompt      string
-	UserID      int64
-	AgentName   string
-	Provider    string
-	Model       string
-	Profile     string
-	EntryPoint  string
+	ChatID     int64
+	ThreadID   int
+	RequestID  string
+	MessageID  int
+	CWD        string
+	Prompt     string
+	UserID     int64
+	AgentName  string
+	Provider   string
+	Model      string
+	Profile    string
+	EntryPoint string
+	Owner      *activeRun
 }
 
 // startRunLog creates a new runlog entry and stores the per-run state.
@@ -1450,6 +1300,22 @@ func (s *Service) startRunLog(p startRunLogParams) bool {
 	}
 	key := runLogKey(p.ChatID, p.ThreadID, p.UserID)
 
+	// Keep runlog replacement in the same critical section as owner-conditional
+	// post-terminal writes. A new run must not replace the state between an old
+	// run's ownership check and its terminal persistence.
+	activeRunSlotMu.Lock()
+	defer activeRunSlotMu.Unlock()
+	if p.Owner != nil {
+		p.Owner.mu.RLock()
+		defer p.Owner.mu.RUnlock()
+		if p.Owner.superseded {
+			return false
+		}
+		current, ok := s.activeSessions.Load(key)
+		if !ok || current != p.Owner {
+			return false
+		}
+	}
 	s.runLogMu.Lock()
 	defer s.runLogMu.Unlock()
 
@@ -1466,22 +1332,26 @@ func (s *Service) startRunLog(p startRunLogParams) bool {
 		ChatID:            p.ChatID,
 		ThreadID:          p.ThreadID,
 		RequestID:         p.RequestID,
-		CWD:               p.CWD,
-		Prompt:            truncatePrompt(redactSecrets(p.Prompt)),
+		CWD:               sanitizeForPersistence(p.CWD, 512),
+		Prompt:            sanitizeForPersistence(p.Prompt, 500),
 		StartedAt:         now,
 		UserID:            p.UserID,
-		EntryPoint:        entryPoint,
-		AgentName:         p.AgentName,
-		Provider:          p.Provider,
-		Model:             p.Model,
-		CapabilityProfile: p.Profile,
+		EntryPoint:        sanitizeForPersistence(entryPoint, 64),
+		AgentName:         sanitizeForPersistence(p.AgentName, 128),
+		Provider:          sanitizeForPersistence(p.Provider, 128),
+		Model:             sanitizeForPersistence(p.Model, 256),
+		CapabilityProfile: sanitizeForPersistence(p.Profile, 128),
 		InboundMessageID:  int64(p.MessageID),
 	})
 	if err != nil {
-		log.Printf("runlog: failed to start %s: %v", p.RequestID, err)
+		log.Printf("runlog: failed to start %s: %s", p.RequestID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
 		return false
 	}
-	s.runLogStates[key] = &runLogState{runID: runID}
+	state := &runLogState{runID: runID, requestID: p.RequestID, owner: p.Owner, startedAt: now}
+	s.runLogStates[key] = state
+	if p.Owner != nil {
+		p.Owner.runLogState = state
+	}
 	return true
 }
 
@@ -1491,228 +1361,52 @@ func (s *Service) startRunLog(p startRunLogParams) bool {
 // When the runlog state has been cleaned up (e.g. after completeRunLog),
 // falls back to the caller-provided ev.RunID so completion events are not
 // silently dropped.
-func (s *Service) recordPipelineEvent(chatID int64, threadID int, userID int64, ev observability.RunEvent) {
-	if s.runLog == nil {
-		return
-	}
-	runID := s.getRunID(chatID, threadID, userID)
-	if runID == "" {
-		runID = ev.RunID // fall back to caller-provided RunID after state cleanup
-	}
-	if runID == "" {
-		return
-	}
-	ev.RunID = runID
-
-	key := runLogKey(chatID, threadID, userID)
-	s.runLogMu.Lock()
-	state, ok := s.runLogStates[key]
-	s.runLogMu.Unlock()
-	if ok && state != nil {
-		state.mu.Lock()
-		state.pendingEvents = append(state.pendingEvents, runlog.RunEvent{
-			RunID:        ev.RunID,
-			Timestamp:    ev.Timestamp.Unix(),
-			Phase:        ev.Phase,
-			Level:        ev.Level,
-			Message:      ev.Message,
-			MetadataJSON: ev.MetadataJSON,
-		})
-		state.mu.Unlock()
-		return
-	}
-
-	// Post-completion events (state already cleaned up) write immediately.
-	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
-	defer cancel()
-	if err := s.runLog.RecordEvent(ctx, runlog.RunEvent{
-		RunID:        ev.RunID,
-		Timestamp:    ev.Timestamp.Unix(),
-		Phase:        ev.Phase,
-		Level:        ev.Level,
-		Message:      ev.Message,
-		MetadataJSON: ev.MetadataJSON,
-	}); err != nil {
-		slog.Warn("observability: event dropped", "run_id", runID, "phase", ev.Phase, "error", err)
-	}
-}
-
 // updateRunLogSession updates the session ID for an active runlog entry.
-func (s *Service) updateRunLogSession(chatID int64, threadID int, userID int64, sessionID string) {
+func (s *Service) updateRunLogSession(chatID int64, threadID int, userID int64, sessionID string, owners ...runOwnership) {
 	if s.runLog == nil || sessionID == "" {
 		return
 	}
-	key := runLogKey(chatID, threadID, userID)
+	sessionID = sanitizeForPersistence(sessionID, 200)
+	s.withRunOwnership(chatID, threadID, userID, owners, func() {
+		state, ok := s.runLogStateFor(chatID, threadID, userID, firstRunOwnership(owners))
+		if !ok || state == nil {
+			return
+		}
 
-	s.runLogMu.Lock()
-	state, ok := s.runLogStates[key]
-	s.runLogMu.Unlock()
-	if !ok || state == nil {
-		return
-	}
-
-	updateCtx, updateCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer updateCancel()
-	if err := s.runLog.Update(updateCtx, runlog.RunUpdate{
-		RunID:     state.runID,
-		SessionID: &sessionID,
-	}); err != nil {
-		log.Printf("runlog: failed to update session for %s: %v", state.runID, err)
-	}
+		updateCtx, updateCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer updateCancel()
+		if err := s.runLog.Update(updateCtx, runlog.RunUpdate{
+			RunID:     state.runID,
+			SessionID: &sessionID,
+		}); err != nil {
+			log.Printf("runlog: failed to update session for %s: %s", state.runID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
+		}
+	})
 }
 
 // updateRunLogSessionFile persists the PI SDK session file path into the
 // active runlog entry so that runlog.GetLastOutboundMessage(sessionFile)
 // can bridge PI sessions to Telegram outbound messages.
-func (s *Service) updateRunLogSessionFile(chatID int64, threadID int, userID int64, sessionFile string) {
+func (s *Service) updateRunLogSessionFile(chatID int64, threadID int, userID int64, sessionFile string, owners ...runOwnership) {
 	if s.runLog == nil || sessionFile == "" {
 		return
 	}
-	key := runLogKey(chatID, threadID, userID)
-
-	s.runLogMu.Lock()
-	state, ok := s.runLogStates[key]
-	s.runLogMu.Unlock()
-	if !ok || state == nil {
-		return
-	}
-
-	updateCtx, updateCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer updateCancel()
-	if err := s.runLog.Update(updateCtx, runlog.RunUpdate{
-		RunID:       state.runID,
-		SessionFile: &sessionFile,
-	}); err != nil {
-		log.Printf("runlog: failed to update session_file for %s: %v", state.runID, err)
-	}
-}
-
-// updateRunLogOutboundMessage updates the outbound Telegram message_id on a
-// completed runlog entry. Called after the final reply has been sent.
-func (s *Service) updateRunLogOutboundMessage(runID string, outboundMessageID int64) {
-	if s.runLog == nil || runID == "" || outboundMessageID == 0 {
-		return
-	}
-	updateCtx, updateCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer updateCancel()
-	if err := s.runLog.Update(updateCtx, runlog.RunUpdate{
-		RunID:             runID,
-		OutboundMessageID: &outboundMessageID,
-	}); err != nil {
-		log.Printf("runlog: failed to update outbound_message_id for %s: %v", runID, err)
-	}
-}
-
-// recordToolUse appends a tool name to the in-memory tool summary for a run.
-func (s *Service) recordToolUse(chatID int64, threadID int, userID int64, toolName string) {
-	if s.runLog == nil || toolName == "" {
-		return
-	}
-	key := runLogKey(chatID, threadID, userID)
-
-	s.runLogMu.Lock()
-	state, ok := s.runLogStates[key]
-	s.runLogMu.Unlock()
-	if !ok || state == nil {
-		return
-	}
-
-	state.mu.Lock()
-	if toolName == "Write" || toolName == "Edit" {
-		state.writeToolsUsed = true
-	}
-	if state.summary.Len() > 0 {
-		state.summary.WriteString(", ")
-	}
-	state.summary.WriteString(toolName)
-	state.summaryCount++
-	state.mu.Unlock()
-}
-
-// savePartialAssistant stores the current partial assistant response text
-// into the run log state. Used for checkpoint on timeout so the resume has
-// context of what the model was saying.
-func (s *Service) savePartialAssistant(chatID int64, threadID int, userID int64, text string) {
-	key := runLogKey(chatID, threadID, userID)
-	s.runLogMu.Lock()
-	state, ok := s.runLogStates[key]
-	s.runLogMu.Unlock()
-	if !ok || state == nil {
-		return
-	}
-	state.mu.Lock()
-	state.partialAssistant = redactAndTruncate(text, maxCheckpointRunes)
-	state.mu.Unlock()
-}
-
-// recordToolResult appends a summarized tool result to the tool summary.
-func (s *Service) recordToolResult(chatID int64, threadID int, userID int64, summary string) {
-	if s.runLog == nil || summary == "" {
-		return
-	}
-	key := runLogKey(chatID, threadID, userID)
-
-	s.runLogMu.Lock()
-	state, ok := s.runLogStates[key]
-	s.runLogMu.Unlock()
-	if !ok || state == nil {
-		return
-	}
-
-	state.mu.Lock()
-	state.summary.WriteString(" → [")
-	state.summary.WriteString(summary)
-	state.summary.WriteString("]")
-	state.mu.Unlock()
-}
-
-// completeRunLog marks the runlog entry with a terminal status and checkpoint.
-// All persisted data is redacted before storage to prevent credential leakage.
-func (s *Service) completeRunLog(chatID int64, threadID int, userID int64, status runlog.RunStatus, checkpoint, errMsg string) {
-	key := runLogKey(chatID, threadID, userID)
-
-	s.runLogMu.Lock()
-	state, ok := s.runLogStates[key]
-	delete(s.runLogStates, key)
-	s.runLogMu.Unlock()
-
-	if !ok || state == nil || s.runLog == nil {
-		return
-	}
-
-	// Capture final tool summary, pending events, and partial assistant text.
-	state.mu.Lock()
-	summary := state.summary.String()
-	partialAssistant := state.partialAssistant
-	pendingEvents := append([]runlog.RunEvent(nil), state.pendingEvents...)
-	state.pendingEvents = nil
-	state.mu.Unlock()
-
-	// Defensive redaction: assistant output may contain credentials.
-	summary = redactSecrets(summary)
-	checkpoint = redactSecrets(checkpoint)
-	errMsg = redactSecrets(errMsg)
-	partialAssistant = redactSecrets(partialAssistant)
-
-	// Build checkpoint with partial assistant text if available
-	if checkpoint == "" {
-		checkpoint = buildCheckpoint(status, "", summary, errMsg, partialAssistant)
-	} else {
-		checkpoint = buildCheckpoint(status, checkpoint, summary, errMsg, partialAssistant)
-	}
-
-	state.wg.Wait()
-
-	completeCtx, completeCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer completeCancel()
-	if len(pendingEvents) > 0 {
-		if err := s.runLog.RecordEvents(completeCtx, pendingEvents); err != nil {
-			log.Printf("runlog: failed to flush %d events for %s: %v", len(pendingEvents), state.runID, err)
+	sessionFile = sanitizeForPersistence(sessionFile, 512)
+	s.withRunOwnership(chatID, threadID, userID, owners, func() {
+		state, ok := s.runLogStateFor(chatID, threadID, userID, firstRunOwnership(owners))
+		if !ok || state == nil {
+			return
 		}
-	}
-	if err := s.runLog.Complete(completeCtx, state.runID, status, checkpoint, errMsg, summary); err != nil {
-		log.Printf("runlog: failed to complete %s (status=%s): %v", state.runID, status, err)
-	}
+
+		updateCtx, updateCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer updateCancel()
+		if err := s.runLog.Update(updateCtx, runlog.RunUpdate{
+			RunID:       state.runID,
+			SessionFile: &sessionFile,
+		}); err != nil {
+			log.Printf("runlog: failed to update session_file for %s: %s", state.runID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
+		}
+	})
 }
 
 // buildCheckpoint formats a textual checkpoint from run status and context.
@@ -1743,14 +1437,6 @@ func buildCheckpoint(status runlog.RunStatus, checkpoint, toolSummary, errMsg st
 		sb.WriteString("\nPróximo passo: continue a partir deste checkpoint")
 	}
 	return sb.String()
-}
-
-func truncatePrompt(prompt string) string {
-	const maxPromptBytes = 500
-	if len(prompt) > maxPromptBytes {
-		return truncateRunes(prompt, maxPromptBytes)
-	}
-	return prompt
 }
 
 const maxCheckpointRunes = 2000

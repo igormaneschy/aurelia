@@ -26,11 +26,40 @@ import (
 	"github.com/igormaneschy/aurelia/internal/users"
 )
 
+// ProgressState is a surface-neutral progress state. The core emits states;
+// each transport (Telegram receipt, TUI indicator) maps them to its own
+// surface without duplicating messages or polluting the transcript.
+type ProgressState string
+
+const (
+	// ProgressStateWorking means the run is actively producing feedback
+	// (tool_use, assistant text, steer resume).
+	ProgressStateWorking ProgressState = "working"
+	// ProgressStateWaiting means no feedback within the heartbeat threshold;
+	// the model is thinking without tools.
+	ProgressStateWaiting ProgressState = "waiting"
+	// ProgressStateStallWarning means the bridge reported a stall with
+	// severity=warning (long silence).
+	ProgressStateStallWarning ProgressState = "stall_warning"
+	// ProgressStateStallUrgent means the bridge reported a stall with
+	// severity=urgent.
+	ProgressStateStallUrgent ProgressState = "stall_urgent"
+	// ProgressStateDone means the run completed with a result.
+	ProgressStateDone ProgressState = "done"
+	// ProgressStateCanceled means the run was canceled before completion.
+	ProgressStateCanceled ProgressState = "canceled"
+	// ProgressStateFailed means the run ended with an error.
+	ProgressStateFailed ProgressState = "failed"
+)
+
 // ProgressReporter reports bridge tool activity to the chat transport.
 type ProgressReporter interface {
 	ReportTool(toolName, detail string)
 	ReportToolResult(summary string)
 	ReportText(text string)
+	// ReportState carries a surface-neutral state change with an optional
+	// human detail string. Adapters render it in their own surface.
+	ReportState(state ProgressState, detail string)
 	Delete()
 }
 
@@ -91,8 +120,8 @@ type Config struct {
 
 // Service owns the LLM/message pipeline independent from Telegram routing.
 type Service struct {
-	config          *config.AppConfig
-	bridge          *bridge.Bridge // PI-specific: lifecycle, cancel, model catalog
+	config            *config.AppConfig
+	bridge            *bridge.Bridge // PI-specific: lifecycle, cancel, model catalog
 	queryMaxRetries   int
 	queryRetryBackoff time.Duration
 	fallbackProvider  string
@@ -102,36 +131,36 @@ type Service struct {
 	// The callback must be fast and fail-open. May be nil.
 	OnEvent func(chatID int64, threadID int, userID int64, phase, level, message string)
 	// testBridgeQuery overrides bridge.Execute in tests when set.
-	testBridgeQuery  func(ctx context.Context, req bridge.Request) (<-chan bridge.Event, error)
-	testSessionStats  func(ctx context.Context, opts bridge.RequestOptions) (*bridge.SessionStats, error)
+	testBridgeQuery    func(ctx context.Context, req bridge.Request) (<-chan bridge.Event, error)
+	testSessionStats   func(ctx context.Context, opts bridge.RequestOptions) (*bridge.SessionStats, error)
 	testCompactSession func(ctx context.Context, chatID int64, threadID int, userID int64, opts bridge.RequestOptions) (*bridge.CompactSessionResult, error)
 	testRotateSession  func(ctx context.Context, chatID int64, threadID int, userID int64, opts bridge.RequestOptions) (*bridge.RotateSessionResult, error)
-	agents          *agents.Registry
-	profiles        *profiles.Resolver // Phase 1: canonical profile resolver
-	persona         *persona.CanonicalIdentityService
-	sessions        *session.Store
-	resolver        *runtime.PathResolver
-	memoryDir       string
-	exePath         string
-	botCwd          string
-	output          Output
-	dreamer         Dreamer
-	nudgeBuffer     *session.NudgeBuffer
-	memoryCache     *MemoryCache
-	projectIndex    *runtime.ProjectIndex
-	bindings        projectbinding.Store
-	bridgeFailures  FailureTracker
-	activeSessions  sync.Map // "chatID:threadID:userID" → context.CancelFunc
-	runLog          runlog.Store
-	runLogMu        sync.Mutex
-	runLogStates    map[string]*runLogState
-	continuity      continuity.Store
-	summaryCounter  *summaryCounter
-	summaryInterval int
-	tokenGuard      *session.TokenGuard
-	usersStore      *users.Store
-	userResolver    *users.Resolver
-	entryPoint      string
+	agents             *agents.Registry
+	profiles           *profiles.Resolver // Phase 1: canonical profile resolver
+	persona            *persona.CanonicalIdentityService
+	sessions           *session.Store
+	resolver           *runtime.PathResolver
+	memoryDir          string
+	exePath            string
+	botCwd             string
+	output             Output
+	dreamer            Dreamer
+	nudgeBuffer        *session.NudgeBuffer
+	memoryCache        *MemoryCache
+	projectIndex       *runtime.ProjectIndex
+	bindings           projectbinding.Store
+	bridgeFailures     FailureTracker
+	activeSessions     sync.Map // "chatID:threadID:userID" → context.CancelFunc
+	runLog             runlog.Store
+	runLogMu           sync.Mutex
+	runLogStates       map[string]*runLogState
+	continuity         continuity.Store
+	summaryCounter     *summaryCounter
+	summaryInterval    int
+	tokenGuard         *session.TokenGuard
+	usersStore         *users.Store
+	userResolver       *users.Resolver
+	entryPoint         string
 	// active tool monitoring state — set/cleared per-run for /status.
 	toolStateMu      sync.Mutex
 	activeToolStates map[string]activeToolState
@@ -253,11 +282,18 @@ func (s *Service) Cancel(chatID int64, threadID int, userID ...int64) bool {
 	key := sessionKey(chatID, threadID, uid)
 
 	// Stop the old goroutine so it doesn't retry after abort
-	if val, loaded := s.activeSessions.LoadAndDelete(key); loaded {
+	activeRunSlotMu.Lock()
+	val, loaded := s.activeSessions.LoadAndDelete(key)
+	if loaded {
+		if oldRun, ok := val.(*activeRun); ok {
+			markRunSuperseded(oldRun)
+		}
 		if cancelFn := extractCancelFn(val); cancelFn != nil {
 			cancelFn()
 		}
-	} else {
+	}
+	activeRunSlotMu.Unlock()
+	if !loaded {
 		return false
 	}
 
@@ -295,12 +331,18 @@ func (s *Service) CancelAllForUser(userID int64) bool {
 		}
 
 		// Cancel the local goroutine context and remove from active sessions.
-		if val, loaded := s.activeSessions.LoadAndDelete(key); loaded {
+		activeRunSlotMu.Lock()
+		val, loaded := deleteActiveSessionForCancel(&s.activeSessions, keyStr, value)
+		if loaded {
+			if oldRun, ok := val.(*activeRun); ok {
+				markRunSuperseded(oldRun)
+			}
 			if cancelFn := extractCancelFn(val); cancelFn != nil {
 				cancelFn()
 				cancelled = true
 			}
 		}
+		activeRunSlotMu.Unlock()
 
 		// Send a scoped bridge abort so the bridge also cleans up this session.
 		s.sendScopedAbort(chatID, threadID, uid)
@@ -308,6 +350,21 @@ func (s *Service) CancelAllForUser(userID int64) bool {
 		return true
 	})
 	return cancelled
+}
+
+// deleteActiveSessionForCancel removes the value observed by CancelAllForUser.
+// A replacement may be installed between sync.Map.Range and the deletion; the
+// activeRun path must compare the token so cancellation cannot delete the newer
+// run. Legacy function values are not comparable in Go, so they retain the
+// historical load-and-delete behavior under activeRunSlotMu.
+func deleteActiveSessionForCancel(sessions *sync.Map, key string, expected any) (any, bool) {
+	if run, ok := expected.(*activeRun); ok {
+		if sessions.CompareAndDelete(key, run) {
+			return run, true
+		}
+		return nil, false
+	}
+	return sessions.LoadAndDelete(key)
 }
 
 // scopedAbortRequest builds a bridge abort request scoped to a specific

@@ -15,16 +15,16 @@ type captureOutput struct {
 	confirmCalled bool
 }
 
-func (c *captureOutput) StartTyping(_ int64, _ int) func() { return func() {} }
-func (c *captureOutput) NewProgress(_ int64, _ int) ProgressReporter { return &fakeProgress{} }
-func (c *captureOutput) SendError(_ int64, _ int, text string) error { return nil }
+func (c *captureOutput) StartTyping(_ int64, _ int) func()                    { return func() {} }
+func (c *captureOutput) NewProgress(_ int64, _ int) ProgressReporter          { return &fakeProgress{} }
+func (c *captureOutput) SendError(_ int64, _ int, text string) error          { return nil }
 func (c *captureOutput) SendReply(_ int64, _ int, text string) (int64, error) { return 0, nil }
 func (c *captureOutput) SendText(_ int64, _ int, text string) (transport.MessageHandle, error) {
 	c.lastText = text
 	return nil, nil
 }
-func (c *captureOutput) DeleteMessage(_ transport.MessageHandle)          {}
-func (c *captureOutput) ConfirmMessage(_ int64, _ int) { c.confirmCalled = true }
+func (c *captureOutput) DeleteMessage(_ transport.MessageHandle) {}
+func (c *captureOutput) ConfirmMessage(_ int64, _ int)           { c.confirmCalled = true }
 
 func TestRunTimeoutTrackerKeepsFirstOrigin(t *testing.T) {
 	t.Parallel()
@@ -58,7 +58,7 @@ func TestClassifyBridgeErrorOutcomeTimeoutOrigins(t *testing.T) {
 	}{
 		{"bridge query", "query timeout: no result after 30 minutes", "timed_out", runlog.RunTimedOut, timeoutOriginBridgeQuery},
 		{"provider", "upstream timed out waiting for model", "timed_out", runlog.RunTimedOut, timeoutOriginProviderPI},
-		{"normal", "rate limit exceeded", "failed", runlog.RunFailed, "rate limit exceeded"},
+		{"normal", "rate limit exceeded", "failed", runlog.RunFailed, "provider_error"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

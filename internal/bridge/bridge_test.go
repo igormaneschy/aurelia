@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -249,10 +250,41 @@ rl.on('close', () => process.exit(0));
 	}
 }
 
-func TestBridge_CancelRequest(t *testing.T) {
+func TestBridge_Execute_DuplicateRequestIDReleasesReservedStream(t *testing.T) {
 	dir := t.TempDir()
+	b := newMockBridge(t, dir, `
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+rl.on('line', () => {});
+rl.on('close', () => process.exit(0));
+`)
 
-	cancelMockJS := `
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	first, err := b.Execute(ctx, Request{Command: "query", Prompt: "first", RequestID: "duplicate-1"})
+	if err != nil {
+		t.Fatalf("first Execute() error: %v", err)
+	}
+	if _, err := b.Execute(ctx, Request{Command: "query", Prompt: "second", RequestID: "duplicate-1"}); err == nil {
+		t.Fatal("duplicate Execute() unexpectedly succeeded")
+	}
+
+	b.mu.Lock()
+	budget := b.streamBudget
+	b.mu.Unlock()
+	budget.mu.Lock()
+	active := budget.active
+	budget.mu.Unlock()
+	if active != 1 {
+		t.Fatalf("active streams after duplicate request = %d, want 1", active)
+	}
+
+	cancel()
+	for range first {
+	}
+}
+
+const cancelRequestMockJS = `
 const readline = require('readline');
 const rl = readline.createInterface({ input: process.stdin, terminal: false });
 const active = new Set();
@@ -274,7 +306,10 @@ rl.on('line', (line) => {
 });
 rl.on('close', () => process.exit(0));
 `
-	b := newMockBridge(t, dir, cancelMockJS)
+
+func TestBridge_CancelRequest(t *testing.T) {
+	dir := t.TempDir()
+	b := newMockBridge(t, dir, cancelRequestMockJS)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -294,6 +329,32 @@ rl.on('close', () => process.exit(0));
 	ev := <-ch
 	if ev.Type != "error" || ev.Message != "request canceled" {
 		t.Fatalf("cancel event = %+v, want request canceled error", ev)
+	}
+}
+
+func TestBridge_CancelRequest_AllowedAtOrdinaryStreamCap(t *testing.T) {
+	dir := t.TempDir()
+	b := newMockBridge(t, dir, cancelRequestMockJS)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	streams := make([]<-chan Event, 0, maxActiveRequestStreams)
+	for i := 0; i < maxActiveRequestStreams; i++ {
+		requestID := fmt.Sprintf("cap-%d", i)
+		ch, err := b.Execute(ctx, Request{Command: "query", RequestID: requestID, Prompt: "hold"})
+		if err != nil {
+			t.Fatalf("Execute(%s) error: %v", requestID, err)
+		}
+		if ev := <-ch; ev.Type != "system" {
+			t.Fatalf("first event for %s = %q, want system", requestID, ev.Type)
+		}
+		streams = append(streams, ch)
+	}
+
+	if err := b.CancelRequest(ctx, "cap-0"); err != nil {
+		t.Fatalf("CancelRequest at ordinary stream cap failed: %v", err)
+	}
+	for range streams[0] {
 	}
 }
 
@@ -560,57 +621,6 @@ func TestBridge_SetEnvAllowlist_NoAllowlistInheritsEnv(t *testing.T) {
 	}
 }
 
-func TestBridge_EnvAllowlist_ExcludesSecrets(t *testing.T) {
-	t.Setenv("ANTHROPIC_API_KEY", "sk-test-123")
-	t.Setenv("TELEGRAM_BOT_TOKEN", "should-be-excluded")
-
-	dir := t.TempDir()
-
-	envCheckJS := `
-const readline = require('readline');
-const rl = readline.createInterface({ input: process.stdin, terminal: false });
-rl.on('line', (line) => {
-    const req = JSON.parse(line);
-    const rid = req.request_id || "";
-    const key = req.prompt || "";
-    const val = process.env[key] || "__UNDEFINED__";
-    process.stdout.write(JSON.stringify({event:"result",request_id:rid,content:key + "=" + val}) + "\n");
-});
-rl.on('close', () => process.exit(0));
-`
-	if err := os.WriteFile(filepath.Join(dir, "env-check.js"), []byte(envCheckJS), 0644); err != nil {
-		t.Fatal(err)
-	}
-
-	b := New(dir, "")
-	b.command = "node"
-	b.args = []string{"env-check.js"}
-	t.Cleanup(func() { b.Stop() })
-
-	b.SetEnvAllowlist(AllowlistEnv("ANTHROPIC_API_KEY"))
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// ANTHROPIC_API_KEY should be accessible in child process.
-	ev, err := b.ExecuteSync(ctx, Request{Command: "get-env", Prompt: "ANTHROPIC_API_KEY"})
-	if err != nil {
-		t.Fatalf("ExecuteSync(ANTHROPIC_API_KEY) error: %v", err)
-	}
-	if !strings.Contains(ev.Content, "sk-test-123") {
-		t.Errorf("ANTHROPIC_API_KEY not found in child env, got: %s", ev.Content)
-	}
-
-	// TELEGRAM_BOT_TOKEN should NOT be accessible.
-	ev, err = b.ExecuteSync(ctx, Request{Command: "get-env", Prompt: "TELEGRAM_BOT_TOKEN"})
-	if err != nil {
-		t.Fatalf("ExecuteSync(TELEGRAM_BOT_TOKEN) error: %v", err)
-	}
-	if strings.Contains(ev.Content, "should-be-excluded") {
-		t.Errorf("TELEGRAM_BOT_TOKEN found in child env, should be excluded: %s", ev.Content)
-	}
-}
-
 func TestStopBeforeStart(t *testing.T) {
 	b := New("/nonexistent", "")
 	done := make(chan struct{})
@@ -729,7 +739,7 @@ rl.on('line', (line) => {
     let req;
     try { req = JSON.parse(line); } catch(e) { return; }
     const rid = req.request_id || "";
-    if (req.command === "flood") {
+    if (req.command === "query") {
         const count = parseInt(req.prompt) || 400;
         for (let i = 0; i < count; i++) {
             process.stdout.write(JSON.stringify({event:"assistant",request_id:rid,text:"msg " + i}) + "\n");
@@ -741,49 +751,53 @@ rl.on('line', (line) => {
 rl.on('close', () => { process.exit(0); });
 `
 
-func TestBridge_DroppedEvents_WhenConsumerSlow(t *testing.T) {
-	dir := t.TempDir()
-	b := newMockBridge(t, dir, floodMockJS)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// 400 events fit in channel(128) + overflow(512); consumer never reads.
-	_, err := b.Execute(ctx, Request{Command: "flood", Prompt: "400", RequestID: "flood-1"})
-	if err != nil {
-		t.Fatalf("Execute() error: %v", err)
+func TestRequestStream_BoundedOverflowDropsAndPreservesTerminal(t *testing.T) {
+	s := newRequestStream(1)
+	accepted := 1 + eventOverflowBuffer
+	for i := 0; i < accepted; i++ {
+		if !s.deliver(Event{Type: "assistant", Text: "buffered"}) {
+			t.Fatalf("buffered event %d was dropped before capacity", i)
+		}
 	}
 
-	time.Sleep(500 * time.Millisecond)
-
-	if dropped := b.DroppedEvents(); dropped != 0 {
-		t.Fatalf("expected 0 dropped events with overflow buffer, got %d", dropped)
+	dropped := 0
+	for i := 0; i < 50; i++ {
+		if !s.deliver(Event{Type: "assistant", Text: "overflow"}) {
+			dropped++
+		}
 	}
-}
-
-func TestBridge_DroppedEvents_WhenOverflowExhausted(t *testing.T) {
-	dir := t.TempDir()
-	b := newMockBridge(t, dir, floodMockJS)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// Consumer never reads: proxy blocks when out is full (another eventChannelBuffer).
-	total := eventChannelBuffer*2 + eventOverflowBuffer + 50
-	_, err := b.Execute(ctx, Request{
-		Command:   "flood",
-		Prompt:    fmt.Sprintf("%d", total),
-		RequestID: "flood-overflow",
-	})
-	if err != nil {
-		t.Fatalf("Execute() error: %v", err)
+	terminalDropped, ok := s.deliverTerminal(Event{Type: "result", Content: "done"})
+	if !ok {
+		t.Fatal("terminal result was not preserved after overflow exhaustion")
+	}
+	dropped += terminalDropped
+	if dropped != 51 {
+		t.Fatalf("dropped events = %d, want 51 (50 overflow + 1 terminal eviction)", dropped)
 	}
 
-	time.Sleep(500 * time.Millisecond)
-
-	wantDropped := uint64(50)
-	if dropped := b.DroppedEvents(); dropped != wantDropped {
-		t.Fatalf("DroppedEvents() = %d, want %d", dropped, wantDropped)
+	seenTerminal := false
+	for {
+		select {
+		case ev := <-s.ch:
+			if ev.Type == "result" {
+				seenTerminal = true
+			}
+		default:
+			for {
+				ev, has := s.dequeueOverflow()
+				if !has {
+					break
+				}
+				if ev.Type == "result" {
+					seenTerminal = true
+				}
+			}
+			if !seenTerminal {
+				t.Fatal("terminal result was lost from the bounded stream")
+			}
+			s.close()
+			return
+		}
 	}
 }
 
@@ -794,12 +808,10 @@ func TestBridge_OverflowBuffer_DeliveredInOrder(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	ch, err := b.Execute(ctx, Request{Command: "flood", Prompt: "300", RequestID: "flood-order"})
+	ch, err := b.Execute(ctx, Request{Command: "query", Prompt: "300", RequestID: "flood-order"})
 	if err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
-
-	time.Sleep(200 * time.Millisecond)
 
 	var count int
 	var gotResult bool
@@ -972,9 +984,11 @@ rl.on('line', (line) => {
     const rid = req.request_id || "";
 
     if (req.command === "compact-session") {
-        // Emit compaction events, then result
+        // Emit compaction events, then result. delta_tokens is negative
+        // (effective reduction) and duration_measured=true with 0ms — the
+        // authoritative presence marker survives even a zero duration.
         process.stdout.write(JSON.stringify({event:"compaction_start",request_id:rid,reason:"manual"}) + "\n");
-        process.stdout.write(JSON.stringify({event:"compaction_end",request_id:rid,reason:"manual",tokens_before:150000,success:true}) + "\n");
+        process.stdout.write(JSON.stringify({event:"compaction_end",request_id:rid,reason:"manual",tokens_before:150000,tokens_after:140000,delta_tokens:-10000,success:true,duration_measured:true,duration_ms:0}) + "\n");
         process.stdout.write(JSON.stringify({
             event: "result",
             request_id: rid,
@@ -1023,6 +1037,42 @@ rl.on('line', (line) => {
     }
 });
 
+rl.on('close', () => process.exit(0));
+`
+
+const cancelCompactionMockJS = `
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+const active = new Set();
+rl.on('line', (line) => {
+    const req = JSON.parse(line);
+    const rid = req.request_id || "";
+    if (req.command === "compact-session") {
+        active.add(rid);
+        process.stdout.write(JSON.stringify({event:"compaction_start",request_id:rid,reason:"manual"}) + "\n");
+        return;
+    }
+    if (req.command === "cancel") {
+        const target = req.target_request_id || "";
+        active.delete(target);
+        process.stdout.write(JSON.stringify({event:"error",request_id:target,message:"request canceled"}) + "\n");
+        process.stdout.write(JSON.stringify({event:"result",request_id:rid,content:"canceled"}) + "\n");
+    }
+});
+rl.on('close', () => process.exit(0));
+`
+
+const malformedCompactionMockJS = `
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+rl.on('line', (line) => {
+    const req = JSON.parse(line);
+    const rid = req.request_id || "";
+    if (req.command === "compact-session") {
+        process.stdout.write(JSON.stringify({event:"compaction_start",request_id:rid,reason:"manual"}) + "\n");
+        process.stdout.write(JSON.stringify({event:"result",request_id:rid,content:"not-json"}) + "\n");
+    }
+});
 rl.on('close', () => process.exit(0));
 `
 
@@ -1182,6 +1232,175 @@ func TestBridge_CompactSession_Success(t *testing.T) {
 	}
 	if result.SessionFile != "/tmp/sessions/test.jsonl" {
 		t.Fatalf("SessionFile = %q", result.SessionFile)
+	}
+}
+
+// TestBridge_CompactSessionWithEvents_StreamsIntermediateEvents verifies the
+// event-aware path: bounded compaction_start/end events are delivered to the
+// callback (including a measured 0ms duration), the terminal is handled
+// exactly once, and the wrapper result matches CompactSession.
+func TestBridge_CompactSessionWithEvents_StreamsIntermediateEvents(t *testing.T) {
+	dir := t.TempDir()
+	b := newMockBridge(t, dir, sessionStatsMockJS)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var got []CompactSessionEvent
+	result, err := b.CompactSessionWithEvents(ctx, RequestOptions{
+		Resume: "/tmp/sessions/test.jsonl",
+	}, func(ev CompactSessionEvent) {
+		got = append(got, ev)
+	})
+	if err != nil {
+		t.Fatalf("CompactSessionWithEvents() error: %v", err)
+	}
+	if result == nil || !result.Success || result.TokensBefore != 150000 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+
+	if len(got) != 2 {
+		t.Fatalf("intermediate events = %d, want 2 (start + end)", len(got))
+	}
+	if got[0].Type != "compaction_start" || got[0].Reason != "manual" {
+		t.Fatalf("compaction_start event = %+v, want type=compaction_start reason=manual", got[0])
+	}
+	end := got[1]
+	if end.Type != "compaction_end" || !end.Success || end.Reason != "manual" {
+		t.Fatalf("compaction_end event = %+v, want success manual end", end)
+	}
+	if end.TokensBefore != 150000 || end.TokensAfter == nil || *end.TokensAfter != 140000 ||
+		end.DeltaTokens == nil || *end.DeltaTokens != -10000 {
+		t.Fatalf("compaction_end tokens = %+v, want before=150000 after=140000 delta=-10000", end)
+	}
+	// duration_measured=true is the authoritative presence marker, present
+	// even when the measured duration is 0ms.
+	if !end.DurationMeasured || end.DurationMs != 0 {
+		t.Fatalf("compaction_end duration = measured=%v ms=%d, want measured=true ms=0", end.DurationMeasured, end.DurationMs)
+	}
+}
+
+func TestBridge_CompactSessionWithEvents_CancelReturnsContextErrorAndOneEnd(t *testing.T) {
+	dir := t.TempDir()
+	b := newMockBridge(t, dir, cancelCompactionMockJS)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	events := make(chan CompactSessionEvent, 4)
+	resultCh := make(chan struct {
+		result *CompactSessionResult
+		err    error
+	}, 1)
+	go func() {
+		result, err := b.CompactSessionWithEvents(ctx, RequestOptions{}, func(ev CompactSessionEvent) {
+			events <- ev
+		})
+		resultCh <- struct {
+			result *CompactSessionResult
+			err    error
+		}{result: result, err: err}
+	}()
+
+	select {
+	case start := <-events:
+		if start.Type != "compaction_start" || start.RequestID == "" {
+			t.Fatalf("start = %+v, want validated request correlation", start)
+		}
+		cancel()
+	case <-time.After(5 * time.Second):
+		t.Fatal("compaction did not emit start before cancellation")
+	}
+
+	select {
+	case outcome := <-resultCh:
+		if !errors.Is(outcome.err, context.Canceled) {
+			t.Fatalf("error = %v, want context.Canceled", outcome.err)
+		}
+		if outcome.result != nil {
+			t.Fatalf("result = %+v, want nil after cancellation", outcome.result)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled compaction did not terminate")
+	}
+
+	close(events)
+	var got []CompactSessionEvent
+	// The callback channel was consumed once above; the remaining buffered item
+	// is the synthesized terminal end event.
+	for ev := range events {
+		got = append(got, ev)
+	}
+	if len(got) != 1 || got[0].Type != "compaction_end" || got[0].Success || got[0].ErrorClass != "compaction_error" {
+		t.Fatalf("events after cancellation = %+v, want exactly one bounded end", got)
+	}
+	if got[0].RequestID == "" {
+		t.Fatal("compaction_end lost request_id correlation")
+	}
+}
+
+func TestBridge_CompactSessionWithEvents_MalformedResultEmitsOneEnd(t *testing.T) {
+	b := newMockBridge(t, t.TempDir(), malformedCompactionMockJS)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var events []CompactSessionEvent
+	_, err := b.CompactSessionWithEvents(ctx, RequestOptions{}, func(ev CompactSessionEvent) {
+		events = append(events, ev)
+	})
+	if err == nil || !strings.Contains(err.Error(), "compact-session parse") {
+		t.Fatalf("error = %v, want parse error", err)
+	}
+	if len(events) != 2 || events[0].Type != "compaction_start" || events[1].Type != "compaction_end" || events[1].Success {
+		t.Fatalf("events = %+v, want one start and one failed end", events)
+	}
+}
+
+func TestBridge_CompactSessionWithEvents_ResultWithoutEndSynthesizesMatchingSuccess(t *testing.T) {
+	dir := t.TempDir()
+	resultWithoutEndMock := `
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+rl.on('line', (line) => {
+    const req = JSON.parse(line);
+    const rid = req.request_id || "";
+    if (req.command !== "compact-session") return;
+    process.stdout.write(JSON.stringify({event:"compaction_start",request_id:rid,reason:"manual"}) + "\n");
+    process.stdout.write(JSON.stringify({event:"result",request_id:rid,content:JSON.stringify({success:true,tokens_before:10})}) + "\n");
+});
+rl.on('close', () => process.exit(0));
+`
+	b := newMockBridge(t, dir, resultWithoutEndMock)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var events []CompactSessionEvent
+	result, err := b.CompactSessionWithEvents(ctx, RequestOptions{}, func(ev CompactSessionEvent) {
+		events = append(events, ev)
+	})
+	if err != nil || result == nil || !result.Success {
+		t.Fatalf("result = %+v, error = %v, want successful result", result, err)
+	}
+	if len(events) != 2 || events[0].Type != "compaction_start" || events[1].Type != "compaction_end" {
+		t.Fatalf("events = %+v, want one start and one synthesized end", events)
+	}
+	if !events[1].Success || events[1].ErrorClass != "" {
+		t.Fatalf("synthesized end = %+v, want success without error class", events[1])
+	}
+}
+
+func TestBridge_RejectsOversizedSerializedRequestBeforeStart(t *testing.T) {
+	b := New(t.TempDir(), "")
+	_, err := b.Execute(context.Background(), Request{
+		Command:   "query",
+		RequestID: "oversized-1",
+		Prompt:    strings.Repeat("x", maxBridgeRequestBytes),
+	})
+	if err == nil || !strings.Contains(err.Error(), "maximum serialized size") {
+		t.Fatalf("error = %v, want serialized request size rejection", err)
+	}
+	b.mu.Lock()
+	started := b.started
+	b.mu.Unlock()
+	if started {
+		t.Fatal("oversized request started the bridge before validation")
 	}
 }
 

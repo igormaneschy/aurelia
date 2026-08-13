@@ -18,15 +18,15 @@ type chromeModel struct {
 	width  int
 	height int
 
-	showSidebar     bool
-	sidebarFocused  bool
-	sidebarTable    table.Model
+	showSidebar      bool
+	sidebarFocused   bool
+	sidebarTable     table.Model
 	sessions         []tuiSessionInfo
 	sessionUnread    map[int64]int
 	sessionSeenCount map[int64]int
 	sidebarCursor    int
-	sidebarHoverRow int // hovered session row from mouse motion; -1 = none
-	statusBarHover  statusBarHitKind
+	sidebarHoverRow  int // hovered session row from mouse motion; -1 = none
+	statusBarHover   statusBarHitKind
 
 	spinner spinner.Model
 
@@ -37,11 +37,11 @@ type chromeModel struct {
 	projectPanelOpen bool
 	projectState     *ipc.ProjectStatePayload
 
-	daemonLabel    string
-	cwdPath        string
-	connectLatency time.Duration
-	activeModel    string
-	turnStart      time.Time
+	daemonLabel       string
+	cwdPath           string
+	connectLatency    time.Duration
+	activeModel       string
+	turnStart         time.Time
 	mouseEnabled      bool
 	noMouse           bool
 	sessionFlashUntil time.Time
@@ -49,6 +49,7 @@ type chromeModel struct {
 	attachProgress    attachProgress
 	animations        animState
 	activeTools       []toolInfo
+	stallLine         string // human stall state from progress events; "" when normal
 
 	styles      themeStyles
 	theme       Theme

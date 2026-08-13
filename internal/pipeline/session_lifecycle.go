@@ -37,7 +37,7 @@ func (s *Service) sendLifecycleNotice(chatID int64, threadID int, message string
 		return
 	}
 	if _, err := s.output.SendText(chatID, threadID, message); err != nil {
-		log.Printf("lifecycle: send notice failed chat=%d thread=%d: %v", chatID, threadID, err)
+		log.Printf("lifecycle: send notice failed chat=%d thread=%d: %s", chatID, threadID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
 	}
 }
 
@@ -55,7 +55,11 @@ func (s *Service) sendLifecycleNotice(chatID int64, threadID int, message string
 //  4. Record lifecycle decision as runlog event
 //
 // Returns a result with the modified request or skip signal.
-func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatID int64, threadID int, userID int64) lifecycleDecisionResult {
+func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatID int64, threadID int, userID int64, owners ...runOwnership) lifecycleDecisionResult {
+	ownership := firstRunOwnership(owners)
+	if len(owners) > 0 && !s.runOwnershipActive(chatID, threadID, userID, owners) {
+		return lifecycleDecisionResult{SkipExecution: true}
+	}
 	if s.config == nil {
 		return lifecycleDecisionResult{
 			Decision: session.Decision{
@@ -87,6 +91,9 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 		signals = s.sessions.GetHealthSignals(chatID, threadID, userID)
 	}
 	signals = s.enrichLifecycleSignals(ctx, req, signals)
+	if len(owners) > 0 && !s.runOwnershipActive(chatID, threadID, userID, owners) {
+		return lifecycleDecisionResult{SkipExecution: true}
+	}
 
 	// Evaluate base lifecycle, then apply token guard for active large sessions.
 	dec := session.EvaluateLifecycle(signals, policy)
@@ -112,7 +119,7 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 		chatID, threadID, userID, dec.State, dec.Action, dec.Reason)
 
 	// Record lifecycle decision as runlog event
-	s.recordLifecycleDecision(chatID, threadID, userID, dec)
+	s.recordLifecycleDecision(chatID, threadID, userID, dec, ownership)
 
 	// Apply action
 	switch dec.Action {
@@ -133,19 +140,22 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 		// technical compaction language in user-facing messages).
 		s.sendLifecycleNotice(chatID, threadID, lifecycleCompactMessage)
 
-		result, err := s.compactSession(ctx, chatID, threadID, userID, req.Options)
+		result, err := s.compactSession(ctx, chatID, threadID, userID, req.Options, ownership)
 		if err != nil {
-			log.Printf("lifecycle: compaction failed for chat=%d: %v — falling back to cold resume", chatID, err)
+			safeErr := sanitizeForPersistence(err.Error(), maxRunlogErrorRunes)
+			log.Printf("lifecycle: compaction failed for chat=%d: %s — falling back to cold resume", chatID, safeErr)
 			s.sendLifecycleNotice(chatID, threadID, lifecycleCompactFailedMessage)
-			if s.sessions != nil {
-				s.sessions.MarkFailure(chatID, threadID, userID, "compaction failed")
-			}
+			s.withRunOwnership(chatID, threadID, userID, owners, func() {
+				if s.sessions != nil {
+					s.sessions.MarkFailure(chatID, threadID, userID, "compaction failed")
+				}
+			})
 			req.Options.Continue = false
 			return lifecycleDecisionResult{
 				Decision: session.Decision{
 					State:  session.HealthSuspect,
 					Action: session.ActionColdResume,
-					Reason: fmt.Sprintf("compaction failed: %v", err),
+					Reason: "compaction failed",
 				},
 				ModifiedReq: req,
 			}
@@ -153,9 +163,11 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 
 		if result == nil || !result.Success {
 			log.Printf("lifecycle: compaction returned unsuccessful result for chat=%d", chatID)
-			if s.sessions != nil {
-				s.sessions.MarkFailure(chatID, threadID, userID, "compaction returned unsuccessful result")
-			}
+			s.withRunOwnership(chatID, threadID, userID, owners, func() {
+				if s.sessions != nil {
+					s.sessions.MarkFailure(chatID, threadID, userID, "compaction returned unsuccessful result")
+				}
+			})
 			req.Options.Continue = false
 			return lifecycleDecisionResult{
 				Decision: session.Decision{
@@ -191,7 +203,7 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 
 		result, err := s.rotateSession(ctx, chatID, threadID, userID, req.Options)
 		if err != nil {
-			log.Printf("lifecycle: rotation failed for chat=%d: %v — falling back to cold resume", chatID, err)
+			log.Printf("lifecycle: rotation failed for chat=%d: %s — falling back to cold resume", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
 
 			// Show billing-specific message if provider is out of credits.
 			// Skip MarkFailure for billing errors — they're provider issues, not session failures.
@@ -199,16 +211,18 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 				s.sendLifecycleNotice(chatID, threadID, "⚠️ Provider sem créditos. Troque com `/model`.")
 			} else {
 				s.sendLifecycleNotice(chatID, threadID, lifecycleRotateFailedMessage)
-				if s.sessions != nil {
-					s.sessions.MarkFailure(chatID, threadID, userID, "rotation failed")
-				}
+				s.withRunOwnership(chatID, threadID, userID, owners, func() {
+					if s.sessions != nil {
+						s.sessions.MarkFailure(chatID, threadID, userID, "rotation failed")
+					}
+				})
 			}
 			req.Options.Continue = false
 			return lifecycleDecisionResult{
 				Decision: session.Decision{
 					State:  session.HealthSuspect,
 					Action: session.ActionColdResume,
-					Reason: fmt.Sprintf("rotation failed: %v", err),
+					Reason: "rotation failed",
 				},
 				ModifiedReq: req,
 			}
@@ -216,9 +230,11 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 
 		if result == nil || !result.Success || result.NewSessionFile == "" {
 			log.Printf("lifecycle: rotation returned invalid result for chat=%d", chatID)
-			if s.sessions != nil {
-				s.sessions.MarkFailure(chatID, threadID, userID, "rotation returned invalid result")
-			}
+			s.withRunOwnership(chatID, threadID, userID, owners, func() {
+				if s.sessions != nil {
+					s.sessions.MarkFailure(chatID, threadID, userID, "rotation returned invalid result")
+				}
+			})
 			req.Options.Continue = false
 			return lifecycleDecisionResult{
 				Decision: session.Decision{
@@ -241,10 +257,12 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 		// Update session store with new session file. SetSession already marks
 		// active=true, and we continue from the compacted session instead of
 		// forcing a cold resume that injects checkpoint data unnecessarily.
-		if s.sessions != nil {
-			s.sessions.SetSession(chatID, threadID, userID, result.NewSessionFile)
-			s.sessions.ClearFailureState(chatID, threadID, userID)
-		}
+		s.withRunOwnership(chatID, threadID, userID, owners, func() {
+			if s.sessions != nil {
+				s.sessions.SetSession(chatID, threadID, userID, result.NewSessionFile)
+				s.sessions.ClearFailureState(chatID, threadID, userID)
+			}
+		})
 
 		req.Options.Resume = result.NewSessionFile
 		// Validate the new session file exists before setting Continue=true.
@@ -287,7 +305,7 @@ func (s *Service) enrichLifecycleSignals(ctx context.Context, req *bridge.Reques
 		stats, err = s.bridge.GetSessionStats(statsCtx, req.Options)
 	}
 	if err != nil {
-		log.Printf("lifecycle: get-session-stats failed for session=%s: %s", filepath.Base(req.Options.Resume), redactSecrets(err.Error()))
+		log.Printf("lifecycle: get-session-stats failed for session=%s: %s", filepath.Base(req.Options.Resume), sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
 		return signals
 	}
 	if stats == nil {
@@ -325,10 +343,34 @@ func (s *Service) rotateSession(ctx context.Context, chatID int64, threadID int,
 	return s.bridge.RotateSession(rotateCtx, opts)
 }
 
-// compactSession runs the compact-session bridge command with a timeout.
-func (s *Service) compactSession(ctx context.Context, chatID int64, threadID int, userID int64, opts bridge.RequestOptions) (*bridge.CompactSessionResult, error) {
+// compactSession runs the compact-session bridge command with a timeout and
+// records bounded compaction telemetry in the active runlog. The runlog must
+// already be started (processRunWithCancel starts it before applyLifecycle)
+// so proactive compaction events share the same run_id/request_id as the
+// prompt that follows. If the runlog state is missing (Start failed), the
+// call stays fail-open: compaction still runs, its events are just not
+// persisted.
+func (s *Service) compactSession(ctx context.Context, chatID int64, threadID int, userID int64, opts bridge.RequestOptions, owners ...runOwnership) (*bridge.CompactSessionResult, error) {
+	ownership := firstRunOwnership(owners)
 	if s.testCompactSession != nil {
-		return s.testCompactSession(ctx, chatID, threadID, userID, opts)
+		// Test hook: mirror the event-aware bridge path by recording a
+		// bounded start before and end after the hook call.
+		s.recordCompactionEvent(chatID, threadID, userID, bridge.CompactSessionEvent{
+			Type: "compaction_start", Reason: "manual",
+		}, ownership)
+		result, err := s.testCompactSession(ctx, chatID, threadID, userID, opts)
+		end := bridge.CompactSessionEvent{
+			Type: "compaction_end", Reason: "manual",
+			Success: result != nil && result.Success,
+		}
+		if err != nil || result == nil || !result.Success {
+			end.ErrorClass = "compaction_error"
+		}
+		if result != nil && result.TokensBefore > 0 {
+			end.TokensBefore = result.TokensBefore
+		}
+		s.recordCompactionEvent(chatID, threadID, userID, end, ownership)
+		return result, err
 	}
 	if s.bridge == nil {
 		return nil, fmt.Errorf("bridge not available")
@@ -345,17 +387,102 @@ func (s *Service) compactSession(ctx context.Context, chatID int64, threadID int
 	opts.ThreadID = threadID
 	opts.UserID = userID
 
-	return s.bridge.CompactSession(compactCtx, opts)
+	// Stream bounded intermediate compaction events into the runlog timeline.
+	// The callback only receives enum/static fields (never raw SDK text) and
+	// runs on the caller's goroutine, so no extra synchronization is needed.
+	sawStart := false
+	sawEnd := false
+	onEvent := func(ev bridge.CompactSessionEvent) {
+		if ev.Type == "compaction_start" {
+			sawStart = true
+		}
+		if ev.Type == "compaction_end" {
+			sawEnd = true
+		}
+		s.recordCompactionEvent(chatID, threadID, userID, ev, ownership)
+	}
+	result, err := s.bridge.CompactSessionWithEvents(compactCtx, opts, onEvent)
+	if err != nil && sawStart && !sawEnd {
+		// The bridge stream failed without emitting a compaction_end: record
+		// a bounded failure classification so the timeline shows the outcome
+		// (the raw error message is never persisted).
+		s.recordCompactionEvent(chatID, threadID, userID, bridge.CompactSessionEvent{
+			Type:       "compaction_end",
+			Reason:     "manual",
+			Success:    false,
+			ErrorClass: "compaction_error",
+		}, ownership)
+	}
+	if err == nil && result != nil && sawStart && !sawEnd {
+		// A successful bridge result without a streamed terminal event must not
+		// look like an unobserved success in the runlog.
+		s.recordCompactionEvent(chatID, threadID, userID, bridge.CompactSessionEvent{
+			Type:         "compaction_end",
+			Reason:       "manual",
+			Success:      result.Success,
+			TokensBefore: result.TokensBefore,
+		}, ownership)
+	}
+	return result, err
+}
+
+// recordCompactionEvent persists a single bounded compaction event into the
+// active runlog timeline (best-effort). Only enum/static values are written:
+// reason is normalized to manual|automatic|unknown, error_class to the
+// compaction_error allowlist (anything else degrades to "unknown"), and the
+// raw SDK reason/error text never reaches the timeline.
+func (s *Service) recordCompactionEvent(chatID int64, threadID int, userID int64, ev bridge.CompactSessionEvent, owners ...runOwnership) {
+	if s.runLog == nil {
+		return
+	}
+	if ev.Type != "compaction_start" && ev.Type != "compaction_end" {
+		return
+	}
+	meta := map[string]any{"event": ev.Type, "source": "bridge_health"}
+	if requestID := safeTelemetryID(ev.RequestID); requestID != "" {
+		meta["request_id"] = requestID
+	}
+	if ts := safeTelemetryTimestamp(ev.Timestamp); ts != "" {
+		meta["ts_iso"] = ts
+	}
+	meta["reason"] = normalizeCompactionReason(ev.Reason)
+	if ev.Type == "compaction_end" {
+		meta["success"] = ev.Success
+		if ev.ErrorClass != "" {
+			meta["error_class"] = normalizeErrorClass(ev.ErrorClass)
+		}
+		meta["tokens_before"] = boundedTelemetryMetric(ev.TokensBefore, false)
+		// Explicit pointer presence: 0 (neutral) and negative (effective
+		// reduction) deltas are observable, never hidden.
+		if ev.TokensAfter != nil {
+			meta["tokens_after"] = boundedTelemetryMetric(*ev.TokensAfter, false)
+		}
+		if ev.DeltaTokens != nil {
+			delta := boundedTelemetryMetric(*ev.DeltaTokens, true)
+			meta["delta_tokens"] = delta
+			meta["effectiveness"] = compactionEffectiveness(delta)
+		} else {
+			meta["effectiveness"] = "unknown"
+		}
+		if ev.DurationMeasured && ev.DurationMs >= 0 && ev.DurationMs <= 24*time.Hour.Milliseconds() {
+			meta["duration_measured"] = true
+			meta["duration_ms"] = ev.DurationMs
+		}
+	}
+	evRun := observability.NewEvent("",
+		observability.PhaseBridgeCompaction, fmt.Sprintf("event=%s", ev.Type))
+	evRun.MetadataJSON = telemetryMetadata(meta)
+	s.recordPipelineEvent(chatID, threadID, userID, evRun, firstRunOwnership(owners))
 }
 
 // recordLifecycleDecision records the lifecycle decision as a runlog event.
-func (s *Service) recordLifecycleDecision(chatID int64, threadID int, userID int64, dec session.Decision) {
+func (s *Service) recordLifecycleDecision(chatID int64, threadID int, userID int64, dec session.Decision, owners ...runOwnership) {
 	if s.runLog == nil {
 		return
 	}
 	s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent("",
 		observability.PhaseSessionLifecycle,
-		fmt.Sprintf("state=%s action=%s reason=%s", dec.State, dec.Action, redactSecrets(dec.Reason))))
+		fmt.Sprintf("state=%s action=%s reason=%s", dec.State, dec.Action, sanitizeForPersistence(dec.Reason, maxRunlogErrorRunes))), firstRunOwnership(owners))
 }
 
 // getLifecyclePolicy returns the active lifecycle policy from config.

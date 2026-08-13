@@ -8,7 +8,6 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
-	
 )
 
 // fakeModelCataloger implements ModelCataloger for tests without a live bridge.
@@ -328,7 +327,7 @@ func TestApplyVisionFallback_NoImages(t *testing.T) {
 func TestApplyVisionFallback_ProfileOverride(t *testing.T) {
 	cfg := &config.AppConfig{
 		DefaultProvider: "openai",
-		DefaultModel:    "gpt-4",       // profile overrides this
+		DefaultModel:    "gpt-4", // profile overrides this
 		VisionModel:     "claude-3-vision",
 		VisionProvider:  "anthropic",
 	}

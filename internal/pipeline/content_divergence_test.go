@@ -16,14 +16,14 @@ func TestDetectContentDivergence(t *testing.T) {
 	short := strings.Repeat("b", 50)
 
 	tests := []struct {
-		name        string
-		streamed    string
-		result      string
-		wantOK      bool
-		wantSignif  bool
-		wantDiff    int
-		wantStream  int
-		wantResult  int
+		name       string
+		streamed   string
+		result     string
+		wantOK     bool
+		wantSignif bool
+		wantDiff   int
+		wantStream int
+		wantResult int
 	}{
 		{name: "empty streamed", streamed: "", result: "x", wantOK: false},
 		{name: "empty result", streamed: "x", result: "", wantOK: false},

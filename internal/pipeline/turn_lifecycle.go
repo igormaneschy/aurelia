@@ -42,21 +42,6 @@ func (c *summaryCounter) reset(key continuity.ConversationKey) {
 	delete(c.counts, key)
 }
 
-// runeCap returns the first n runes of s, preserving valid UTF-8.
-func runeCap(s string, n int) string {
-	if utf8.RuneCountInString(s) <= n {
-		return s
-	}
-	var count int
-	for i := range s {
-		if count >= n {
-			return s[:i]
-		}
-		count++
-	}
-	return s
-}
-
 // generateProgressiveSummary calls the LLM to merge the previous summary
 // with the latest exchange. Returns an updated summary string, or empty
 // string if summarization failed (caller falls back to raw text).
@@ -66,9 +51,9 @@ func (s *Service) generateProgressiveSummary(ctx context.Context, previousSummar
 	}
 
 	// Cap inputs to keep prompt tokens manageable
-	cappedPrev := runeCap(previousSummary, 2000)
-	cappedUser := runeCap(userText, 2000)
-	cappedAssistant := runeCap(assistantText, 2000)
+	cappedPrev := sanitizeForPersistence(previousSummary, 2000)
+	cappedUser := sanitizeForPersistence(userText, 2000)
+	cappedAssistant := sanitizeForPersistence(assistantText, 2000)
 
 	prompt := fmt.Sprintf(`Merge the previous summary with the latest user message and assistant response into ONE updated summary that captures all important context, decisions, and open items.
 
@@ -93,7 +78,7 @@ Updated summary (max 900 chars, no preamble):`,
 
 	ch, err := s.bridge.Execute(sumCtx, req)
 	if err != nil {
-		log.Printf("summary: failed to generate progressive summary: %v", err)
+		log.Printf("summary: failed to generate progressive summary: %s", sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
 		return ""
 	}
 
@@ -119,14 +104,21 @@ Updated summary (max 900 chars, no preamble):`,
 
 	// Redact BEFORE truncation (per redaction-before-truncation.md) so
 	// secrets straddling the boundary aren't sliced in half.
-	summary := redactSecrets(strings.TrimSpace(content))
-	return runeCap(summary, continuity.MaxAssistantSummary)
+	summary := sanitizeForPersistence(strings.TrimSpace(content), continuity.MaxAssistantSummary)
+	return summary
 }
 
-func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText string, finalText string, runID string, userID int64, isPrivateChat bool) {
+func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText string, finalText string, runID string, userID int64, isPrivateChat bool, owners ...runOwnership) {
+	if len(owners) > 0 && !s.activeRunStillOwned(chatID, threadID, userID, firstRunOwnership(owners).owner) {
+		return
+	}
 	// Clear failure/suspect state after successful completion
-	if s.sessions != nil {
-		s.sessions.ClearFailureState(chatID, threadID, userID)
+	if !s.withRunOwnership(chatID, threadID, userID, owners, func() {
+		if s.sessions != nil {
+			s.sessions.ClearFailureState(chatID, threadID, userID)
+		}
+	}) {
+		return
 	}
 
 	key := continuity.ConversationKeyFor(chatID, threadID, userID)
@@ -169,9 +161,12 @@ func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText strin
 	}
 
 	// Patch continuity with the (potentially summarized) assistant text
-	s.patchContinuityAfterSuccess(chatID, threadID, userText, finalSummary, runID, userID, isPrivateChat)
+	s.patchContinuityAfterSuccess(chatID, threadID, userText, finalSummary, runID, userID, isPrivateChat, owners...)
 
 	if s.dreamer == nil {
+		return
+	}
+	if len(owners) > 0 && !s.activeRunStillOwned(chatID, threadID, userID, firstRunOwnership(owners).owner) {
 		return
 	}
 	s.dreamer.AfterTurn(userID)
@@ -181,13 +176,13 @@ func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText strin
 		sessionFile = s.sessions.GetSession(chatID, threadID, userID)
 	}
 	s.nudgeBuffer.AddTurn(chatID, threadID, userID, userText, finalText)
-	if toolSummary := s.getRunToolSummary(chatID, threadID, userID); toolSummary != "" {
+	if toolSummary := s.getRunToolSummary(chatID, threadID, userID, owners...); toolSummary != "" {
 		s.nudgeBuffer.AddToolEvent(chatID, threadID, userID, toolSummary)
 	}
 	s.dreamer.AfterTurnNudge(chatID, threadID, userID, cwd, sessionFile, s.nudgeBuffer)
 	// Invalidate only when the agent used Write/Edit this turn — background nudge/dream
 	// invalidate their own dirs after async writes; broad per-turn wipe defeated the cache.
-	if s.runUsedWriteTools(chatID, threadID, userID) {
+	if s.runUsedWriteTools(chatID, threadID, userID, owners...) {
 		s.InvalidateMemoryDirs(chatID, threadID, userID, cwd)
 	}
 }
@@ -196,204 +191,246 @@ func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText strin
 
 // getRunID returns the current runID from runLogStates, or empty string.
 // Must be called before completeRunLog, which deletes the state.
-func (s *Service) getRunID(chatID int64, threadID int, userID int64) string {
-	key := runLogKey(chatID, threadID, userID)
-	s.runLogMu.Lock()
-	state, ok := s.runLogStates[key]
-	s.runLogMu.Unlock()
-	if ok && state != nil {
-		return state.runID
-	}
-	return ""
+func (s *Service) getRunID(chatID int64, threadID int, userID int64, owners ...runOwnership) string {
+	var runID string
+	s.withRunOwnership(chatID, threadID, userID, owners, func() {
+		state, ok := s.runLogStateFor(chatID, threadID, userID, firstRunOwnership(owners))
+		if ok && state != nil {
+			runID = state.runID
+		}
+	})
+	return runID
 }
 
 // patchContinuityAfterSuccess writes successful turn state into the continuity store.
 // runID must be captured before completeRunLog (which cleans up runLogStates).
-func (s *Service) patchContinuityAfterSuccess(chatID int64, threadID int, userText string, assistantText string, runID string, userID int64, isPrivateChat bool) {
+func (s *Service) patchContinuityAfterSuccess(chatID int64, threadID int, userText string, assistantText string, runID string, userID int64, isPrivateChat bool, owners ...runOwnership) {
 	if s.continuity == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
+	userText = sanitizeForPersistence(userText, continuity.MaxUserIntent)
+	assistantText = sanitizeForPersistence(assistantText, continuity.MaxAssistantSummary)
+	runID = sanitizeForPersistence(runID, 200)
+	var projectPatch continuity.ProjectWorkPatch
+	wrote := s.withCurrentRunOwnership(chatID, threadID, userID, owners, func() {
+		// The run ID captured before terminal cleanup is not trusted by itself;
+		// an active owner token is authoritative at this write boundary.
+		ownership := firstRunOwnership(owners)
+		if ownership.runID != "" {
+			runID = sanitizeForPersistence(ownership.runID, 200)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
 
-	cwd := s.effectiveCwdForContext(nil, chatID, threadID, userID, isPrivateChat)
-	now := time.Now()
-	runStatus := "completed"
-	sessionCold := false
+		cwd := s.effectiveCwdForContext(nil, chatID, threadID, userID, isPrivateChat)
+		now := time.Now()
+		runStatus := "completed"
+		sessionCold := false
 
-	sessionID := ""
-	if s.sessions != nil {
-		sessionID = s.sessions.GetSession(chatID, threadID, userID)
+		sessionID := ""
+		if s.sessions != nil {
+			sessionID = s.sessions.GetSession(chatID, threadID, userID)
+		}
+
+		err := s.continuity.Patch(ctx, continuity.ConversationKeyFor(chatID, threadID, userID), continuity.StatePatch{
+			CWD:                  &cwd,
+			LastUserIntent:       &userText,
+			LastAssistantSummary: &assistantText,
+			LastRunID:            &runID,
+			LastRunStatus:        &runStatus,
+			SessionID:            &sessionID,
+			SessionCold:          &sessionCold,
+			UpdatedAt:            now,
+		})
+		if err != nil {
+			log.Printf("continuity: failed to patch after success chat=%d thread=%d: %s", chatID, threadID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
+		}
+
+		projectPatch = continuity.ProjectWorkPatch{
+			LastUserIntent:       &userText,
+			LastAssistantSummary: &assistantText,
+			LastRunID:            &runID,
+			LastRunStatus:        &runStatus,
+			CWD:                  &cwd,
+			UpdatedAt:            now,
+		}
+	})
+	if !wrote {
+		return
 	}
 
-	err := s.continuity.Patch(ctx, continuity.ConversationKeyFor(chatID, threadID, userID), continuity.StatePatch{
-		CWD:                  &cwd,
-		LastUserIntent:       &userText,
-		LastAssistantSummary: &assistantText,
-		LastRunID:            &runID,
-		LastRunStatus:        &runStatus,
-		SessionID:            &sessionID,
-		SessionCold:          &sessionCold,
-		UpdatedAt:            now,
-	})
-	if err != nil {
-		log.Printf("continuity: failed to patch after success chat=%d thread=%d: %v", chatID, threadID, err)
-	}
-
-	// Mirror to ProjectWorkState when /cwd is active (cross-surface continuity)
-	s.mirrorProjectWork(chatID, threadID, userID, isPrivateChat, continuity.ProjectWorkPatch{
-		LastUserIntent:       &userText,
-		LastAssistantSummary: &assistantText,
-		LastRunID:            &runID,
-		LastRunStatus:        &runStatus,
-		CWD:                  &cwd,
-		UpdatedAt:            now,
-	})
+	// Mirror to ProjectWorkState through a second ownership gate. The first
+	// patch may involve an asynchronous/slow store; a newer run can win before
+	// this cross-surface write and must then be allowed to keep its state.
+	s.mirrorProjectWork(chatID, threadID, userID, isPrivateChat, projectPatch, owners...)
 }
 
 // patchContinuityFailure writes failure/timeout/error state into the continuity store.
 // Must be called BEFORE completeRunLog, since that cleans up the run log state.
-func (s *Service) patchContinuityFailure(chatID int64, threadID int, status string, errMsg string, userID int64, isPrivateChat bool) {
+func (s *Service) patchContinuityFailure(chatID int64, threadID int, status string, errMsg string, userID int64, isPrivateChat bool, owners ...runOwnership) {
 	if s.continuity == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
+	var projectPatch continuity.ProjectWorkPatch
+	wrote := s.withCurrentRunOwnership(chatID, threadID, userID, owners, func() {
+		ownership := firstRunOwnership(owners)
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
 
-	now := time.Now()
-	sessionCold := true
+		now := time.Now()
+		sessionCold := true
 
-	// Capture latest checkpoint, tools, and partial assistant text from runLogState
-	checkpoint := ""
-	tools := ""
-	runID := ""
-	assistantText := ""
-	key := runLogKey(chatID, threadID, userID)
-	s.runLogMu.Lock()
-	state, ok := s.runLogStates[key]
-	if ok && state != nil {
-		runID = state.runID
-		state.mu.Lock()
-		tools = state.summary.String()
-		assistantText = state.partialAssistant
-		state.mu.Unlock()
-	}
-	s.runLogMu.Unlock()
+		// Capture the checkpoint while the same owner lock protects the write
+		// boundary. A newer run cannot replace this state mid-capture.
+		checkpoint := ""
+		tools := ""
+		runID := ownership.runID
+		assistantText := ""
+		key := runLogKey(chatID, threadID, userID)
+		s.runLogMu.Lock()
+		state, ok := s.runLogStates[key]
+		if ok && state != nil {
+			runID = state.runID
+			state.mu.Lock()
+			tools = state.summary.String()
+			assistantText = state.partialAssistant
+			state.mu.Unlock()
+		}
+		s.runLogMu.Unlock()
 
-	if tools != "" {
-		tools = redactSecrets(tools)
-	}
-	if assistantText != "" {
-		assistantText = redactSecrets(assistantText)
-	}
+		if tools != "" {
+			tools = sanitizeForPersistence(tools, continuity.MaxTools)
+		}
+		if assistantText != "" {
+			assistantText = sanitizeForPersistence(assistantText, continuity.MaxAssistantSummary)
+		}
+		errMsg = sanitizeForPersistence(errMsg, continuity.MaxCheckpoint)
 
-	// Build checkpoint from available info, including partial assistant text
-	cp := buildCheckpoint(runlog.RunStatus(status), "", tools, errMsg, assistantText)
-	checkpoint = redactSecrets(cp)
+		// Build checkpoint from available info, including partial assistant text.
+		cp := buildCheckpoint(runlog.RunStatus(status), "", tools, errMsg, assistantText)
+		checkpoint = sanitizeForPersistence(cp, continuity.MaxCheckpoint)
 
-	cwd := s.effectiveCwdForContext(nil, chatID, threadID, userID, isPrivateChat)
+		cwd := s.effectiveCwdForContext(nil, chatID, threadID, userID, isPrivateChat)
+		sid := ""
+		if s.sessions != nil {
+			sid = s.sessions.GetSession(chatID, threadID, userID)
+		}
 
-	sid := ""
-	if s.sessions != nil {
-		sid = s.sessions.GetSession(chatID, threadID, userID)
-	}
+		err := s.continuity.Patch(ctx, continuity.ConversationKeyFor(chatID, threadID, userID), continuity.StatePatch{
+			CWD:            &cwd,
+			LastRunID:      &runID,
+			LastRunStatus:  &status,
+			LastCheckpoint: &checkpoint,
+			LastTools:      &tools,
+			SessionID:      &sid,
+			SessionCold:    &sessionCold,
+			ResetReason:    &errMsg,
+			UpdatedAt:      now,
+		})
+		if err != nil {
+			log.Printf("continuity: failed to patch failure chat=%d thread=%d: %s", chatID, threadID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
+		}
 
-	err := s.continuity.Patch(ctx, continuity.ConversationKeyFor(chatID, threadID, userID), continuity.StatePatch{
-		CWD:            &cwd,
-		LastRunID:      &runID,
-		LastRunStatus:  &status,
-		LastCheckpoint: &checkpoint,
-		LastTools:      &tools,
-		SessionID:      &sid,
-		SessionCold:    &sessionCold,
-		ResetReason:    &errMsg,
-		UpdatedAt:      now,
+		projectPatch = continuity.ProjectWorkPatch{
+			LastCheckpoint: &checkpoint,
+			LastRunStatus:  &status,
+			LastRunID:      &runID,
+			LastTools:      &tools,
+			CWD:            &cwd,
+			UpdatedAt:      now,
+		}
 	})
-	if err != nil {
-		log.Printf("continuity: failed to patch failure chat=%d thread=%d: %v", chatID, threadID, err)
+	if !wrote {
+		return
 	}
 
-	// Mirror to ProjectWorkState when /cwd is active (cross-surface continuity)
-	s.mirrorProjectWork(chatID, threadID, userID, isPrivateChat, continuity.ProjectWorkPatch{
-		LastCheckpoint: &checkpoint,
-		LastRunStatus:  &status,
-		LastRunID:      &runID,
-		LastTools:      &tools,
-		CWD:            &cwd,
-		UpdatedAt:      now,
-	})
+	// Project state is a separate durable surface and must revalidate the
+	// owner independently of the conversation patch above.
+	s.mirrorProjectWork(chatID, threadID, userID, isPrivateChat, projectPatch, owners...)
 }
 
 // patchContinuitySessionCold marks the session as cold with a reset reason.
-func (s *Service) patchContinuitySessionCold(chatID int64, threadID int, reason string, userID int64, isPrivateChat bool) {
+func (s *Service) patchContinuitySessionCold(chatID int64, threadID int, reason string, userID int64, isPrivateChat bool, owners ...runOwnership) {
 	if s.continuity == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
+	reason = sanitizeForPersistence(reason, 300)
+	var projectPatch continuity.ProjectWorkPatch
+	wrote := s.withCurrentRunOwnership(chatID, threadID, userID, owners, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
 
-	cold := true
-	err := s.continuity.Patch(ctx, continuity.ConversationKeyFor(chatID, threadID, userID), continuity.StatePatch{
-		SessionCold: &cold,
-		ResetReason: &reason,
-		UpdatedAt:   time.Now(),
+		cold := true
+		err := s.continuity.Patch(ctx, continuity.ConversationKeyFor(chatID, threadID, userID), continuity.StatePatch{
+			SessionCold: &cold,
+			ResetReason: &reason,
+			UpdatedAt:   time.Now(),
+		})
+		if err != nil {
+			log.Printf("continuity: failed to patch session cold chat=%d thread=%d: %s", chatID, threadID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
+		}
+
+		// Mirror checkpoint to ProjectWorkState when /cwd is active.
+		now := time.Now()
+		cp := sanitizeForPersistence(reason, continuity.MaxCheckpoint)
+		coldStatus := "cold"
+		projectPatch = continuity.ProjectWorkPatch{
+			LastCheckpoint: &cp,
+			LastRunStatus:  &coldStatus,
+			UpdatedAt:      now,
+		}
 	})
-	if err != nil {
-		log.Printf("continuity: failed to patch session cold chat=%d thread=%d: %v", chatID, threadID, err)
+	if wrote {
+		s.mirrorProjectWork(chatID, threadID, userID, isPrivateChat, projectPatch, owners...)
 	}
-
-	// Mirror checkpoint to ProjectWorkState when /cwd is active
-	now := time.Now()
-	cp := redactSecrets(reason)
-	coldStatus := "cold"
-	s.mirrorProjectWork(chatID, threadID, userID, isPrivateChat, continuity.ProjectWorkPatch{
-		LastCheckpoint: &cp,
-		LastRunStatus:  &coldStatus,
-		UpdatedAt:      now,
-	})
 }
 
 // patchContinuitySessionID updates the session ID in continuity state.
-func (s *Service) patchContinuitySessionID(chatID int64, threadID int, sessionID string, userID int64) {
+func (s *Service) patchContinuitySessionID(chatID int64, threadID int, sessionID string, userID int64, owners ...runOwnership) {
 	if s.continuity == nil || sessionID == "" {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
+	sessionID = sanitizeForPersistence(sessionID, 200)
+	s.withCurrentRunOwnership(chatID, threadID, userID, owners, func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
 
-	err := s.continuity.Patch(ctx, continuity.ConversationKeyFor(chatID, threadID, userID), continuity.StatePatch{
-		SessionID: &sessionID,
-		UpdatedAt: time.Now(),
+		err := s.continuity.Patch(ctx, continuity.ConversationKeyFor(chatID, threadID, userID), continuity.StatePatch{
+			SessionID: &sessionID,
+			UpdatedAt: time.Now(),
+		})
+		if err != nil {
+			log.Printf("continuity: failed to patch session ID chat=%d thread=%d: %s", chatID, threadID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
+		}
 	})
-	if err != nil {
-		log.Printf("continuity: failed to patch session ID chat=%d thread=%d: %v", chatID, threadID, err)
-	}
 }
 
 // mirrorProjectWork writes a ProjectWorkState row when /cwd is active.
 // It resolves the cwd, computes the project slug, sets LastEntrypoint and
 // LastChatID from the current turn, and patches the project store.
 // Errors are logged but never fail the caller's turn.
-func (s *Service) mirrorProjectWork(chatID int64, threadID int, userID int64, isPrivateChat bool, patch continuity.ProjectWorkPatch) {
-	cwd := s.effectiveCwdForContext(nil, chatID, threadID, userID, isPrivateChat)
-	if cwd == "" || userID == 0 || s.continuity == nil {
-		return
-	}
-	slug := runtime.ProjectSlug(cwd)
-	if slug == "" {
-		return
-	}
-	patch.CWD = &cwd
-	ep := s.entryPoint
-	patch.LastEntrypoint = &ep
-	patch.LastChatID = &chatID
+func (s *Service) mirrorProjectWork(chatID int64, threadID int, userID int64, isPrivateChat bool, patch continuity.ProjectWorkPatch, owners ...runOwnership) {
+	s.withCurrentRunOwnership(chatID, threadID, userID, owners, func() {
+		cwd := s.effectiveCwdForContext(nil, chatID, threadID, userID, isPrivateChat)
+		if cwd == "" || userID == 0 || s.continuity == nil {
+			return
+		}
+		slug := runtime.ProjectSlug(cwd)
+		if slug == "" {
+			return
+		}
+		patch.CWD = &cwd
+		ep := s.entryPoint
+		patch.LastEntrypoint = &ep
+		patch.LastChatID = &chatID
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
 
-	if err := s.continuity.PatchProjectWork(ctx, continuity.ProjectWorkKey{UserID: userID, ProjectSlug: slug}, patch); err != nil {
-		log.Printf("continuity: failed to mirror project work user=%d slug=%s: %v", userID, slug, err)
-	}
+		if err := s.continuity.PatchProjectWork(ctx, continuity.ProjectWorkKey{UserID: userID, ProjectSlug: slug}, patch); err != nil {
+			log.Printf("continuity: failed to mirror project work user=%d slug=%s: %s", userID, slug, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
+		}
+	})
 }
 
 // continuitySnapshot captures the current continuity state for fallback recovery.
@@ -475,10 +512,20 @@ func classifyBridgeErrorOutcome(message string) (string, runlog.RunStatus, strin
 	if strings.Contains(lower, "timeout") || strings.Contains(lower, "timed out") || strings.Contains(lower, "deadline exceeded") {
 		return "timed_out", runlog.RunTimedOut, timeoutOriginProviderPI
 	}
-	return "failed", runlog.RunFailed, message
+	return "failed", runlog.RunFailed, "provider_error"
 }
 
-func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev bridge.Event, userID int64, isPrivateChat bool) Outcome {
+func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev bridge.Event, userID int64, isPrivateChat bool, owners ...runOwnership) Outcome {
+	ownership := firstRunOwnership(owners)
+	if ownership.finalizer == nil {
+		var claimed bool
+		ownership, claimed = s.claimRunFinalization(chatID, threadID, userID, owners...)
+		if !claimed {
+			return OutcomeCanceled
+		}
+	}
+	// Terminal bridge event: counts as surface-updating feedback.
+	s.trackRunFeedback(chatID, threadID, userID, bridgeEventTime(ev), ownership)
 	errMsg := ev.Message
 	if errMsg == "" {
 		errMsg = ev.Content
@@ -486,22 +533,35 @@ func (s *Service) handleErrorEvent(chatID int64, threadID int, messageID int, ev
 	if errMsg == "" {
 		errMsg = "Erro desconhecido no processador."
 	}
-	redacted := redactSecrets(errMsg)
+	redacted := sanitizeForPersistence(errMsg, maxRunlogErrorRunes)
 	log.Printf("Bridge error: %s", redacted)
 	status, runStatus, reason := classifyBridgeErrorOutcome(redacted)
-	s.patchContinuityFailure(chatID, threadID, status, reason, userID, isPrivateChat)
-	s.completeRunLog(chatID, threadID, userID, runStatus, "", reason)
-	s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent("",
-		observability.PhaseRunFailed, reason))
+	durableReason := reason
+	if runStatus == runlog.RunFailed {
+		durableReason = "provider_error"
+	}
+	// Capture the run ID BEFORE completeRunLog removes the runlog state so
+	// the run_failed event emitted afterwards is correlated to the same run.
+	runID := s.getRunID(chatID, threadID, userID, ownership)
+	s.patchContinuityFailure(chatID, threadID, status, durableReason, userID, isPrivateChat, ownership)
+	s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent(runID,
+		observability.PhaseRunFailed, durableReason), ownership)
+	s.completeRunLog(chatID, threadID, userID, runStatus, "", durableReason, ownership)
 
 	// Mark failure for timeout/provider errors so lifecycle manager marks session suspect.
 	// Skip billing errors — they're provider issues, not session failures.
 	if s.sessions != nil && status == "timed_out" && !isBillingError(redacted) {
-		s.sessions.MarkFailure(chatID, threadID, userID, reason)
+		if !s.withCurrentRunOwnership(chatID, threadID, userID, []runOwnership{ownership}, func() {
+			s.sessions.MarkFailure(chatID, threadID, userID, reason)
+		}) {
+			return OutcomeCanceled
+		}
 	}
 
-	if err := s.output.SendError(chatID, threadID, redacted); err != nil {
-		log.Printf("Failed to send error to chat %d: %v", chatID, redactSecrets(err.Error()))
+	if s.activeRunStillOwned(chatID, threadID, userID, ownership.owner) {
+		if err := s.output.SendError(chatID, threadID, redacted); err != nil {
+			log.Printf("Failed to send error to chat %d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
+		}
 	}
 	s.output.ConfirmMessage(chatID, messageID)
 	return OutcomeLLMError

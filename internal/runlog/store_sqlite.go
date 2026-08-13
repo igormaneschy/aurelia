@@ -3,12 +3,16 @@ package runlog
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
+	"github.com/igormaneschy/aurelia/internal/observability"
 	_ "modernc.org/sqlite"
 )
 
@@ -39,6 +43,10 @@ var observabilityColumns = []columnDef{
 	{name: "parent_run_id", typ: "TEXT", def: "''"},
 	{name: "inbound_message_id", typ: "INTEGER", def: "0"},
 	{name: "outbound_message_id", typ: "INTEGER", def: "0"},
+	{name: "first_feedback_ms", typ: "INTEGER", def: "0"},
+	{name: "max_silence_ms", typ: "INTEGER", def: "0"},
+	{name: "stall_count", typ: "INTEGER", def: "0"},
+	{name: "steer_count", typ: "INTEGER", def: "0"},
 }
 
 // SQLiteStore implements Store backed by a SQLite database.
@@ -167,6 +175,21 @@ func (s *SQLiteStore) initialize() error {
 // Start inserts a new run record with status=running.
 // Uses record.StartedAt when non-zero, otherwise falls back to time.Now().
 func (s *SQLiteStore) Start(ctx context.Context, record RunRecord) error {
+	record.RunID = sanitizeRunlogText(record.RunID, 128)
+	record.RequestID = sanitizeRunlogText(record.RequestID, 128)
+	record.SessionID = sanitizeRunlogText(record.SessionID, 256)
+	record.CWD = sanitizeRunlogText(record.CWD, 512)
+	record.Prompt = sanitizeRunlogText(record.Prompt, 4096)
+	record.Checkpoint = sanitizeRunlogText(record.Checkpoint, 4096)
+	record.ToolSummary = sanitizeRunlogText(record.ToolSummary, 4096)
+	record.Error = sanitizeRunlogText(record.Error, maxEventMessageBytes)
+	record.EntryPoint = sanitizeRunlogText(record.EntryPoint, 64)
+	record.AgentName = sanitizeRunlogText(record.AgentName, 128)
+	record.Provider = sanitizeRunlogText(record.Provider, 128)
+	record.Model = sanitizeRunlogText(record.Model, 256)
+	record.CapabilityProfile = sanitizeRunlogText(record.CapabilityProfile, 128)
+	record.SessionFile = sanitizeRunlogText(record.SessionFile, 512)
+	record.ParentRunID = sanitizeRunlogText(record.ParentRunID, 128)
 	now := unix(time.Now())
 	startedAt := now
 	if !record.StartedAt.IsZero() {
@@ -199,6 +222,27 @@ func (s *SQLiteStore) Start(ctx context.Context, record RunRecord) error {
 
 // Update applies partial updates to an existing run.
 func (s *SQLiteStore) Update(ctx context.Context, update RunUpdate) error {
+	update.RunID = sanitizeRunlogText(update.RunID, 128)
+	sanitizePtr := func(value *string, maxRunes int) *string {
+		if value == nil {
+			return nil
+		}
+		clean := sanitizeRunlogText(*value, maxRunes)
+		return &clean
+	}
+	update.SessionID = sanitizePtr(update.SessionID, 256)
+	update.Checkpoint = sanitizePtr(update.Checkpoint, 4096)
+	update.ToolSummary = sanitizePtr(update.ToolSummary, 4096)
+	update.Error = sanitizePtr(update.Error, maxEventMessageBytes)
+	update.EntryPoint = sanitizePtr(update.EntryPoint, 64)
+	update.AgentName = sanitizePtr(update.AgentName, 128)
+	update.Provider = sanitizePtr(update.Provider, 128)
+	update.Model = sanitizePtr(update.Model, 256)
+	update.CapabilityProfile = sanitizePtr(update.CapabilityProfile, 128)
+	update.ErrorClass = sanitizePtr(update.ErrorClass, 128)
+	update.TimeoutOrigin = sanitizePtr(update.TimeoutOrigin, 128)
+	update.SessionFile = sanitizePtr(update.SessionFile, 512)
+	update.ParentRunID = sanitizePtr(update.ParentRunID, 128)
 	now := unix(time.Now())
 
 	sets := "updated_at = ?"
@@ -309,6 +353,24 @@ func (s *SQLiteStore) Update(ctx context.Context, update RunUpdate) error {
 		args = append(args, *update.OutboundMessageID)
 	}
 
+	// Long-session aggregates.
+	if update.FirstFeedbackMs != nil {
+		sets += ", first_feedback_ms = ?"
+		args = append(args, *update.FirstFeedbackMs)
+	}
+	if update.MaxSilenceMs != nil {
+		sets += ", max_silence_ms = ?"
+		args = append(args, *update.MaxSilenceMs)
+	}
+	if update.StallCount != nil {
+		sets += ", stall_count = ?"
+		args = append(args, *update.StallCount)
+	}
+	if update.SteerCount != nil {
+		sets += ", steer_count = ?"
+		args = append(args, *update.SteerCount)
+	}
+
 	args = append(args, update.RunID)
 	q := fmt.Sprintf("UPDATE run_journal SET %s WHERE run_id = ?", sets)
 	_, err := s.db.ExecContext(ctx, q, args...)
@@ -321,17 +383,102 @@ func (s *SQLiteStore) Update(ctx context.Context, update RunUpdate) error {
 // Complete marks a run with a terminal status and optional checkpoint/error/tool summary.
 // Also sets completed_at and updates updated_at.
 func (s *SQLiteStore) Complete(ctx context.Context, runID string, status RunStatus, checkpoint, errMsg, toolSummary string) error {
+	runID = sanitizeRunlogText(runID, 128)
+	checkpoint = sanitizeRunlogText(checkpoint, 4096)
+	errMsg = sanitizeRunlogText(errMsg, maxEventMessageBytes)
+	toolSummary = sanitizeRunlogText(toolSummary, 4096)
 	now := unix(time.Now())
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE run_journal
 		SET status = ?, checkpoint = ?, error = ?, tool_summary = ?,
 		    updated_at = ?, completed_at = ?
-		WHERE run_id = ?`,
+		WHERE run_id = ? AND status = 'running'`,
 		string(status), checkpoint, errMsg, toolSummary, now, now, runID)
 	if err != nil {
 		return fmt.Errorf("runlog complete %s: %w", runID, err)
 	}
 	return nil
+}
+
+// CompleteWithEvents commits all pending timeline events and the terminal run
+// row in one SQLite transaction. The terminal UPDATE is conditional on the
+// row still being running, so a late callback cannot overwrite an earlier
+// terminal status. If either the event insert or terminal UPDATE fails, the
+// transaction is rolled back and neither half is reported as committed.
+func (s *SQLiteStore) CompleteWithEvents(ctx context.Context, runID string, status RunStatus, checkpoint, errMsg, toolSummary string, agg CompletionAggregates, events []RunEvent) error {
+	runID = sanitizeRunlogText(runID, 128)
+	checkpoint = sanitizeRunlogText(checkpoint, 4096)
+	errMsg = sanitizeRunlogText(errMsg, maxEventMessageBytes)
+	toolSummary = sanitizeRunlogText(toolSummary, 4096)
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("runlog complete transaction %s: %w", runID, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	stmt, err := tx.PrepareContext(ctx, `
+		INSERT INTO run_events (run_id, ts, phase, level, message, metadata_json)
+		VALUES (?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return fmt.Errorf("runlog complete prepare events %s: %w", runID, err)
+	}
+	for _, ev := range events {
+		ev.RunID = sanitizeRunlogText(ev.RunID, 128)
+		if ev.RunID == "" {
+			ev.RunID = runID
+		} else if ev.RunID != runID {
+			_ = stmt.Close()
+			return fmt.Errorf("runlog complete event %s/%s: foreign run_id rejected", runID, ev.RunID)
+		}
+		ev.Phase = sanitizeRunlogText(ev.Phase, 128)
+		ev.Level = sanitizeRunlogText(ev.Level, 32)
+		if ev.Level == "" {
+			ev.Level = "info"
+		}
+		ts := ev.Timestamp
+		if ts == 0 {
+			ts = unix(time.Now())
+		}
+		if _, err := stmt.ExecContext(ctx, ev.RunID, ts, ev.Phase, ev.Level,
+			sanitizeEventMessage(ev.Message), sanitizeMetadataJSON(ev.MetadataJSON)); err != nil {
+			_ = stmt.Close()
+			return fmt.Errorf("runlog complete event %s/%s: %w", runID, ev.Phase, err)
+		}
+	}
+	if err := stmt.Close(); err != nil {
+		return fmt.Errorf("runlog complete close events %s: %w", runID, err)
+	}
+
+	now := unix(time.Now())
+	result, err := tx.ExecContext(ctx, `
+		UPDATE run_journal
+		SET status = ?, checkpoint = ?, error = ?, tool_summary = ?,
+		    updated_at = ?, completed_at = ?,
+		    first_feedback_ms = ?, max_silence_ms = ?,
+		    stall_count = ?, steer_count = ?
+		WHERE run_id = ? AND status = 'running'`,
+		string(status), checkpoint, errMsg, toolSummary, now, now,
+		agg.FirstFeedbackMs, agg.MaxSilenceMs, agg.StallCount, agg.SteerCount, runID)
+	if err != nil {
+		return fmt.Errorf("runlog complete terminal %s: %w", runID, err)
+	}
+	if rows, err := result.RowsAffected(); err != nil {
+		return fmt.Errorf("runlog complete terminal rows %s: %w", runID, err)
+	} else if rows != 1 {
+		return fmt.Errorf("runlog complete terminal %s: expected one running row, affected %d", runID, rows)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("runlog complete commit %s: %w", runID, err)
+	}
+	return nil
+}
+
+// CompleteWithAggregates is retained as the concrete SQLite capability for
+// callers that have no pending timeline events. It uses the same atomic
+// terminal transaction and exactly-once running-row guard.
+func (s *SQLiteStore) CompleteWithAggregates(ctx context.Context, runID string, status RunStatus, checkpoint, errMsg, toolSummary string, agg CompletionAggregates) error {
+	return s.CompleteWithEvents(ctx, runID, status, checkpoint, errMsg, toolSummary, agg, nil)
 }
 
 // Latest returns the most recent run for a chat/thread, ordered by started_at.
@@ -360,6 +507,147 @@ func (s *SQLiteStore) Latest(ctx context.Context, chatID int64, threadID int) (*
 // New Store methods (observability)
 // ---------------------------------------------------------------------------
 
+// maxEventMessageBytes caps the defensive message size at the sink. Metadata
+// is capped by observability.MaxEventMetadataBytes via sanitizeMetadataJSON.
+const maxEventMessageBytes = 2048
+
+var (
+	runlogAPIKeyRE     = regexp.MustCompile(`\b(?:sk-[A-Za-z0-9]{20,}|pk-[A-Za-z0-9]{20,}|sk_live_[A-Za-z0-9]+|sk_test_[A-Za-z0-9]+|AKIA[A-Z0-9]{16}|AIza[0-9A-Za-z_-]{35}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[0-9A-Za-z_-]+|xai-[A-Za-z0-9]{20,}|glpat-[A-Za-z0-9_-]{20,}|hf_[A-Za-z0-9]{20,}|npm_[A-Za-z0-9]{20,})`)
+	runlogJWTRE        = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+`)
+	runlogPrivateRE    = regexp.MustCompile(`(?s)-----BEGIN (?:OPENSSH |RSA |DSA |EC |PGP )?PRIVATE KEY-----.*?-----END (?:OPENSSH |RSA |DSA |EC |PGP )?PRIVATE KEY-----`)
+	runlogAuthRE       = regexp.MustCompile(`(?i)(Authorization:\s*(?:Bearer|Basic)\s+)\S+`)
+	runlogJSONSecretRE = regexp.MustCompile(`(?i)((?:"|')?(?:password|secret|api[_-]?key|client[_-]?secret|access[_-]?token|refresh[_-]?token|token)(?:"|')?\s*[:=]\s*["']?)[^"'\s,}\]]+`)
+)
+
+func redactRunlogSecrets(s string) string {
+	s = runlogPrivateRE.ReplaceAllString(s, "[PRIVATE_KEY_BLOCK_REDACTED]")
+	s = runlogAuthRE.ReplaceAllString(s, "$1[REDACTED]")
+	s = runlogAPIKeyRE.ReplaceAllString(s, "[CREDENTIAL_REDACTED]")
+	s = runlogJWTRE.ReplaceAllString(s, "[JWT_REDACTED]")
+	return runlogJSONSecretRE.ReplaceAllString(s, "$1[CREDENTIAL_REDACTED]")
+}
+
+// sanitizeRunlogText applies redaction before control cleanup and truncation.
+// It is deliberately local to the SQLite sink so direct Store callers cannot
+// bypass the telemetry-path safety guarantees provided by the pipeline.
+func sanitizeRunlogText(s string, maxRunes int) string {
+	s = redactRunlogSecrets(strings.ToValidUTF8(s, "\uFFFD"))
+	s = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return -1
+		}
+		return r
+	}, s)
+	if maxRunes <= 0 {
+		return ""
+	}
+	runes := []rune(s)
+	if len(runes) > maxRunes {
+		return string(runes[:maxRunes])
+	}
+	return s
+}
+
+func sanitizeRunlogMetadataValue(value any, depth int) any {
+	if depth >= 4 {
+		return "[metadata_depth_limit]"
+	}
+	switch v := value.(type) {
+	case string:
+		return sanitizeRunlogText(v, maxEventMessageBytes)
+	case []any:
+		if len(v) > 64 {
+			v = v[:64]
+		}
+		out := make([]any, len(v))
+		for i := range v {
+			out[i] = sanitizeRunlogMetadataValue(v[i], depth+1)
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(v))
+		count := 0
+		for key, item := range v {
+			if count >= 64 {
+				break
+			}
+			out[sanitizeRunlogText(key, 128)] = sanitizeRunlogMetadataValue(item, depth+1)
+			count++
+		}
+		return out
+	default:
+		return value
+	}
+}
+
+// sanitizeEventMessage bounds a timeline message defensively at the sink:
+// invalid UTF-8 is replaced (the persisted TEXT must always be valid UTF-8),
+// CR/LF and C0/C1/control characters are removed, and the result is
+// truncated to at most maxEventMessageBytes at a rune boundary. Terminal
+// events are sanitized like any other message — never dropped.
+func sanitizeEventMessage(s string) string {
+	// 1. Redact complete secrets before any size-changing operation, then
+	// replace invalid UTF-8 so the stored TEXT is always valid.
+	s = sanitizeRunlogText(s, maxEventMessageBytes)
+	// 2. Remove control characters (C0: 0x00-0x1F, DEL: 0x7F, C1: 0x80-0x9F).
+	//    Rune iteration after ToValidUTF8 guarantees multi-byte sequences are
+	//    never mistaken for C1 control bytes.
+	cleaned := make([]rune, 0, len(s))
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			continue
+		}
+		cleaned = append(cleaned, r)
+	}
+	// 3. Exact cap: at most maxEventMessageBytes, cut at a rune boundary.
+	total := 0
+	for i, r := range cleaned {
+		sz := utf8.RuneLen(r)
+		if total+sz > maxEventMessageBytes {
+			return string(cleaned[:i])
+		}
+		total += sz
+	}
+	return string(cleaned)
+}
+
+// sanitizeMetadataJSON enforces the metadata cap defensively at the sink:
+// the value is parsed and RE-MARSHALED (normalizing escaping and rejecting
+// anything invalid, including literal control characters) and the re-marshaled
+// size must respect exactly observability.MaxEventMetadataBytes. Oversized or
+// invalid metadata is replaced with a small valid fallback so the timeline
+// never stores broken or oversized JSON.
+func sanitizeMetadataJSON(s string) string {
+	if s == "" {
+		return "{}"
+	}
+	// Redact before the size check so a credential that crosses the metadata
+	// boundary cannot survive as a sliced prefix.
+	s = redactRunlogSecrets(s)
+	// Cheap pre-check: oversized input can never be legit (the pipeline
+	// caps metadata at MaxEventMetadataBytes), so fail fast to the fallback
+	// instead of parsing a huge blob.
+	if len(s) > observability.MaxEventMetadataBytes {
+		return `{"metadata_truncated":true}`
+	}
+	var v any
+	if err := json.Unmarshal([]byte(s), &v); err != nil {
+		return "{}"
+	}
+	v = sanitizeRunlogMetadataValue(v, 0)
+	// Re-marshal normalizes escaping (and rejects nothing further — the
+	// parse already validated). The cap check runs on the RE-MARSHALED
+	// bytes because escaping can inflate the output past the input length.
+	b, err := json.Marshal(v)
+	if err != nil {
+		return "{}"
+	}
+	if len(b) > observability.MaxEventMetadataBytes {
+		return `{"metadata_truncated":true}`
+	}
+	return string(b)
+}
+
 // RecordEvents persists multiple timeline events in one transaction.
 func (s *SQLiteStore) RecordEvents(ctx context.Context, events []RunEvent) error {
 	if len(events) == 0 {
@@ -379,6 +667,9 @@ func (s *SQLiteStore) RecordEvents(ctx context.Context, events []RunEvent) error
 	defer func() { _ = stmt.Close() }()
 
 	for _, ev := range events {
+		ev.RunID = sanitizeRunlogText(ev.RunID, 128)
+		ev.Phase = sanitizeRunlogText(ev.Phase, 128)
+		ev.Level = sanitizeRunlogText(ev.Level, 32)
 		ts := ev.Timestamp
 		if ts == 0 {
 			ts = unix(time.Now())
@@ -387,7 +678,9 @@ func (s *SQLiteStore) RecordEvents(ctx context.Context, events []RunEvent) error
 		if level == "" {
 			level = "info"
 		}
-		if _, err := stmt.ExecContext(ctx, ev.RunID, ts, ev.Phase, level, ev.Message, ev.MetadataJSON); err != nil {
+		message := sanitizeEventMessage(ev.Message)
+		metadata := sanitizeMetadataJSON(ev.MetadataJSON)
+		if _, err := stmt.ExecContext(ctx, ev.RunID, ts, ev.Phase, level, message, metadata); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("runlog record_events %s/%s: %w", ev.RunID, ev.Phase, err)
 		}
@@ -401,6 +694,9 @@ func (s *SQLiteStore) RecordEvents(ctx context.Context, events []RunEvent) error
 // RecordEvent persists a single run event to the timeline.
 // Best-effort: errors are logged, never block the caller.
 func (s *SQLiteStore) RecordEvent(ctx context.Context, ev RunEvent) error {
+	ev.RunID = sanitizeRunlogText(ev.RunID, 128)
+	ev.Phase = sanitizeRunlogText(ev.Phase, 128)
+	ev.Level = sanitizeRunlogText(ev.Level, 32)
 	ts := ev.Timestamp
 	if ts == 0 {
 		ts = unix(time.Now())
@@ -412,7 +708,8 @@ func (s *SQLiteStore) RecordEvent(ctx context.Context, ev RunEvent) error {
 	_, err := s.db.ExecContext(ctx, `
 		INSERT INTO run_events (run_id, ts, phase, level, message, metadata_json)
 		VALUES (?, ?, ?, ?, ?, ?)`,
-		ev.RunID, ts, ev.Phase, level, ev.Message, ev.MetadataJSON)
+		ev.RunID, ts, ev.Phase, level,
+		sanitizeEventMessage(ev.Message), sanitizeMetadataJSON(ev.MetadataJSON))
 	if err != nil {
 		return fmt.Errorf("runlog record_event %s/%s: %w", ev.RunID, ev.Phase, err)
 	}
@@ -459,7 +756,9 @@ func (s *SQLiteStore) GetRun(ctx context.Context, runID string) (*RunRecord, err
 		       COALESCE(error_class, ''), COALESCE(timeout_origin, ''),
 		       COALESCE(used_fallback, 0), COALESCE(session_file, ''),
 		       COALESCE(parent_run_id, ''),
-		       COALESCE(inbound_message_id, 0), COALESCE(outbound_message_id, 0)
+		       COALESCE(inbound_message_id, 0), COALESCE(outbound_message_id, 0),
+		       COALESCE(first_feedback_ms, 0), COALESCE(max_silence_ms, 0),
+		       COALESCE(stall_count, 0), COALESCE(steer_count, 0)
 		FROM run_journal
 		WHERE run_id = ?`, runID)
 
@@ -497,9 +796,11 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, chatID int64, limit int) ([]
 			       COALESCE(duration_ms, 0), COALESCE(input_tokens, 0), COALESCE(output_tokens, 0),
 			       COALESCE(cost_usd, 0), COALESCE(tool_count, 0),
 			       COALESCE(error_class, ''), COALESCE(timeout_origin, ''),
-			       COALESCE(used_fallback, 0), COALESCE(session_file, ''),
-			       COALESCE(parent_run_id, ''),
-			       COALESCE(inbound_message_id, 0), COALESCE(outbound_message_id, 0)
+		       COALESCE(used_fallback, 0), COALESCE(session_file, ''),
+		       COALESCE(parent_run_id, ''),
+		       COALESCE(inbound_message_id, 0), COALESCE(outbound_message_id, 0),
+		       COALESCE(first_feedback_ms, 0), COALESCE(max_silence_ms, 0),
+		       COALESCE(stall_count, 0), COALESCE(steer_count, 0)
 			FROM run_journal
 			WHERE chat_id = ?
 			ORDER BY started_at DESC
@@ -514,9 +815,11 @@ func (s *SQLiteStore) ListRuns(ctx context.Context, chatID int64, limit int) ([]
 			       COALESCE(duration_ms, 0), COALESCE(input_tokens, 0), COALESCE(output_tokens, 0),
 			       COALESCE(cost_usd, 0), COALESCE(tool_count, 0),
 			       COALESCE(error_class, ''), COALESCE(timeout_origin, ''),
-			       COALESCE(used_fallback, 0), COALESCE(session_file, ''),
-			       COALESCE(parent_run_id, ''),
-			       COALESCE(inbound_message_id, 0), COALESCE(outbound_message_id, 0)
+		       COALESCE(used_fallback, 0), COALESCE(session_file, ''),
+		       COALESCE(parent_run_id, ''),
+		       COALESCE(inbound_message_id, 0), COALESCE(outbound_message_id, 0),
+		       COALESCE(first_feedback_ms, 0), COALESCE(max_silence_ms, 0),
+		       COALESCE(stall_count, 0), COALESCE(steer_count, 0)
 			FROM run_journal
 			ORDER BY started_at DESC
 			LIMIT ?`, limit)
@@ -672,7 +975,9 @@ func scanRecordFull(row recordScanner) (*RunRecord, error) {
 		&r.ErrorClass, &r.TimeoutOrigin,
 		&usedFallback, &r.SessionFile,
 		&r.ParentRunID,
-		&r.InboundMessageID, &r.OutboundMessageID)
+		&r.InboundMessageID, &r.OutboundMessageID,
+		&r.FirstFeedbackMs, &r.MaxSilenceMs,
+		&r.StallCount, &r.SteerCount)
 	if err != nil {
 		return nil, err
 	}

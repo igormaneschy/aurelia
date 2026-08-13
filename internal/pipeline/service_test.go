@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/igormaneschy/aurelia/pkg/idgen"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/session"
+	"github.com/igormaneschy/aurelia/pkg/idgen"
 )
 
 func TestParseSessionKey_Valid(t *testing.T) {
@@ -473,6 +473,18 @@ type spyRunLogStore struct {
 	mu      sync.Mutex
 	events  []runlog.RunEvent
 	updates []runlog.RunUpdate
+
+	// completions records terminal completions (atomic aggregate path) so
+	// tests can assert exactly-one-completion and the aggregate values.
+	completions []spyCompletion
+}
+
+// spyCompletion captures one CompleteWithAggregates call.
+type spyCompletion struct {
+	runID      string
+	status     runlog.RunStatus
+	checkpoint string
+	agg        runlog.CompletionAggregates
 }
 
 func (s *spyRunLogStore) Start(_ context.Context, _ runlog.RunRecord) error { return nil }
@@ -483,6 +495,12 @@ func (s *spyRunLogStore) Update(_ context.Context, u runlog.RunUpdate) error {
 	return nil
 }
 func (s *spyRunLogStore) Complete(_ context.Context, _ string, _ runlog.RunStatus, _, _, _ string) error {
+	return nil
+}
+func (s *spyRunLogStore) CompleteWithAggregates(_ context.Context, runID string, status runlog.RunStatus, _, checkpoint, _ string, agg runlog.CompletionAggregates) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.completions = append(s.completions, spyCompletion{runID: runID, status: status, checkpoint: checkpoint, agg: agg})
 	return nil
 }
 func (s *spyRunLogStore) RecordEvents(_ context.Context, events []runlog.RunEvent) error {
@@ -536,6 +554,14 @@ func (s *spyRunLogStore) recordedUpdates() []runlog.RunUpdate {
 	return out
 }
 
+func (s *spyRunLogStore) recordedCompletions() []spyCompletion {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]spyCompletion, len(s.completions))
+	copy(out, s.completions)
+	return out
+}
+
 // TestRecordPipelineEvent_DropsEventWithoutRunID ensures events with empty RunID
 // are silently dropped when no runLogState exists (e.g. after completeRunLog without
 // capturing the runID first). This is the failure mode that the fixes in
@@ -576,7 +602,7 @@ func TestHandleContextOutcome_CancelledCapturesRunID(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	handled := s.handleContextOutcome(ctx, context.Background(), 1, 0, 100, false)
+	handled := s.handleContextOutcome(ctx, context.Background(), 1, 0, 100, false, nil)
 	if !handled {
 		t.Fatal("expected handleContextOutcome to return true for cancelled parentCtx")
 	}
@@ -757,5 +783,29 @@ func TestStartRunLog_DefaultEntryPointTelegram(t *testing.T) {
 	}
 	if store.started.EntryPoint != observability.EntryPointTelegram {
 		t.Errorf("runlog EntryPoint = %q, want %q", store.started.EntryPoint, observability.EntryPointTelegram)
+	}
+}
+
+func TestStartRunLog_RejectsStaleOwner(t *testing.T) {
+	store := &captureRunLogStore{}
+	s := &Service{
+		runLog:       store,
+		runLogStates: make(map[string]*runLogState),
+	}
+	owner := newActiveRun()
+	key := sessionKey(42, 7, 100)
+	s.activeSessions.Store(key, owner)
+	markRunSuperseded(owner)
+
+	if s.startRunLog(startRunLogParams{
+		ChatID:    42,
+		ThreadID:  7,
+		RequestID: "stale-owner",
+		Owner:     owner,
+	}) {
+		t.Fatal("startRunLog accepted a superseded owner")
+	}
+	if store.started != nil {
+		t.Fatal("stale owner started a durable runlog row")
 	}
 }

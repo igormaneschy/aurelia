@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -173,11 +174,17 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMsg:
-		if !m.mouseEnabled { return m, nil }
-		if m.shouldShowSidebar() {
-			if handled, model, cmd := m.handleSidebarMouse(msg); handled { return model, cmd }
+		if !m.mouseEnabled {
+			return m, nil
 		}
-		if handled, model, cmd := m.handleChatMouse(msg); handled { return model, cmd }
+		if m.shouldShowSidebar() {
+			if handled, model, cmd := m.handleSidebarMouse(msg); handled {
+				return model, cmd
+			}
+		}
+		if handled, model, cmd := m.handleChatMouse(msg); handled {
+			return model, cmd
+		}
 		return m.handleViewportMsg(msg)
 
 	case spinner.TickMsg:
@@ -1072,33 +1079,50 @@ func (m Model) toggleMouseCapture() (tea.Model, tea.Cmd) {
 }
 
 func (m Model) openSidebarSessionAt(row int) (tea.Model, tea.Cmd) {
-	if row < 0 || row >= len(m.sessions) { return m, nil }
+	if row < 0 || row >= len(m.sessions) {
+		return m, nil
+	}
 	m.sidebarCursor = row
 	m.syncSidebarRows()
 	target := m.sessions[row]
 	if target.ChatID == m.activeSession {
-		if m.sidebarFocused { m.sidebarFocused = false; m.sidebarTable.Blur() }
+		if m.sidebarFocused {
+			m.sidebarFocused = false
+			m.sidebarTable.Blur()
+		}
 		return m, nil
 	}
-	if m.warnSessionChangeWhileStreaming() { return m, nil }
+	if m.warnSessionChangeWhileStreaming() {
+		return m, nil
+	}
 	return m, openTUISession(m.ipcClient, target.ChatID)
 }
 
 func (m Model) handleSidebarMouse(msg tea.MouseMsg) (handled bool, model tea.Model, cmd tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.MouseClickMsg:
-		if msg.Button != tea.MouseLeft || !sidebarMouseHitX(msg.X) { return false, m, nil }
+		if msg.Button != tea.MouseLeft || !sidebarMouseHitX(msg.X) {
+			return false, m, nil
+		}
 		row := m.sidebarRowAt(msg.Y)
-		if row < 0 { return false, m, nil }
+		if row < 0 {
+			return false, m, nil
+		}
 		model, cmd := m.openSidebarSessionAt(row)
 		return true, model, cmd
 	case tea.MouseMotionMsg:
 		if sidebarMouseHitX(msg.X) {
 			row := m.sidebarRowAt(msg.Y)
-			if row != m.sidebarHoverRow { m.sidebarHoverRow = row; m.syncSidebarRows() }
+			if row != m.sidebarHoverRow {
+				m.sidebarHoverRow = row
+				m.syncSidebarRows()
+			}
 			return true, m, nil
 		}
-		if m.sidebarHoverRow != -1 { m.sidebarHoverRow = -1; m.syncSidebarRows() }
+		if m.sidebarHoverRow != -1 {
+			m.sidebarHoverRow = -1
+			m.syncSidebarRows()
+		}
 		return false, m, nil
 	default:
 		return false, m, nil
@@ -1411,11 +1435,15 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 		m.updateViewport()
 		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
 
+	case ipc.EventTypeProgress:
+		return m.handleProgressEvent(event)
+
 	case "stream_end":
 		// Terminal event — stream complete.
 		animCmd := m.animations.onStreamEnd()
 		m.waiting = false
 		m.activeTools = nil
+		m.stallLine = ""
 		m.resetAttachProgress()
 		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
@@ -1433,6 +1461,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 		// Terminal event — error.
 		m.waiting = false
 		m.activeTools = nil
+		m.stallLine = ""
 		m.resetAttachProgress()
 		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
@@ -1456,6 +1485,48 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 
 	// Unknown event type — keep reading.
 	return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
+}
+
+// handleProgressEvent processes a surface-neutral progress event from the
+// daemon. It updates the tool activity indicator and the stall line without
+// ever touching the transcript buffer — technical progress never pollutes
+// the chat transcript. Old daemons that still embed tool markers in
+// stream_chunk keep working through parseToolChunk/parseToolDone above.
+func (m Model) handleProgressEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
+	var payload ipc.ProgressPayload
+	if err := json.Unmarshal([]byte(event.Body), &payload); err != nil {
+		// Malformed progress event — ignore and keep streaming.
+		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
+	}
+
+	switch payload.State {
+	case "working":
+		if payload.ToolName != "" {
+			m.activeTools = append(m.activeTools, toolInfo{Name: payload.ToolName, Detail: payload.Detail})
+		}
+		if payload.ToolDone {
+			if n := len(m.activeTools); n > 0 {
+				m.activeTools[n-1].Done = true
+			}
+		}
+		m.stallLine = ""
+	case "waiting":
+		// Model thinking without tools — the spinner already covers this.
+		m.stallLine = ""
+	case "stall_warning":
+		m.stallLine = "⚠️ Estou demorando mais que o normal — aguarde."
+	case "stall_urgent":
+		m.stallLine = "🚨 Modelo com dificuldade de responder. Se persistir, pressione Esc para cancelar."
+	case "done", "canceled", "failed":
+		// Terminal states: stream_end/error already reset the chrome.
+		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
+	default:
+		// Unknown state from a newer daemon — keep streaming.
+		return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd())
+	}
+
+	vpCmd := m.updateViewport()
+	return m, tea.Batch(m.readNextStreamEvent(), spinnerTickCmd(), vpCmd)
 }
 
 // readNextStreamEvent returns a command that reads the next event from the

@@ -51,3 +51,18 @@ type Store interface {
 	// Close releases the store's resources.
 	Close() error
 }
+
+// AtomicCompletionStore is an optional capability implemented by stores that
+// can commit the terminal run row and its pending timeline events together.
+// SQLiteStore is the production implementation. Generic stores may use the
+// Store methods as a best-effort fallback when this capability is absent.
+type AtomicCompletionStore interface {
+	CompleteWithEvents(ctx context.Context, runID string, status RunStatus, checkpoint, errMsg, toolSummary string, agg CompletionAggregates, events []RunEvent) error
+}
+
+// AggregateCompletionStore is the older atomic terminal capability retained
+// for generic test stores and non-SQLite backends that can commit aggregates
+// with the terminal row but do not own the pending timeline transaction.
+type AggregateCompletionStore interface {
+	CompleteWithAggregates(ctx context.Context, runID string, status RunStatus, checkpoint, errMsg, toolSummary string, agg CompletionAggregates) error
+}

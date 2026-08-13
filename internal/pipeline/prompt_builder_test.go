@@ -518,7 +518,7 @@ type fakeRunLog struct {
 	latest *runlog.RunRecord
 }
 
-func (f *fakeRunLog) Start(ctx context.Context, record runlog.RunRecord) error { return nil }
+func (f *fakeRunLog) Start(ctx context.Context, record runlog.RunRecord) error  { return nil }
 func (f *fakeRunLog) Update(ctx context.Context, update runlog.RunUpdate) error { return nil }
 func (f *fakeRunLog) Complete(ctx context.Context, runID string, status runlog.RunStatus, checkpoint, errMsg, toolSummary string) error {
 	return nil
@@ -1792,11 +1792,11 @@ func TestBuildProjectWorkSection_CrossSurface(t *testing.T) {
 	slug := runtime.ProjectSlug("/Users/test/project-y")
 	staleTime := time.Now().Add(-7 * time.Hour) // stale but cross-surface
 	err = contStore.PatchProjectWork(ctx, continuity.ProjectWorkKey{UserID: 100, ProjectSlug: slug}, continuity.ProjectWorkPatch{
-		LastUserIntent:  ptrString("fix the bug"),
-		LastRunStatus:   ptrString("completed"),
-		LastEntrypoint:  ptrString("telegram"),
-		CWD:             ptrString("/Users/test/project-y"),
-		UpdatedAt:       staleTime,
+		LastUserIntent: ptrString("fix the bug"),
+		LastRunStatus:  ptrString("completed"),
+		LastEntrypoint: ptrString("telegram"),
+		CWD:            ptrString("/Users/test/project-y"),
+		UpdatedAt:      staleTime,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1830,11 +1830,11 @@ func TestBuildProjectWorkSection_StaleSkips(t *testing.T) {
 	slug := runtime.ProjectSlug("/Users/test/project-z")
 	staleTime := time.Now().Add(-7 * time.Hour) // > 6h stale
 	err = contStore.PatchProjectWork(ctx, continuity.ProjectWorkKey{UserID: 100, ProjectSlug: slug}, continuity.ProjectWorkPatch{
-		LastUserIntent:  ptrString("old intent"),
-		LastRunStatus:   ptrString("completed"),
-		LastEntrypoint:  ptrString("telegram"),
-		CWD:             ptrString("/Users/test/project-z"),
-		UpdatedAt:       staleTime,
+		LastUserIntent: ptrString("old intent"),
+		LastRunStatus:  ptrString("completed"),
+		LastEntrypoint: ptrString("telegram"),
+		CWD:            ptrString("/Users/test/project-z"),
+		UpdatedAt:      staleTime,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1866,11 +1866,11 @@ func TestBuildProjectWorkSection_ContinuationAlwaysInjects(t *testing.T) {
 	// Hot state, same entrypoint — normally would skip
 	now := time.Now()
 	err = contStore.PatchProjectWork(ctx, continuity.ProjectWorkKey{UserID: 100, ProjectSlug: slug}, continuity.ProjectWorkPatch{
-		LastUserIntent:  ptrString("previous work"),
-		LastRunStatus:   ptrString("completed"),
-		LastEntrypoint:  ptrString("telegram"),
-		CWD:             ptrString("/Users/test/project-w"),
-		UpdatedAt:       now,
+		LastUserIntent: ptrString("previous work"),
+		LastRunStatus:  ptrString("completed"),
+		LastEntrypoint: ptrString("telegram"),
+		CWD:            ptrString("/Users/test/project-w"),
+		UpdatedAt:      now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1905,11 +1905,11 @@ func TestBuildProjectWorkSection_HotActiveSameChatSkips(t *testing.T) {
 	slug := runtime.ProjectSlug("/Users/test/project-hot")
 	now := time.Now()
 	err = contStore.PatchProjectWork(ctx, continuity.ProjectWorkKey{UserID: 100, ProjectSlug: slug}, continuity.ProjectWorkPatch{
-		LastUserIntent:  ptrString("recent work"),
-		LastRunStatus:   ptrString("completed"),
-		LastEntrypoint:  ptrString("telegram"),
-		CWD:             ptrString("/Users/test/project-hot"),
-		UpdatedAt:       now,
+		LastUserIntent: ptrString("recent work"),
+		LastRunStatus:  ptrString("completed"),
+		LastEntrypoint: ptrString("telegram"),
+		CWD:            ptrString("/Users/test/project-hot"),
+		UpdatedAt:      now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2054,4 +2054,3 @@ func TestBuildProjectWorkSection_ZeroUserID(t *testing.T) {
 		t.Fatalf("expected empty for userID=0, got %q", got)
 	}
 }
-
