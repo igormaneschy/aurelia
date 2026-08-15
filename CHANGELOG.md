@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.41.0] - 2026-08-15
+
+### Added
+- Progresso contínuo em execuções longas: primeiro feedback visível em
+  até 15s e indicadores de stall (warning/urgent) que atualizam um único
+  recibo no Telegram e um indicador não-transcript na TUI, sem duplicar
+  mensagens.
+- Telemetria de sessões longas no runlog e em `aurelia debug metrics
+  --json`: first feedback, silêncio máximo, contagem de stall/steer,
+  duração de ferramentas, delta de tokens de compactação, origem de
+  timeout e retry de process death — tudo redigido e correlacionado por
+  run/request.
+- Retry de process death injeta contexto recuperado no prompt de retomada
+  e eventos de steer são registrados somente quando efetivamente entregues.
+
+### Fixed
+- Run superseded não é mais registrado como completed sem entregar a
+  resposta; o status terminal é cancelado/superseded.
+- Heartbeat de progresso não congela mais após o primeiro aviso durante
+  silêncio prolongado.
+- `aurelia debug metrics` não falha mais quando a janela não tem runs
+  com duração (AVG NULL).
+- Goroutine do watcher de cancelamento de compactação agora tem recovery
+  obrigatório.
+
+### Changed
+- Go toolchain 1.26.6; golang.org/x/net v0.56.0 e x/text v0.39.0
+  (govulncheck limpo).
+
 ## [0.40.2] - 2026-08-11
 
 ### Fixed
