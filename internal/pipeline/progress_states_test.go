@@ -139,7 +139,8 @@ func TestProcessBridgeEvents_StaleOwnerEmitsCanceledState(t *testing.T) {
 
 // TestHeartbeatMonitor_EmitsWaitingState drives the real heartbeat state
 // machine with short intervals: the waiting state fires after the threshold,
-// and a tool signal resets the gap so a second waiting state can fire.
+// refreshes on a cadence while the silence continues, and a tool signal
+// resets the gap so a fresh waiting state can fire.
 func TestHeartbeatMonitor_EmitsWaitingState(t *testing.T) {
 	progress := &recordingProgress{}
 	done := make(chan struct{})
@@ -161,15 +162,24 @@ func TestHeartbeatMonitor_EmitsWaitingState(t *testing.T) {
 	}
 
 	states := waitForStates(1)
-	if len(states) != 1 || states[0] != ProgressStateWaiting {
-		t.Fatalf("states = %v, want exactly [waiting] after threshold", states)
+	if len(states) == 0 || states[0] != ProgressStateWaiting {
+		t.Fatalf("states = %v, want first [waiting] after threshold", states)
 	}
 
-	// Tool signal resets the gap; a second waiting state must fire.
+	// While the model stays silent, the state refreshes on the cadence
+	// (every 3 intervals) instead of freezing at the first beat.
+	time.Sleep(45 * time.Millisecond)
+	if got := len(progress.recorded()); got < 2 {
+		t.Fatalf("states = %v, want refresh while silent (>= 2 waiting)", progress.recorded())
+	}
+
+	// Tool signal resets the gap; a fresh waiting state must fire after the
+	// threshold again.
+	before := len(progress.recorded())
 	sig <- struct{}{}
-	states = waitForStates(2)
-	if len(states) < 2 || states[1] != ProgressStateWaiting {
-		t.Fatalf("states = %v, want second [waiting] after reset", states)
+	states = waitForStates(before + 1)
+	if got := len(states); got < before+1 || states[got-1] != ProgressStateWaiting {
+		t.Fatalf("states = %v, want fresh [waiting] after reset", states)
 	}
 }
 

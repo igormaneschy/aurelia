@@ -1685,7 +1685,7 @@ async function handleQuery(req) {
             eReq(compactionEndPayload({
               reason: compactionReason(sdkEvent.reason),
               tokensBefore,
-              success: !!result && sdkEvent.aborted !== true,
+              success: !!result && sdkEvent.aborted !== true && typeof sdkEvent.errorMessage !== "string",
               errored: !result || sdkEvent.aborted === true || typeof sdkEvent.errorMessage === "string",
               tokensAfter,
               durationMs
@@ -1746,6 +1746,12 @@ async function handleQuery(req) {
           liveSession.steer(
             "Continue please. You have been silent for over a minute. If you have finished your current task, present your findings."
           ).then(() => {
+            emitReq({
+              event: "steer",
+              severity: "warning",
+              silent_ms: silent,
+              source: "bridge_health"
+            });
             redactedLog("stall steer sent at ".concat(Math.round(silent / 1e3), "s (rid=").concat(reqId, ")"));
           }).catch((err) => {
             redactedLog("stall steer failed: ".concat(err instanceof Error ? err.message : String(err)));
@@ -1753,18 +1759,18 @@ async function handleQuery(req) {
         } catch (err) {
           redactedLog("stall steer failed (sync): ".concat(err instanceof Error ? err.message : String(err)));
         }
-        emitReq({
-          event: "steer",
-          severity: "warning",
-          silent_ms: silent,
-          source: "bridge_health"
-        });
       }
       if (telemetry.steer === "urgent") {
         try {
           liveSession.steer(
             "You have been silent for over 2 minutes. Stop your current activity and present a summary of what you have done so far."
           ).then(() => {
+            emitReq({
+              event: "steer",
+              severity: "urgent",
+              silent_ms: silent,
+              source: "bridge_health"
+            });
             redactedLog("stall urgent steer sent at ".concat(Math.round(silent / 1e3), "s (rid=").concat(reqId, ")"));
           }).catch((err) => {
             redactedLog("stall urgent steer failed: ".concat(err instanceof Error ? err.message : String(err)));
@@ -1772,12 +1778,6 @@ async function handleQuery(req) {
         } catch (err) {
           redactedLog("stall urgent steer failed (sync): ".concat(err instanceof Error ? err.message : String(err)));
         }
-        emitReq({
-          event: "steer",
-          severity: "urgent",
-          silent_ms: silent,
-          source: "bridge_health"
-        });
       }
     }, 15e3);
     let unsubHook;
@@ -2142,7 +2142,7 @@ async function handleCompactSession(req) {
           emitReq(compactionEndPayload({
             reason: compactionReason(sdkEvent.reason),
             tokensBefore,
-            success: !!result2 && sdkEvent.aborted !== true,
+            success: !!result2 && sdkEvent.aborted !== true && typeof sdkEvent.errorMessage !== "string",
             errored: !result2 || sdkEvent.aborted === true || typeof sdkEvent.errorMessage === "string",
             tokensAfter,
             durationMs

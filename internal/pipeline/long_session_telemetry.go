@@ -25,9 +25,8 @@ type runLogState struct {
 	owner            *activeRun // compare-and-delete/update ownership token
 	summary          strings.Builder
 	summaryCount     int
-	wg               sync.WaitGroup // tracks in-flight DB updates
-	finalizing       bool           // terminal finalization has been claimed
-	finalized        bool           // terminal persistence path has completed
+	finalizing       bool // terminal finalization has been claimed
+	finalized        bool // terminal persistence path has completed
 	finalizer        *terminalFinalization
 	partialAssistant string // last partial assistant text, for checkpoint on timeout
 	writeToolsUsed   bool   // Write/Edit tools may have changed memory files
@@ -526,6 +525,15 @@ func (s *Service) recordPipelineEventOwned(chatID int64, threadID int, userID in
 		if isTelemetryPhase(ev.Phase) {
 			state.telemetryEvents++
 			state.telemetryBytes += evBytes
+		}
+		if state.finalized {
+			// The terminal batch already copied and detached the pending
+			// queue; anything appended now is never flushed to the store.
+			// Count it so the drop stays observable instead of silent.
+			state.pendingDropped++
+			if isTelemetryPhase(ev.Phase) {
+				state.telemetryDropped++
+			}
 		}
 		state.pendingEvents = append(state.pendingEvents, evLog)
 		state.pendingBytes += evBytes
@@ -1064,8 +1072,6 @@ func (s *Service) completeRunLogOwned(chatID int64, threadID int, userID int64, 
 	} else {
 		checkpoint = buildCheckpoint(status, checkpoint, summary, errMsg, partialAssistant)
 	}
-
-	state.wg.Wait()
 
 	completeCtx, completeCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer completeCancel()

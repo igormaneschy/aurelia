@@ -846,6 +846,7 @@ func heartbeatMonitorWithIntervals(doneCh <-chan struct{}, toolUseSignal <-chan 
 	lastTool := time.Now()
 	beatSent := false
 	beatCount := 0
+	var lastBeatAt time.Time
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -857,12 +858,16 @@ func heartbeatMonitorWithIntervals(doneCh <-chan struct{}, toolUseSignal <-chan 
 			lastTool = time.Now()
 			beatSent = false
 		case <-ticker.C:
-			if time.Since(lastTool) >= threshold && !beatSent {
+			// Re-report on a refresh cadence (every 3 intervals) while the
+			// model keeps thinking without tools: the embedded elapsed time
+			// must stay fresh instead of freezing at the first beat.
+			if time.Since(lastTool) >= threshold && (!beatSent || time.Since(lastBeatAt) >= interval*3) {
 				elapsed := time.Since(lastTool).Round(time.Second)
 				beatCount++
 				toolCount := toolTracker.countLocked()
 				progress.ReportState(ProgressStateWaiting, buildHeartbeatMessage(elapsed, beatCount, toolCount))
 				beatSent = true
+				lastBeatAt = time.Now()
 			}
 		}
 	}
@@ -1180,6 +1185,16 @@ func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, e
 
 	// Capture runID before completeRunLog cleans up runLogStates.
 	successRunID := s.getRunID(chatID, threadID, userID, ownership)
+	// A superseded run must not be recorded as completed: its final reply is
+	// intentionally not delivered (the replacement run owns the conversation),
+	// so the timeline would show a completed run with no delivery. Persist an
+	// honest canceled/superseded terminal status instead.
+	if !s.activeRunStillOwned(chatID, threadID, userID, ownership.owner) {
+		s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent(successRunID,
+			observability.PhaseRunCanceled, "status=superseded"), ownership)
+		s.completeRunLog(chatID, threadID, userID, runlog.RunCanceled, "", "superseded", ownership)
+		return OutcomeCanceled
+	}
 	// Record run_completed while the state is pending so SQLite includes it in
 	// the atomic terminal completion batch.
 	s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent(successRunID,

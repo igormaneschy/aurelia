@@ -106,6 +106,14 @@ func (b *Bridge) CompactSessionWithEvents(ctx context.Context, opts RequestOptio
 	cancelWatchStop := make(chan struct{})
 	cancelWatchDone := make(chan error, 1)
 	go func() {
+		// Mandatory recovery: a panic in any background goroutine terminates
+		// the whole daemon. CancelRequest touches shared transport state and
+		// must never take the process down if it races a wedged bridge.
+		defer func() {
+			if r := recover(); r != nil {
+				slog.Error("bridge: panic in compact-session cancellation watcher", "request_id", requestID, "error", r)
+			}
+		}()
 		select {
 		case <-ctx.Done():
 			cancelCtx, cancel := context.WithTimeout(context.Background(), compactionCancelGrace)

@@ -2534,7 +2534,7 @@ async function handleQuery(req: Request): Promise<void> {
             eReq(compactionEndPayload({
               reason: compactionReason(sdkEvent.reason),
               tokensBefore,
-              success: !!result && sdkEvent.aborted !== true,
+              success: !!result && sdkEvent.aborted !== true && typeof sdkEvent.errorMessage !== "string",
               errored: !result || sdkEvent.aborted === true || typeof sdkEvent.errorMessage === "string",
               tokensAfter,
               durationMs,
@@ -2610,6 +2610,14 @@ async function handleQuery(req: Request): Promise<void> {
             "Continue please. You have been silent for over a minute. " +
             "If you have finished your current task, present your findings."
           ).then(() => {
+            // Telemetry only when the steer was actually delivered; a failed
+            // steer must not be recorded as if it happened (timeline honesty).
+            emitReq({
+              event: "steer",
+              severity: "warning",
+              silent_ms: silent,
+              source: "bridge_health",
+            });
             redactedLog(`stall steer sent at ${Math.round(silent / 1000)}s (rid=${reqId})`);
           }).catch((err: unknown) => {
             redactedLog(`stall steer failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -2617,12 +2625,6 @@ async function handleQuery(req: Request): Promise<void> {
         } catch (err: unknown) {
           redactedLog(`stall steer failed (sync): ${err instanceof Error ? err.message : String(err)}`);
         }
-        emitReq({
-          event: "steer",
-          severity: "warning",
-          silent_ms: silent,
-          source: "bridge_health",
-        });
       }
       if (telemetry.steer === "urgent") {
         try {
@@ -2630,6 +2632,12 @@ async function handleQuery(req: Request): Promise<void> {
             "You have been silent for over 2 minutes. " +
             "Stop your current activity and present a summary of what you have done so far."
           ).then(() => {
+            emitReq({
+              event: "steer",
+              severity: "urgent",
+              silent_ms: silent,
+              source: "bridge_health",
+            });
             redactedLog(`stall urgent steer sent at ${Math.round(silent / 1000)}s (rid=${reqId})`);
           }).catch((err: unknown) => {
             redactedLog(`stall urgent steer failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -2637,12 +2645,6 @@ async function handleQuery(req: Request): Promise<void> {
         } catch (err: unknown) {
           redactedLog(`stall urgent steer failed (sync): ${err instanceof Error ? err.message : String(err)}`);
         }
-        emitReq({
-          event: "steer",
-          severity: "urgent",
-          silent_ms: silent,
-          source: "bridge_health",
-        });
       }
     }, 15_000);
 
@@ -3104,7 +3106,7 @@ async function handleCompactSession(req: Request): Promise<void> {
           emitReq(compactionEndPayload({
             reason: compactionReason(sdkEvent.reason),
             tokensBefore,
-            success: !!result && sdkEvent.aborted !== true,
+            success: !!result && sdkEvent.aborted !== true && typeof sdkEvent.errorMessage !== "string",
             errored: !result || sdkEvent.aborted === true || typeof sdkEvent.errorMessage === "string",
             tokensAfter,
             durationMs,

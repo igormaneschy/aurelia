@@ -305,6 +305,34 @@ func (s *Service) retryAfterProcessDeath(
 		}
 	}
 
+	// The cold-resume retry relies on the PI session file surviving the crash,
+	// but a death mid-compaction/write can corrupt it. Inject the same
+	// recovered-context snapshot the fallback path uses so the retry still has
+	// the interrupted task's context when the session file is unusable.
+	if chatID != 0 {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("process_death_retry: panic in continuitySnapshot: %v", r)
+				}
+			}()
+			snapshot := s.continuitySnapshot(ctx, chatID, threadID, userID)
+			if snapshot != "" {
+				snapshotBlock := "\n\n## Previous Session Context (recovered)\n\n" +
+					"The following is recovered context from the previous session that was interrupted. " +
+					"Use it to continue the task.\n\n" +
+					"<recovered_context_untrusted>\n" + snapshot + "\n</recovered_context_untrusted>"
+
+				if retryReq.Options.SystemPrompt != "" {
+					retryReq.Options.SystemPrompt += snapshotBlock
+				} else {
+					retryReq.Options.SystemPrompt = snapshotBlock
+				}
+				log.Printf("process_death_retry: injected continuity snapshot into retry prompt (chat=%d thread=%d)", chatID, threadID)
+			}
+		}()
+	}
+
 	// Intentionally uses s.bridge.Execute (not s.executeQuery) here because
 	// process-death recovery has its own retry/fallback discipline — the bridge
 	// process was restarted by s.bridge's readLoop death callback, so a single

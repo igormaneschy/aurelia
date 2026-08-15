@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -219,11 +220,11 @@ func debugPrune(ctx context.Context, resolver *runtime.PathResolver, store *runl
 
 	if jsonOut {
 		return printJSON(struct {
-			Days          int                `json:"days"`
-			Cutoff        time.Time          `json:"cutoff"`
-			DryRun        bool               `json:"dry_run"`
-			RunsDeleted   int64              `json:"runs_deleted"`
-			EventsDeleted int64              `json:"events_deleted"`
+			Days          int       `json:"days"`
+			Cutoff        time.Time `json:"cutoff"`
+			DryRun        bool      `json:"dry_run"`
+			RunsDeleted   int64     `json:"runs_deleted"`
+			EventsDeleted int64     `json:"events_deleted"`
 		}{
 			Days:          days,
 			Cutoff:        cutoff,
@@ -345,7 +346,9 @@ func printRunDetail(r *runlog.RunRecord, events []runlog.RunEvent) {
 	}
 	fmt.Printf("  CWD:          %s\n", r.CWD)
 	if r.SessionFile != "" {
-		fmt.Printf("  Session:      %s\n", r.SessionFile)
+		// Absolute paths may expose the operator's home layout in shared
+		// shell recordings; the basename identifies the session uniquely.
+		fmt.Printf("  Session:      %s\n", filepath.Base(r.SessionFile))
 	}
 	if r.DurationMs > 0 {
 		dur := time.Duration(r.DurationMs) * time.Millisecond
