@@ -13,14 +13,14 @@ type MetricsResult struct {
 	WindowEnd   time.Time
 
 	// Run counts
-	RunsTotal       int
-	RunsCompleted   int
-	RunsFailed      int
-	RunsTimedOut    int
-	RunsCanceled    int
-	RunsRunning     int
-	SuccessRate     float64 // 0-100
-	FallbackCount   int
+	RunsTotal     int
+	RunsCompleted int
+	RunsFailed    int
+	RunsTimedOut  int
+	RunsCanceled  int
+	RunsRunning   int
+	SuccessRate   float64 // 0-100
+	FallbackCount int
 
 	// Token and cost
 	TokensInputTotal  int64
@@ -38,13 +38,13 @@ type MetricsResult struct {
 	AvgMaxSilenceMs    float64 // AVG(max_silence_ms) over runs with max_silence_ms > 0
 
 	// Breakdowns
-	ProviderBreakdown []BreakdownItem
-	ModelBreakdown    []BreakdownItem
+	ProviderBreakdown   []BreakdownItem
+	ModelBreakdown      []BreakdownItem
 	EntrypointBreakdown []BreakdownItem
 
 	// Cron (if available)
-	CronRunsTotal    int
-	CronSuccessRate  float64
+	CronRunsTotal   int
+	CronSuccessRate float64
 }
 
 // BreakdownItem is a metric breakdown key-value pair.
@@ -111,7 +111,7 @@ func (s *SQLiteStore) Metrics(ctx context.Context, filter MetricsFilter) (*Metri
 	// that have non-zero duration.
 	durationRow := s.db.QueryRowContext(ctx, `
 		SELECT
-			AVG(duration_ms) AS avg_dur,
+			COALESCE(AVG(duration_ms), 0) AS avg_dur,
 			COALESCE(
 				(SELECT duration_ms FROM run_journal
 				 WHERE started_at >= ? AND started_at < ?

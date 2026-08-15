@@ -139,6 +139,27 @@ func TestSQLiteStore_Metrics_LongSessionAggregates(t *testing.T) {
 	}
 }
 
+// TestSQLiteStore_Metrics_EmptyWindowIsZero ensures Metrics succeeds with no
+// runs in the window: AVG over zero rows yields NULL and must be coalesced to
+// zero instead of failing the scan (regression: debug metrics crashed with
+// "converting NULL to float64 is unsupported" on a fresh store).
+func TestSQLiteStore_Metrics_EmptyWindowIsZero(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	m, err := s.Metrics(ctx, MetricsFilter{Since: now.Add(-time.Hour), Until: now.Add(time.Hour)})
+	if err != nil {
+		t.Fatalf("Metrics on empty window: %v", err)
+	}
+	if m.RunsTotal != 0 || m.DurationP50Ms != 0 || m.DurationP95Ms != 0 {
+		t.Fatalf("empty-window metrics = %+v, want all zero", m)
+	}
+	if m.StallsTotal != 0 || m.SteersTotal != 0 || m.AvgFirstFeedbackMs != 0 || m.AvgMaxSilenceMs != 0 {
+		t.Fatalf("empty-window long-session aggregates = %+v, want all zero", m)
+	}
+}
+
 // TestSQLiteStore_CompleteWithAggregates verifies the atomic terminal write:
 // status + long-session aggregates persist in the same operation and are
 // readable back together (never split between Complete and a later Update).
