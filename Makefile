@@ -133,7 +133,13 @@ install-service-linux:
 	./scripts/install-systemd.sh
 
 # Atomic deploy: build + swap + kickstart. Use this for every change.
+# Guards the kickstart with scripts/deploy-guard.sh: if runs are active it
+# waits DRAIN_WAIT seconds, then aborts unless FORCE=1 is set. Interrupted
+# runs are marked `interrupted` in the runlog on the next daemon start.
+DRAIN_WAIT ?= 5
+
 deploy: install install-tui
+	@./scripts/deploy-guard.sh "$(BINARY)" "$(DRAIN_WAIT)" || exit 1
 	@if launchctl print $(SERVICE) >/dev/null 2>&1; then \
 		launchctl kickstart -k $(SERVICE); \
 		echo "deployed: $(BINARY) and $(TUI_BINARY) (service kicked)"; \

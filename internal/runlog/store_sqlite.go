@@ -400,6 +400,24 @@ func (s *SQLiteStore) Complete(ctx context.Context, runID string, status RunStat
 	return nil
 }
 
+// MarkStaleRunsInterrupted transitions every row still in status=running to
+// status=interrupted. Called at daemon startup: any row still running after a
+// restart is stale by definition (the process that owned it is gone). The
+// terminal status is interrupted — the run did not fail, it was cut off.
+func (s *SQLiteStore) MarkStaleRunsInterrupted(ctx context.Context) (int64, error) {
+	now := unix(time.Now())
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE run_journal
+		SET status = ?, error = 'daemon_restart',
+		    updated_at = ?, completed_at = ?
+		WHERE status = ?`,
+		string(RunInterrupted), now, now, string(RunRunning))
+	if err != nil {
+		return 0, fmt.Errorf("runlog mark stale runs interrupted: %w", err)
+	}
+	return res.RowsAffected()
+}
+
 // CompleteWithEvents commits all pending timeline events and the terminal run
 // row in one SQLite transaction. The terminal UPDATE is conditional on the
 // row still being running, so a late callback cannot overwrite an earlier

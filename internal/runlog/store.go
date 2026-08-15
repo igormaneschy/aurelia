@@ -14,6 +14,12 @@ type Store interface {
 	// error, and optional tool_summary in a single write.
 	Complete(ctx context.Context, runID string, status RunStatus, checkpoint, errMsg, toolSummary string) error
 
+	// MarkStaleRunsInterrupted transitions every row still in status=running
+	// to status=interrupted (error='daemon_restart'). Called at daemon
+	// startup: any row still running after a restart is stale by definition.
+	// Returns the number of rows updated.
+	MarkStaleRunsInterrupted(ctx context.Context) (int64, error)
+
 	// RecordEvents persists multiple timeline events in one transaction.
 	// Best-effort: errors are logged by callers, never block the pipeline.
 	RecordEvents(ctx context.Context, events []RunEvent) error

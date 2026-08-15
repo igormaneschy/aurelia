@@ -13,14 +13,15 @@ type MetricsResult struct {
 	WindowEnd   time.Time
 
 	// Run counts
-	RunsTotal     int
-	RunsCompleted int
-	RunsFailed    int
-	RunsTimedOut  int
-	RunsCanceled  int
-	RunsRunning   int
-	SuccessRate   float64 // 0-100
-	FallbackCount int
+	RunsTotal       int
+	RunsCompleted   int
+	RunsFailed      int
+	RunsTimedOut    int
+	RunsCanceled    int
+	RunsRunning     int
+	RunsInterrupted int     // cut off by daemon restart/deploy
+	SuccessRate     float64 // 0-100
+	FallbackCount   int
 
 	// Token and cost
 	TokensInputTotal  int64
@@ -77,13 +78,14 @@ func (s *SQLiteStore) Metrics(ctx context.Context, filter MetricsFilter) (*Metri
 			COALESCE(SUM(CASE WHEN status = 'timed_out' THEN 1 ELSE 0 END), 0) AS timed_out,
 			COALESCE(SUM(CASE WHEN status = 'canceled' THEN 1 ELSE 0 END), 0) AS canceled,
 			COALESCE(SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END), 0) AS running,
+			COALESCE(SUM(CASE WHEN status = 'interrupted' THEN 1 ELSE 0 END), 0) AS interrupted,
 			COALESCE(SUM(used_fallback), 0) AS fallbacks
 		FROM run_journal
 		WHERE started_at >= ? AND started_at < ?`,
 		filter.Since.Unix(), filter.Until.Unix())
 
 	if err := row.Scan(&m.RunsTotal, &m.RunsCompleted, &m.RunsFailed,
-		&m.RunsTimedOut, &m.RunsCanceled, &m.RunsRunning, &m.FallbackCount); err != nil {
+		&m.RunsTimedOut, &m.RunsCanceled, &m.RunsRunning, &m.RunsInterrupted, &m.FallbackCount); err != nil {
 		return nil, fmt.Errorf("metrics run counts: %w", err)
 	}
 

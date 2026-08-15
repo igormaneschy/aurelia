@@ -160,6 +160,66 @@ func TestSQLiteStore_Metrics_EmptyWindowIsZero(t *testing.T) {
 	}
 }
 
+// TestSQLiteStore_MarkStaleRunsInterrupted covers T5: rows still running
+// after a daemon restart are marked interrupted (error=daemon_restart) while
+// terminal rows are untouched.
+func TestSQLiteStore_MarkStaleRunsInterrupted(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	runA := idgen.New()
+	if err := s.Start(ctx, RunRecord{
+		RunID: runA, ChatID: 1, ThreadID: 0, RequestID: "req-stale",
+		Prompt: "stale", StartedAt: now.Add(-5 * time.Minute),
+	}); err != nil {
+		t.Fatalf("Start A: %v", err)
+	}
+	runB := idgen.New()
+	if err := s.Start(ctx, RunRecord{
+		RunID: runB, ChatID: 2, ThreadID: 0, RequestID: "req-done",
+		Prompt: "done", StartedAt: now.Add(-5 * time.Minute),
+	}); err != nil {
+		t.Fatalf("Start B: %v", err)
+	}
+	if err := s.Complete(ctx, runB, RunCompleted, "", "", ""); err != nil {
+		t.Fatalf("Complete B: %v", err)
+	}
+
+	marked, err := s.MarkStaleRunsInterrupted(ctx)
+	if err != nil {
+		t.Fatalf("MarkStaleRunsInterrupted: %v", err)
+	}
+	if marked != 1 {
+		t.Fatalf("marked = %d, want 1", marked)
+	}
+
+	got, err := s.GetRun(ctx, runA)
+	if err != nil || got == nil {
+		t.Fatalf("GetRun A: %v", err)
+	}
+	if got.Status != RunInterrupted || got.Error != "daemon_restart" {
+		t.Fatalf("stale run status = %q error = %q, want interrupted/daemon_restart", got.Status, got.Error)
+	}
+
+	gotB, err := s.GetRun(ctx, runB)
+	if err != nil || gotB == nil {
+		t.Fatalf("GetRun B: %v", err)
+	}
+	if gotB.Status != RunCompleted {
+		t.Fatalf("completed run status = %q, want completed (untouched)", gotB.Status)
+	}
+
+	// Idempotent: a second pass marks nothing.
+	marked2, err := s.MarkStaleRunsInterrupted(ctx)
+	if err != nil {
+		t.Fatalf("MarkStaleRunsInterrupted second pass: %v", err)
+	}
+	if marked2 != 0 {
+		t.Fatalf("marked2 = %d, want 0 (idempotent)", marked2)
+	}
+}
+
 // TestSQLiteStore_CompleteWithAggregates verifies the atomic terminal write:
 // status + long-session aggregates persist in the same operation and are
 // readable back together (never split between Complete and a later Update).

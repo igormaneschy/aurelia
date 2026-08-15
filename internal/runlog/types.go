@@ -11,6 +11,10 @@ const (
 	RunTimedOut  RunStatus = "timed_out"
 	RunCanceled  RunStatus = "canceled"
 	RunFailed    RunStatus = "failed"
+	// RunInterrupted marks runs that were still running when the daemon was
+	// restarted/deployed. The row is persisted as interrupted (not failed):
+	// the run did not fail on its own, it was cut off by an external stop.
+	RunInterrupted RunStatus = "interrupted"
 )
 
 // RunRecord is the full representation of a run journal entry.
