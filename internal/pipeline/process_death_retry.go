@@ -144,9 +144,7 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	}
 
 	if ch != nil {
-		ch = idleTimeoutWrapper(ctx, ch, s.getIdleTimeout(), cancel, func() {
-			timeoutTracker.mark(timeoutOriginIdleBridge)
-		})
+		ch = s.wrapWithLivenessTimeout(ctx, ch, chatID, threadID, userID, s.getIdleTimeout(), cancel, timeoutTracker, progress, runLogStarted, ownership, steerDuringExecution)
 	}
 
 	var outcome Outcome
@@ -369,9 +367,25 @@ func (s *Service) retryAfterProcessDeath(
 	}
 
 	if ch != nil {
-		ch = idleTimeoutWrapper(ctx, ch, s.getIdleTimeout(), cancel, func() {
-			timeoutTracker.mark(timeoutOriginIdleBridge)
-		})
+		// The retry path uses the same liveness-aware watchdog; steer is
+		// available through the bridge like the primary path.
+		steerRetry := func(msg string) {
+			steerCtx, steerCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer steerCancel()
+			_, err := s.bridge.ExecuteSync(steerCtx, bridge.Request{
+				Command: "steer",
+				Prompt:  msg,
+				Options: bridge.RequestOptions{
+					ChatID:   chatID,
+					ThreadID: threadID,
+					UserID:   userID,
+				},
+			})
+			if err != nil {
+				log.Printf("pipeline: steer failed during retry chat=%d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
+			}
+		}
+		ch = s.wrapWithLivenessTimeout(ctx, ch, chatID, threadID, userID, s.getIdleTimeout(), cancel, timeoutTracker, progress, runLogStarted, ownership, steerRetry)
 	}
 
 	toolUseSignal := make(chan struct{}, 16)

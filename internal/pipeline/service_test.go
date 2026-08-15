@@ -536,6 +536,9 @@ func (s *spyRunLogStore) Metrics(_ context.Context, _ runlog.MetricsFilter) (*ru
 func (s *spyRunLogStore) GetLastOutboundMessage(_ context.Context, _ string) (int64, int, int64, error) {
 	return 0, 0, 0, nil
 }
+func (s *spyRunLogStore) MarkStaleRunsInterrupted(_ context.Context) (int64, error) {
+	return 0, nil
+}
 func (s *spyRunLogStore) Close() error { return nil }
 
 func (s *spyRunLogStore) recordedEvents() []runlog.RunEvent {

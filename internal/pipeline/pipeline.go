@@ -213,6 +213,9 @@ func buildTimeoutMessage(origin string) string {
 	case timeoutOriginMaxExecution:
 		return "Tempo máximo de execução atingido.\n\n" +
 			"A solicitação foi muito complexa. Tente dividir em partes menores."
+	case timeoutOriginProcessDeath:
+		return "O processador parou de responder.\n\n" +
+			"O processo foi reiniciado automaticamente. Tente novamente em instantes."
 	default:
 		return "Tempo limite atingido antes de concluir.\n\n" +
 			"A solicitação foi muito complexa. Tente dividir em partes menores."
@@ -883,6 +886,10 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 		assistantText       strings.Builder
 		lastStreamFlush     = time.Now()
 		streamFlushInterval = 3 * time.Second
+		// compactionNotified bounds the compaction receipt update to once
+		// per run (T4): a long run may compact multiple times, but the
+		// surface-neutral notice is only meaningful once.
+		compactionNotified = false
 	)
 
 	for ev := range ch {
@@ -1029,6 +1036,25 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 					DurationMs:       ev.DurationMs,
 					Timestamp:        ev.Timestamp,
 				}, ownership)
+			}
+			// Notify the user once per run when a compaction actually
+			// happened (T4): surface-neutral receipt update, never a new
+			// chat message. Regressive compactions (context grew instead of
+			// shrinking) are surfaced as a stall warning so they are not
+			// silently treated as success.
+			if ev.Type == "compaction_end" && progress != nil && !compactionNotified {
+				compactionNotified = true
+				switch {
+				case !ev.Success:
+					// Failure is already persisted with error_class; keep
+					// the receipt calm.
+				case ev.DeltaTokens == nil:
+					progress.ReportState(ProgressStateWorking, "contexto compactado")
+				case compactionEffectiveness(*ev.DeltaTokens) == "regressive":
+					progress.ReportState(ProgressStateStallWarning, "compactação não reduziu o contexto — verificando continuidade")
+				default:
+					progress.ReportState(ProgressStateWorking, fmt.Sprintf("contexto compactado (tokens: %d → %d)", ev.TokensBefore, *ev.TokensAfter))
+				}
 			}
 		case "stall", "steer":
 			// bridge_health telemetry. Redacted, correlated by run/request,
