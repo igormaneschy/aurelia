@@ -1,6 +1,6 @@
 module github.com/igormaneschy/aurelia
 
-go 1.26.5
+go 1.26.6
 
 require (
 	charm.land/bubbles/v2 v2.1.0
@@ -12,8 +12,8 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.7
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/yuin/goldmark v1.7.17
-	golang.org/x/sys v0.45.0
-	golang.org/x/term v0.41.0
+	golang.org/x/sys v0.46.0
+	golang.org/x/term v0.44.0
 	gopkg.in/telebot.v3 v3.3.8
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.46.1
@@ -55,9 +55,9 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/yuin/goldmark-emoji v1.0.5 // indirect
 	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90 // indirect
-	golang.org/x/net v0.39.0 // indirect
-	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/text v0.24.0 // indirect
+	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/text v0.39.0 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 	modernc.org/libc v1.67.6 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
