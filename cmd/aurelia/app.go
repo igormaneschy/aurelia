@@ -585,9 +585,10 @@ func (a *app) reconcileStaleRuns() {
 	// Mark stale run_journal rows as interrupted: any row still running
 	// after a restart belonged to the previous process. This keeps the
 	// timeline honest (A5/T5) — a run cut off by deploy/shutdown is
-	// interrupted, never silently left as "running".
+	// interrupted, never silently left as "running". The cutoff (boot time)
+	// protects runs started after boot (e.g. cron racing the reconcile).
 	if a.runLog != nil {
-		marked, err := a.runLog.MarkStaleRunsInterrupted(ctx)
+		marked, err := a.runLog.MarkStaleRunsInterrupted(ctx, time.Now())
 		if err != nil {
 			log.Printf("Warning: failed to mark stale runs interrupted: %v", err)
 		} else if marked > 0 {

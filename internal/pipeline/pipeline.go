@@ -1048,7 +1048,9 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 				case !ev.Success:
 					// Failure is already persisted with error_class; keep
 					// the receipt calm.
-				case ev.DeltaTokens == nil:
+				case ev.DeltaTokens == nil || ev.TokensAfter == nil:
+					// Unmeasured or malformed (delta without tokens_after):
+					// keep the receipt informational instead of panicking.
 					progress.ReportState(ProgressStateWorking, "contexto compactado")
 				case compactionEffectiveness(*ev.DeltaTokens) == "regressive":
 					progress.ReportState(ProgressStateStallWarning, "compactação não reduziu o contexto — verificando continuidade")

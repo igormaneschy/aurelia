@@ -39,6 +39,9 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	defer stopTyping()
 
 	progress := s.output.NewProgress(chatID, threadID)
+	// Stall priority: heartbeat Waiting re-beats must not erase the staged
+	// stall escalation on the shared surface (A2).
+	progress = &stallPriorityReporter{inner: progress}
 	defer progress.Delete()
 
 	ctx, cancel := context.WithCancel(parentCtx)

@@ -1,6 +1,9 @@
 package runlog
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Store persists run lifecycle events for observability and checkpointing.
 type Store interface {
@@ -15,10 +18,14 @@ type Store interface {
 	Complete(ctx context.Context, runID string, status RunStatus, checkpoint, errMsg, toolSummary string) error
 
 	// MarkStaleRunsInterrupted transitions every row still in status=running
-	// to status=interrupted (error='daemon_restart'). Called at daemon
-	// startup: any row still running after a restart is stale by definition.
+	// that started BEFORE the given cutoff to status=interrupted. Called at
+	// daemon startup with cutoff = boot time: any row still running after a
+	// restart is stale by definition (the process that owned it is gone),
+	// while rows started after boot (e.g. cron jobs racing the reconcile)
+	// must never be touched. The terminal status is interrupted — the run did
+	// not fail, it was cut off.
 	// Returns the number of rows updated.
-	MarkStaleRunsInterrupted(ctx context.Context) (int64, error)
+	MarkStaleRunsInterrupted(ctx context.Context, before time.Time) (int64, error)
 
 	// RecordEvents persists multiple timeline events in one transaction.
 	// Best-effort: errors are logged by callers, never block the pipeline.

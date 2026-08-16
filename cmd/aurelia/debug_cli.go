@@ -420,6 +420,9 @@ func printMetricsTable(m *runlog.MetricsResult, days int) {
 	fmt.Printf("  ⏰ Timeout:    %d\n", m.RunsTimedOut)
 	fmt.Printf("  🛑 Canceladas: %d\n", m.RunsCanceled)
 	fmt.Printf("  ⏳ Em andamento: %d\n", m.RunsRunning)
+	if m.RunsInterrupted > 0 {
+		fmt.Printf("  🔌 Interrompidas (restart/deploy): %d\n", m.RunsInterrupted)
+	}
 	if m.FallbackCount > 0 {
 		fmt.Printf("  ⚠️  Fallbacks:  %d\n", m.FallbackCount)
 	}

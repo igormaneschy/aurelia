@@ -2,6 +2,8 @@ package pipeline
 
 import (
 	"context"
+	"time"
+
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/session"
@@ -233,7 +235,7 @@ func (f *fakeRunLogStore) Metrics(_ context.Context, _ runlog.MetricsFilter) (*r
 func (f *fakeRunLogStore) GetLastOutboundMessage(_ context.Context, _ string) (int64, int, int64, error) {
 	return 0, 0, 0, nil
 }
-func (f *fakeRunLogStore) MarkStaleRunsInterrupted(_ context.Context) (int64, error) {
+func (f *fakeRunLogStore) MarkStaleRunsInterrupted(_ context.Context, _ time.Time) (int64, error) {
 	return 0, nil
 }
 func (f *fakeRunLogStore) Close() error { return nil }

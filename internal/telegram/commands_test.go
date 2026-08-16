@@ -1014,7 +1014,7 @@ func (f *fakeRunLog) Metrics(_ context.Context, _ runlog.MetricsFilter) (*runlog
 func (f *fakeRunLog) GetLastOutboundMessage(_ context.Context, _ string) (int64, int, int64, error) {
 	return 0, 0, 0, nil
 }
-func (f *fakeRunLog) MarkStaleRunsInterrupted(_ context.Context) (int64, error) {
+func (f *fakeRunLog) MarkStaleRunsInterrupted(_ context.Context, _ time.Time) (int64, error) {
 	return 0, nil
 }
 func (f *fakeRunLog) Close() error { return nil }

@@ -12,17 +12,19 @@ import (
 // recordingProgress captures ReportState calls for assertions. Other
 // ProgressReporter methods are no-ops.
 type recordingProgress struct {
-	mu     sync.Mutex
-	states []ProgressState
+	mu      sync.Mutex
+	states  []ProgressState
+	details []string
 }
 
 func (r *recordingProgress) ReportTool(_, _ string)    {}
 func (r *recordingProgress) ReportToolResult(_ string) {}
 func (r *recordingProgress) ReportText(_ string)       {}
-func (r *recordingProgress) ReportState(s ProgressState, _ string) {
+func (r *recordingProgress) ReportState(s ProgressState, detail string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.states = append(r.states, s)
+	r.details = append(r.details, detail)
 }
 func (r *recordingProgress) Delete() {}
 
@@ -32,6 +34,16 @@ func (r *recordingProgress) recorded() []ProgressState {
 	out := make([]ProgressState, len(r.states))
 	copy(out, r.states)
 	return out
+}
+
+// firstReport returns the state/detail of the first ReportState call.
+func (r *recordingProgress) firstReport() (ProgressState, string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.states) == 0 {
+		return "", ""
+	}
+	return r.states[0], r.details[0]
 }
 
 // TestProcessBridgeEvents_ProgressStates covers the surface-neutral state
@@ -70,6 +82,129 @@ func TestProcessBridgeEvents_ProgressStates(t *testing.T) {
 		if states[i] != want[i] {
 			t.Fatalf("states[%d] = %s, want %s (full: %v)", i, states[i], want[i], states)
 		}
+	}
+}
+
+// TestProcessBridgeEvents_CompactionReceipt covers the T4 once-per-run
+// compaction notice: effective compaction reports working with the token
+// delta, regressive compaction escalates to stall_warning, and only the
+// first compaction_end of a run notifies.
+func TestProcessBridgeEvents_CompactionReceipt(t *testing.T) {
+	s := &Service{output: &fakeOutput{}}
+	progress := &recordingProgress{}
+
+	ch := make(chan bridge.Event, 8)
+	ch <- bridge.Event{Type: "compaction_start", Reason: "auto"}
+	ch <- bridge.Event{Type: "compaction_end", Reason: "auto", Success: true,
+		TokensBefore: 200, TokensAfter: ptr(100), DeltaTokens: ptr(-100)}
+	ch <- bridge.Event{Type: "compaction_end", Reason: "auto", Success: true,
+		TokensBefore: 200, TokensAfter: ptr(100), DeltaTokens: ptr(-100)}
+	ch <- bridge.Event{Type: "result", Content: "final answer"}
+	close(ch)
+
+	outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil)
+	if outcome != OutcomeSuccess {
+		t.Fatalf("outcome = %v, want OutcomeSuccess", outcome)
+	}
+
+	state, detail := progress.firstReport()
+	if state != ProgressStateWorking {
+		t.Fatalf("compaction receipt state = %s, want working", state)
+	}
+	if !strings.Contains(detail, "200 → 100") {
+		t.Fatalf("compaction receipt detail = %q, want token delta", detail)
+	}
+	if n := len(progress.recorded()); n != 2 { // compaction receipt + done
+		t.Fatalf("states = %v, want exactly [working done] (once-per-run)", progress.recorded())
+	}
+}
+
+// TestProcessBridgeEvents_CompactionRegressiveEscalates ensures a regressive
+// compaction (context grew) is surfaced as a stall warning, never silently
+// treated as success.
+func TestProcessBridgeEvents_CompactionRegressiveEscalates(t *testing.T) {
+	s := &Service{output: &fakeOutput{}}
+	progress := &recordingProgress{}
+
+	ch := make(chan bridge.Event, 8)
+	ch <- bridge.Event{Type: "compaction_start", Reason: "auto"}
+	ch <- bridge.Event{Type: "compaction_end", Reason: "auto", Success: true,
+		TokensBefore: 100, TokensAfter: ptr(150), DeltaTokens: ptr(50)}
+	ch <- bridge.Event{Type: "result", Content: "final answer"}
+	close(ch)
+
+	outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil)
+	if outcome != OutcomeSuccess {
+		t.Fatalf("outcome = %v, want OutcomeSuccess", outcome)
+	}
+
+	state, _ := progress.firstReport()
+	if state != ProgressStateStallWarning {
+		t.Fatalf("regressive compaction state = %s, want stall_warning (states: %v)", state, progress.recorded())
+	}
+}
+
+// TestProcessBridgeEvents_CompactionMalformedDoesNotPanic covers the M3 guard:
+// a delta without tokens_after must fall back to the informational receipt
+// instead of dereferencing nil.
+func TestProcessBridgeEvents_CompactionMalformedDoesNotPanic(t *testing.T) {
+	s := &Service{output: &fakeOutput{}}
+	progress := &recordingProgress{}
+
+	ch := make(chan bridge.Event, 8)
+	ch <- bridge.Event{Type: "compaction_start", Reason: "auto"}
+	ch <- bridge.Event{Type: "compaction_end", Reason: "auto", Success: true,
+		TokensBefore: 200, DeltaTokens: ptr(-100)} // TokensAfter nil
+	ch <- bridge.Event{Type: "result", Content: "final answer"}
+	close(ch)
+
+	outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil)
+	if outcome != OutcomeSuccess {
+		t.Fatalf("outcome = %v, want OutcomeSuccess", outcome)
+	}
+
+	state, detail := progress.firstReport()
+	if state != ProgressStateWorking || !strings.Contains(detail, "contexto compactado") {
+		t.Fatalf("malformed compaction receipt = %s %q, want informational working", state, detail)
+	}
+}
+
+func ptr[T any](v T) *T { return &v }
+
+// TestStallPriorityReporter_WaitingDoesNotClobberStall covers H1: after a
+// stall state, heartbeat Waiting re-beats are suppressed within the hold
+// window while real Working activity still clears the stall.
+func TestStallPriorityReporter_WaitingDoesNotClobberStall(t *testing.T) {
+	inner := &recordingProgress{}
+	r := &stallPriorityReporter{inner: inner}
+
+	r.ReportState(ProgressStateStallWarning, "detail")
+	r.ReportState(ProgressStateWaiting, "") // heartbeat re-beat: suppressed
+	r.ReportState(ProgressStateWorking, "") // real activity: passes through
+
+	states := inner.recorded()
+	want := []ProgressState{ProgressStateStallWarning, ProgressStateWorking}
+	if len(states) != len(want) {
+		t.Fatalf("states = %v, want %v", states, want)
+	}
+	for i := range want {
+		if states[i] != want[i] {
+			t.Fatalf("states[%d] = %s, want %s", i, states[i], want[i])
+		}
+	}
+}
+
+// TestStallPriorityReporter_WaitingAfterHoldPasses ensures the suppression
+// expires: a Waiting re-beat after the hold window reaches the surface.
+func TestStallPriorityReporter_WaitingAfterHoldPasses(t *testing.T) {
+	inner := &recordingProgress{}
+	r := &stallPriorityReporter{inner: inner, stallSeen: time.Now().Add(-stallHoldWindow - time.Second)}
+
+	r.ReportState(ProgressStateWaiting, "")
+
+	states := inner.recorded()
+	if len(states) != 1 || states[0] != ProgressStateWaiting {
+		t.Fatalf("states = %v, want [waiting] after hold expiry", states)
 	}
 }
 

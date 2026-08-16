@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
@@ -57,7 +58,8 @@ type livenessHooks struct {
 	// telemetry (never a user-facing chat message).
 	warn func(severity string, silent time.Duration)
 	// notify sends a bounded user-facing warning and steers the model.
-	// The wrapper calls it once per severity by construction.
+	// The wrapper calls it once per severity per escalation cycle (a
+	// subsequent silence after activity resumes restarts the cycle).
 	notify func(severity string, silent time.Duration)
 }
 
@@ -126,6 +128,24 @@ func livenessIdleTimeoutWrapper(ctx context.Context, ch <-chan bridge.Event, pol
 					return
 				}
 
+				// Activity may have arrived while the probe was in flight.
+				// Consume it instead of escalating/canceling a run that just
+				// resumed: the event resets the window and the stage.
+				select {
+				case ev := <-ch:
+					lastEventAt = time.Now()
+					stage = 0
+					window = policy.idle
+					reset()
+					select {
+					case out <- ev:
+					case <-ctx.Done():
+						return
+					}
+					continue
+				default:
+				}
+
 				switch stage {
 				case 0:
 					if hooks.warn != nil {
@@ -158,6 +178,45 @@ func livenessIdleTimeoutWrapper(ctx context.Context, ch <-chan bridge.Event, pol
 
 	return out
 }
+
+// stallHoldWindow is how long a reported stall state keeps the surface
+// indicator against heartbeat Waiting re-beats. The heartbeat re-reports
+// every interval*3 (30s); the bridge and watchdog stall sources re-report
+// within 60–120s, so a 90s hold preserves the escalation between refreshes.
+const stallHoldWindow = 90 * time.Second
+
+// stallPriorityReporter decorates a ProgressReporter so the heartbeat
+// Waiting re-beat cannot clobber a stall escalation (A2): while a stall was
+// reported within stallHoldWindow, Waiting states are suppressed. Real
+// productive activity (ProgressStateWorking — tool_use, delivered steer)
+// still clears the stall line.
+type stallPriorityReporter struct {
+	mu        sync.Mutex
+	inner     ProgressReporter
+	stallSeen time.Time
+}
+
+func (s *stallPriorityReporter) ReportState(state ProgressState, detail string) {
+	s.mu.Lock()
+	switch state {
+	case ProgressStateStallWarning, ProgressStateStallUrgent:
+		s.stallSeen = time.Now()
+	case ProgressStateWaiting:
+		if time.Since(s.stallSeen) < stallHoldWindow {
+			s.mu.Unlock()
+			return
+		}
+	}
+	s.mu.Unlock()
+	s.inner.ReportState(state, detail)
+}
+
+func (s *stallPriorityReporter) ReportTool(toolName, detail string) {
+	s.inner.ReportTool(toolName, detail)
+}
+func (s *stallPriorityReporter) ReportToolResult(summary string) { s.inner.ReportToolResult(summary) }
+func (s *stallPriorityReporter) ReportText(text string)          { s.inner.ReportText(text) }
+func (s *stallPriorityReporter) Delete()                         { s.inner.Delete() }
 
 // wrapWithLivenessTimeout wires the liveness watchdog to the live Service:
 // bridge ping probe, surface-neutral stall telemetry and bounded user

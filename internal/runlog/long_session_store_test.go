@@ -186,7 +186,7 @@ func TestSQLiteStore_MarkStaleRunsInterrupted(t *testing.T) {
 		t.Fatalf("Complete B: %v", err)
 	}
 
-	marked, err := s.MarkStaleRunsInterrupted(ctx)
+	marked, err := s.MarkStaleRunsInterrupted(ctx, now)
 	if err != nil {
 		t.Fatalf("MarkStaleRunsInterrupted: %v", err)
 	}
@@ -211,12 +211,60 @@ func TestSQLiteStore_MarkStaleRunsInterrupted(t *testing.T) {
 	}
 
 	// Idempotent: a second pass marks nothing.
-	marked2, err := s.MarkStaleRunsInterrupted(ctx)
+	marked2, err := s.MarkStaleRunsInterrupted(ctx, now)
 	if err != nil {
 		t.Fatalf("MarkStaleRunsInterrupted second pass: %v", err)
 	}
 	if marked2 != 0 {
 		t.Fatalf("marked2 = %d, want 0 (idempotent)", marked2)
+	}
+}
+
+// TestSQLiteStore_MarkStaleRunsInterrupted_CutoffProtectsFreshRuns covers the
+// startup race (H2): a run started AFTER the reconcile cutoff (e.g. a cron
+// job racing boot) must never be marked interrupted.
+func TestSQLiteStore_MarkStaleRunsInterrupted_CutoffProtectsFreshRuns(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	runA := idgen.New()
+	if err := s.Start(ctx, RunRecord{
+		RunID: runA, ChatID: 1, ThreadID: 0, RequestID: "req-before",
+		Prompt: "before", StartedAt: now.Add(-5 * time.Minute),
+	}); err != nil {
+		t.Fatalf("Start A: %v", err)
+	}
+	runB := idgen.New()
+	if err := s.Start(ctx, RunRecord{
+		RunID: runB, ChatID: 2, ThreadID: 0, RequestID: "req-after",
+		Prompt: "after", StartedAt: now.Add(30 * time.Second),
+	}); err != nil {
+		t.Fatalf("Start B: %v", err)
+	}
+
+	marked, err := s.MarkStaleRunsInterrupted(ctx, now)
+	if err != nil {
+		t.Fatalf("MarkStaleRunsInterrupted: %v", err)
+	}
+	if marked != 1 {
+		t.Fatalf("marked = %d, want 1 (only the pre-cutoff run)", marked)
+	}
+
+	got, err := s.GetRun(ctx, runA)
+	if err != nil || got == nil {
+		t.Fatalf("GetRun A: %v", err)
+	}
+	if got.Status != RunInterrupted {
+		t.Fatalf("stale run status = %q, want interrupted", got.Status)
+	}
+
+	gotB, err := s.GetRun(ctx, runB)
+	if err != nil || gotB == nil {
+		t.Fatalf("GetRun B: %v", err)
+	}
+	if gotB.Status != RunRunning {
+		t.Fatalf("fresh run status = %q, want running (protected by cutoff)", gotB.Status)
 	}
 }
 

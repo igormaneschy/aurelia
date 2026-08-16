@@ -180,8 +180,9 @@ func TestLivenessTimeout_CtxDoneExits(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	rec := &livenessRecorder{}
+	cancelCalled := make(chan struct{}, 1)
 	out := livenessIdleTimeoutWrapper(ctx, ch, livenessPolicy{idle: time.Hour, urgentLead: time.Hour, cancelLead: time.Hour},
-		func() { t.Fatal("cancel must not be called on ctx.Done") },
+		func() { cancelCalled <- struct{}{} },
 		rec.addOrigin, livenessHooks{
 			probe: func(context.Context) error { return nil },
 		})
@@ -191,6 +192,11 @@ func TestLivenessTimeout_CtxDoneExits(t *testing.T) {
 	case <-out:
 	case <-time.After(2 * time.Second):
 		t.Fatal("wrapper did not exit on ctx.Done")
+	}
+	select {
+	case <-cancelCalled:
+		t.Fatal("cancel must not be called on ctx.Done")
+	default:
 	}
 	origins, _, _ := rec.snapshot()
 	if len(origins) != 0 {
