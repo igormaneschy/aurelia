@@ -696,5 +696,3 @@ func TestDelegateKeyToTextarea_DocumentPaste_WithQuotedEscapedSpaces_Attaches(t 
 		t.Errorf("expected empty textarea, got %q", m2.textarea.Value())
 	}
 }
-
-

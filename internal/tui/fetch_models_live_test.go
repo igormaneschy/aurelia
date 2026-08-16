@@ -1,8 +1,8 @@
 package tui
 
 import (
-	"testing"
 	"github.com/igormaneschy/aurelia/internal/ipc"
+	"testing"
 )
 
 func TestFetchTUIModelCatalog_Live(t *testing.T) {

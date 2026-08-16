@@ -12,9 +12,9 @@ import (
 // whole UI can be repainted in a different palette by swapping the struct.
 type themeStyles struct {
 	// Chat messages.
-	UserStyle       lipgloss.Style
-	AssistantStyle  lipgloss.Style
-	ErrorStyle      lipgloss.Style
+	UserStyle           lipgloss.Style
+	AssistantStyle      lipgloss.Style
+	ErrorStyle          lipgloss.Style
 	MessageDividerStyle lipgloss.Style // subtle divider between consecutive messages
 
 	// Surfaces and chrome accents.
@@ -50,11 +50,11 @@ type themeStyles struct {
 	HeaderRuleStyle  lipgloss.Style
 
 	// Transcript alerts and composer chrome.
-	AlertChipStyle     lipgloss.Style
+	AlertChipStyle      lipgloss.Style
 	ComposerSpacerStyle lipgloss.Style
 
-	ProgressBarStyle lipgloss.Style
-	ProgressFullColor string
+	ProgressBarStyle   lipgloss.Style
+	ProgressFullColor  string
 	ProgressEmptyColor string
 
 	MessageSeparatorStyle lipgloss.Style
@@ -98,11 +98,11 @@ func ResolveTheme(t Theme) Theme {
 // detectLightBackground attempts to infer whether the terminal has a light
 // background by checking well-known environment variables.
 //
-// - $TERM_PROGRAM: iTerm2, Warp, and Kitty expose background info via
-//   proprietary escape sequences, but few set env vars for it.
-// - $COLORFGBG: some terminals set this to "15;0" for light-on-dark and
-//   "0;15" for dark-on-light, but it is not universally reliable.
-// - macOS Terminal.app default is light background.
+//   - $TERM_PROGRAM: iTerm2, Warp, and Kitty expose background info via
+//     proprietary escape sequences, but few set env vars for it.
+//   - $COLORFGBG: some terminals set this to "15;0" for light-on-dark and
+//     "0;15" for dark-on-light, but it is not universally reliable.
+//   - macOS Terminal.app default is light background.
 //
 // Returns true when a light background is detected; defaults to dark.
 func detectLightBackground() bool {
@@ -164,8 +164,8 @@ func newDarkStyles() themeStyles {
 			Foreground(lipgloss.Color("39")),
 
 		AssistantStyle: lipgloss.NewStyle().
-				Bold(true).
-				Foreground(lipgloss.Color("205")),
+			Bold(true).
+			Foreground(lipgloss.Color("205")),
 
 		ErrorStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("196")),
@@ -274,7 +274,7 @@ func newDarkStyles() themeStyles {
 		SearchHighlightStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("226")).
 			Background(lipgloss.Color("236")),
-		ProgressBarStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
+		ProgressBarStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
 		ProgressFullColor: "244", ProgressEmptyColor: "238",
 	}
 }
@@ -397,7 +397,7 @@ func newLightStyles() themeStyles {
 		SearchHighlightStyle: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("130")).
 			Background(lipgloss.Color("254")),
-		ProgressBarStyle: lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
+		ProgressBarStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
 		ProgressFullColor: "245", ProgressEmptyColor: "250",
 	}
 }
