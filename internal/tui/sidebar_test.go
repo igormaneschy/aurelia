@@ -1,10 +1,10 @@
 package tui
 
 import (
-	"strings"
-	"testing"
 	tea "charm.land/bubbletea/v2"
 	"github.com/igormaneschy/aurelia/internal/ipc"
+	"strings"
+	"testing"
 )
 
 func prepSidebarMouseTest(m *Model) {

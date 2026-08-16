@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.42.0] - 2026-08-16
+
+### Added
+- Indicador de modelo na TUI sincroniza após /model: a sequência de
+  status avança pelo Update loop com proteção contra snapshots obsoletos.
+
+### Fixed
+- Histórico de sessões longas na TUI falhava com "unexpected end of JSON
+  input": payloads `result` estruturados (histórico, catálogo de modelos)
+  são limitados por mensagem/orçamento antes do cap de 16K runes do
+  sanitizer, mantendo o JSON sempre válido; Go degrada para vazio com log
+  em payloads malformados em vez de erro fatal.
+
 ## [0.41.0] - 2026-08-15
 
 ### Added

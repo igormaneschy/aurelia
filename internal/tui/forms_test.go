@@ -286,4 +286,3 @@ func TestHandleCwdFormKey_EscCloses(t *testing.T) {
 		t.Fatalf("handled=%v formOpen=%v", handled, next.formOpen)
 	}
 }
-

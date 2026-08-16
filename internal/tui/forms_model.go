@@ -479,6 +479,9 @@ func (m Model) submitModelSelection(model string) (Model, tea.Cmd) {
 	m = m.closeForm()
 	m.waiting = true
 	m.streamID++
+	// The wizard always changes the model: refresh the canonical status
+	// once the command stream ends.
+	m.refreshStatusOnStreamEnd = true
 	return m, tea.Batch(m.sendCommand("/model "+model), spinnerTickCmd())
 }
 

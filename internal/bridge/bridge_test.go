@@ -1145,6 +1145,55 @@ func TestBridge_GetSessionHistory(t *testing.T) {
 	}
 }
 
+// truncatedHistoryMockJS returns a get-session-history payload that was cut
+// mid-string — the failure mode of an oversized history truncated by the
+// bridge sanitizer (sanitizeOutEvent's MAX_EVENT_TEXT_RUNES cap). The Go
+// side must degrade to an empty history instead of a fatal parse error.
+const truncatedHistoryMockJS = `
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+
+rl.on('line', (line) => {
+    const req = JSON.parse(line);
+    const rid = req.request_id || "";
+    if (req.command === "get-session-history") {
+        // Deliberately invalid: JSON string truncated mid-escape.
+        process.stdout.write(JSON.stringify({
+            event: "result",
+            request_id: rid,
+            content: "[{\"sender\":\"Igor\",\"text\":\"long message...\\u00",
+        }) + "\n");
+    } else {
+        process.stdout.write(JSON.stringify({event:"error",request_id:rid,message:"unexpected command: " + req.command}) + "\n");
+    }
+});
+
+rl.on('close', () => {
+    process.exit(0);
+});
+`
+
+func TestBridge_GetSessionHistory_TruncatedPayloadDegradesToEmpty(t *testing.T) {
+	dir := t.TempDir()
+	b := newMockBridge(t, dir, truncatedHistoryMockJS)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	messages, err := b.GetSessionHistory(ctx, RequestOptions{
+		Resume: "/tmp/sessions/test.jsonl",
+	})
+	if err != nil {
+		t.Fatalf("GetSessionHistory() should degrade, got error: %v", err)
+	}
+	if messages == nil {
+		t.Fatal("expected non-nil empty history, got nil")
+	}
+	if len(messages) != 0 {
+		t.Fatalf("expected empty history, got %d messages", len(messages))
+	}
+}
+
 func TestBridge_GetSessionStats_Error(t *testing.T) {
 	dir := t.TempDir()
 

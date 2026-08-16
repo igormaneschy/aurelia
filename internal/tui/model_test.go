@@ -1926,7 +1926,7 @@ func TestModel_TuiStatusUpdatesCWD(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 
-	updated, _ := m.Update(tuiStatusMsg{cwd: "/Users/igor/dev/aurelia"})
+	updated, _ := m.Update(tuiStatusMsg{cwd: "/Users/igor/dev/aurelia", seq: 1})
 	m2 := updated.(Model)
 
 	if m2.cwdPath != "/Users/igor/dev/aurelia" {
@@ -2374,7 +2374,7 @@ func TestModel_statusFromEvents(t *testing.T) {
 	events := []ipc.IPCEvent{
 		{Type: ipc.EventTypeMessage, Body: "**Aurelia Status**\n🧠 Bridge: **online**\n⚙️ Model: **gpt-5.5**\n📂 CWD: `/Users/igor/dev`\n💬 Session: none\n"},
 	}
-	result := statusFromEvents(events)
+	result := statusFromEvents(events, 7)
 
 	if result.cwd != "/Users/igor/dev" {
 		t.Errorf("cwd = %q, want /Users/igor/dev", result.cwd)
@@ -2385,13 +2385,16 @@ func TestModel_statusFromEvents(t *testing.T) {
 	if result.err != nil {
 		t.Errorf("unexpected error: %v", result.err)
 	}
+	if result.seq != 7 {
+		t.Errorf("seq = %d, want 7", result.seq)
+	}
 }
 
 func TestModel_statusFromEvents_NoModel(t *testing.T) {
 	events := []ipc.IPCEvent{
 		{Type: ipc.EventTypeMessage, Body: "**Aurelia Status**\n🧠 Bridge: **online**\n📂 No project set.\n"},
 	}
-	result := statusFromEvents(events)
+	result := statusFromEvents(events, 0)
 
 	if result.cwd != "not set" {
 		t.Errorf("cwd = %q, want 'not set'", result.cwd)

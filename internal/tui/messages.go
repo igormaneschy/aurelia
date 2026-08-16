@@ -26,10 +26,13 @@ type daemonErrorMsg struct {
 }
 
 // tuiStatusMsg carries daemon state used by chrome/sidebar rendering.
+// seq is the refresh sequence: responses with a sequence lower than the last
+// applied one are stale and dropped by the handler.
 type tuiStatusMsg struct {
 	cwd   string
 	model string
 	err   error
+	seq   int64
 }
 
 // tuiModelsMsg carries models grouped by provider from a daemon /model response.

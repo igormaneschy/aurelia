@@ -18,12 +18,12 @@ const (
 )
 
 type streamProgress struct {
-	bar progress.Model
-	stopwatch stopwatch.Model
-	active bool
-	showAfter time.Time
-	tokenEst int
-	tokenMax int
+	bar           progress.Model
+	stopwatch     stopwatch.Model
+	active        bool
+	showAfter     time.Time
+	tokenEst      int
+	tokenMax      int
 	recentLengths []int
 }
 
@@ -44,16 +44,24 @@ func newStreamProgressBar(styles themeStyles) progress.Model {
 }
 
 func (sp *streamProgress) estimateTokenMax() int {
-	if len(sp.recentLengths) == 0 { return defaultStreamTokenMax }
+	if len(sp.recentLengths) == 0 {
+		return defaultStreamTokenMax
+	}
 	sum := 0
-	for _, l := range sp.recentLengths { sum += l }
+	for _, l := range sp.recentLengths {
+		sum += l
+	}
 	avg := sum / len(sp.recentLengths)
-	if avg < 256 { return defaultStreamTokenMax }
+	if avg < 256 {
+		return defaultStreamTokenMax
+	}
 	return avg
 }
 
 func (sp *streamProgress) recordLength(length int) {
-	if length <= 0 { return }
+	if length <= 0 {
+		return
+	}
 	sp.recentLengths = append(sp.recentLengths, length)
 	if len(sp.recentLengths) > maxRecentResponseLengths {
 		sp.recentLengths = sp.recentLengths[len(sp.recentLengths)-maxRecentResponseLengths:]
@@ -73,7 +81,9 @@ func (m *Model) initStreamProgress() tea.Cmd {
 }
 
 func (m *Model) updateStreamProgress(chunkLen int) {
-	if !m.streamProgress.active || chunkLen <= 0 { return }
+	if !m.streamProgress.active || chunkLen <= 0 {
+		return
+	}
 	m.streamProgress.tokenEst += chunkLen
 	if m.streamProgress.tokenEst > m.streamProgress.tokenMax {
 		m.streamProgress.tokenMax = m.streamProgress.tokenEst + m.streamProgress.tokenEst/4
@@ -81,14 +91,20 @@ func (m *Model) updateStreamProgress(chunkLen int) {
 }
 
 func (m Model) streamProgressPercent() float64 {
-	if !m.streamProgress.active || m.streamProgress.tokenMax <= 0 { return 0 }
+	if !m.streamProgress.active || m.streamProgress.tokenMax <= 0 {
+		return 0
+	}
 	pct := float64(m.streamProgress.tokenEst) / float64(m.streamProgress.tokenMax)
-	if pct > 0.95 { return 0.95 }
+	if pct > 0.95 {
+		return 0.95
+	}
 	return pct
 }
 
 func (m Model) showStreamProgress() bool {
-	if !m.streamProgress.active || !m.waiting { return false }
+	if !m.streamProgress.active || !m.waiting {
+		return false
+	}
 	return !time.Now().Before(m.streamProgress.showAfter)
 }
 
@@ -114,7 +130,9 @@ func (m *Model) resetStreamProgress() {
 }
 
 func (m Model) updateStreamProgressMsgs(msg tea.Msg) (Model, tea.Cmd) {
-	if !m.streamProgress.active { return m, nil }
+	if !m.streamProgress.active {
+		return m, nil
+	}
 	var cmd tea.Cmd
 	switch msg.(type) {
 	case stopwatch.TickMsg, stopwatch.StartStopMsg, stopwatch.ResetMsg:
@@ -181,7 +199,11 @@ func (m *Model) resetAttachProgress() {
 }
 
 func formatElapsed(d time.Duration) string {
-	if d < 0 { d = 0 }
-	if d.Seconds() < 60 { return fmt.Sprintf("%.1fs", d.Seconds()) }
+	if d < 0 {
+		d = 0
+	}
+	if d.Seconds() < 60 {
+		return fmt.Sprintf("%.1fs", d.Seconds())
+	}
 	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 }

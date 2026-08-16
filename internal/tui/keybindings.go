@@ -8,48 +8,48 @@ import (
 
 // keyMap defines Aurelia TUI shortcuts for bubbles/help and key.Matches handlers.
 type keyMap struct {
-	Submit       key.Binding
-	Cancel       key.Binding
-	Newline      key.Binding
-	Sidebar      key.Binding
-	SidebarFocus key.Binding
-	Help         key.Binding
-	HelpClose    key.Binding
-	PageUp       key.Binding
-	PageDown     key.Binding
-	MouseToggle  key.Binding
-	ProjectPanel key.Binding
-	Clear        key.Binding
-	Quit         key.Binding
-	CopyTranscript key.Binding
-	CopyResponse key.Binding
-	ClearPending key.Binding
-	PasteImage   key.Binding
-	HistoryUp    key.Binding
-	HistoryDown  key.Binding
-	HistoryNext  key.Binding
-	HistoryPrev  key.Binding
-	HistorySearch key.Binding
-	NewSession   key.Binding
-	ThemeToggle  key.Binding
+	Submit             key.Binding
+	Cancel             key.Binding
+	Newline            key.Binding
+	Sidebar            key.Binding
+	SidebarFocus       key.Binding
+	Help               key.Binding
+	HelpClose          key.Binding
+	PageUp             key.Binding
+	PageDown           key.Binding
+	MouseToggle        key.Binding
+	ProjectPanel       key.Binding
+	Clear              key.Binding
+	Quit               key.Binding
+	CopyTranscript     key.Binding
+	CopyResponse       key.Binding
+	ClearPending       key.Binding
+	PasteImage         key.Binding
+	HistoryUp          key.Binding
+	HistoryDown        key.Binding
+	HistoryNext        key.Binding
+	HistoryPrev        key.Binding
+	HistorySearch      key.Binding
+	NewSession         key.Binding
+	ThemeToggle        key.Binding
 	TransparencyToggle key.Binding
-	Tab          key.Binding
+	Tab                key.Binding
 
-	CmdHelp         key.Binding
-	CmdStatus       key.Binding
-	CmdModel        key.Binding
-	CmdModelName    key.Binding
-	CmdModelAuto    key.Binding
-	CmdModelRefresh key.Binding
-	CmdMode         key.Binding
-	CmdModeName     key.Binding
-	CmdAgents       key.Binding
+	CmdHelp          key.Binding
+	CmdStatus        key.Binding
+	CmdModel         key.Binding
+	CmdModelName     key.Binding
+	CmdModelAuto     key.Binding
+	CmdModelRefresh  key.Binding
+	CmdMode          key.Binding
+	CmdModeName      key.Binding
+	CmdAgents        key.Binding
 	CmdAgentsVerbose key.Binding
-	CmdCwd          key.Binding
-	CmdCwdPath      key.Binding
-	CmdCwdClear     key.Binding
-	CmdImg          key.Binding
-	CmdAttach       key.Binding
+	CmdCwd           key.Binding
+	CmdCwdPath       key.Binding
+	CmdCwdClear      key.Binding
+	CmdImg           key.Binding
+	CmdAttach        key.Binding
 }
 
 // uiContext identifies which TUI mode is active for contextual help.
@@ -187,21 +187,21 @@ func defaultKeyMap() keyMap {
 			key.WithHelp("Tab", "Complete command or cycle sidebar"),
 		),
 
-		CmdHelp:         helpOnlyBinding("/help", "Show this help"),
-		CmdStatus:       helpOnlyBinding("/status", "Daemon, model, cwd, session status"),
-		CmdModel:        helpOnlyBinding("/model", "List available models"),
-		CmdModelName:    helpOnlyBinding("/model <name>", "Switch model"),
-		CmdModelAuto:    helpOnlyBinding("/model auto", "Use automatic model selection"),
-		CmdModelRefresh: helpOnlyBinding("/model refresh", "Refresh model list"),
-		CmdMode:         helpOnlyBinding("/mode", "Show active prompt profile"),
-		CmdModeName:     helpOnlyBinding("/mode <profile>", "Set default prompt profile"),
-		CmdAgents:       helpOnlyBinding("/agents", "List prompt profiles"),
+		CmdHelp:          helpOnlyBinding("/help", "Show this help"),
+		CmdStatus:        helpOnlyBinding("/status", "Daemon, model, cwd, session status"),
+		CmdModel:         helpOnlyBinding("/model", "List available models"),
+		CmdModelName:     helpOnlyBinding("/model <name>", "Switch model"),
+		CmdModelAuto:     helpOnlyBinding("/model auto", "Use automatic model selection"),
+		CmdModelRefresh:  helpOnlyBinding("/model refresh", "Refresh model list"),
+		CmdMode:          helpOnlyBinding("/mode", "Show active prompt profile"),
+		CmdModeName:      helpOnlyBinding("/mode <profile>", "Set default prompt profile"),
+		CmdAgents:        helpOnlyBinding("/agents", "List prompt profiles"),
 		CmdAgentsVerbose: helpOnlyBinding("/agents verbose", "List profiles with execution hints"),
-		CmdCwd:          helpOnlyBinding("/cwd", "Show current project binding"),
-		CmdCwdPath:      helpOnlyBinding("/cwd <path>", "Set project working directory"),
-		CmdCwdClear:     helpOnlyBinding("/cwd clear", "Remove project binding"),
-		CmdImg:          helpOnlyBinding("/img <path>", "Attach image (png, jpg, gif, webp)"),
-		CmdAttach:       helpOnlyBinding("/attach <path>", "Attach document (md, docx, pdf, etc.)"),
+		CmdCwd:           helpOnlyBinding("/cwd", "Show current project binding"),
+		CmdCwdPath:       helpOnlyBinding("/cwd <path>", "Set project working directory"),
+		CmdCwdClear:      helpOnlyBinding("/cwd clear", "Remove project binding"),
+		CmdImg:           helpOnlyBinding("/img <path>", "Attach image (png, jpg, gif, webp)"),
+		CmdAttach:        helpOnlyBinding("/attach <path>", "Attach document (md, docx, pdf, etc.)"),
 	}
 }
 

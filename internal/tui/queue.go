@@ -59,8 +59,12 @@ func (m Model) startQueuedMessage() (Model, tea.Cmd) {
 	}
 	m.submittedTempImagePaths = append(m.submittedTempImagePaths, q.tempImagePaths...)
 	if q.isCommand {
+		// Only model-changing commands (e.g. queued /model <name>) mark a
+		// post-command status refresh; other commands never do.
+		m.refreshStatusOnStreamEnd = isModelChangeCommand(q.text)
 		return m, tea.Batch(m.sendCommandToSession(q.chatID, q.text, m.streamID), spinnerTickCmd())
 	}
+	m.refreshStatusOnStreamEnd = false
 	return m, tea.Batch(m.submitMessageWithPayload(q.chatID, q.text, q.images, q.attachments, m.streamID), spinnerTickCmd())
 }
 
