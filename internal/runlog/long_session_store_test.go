@@ -268,6 +268,38 @@ func TestSQLiteStore_MarkStaleRunsInterrupted_CutoffProtectsFreshRuns(t *testing
 	}
 }
 
+// TestSQLiteStore_Metrics_SingleRunPercentiles covers the regression where
+// MAX(1, COUNT/2-1) resolved the p50/p95 offset to 1 for a single qualifying
+// run, skipping the only row and yielding NULL (percentiles stuck at 0).
+func TestSQLiteStore_Metrics_SingleRunPercentiles(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	runID := idgen.New()
+	if err := s.Start(ctx, RunRecord{
+		RunID: runID, ChatID: 1, ThreadID: 0, RequestID: "req-solo",
+		Prompt: "solo", StartedAt: now.Add(-5 * time.Minute),
+	}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	dur := int64(3312)
+	if err := s.Update(ctx, RunUpdate{RunID: runID, DurationMs: &dur}); err != nil {
+		t.Fatalf("Update duration: %v", err)
+	}
+	if err := s.Complete(ctx, runID, RunCompleted, "", "", ""); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	m, err := s.Metrics(ctx, MetricsFilter{Since: now.Add(-time.Hour), Until: now.Add(time.Hour)})
+	if err != nil {
+		t.Fatalf("Metrics: %v", err)
+	}
+	if m.DurationP50Ms != 3312 || m.DurationP95Ms != 3312 {
+		t.Fatalf("percentiles = p50:%v p95:%v, want both 3312 (single row must resolve)", m.DurationP50Ms, m.DurationP95Ms)
+	}
+}
+
 // TestSQLiteStore_CompleteWithAggregates verifies the atomic terminal write:
 // status + long-session aggregates persist in the same operation and are
 // readable back together (never split between Complete and a later Update).

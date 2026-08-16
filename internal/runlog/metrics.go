@@ -110,7 +110,10 @@ func (s *SQLiteStore) Metrics(ctx context.Context, filter MetricsFilter) (*Metri
 
 	// ── Duration percentiles ──
 	// SQLite percentile approximation: use subquery with completed runs
-	// that have non-zero duration.
+	// that have non-zero duration. MAX(0, ...) keeps the offset non-negative
+	// (SQLite also clamps negative offsets to 0) while still resolving to
+	// the first row for small result sets — MAX(1, ...) would skip the only
+	// row and yield NULL.
 	durationRow := s.db.QueryRowContext(ctx, `
 		SELECT
 			COALESCE(AVG(duration_ms), 0) AS avg_dur,
@@ -119,7 +122,7 @@ func (s *SQLiteStore) Metrics(ctx context.Context, filter MetricsFilter) (*Metri
 				 WHERE started_at >= ? AND started_at < ?
 				   AND duration_ms > 0 AND status IN ('completed', 'failed', 'timed_out')
 				 ORDER BY duration_ms ASC
-				 LIMIT 1 OFFSET (SELECT MAX(1, COUNT(*)/2 - 1) FROM run_journal
+				 LIMIT 1 OFFSET (SELECT MAX(0, COUNT(*)/2 - 1) FROM run_journal
 				   WHERE started_at >= ? AND started_at < ?
 				     AND duration_ms > 0 AND status IN ('completed', 'failed', 'timed_out'))),
 			0) AS p50,
@@ -128,7 +131,7 @@ func (s *SQLiteStore) Metrics(ctx context.Context, filter MetricsFilter) (*Metri
 				 WHERE started_at >= ? AND started_at < ?
 				   AND duration_ms > 0 AND status IN ('completed', 'failed', 'timed_out')
 				 ORDER BY duration_ms ASC
-				 LIMIT 1 OFFSET (SELECT MAX(1, (COUNT(*) * 95 / 100) - 1) FROM run_journal
+				 LIMIT 1 OFFSET (SELECT MAX(0, (COUNT(*) * 95 / 100) - 1) FROM run_journal
 				   WHERE started_at >= ? AND started_at < ?
 				     AND duration_ms > 0 AND status IN ('completed', 'failed', 'timed_out'))),
 			0) AS p95

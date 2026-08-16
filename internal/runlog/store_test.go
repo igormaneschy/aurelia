@@ -99,11 +99,11 @@ func TestSQLiteStore_Update(t *testing.T) {
 
 	runID := idgen.New()
 	record := RunRecord{
-		RunID:   runID,
-		ChatID:  100,
-		ThreadID: 0,
+		RunID:     runID,
+		ChatID:    100,
+		ThreadID:  0,
 		RequestID: "req-1",
-		Prompt:  "test",
+		Prompt:    "test",
 	}
 	if err := s.Start(ctx, record); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -146,11 +146,11 @@ func TestSQLiteStore_Complete(t *testing.T) {
 
 	runID := idgen.New()
 	record := RunRecord{
-		RunID:   runID,
-		ChatID:  100,
-		ThreadID: 0,
+		RunID:     runID,
+		ChatID:    100,
+		ThreadID:  0,
 		RequestID: "req-1",
-		Prompt:  "test",
+		Prompt:    "test",
 	}
 	if err := s.Start(ctx, record); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -181,11 +181,11 @@ func TestSQLiteStore_Complete_WithError(t *testing.T) {
 
 	runID := idgen.New()
 	record := RunRecord{
-		RunID:   runID,
-		ChatID:  100,
-		ThreadID: 0,
+		RunID:     runID,
+		ChatID:    100,
+		ThreadID:  0,
 		RequestID: "req-1",
-		Prompt:  "test",
+		Prompt:    "test",
 	}
 	if err := s.Start(ctx, record); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -567,12 +567,12 @@ func TestSQLiteStore_Metrics(t *testing.T) {
 		// Update status and extended fields after start.
 		if r.Status != RunRunning || r.DurationMs > 0 || r.InputTokens > 0 {
 			upd := RunUpdate{
-				RunID:       r.RunID,
-				Status:      &r.Status,
-				DurationMs:  &r.DurationMs,
-				InputTokens: &r.InputTokens,
+				RunID:        r.RunID,
+				Status:       &r.Status,
+				DurationMs:   &r.DurationMs,
+				InputTokens:  &r.InputTokens,
 				OutputTokens: &r.OutputTokens,
-				CostUSD:     &r.CostUSD,
+				CostUSD:      &r.CostUSD,
 				UsedFallback: &r.UsedFallback,
 			}
 			if r.EntryPoint != "" {
@@ -629,6 +629,15 @@ func TestSQLiteStore_Metrics(t *testing.T) {
 	// Cost
 	if metrics.CostUSDTotal < 0.003 || metrics.CostUSDTotal > 0.004 {
 		t.Fatalf("CostUSDTotal = %.4f, want ~0.0035", metrics.CostUSDTotal)
+	}
+
+	// Duration percentiles over [1000, 3000, 5000]: p50 approx index 0
+	// (1000), p95 approx index 1 (3000), avg 3000.
+	if metrics.DurationP50Ms != 1000 {
+		t.Fatalf("DurationP50Ms = %v, want 1000", metrics.DurationP50Ms)
+	}
+	if metrics.DurationP95Ms != 3000 {
+		t.Fatalf("DurationP95Ms = %v, want 3000", metrics.DurationP95Ms)
 	}
 
 	// Provider breakdown should have 2 entries (kimi, anthropic).
