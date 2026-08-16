@@ -70,7 +70,7 @@ func (m Model) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
 		})
 		m.ensureViewport()
 		return m, tea.Batch(
-			fetchTUIStatus(m.ipcClient, m.activeSession),
+			m.fetchTUIStatusCmd(),
 			fetchTUIHistory(m.ipcClient, m.activeSession),
 			fetchTUISessions(m.ipcClient),
 			scheduleHealthCheck(),
@@ -233,14 +233,19 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tuiStatusMsg:
-		if msg.err == nil {
+		if msg.err == nil && msg.seq >= m.lastStatusSeq {
+			m.lastStatusSeq = msg.seq
 			if msg.cwd != "" {
 				m.cwdPath = msg.cwd
 			} else {
 				// No cwd marker in status response — session has no project.
 				m.cwdPath = "not set"
 			}
-			m.activeModel = msg.model
+			// An unconfirmed model (missing from the status response) never
+			// replaces the last confirmed model.
+			if msg.model != "" {
+				m.activeModel = msg.model
+			}
 			m.syncSidebarRows()
 		}
 		return m, nil
@@ -318,6 +323,9 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resetAttachProgress()
 		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
+		// Unexpected EOF is not a confirmed command outcome: never refresh
+		// the model indicator from it.
+		m.refreshStatusOnStreamEnd = false
 		if m.reader != nil {
 			_ = m.reader.Close()
 			m.reader = nil
@@ -340,6 +348,9 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.resetAttachProgress()
 		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
+		// A stream error is not a confirmed command outcome: the last
+		// confirmed model stays visible.
+		m.refreshStatusOnStreamEnd = false
 		if m.reader != nil {
 			_ = m.reader.Close()
 			m.reader = nil
@@ -399,13 +410,16 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds := []tea.Cmd{
 			fetchTUISessions(m.ipcClient),
 			fetchTUIHistory(m.ipcClient, m.activeSession),
-			fetchTUIStatus(m.ipcClient, m.activeSession),
+			m.fetchTUIStatusCmd(),
 			m.animations.pulseNewMessages(),
 		}
 		if model := strings.TrimSpace(m.pendingSessionModel); model != "" && model != "auto" {
 			m.pendingSessionModel = ""
 			m.waiting = true
 			m.streamID++
+			// The session-create refresh above may race this command; the
+			// post-command refresh (higher seq) is the one that wins.
+			m.refreshStatusOnStreamEnd = true
 			cmds = append(cmds, m.sendCommandToSession(m.activeSession, "/model "+model, m.streamID), spinnerTickCmd())
 		} else {
 			m.pendingSessionModel = ""
@@ -438,7 +452,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reload history + status for the new session.
 		return m, tea.Batch(
 			fetchTUIHistory(m.ipcClient, m.activeSession),
-			fetchTUIStatus(m.ipcClient, m.activeSession),
+			m.fetchTUIStatusCmd(),
 			m.animations.pulseNewMessages(),
 		)
 
@@ -466,7 +480,7 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Batch(
 				fetchTUISessions(m.ipcClient),
 				fetchTUIHistory(m.ipcClient, m.activeSession),
-				fetchTUIStatus(m.ipcClient, m.activeSession),
+				m.fetchTUIStatusCmd(),
 			)
 		}
 		m.repositionCursorToActive()
@@ -1034,6 +1048,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.updateViewport()
 
 		if isCommand {
+			// Model-changing commands refresh the canonical status once the
+			// command stream ends so header/sidebar follow the daemon.
+			m.refreshStatusOnStreamEnd = isModelChangeCommand(text)
 			return m, tea.Batch(m.sendCommand(text), spinnerTickCmd())
 		}
 
@@ -1453,9 +1470,16 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 		}
 		m.streamBuf = ""
 		m.markSessionSeen(m.activeSession, len(m.messages))
+		// Consume the model-change marker BEFORE the next queued message
+		// starts: the queued item sets its own flag for its own stream.
+		var refreshCmd tea.Cmd
+		if m.refreshStatusOnStreamEnd {
+			m.refreshStatusOnStreamEnd = false
+			refreshCmd = m.fetchTUIStatusCmd()
+		}
 		vpCmd := m.updateViewport()
 		next, queueCmd := m.continueWithNextQueuedMessage()
-		return next, tea.Batch(queueCmd, animCmd, vpCmd, fetchTUISessions(m.ipcClient))
+		return next, tea.Batch(queueCmd, animCmd, vpCmd, fetchTUISessions(m.ipcClient), refreshCmd)
 
 	case "error":
 		// Terminal event — error.
@@ -1465,6 +1489,9 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 		m.resetAttachProgress()
 		m.resetStreamProgress()
 		m.cleanupSubmittedTempImages()
+		// A failed model command must not refresh the indicator: the last
+		// confirmed model stays visible.
+		m.refreshStatusOnStreamEnd = false
 		if m.reader != nil {
 			_ = m.reader.Close()
 			m.reader = nil

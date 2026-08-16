@@ -69,6 +69,19 @@ type Model struct {
 	// pendingSessionModel is sent via /model after session_create completes.
 	pendingSessionModel string
 
+	// refreshStatusOnStreamEnd requests a canonical /status refresh once the
+	// current command stream ends. Set only for model-changing commands
+	// (manual, wizard, queue, pending session model) so normal messages never
+	// trigger an extra status call.
+	refreshStatusOnStreamEnd bool
+
+	// statusSeq / lastStatusSeq guard against stale status responses: every
+	// refresh carries a monotonically increasing sequence and a response with
+	// a lower sequence than the last applied one is dropped, so the
+	// post-command refresh always wins over an older intermediate response.
+	statusSeq     int64
+	lastStatusSeq int64
+
 	// Pending request tracking
 	requestID string
 	waiting   bool
@@ -143,9 +156,9 @@ func newModel(socketPath, historyPath string, theme Theme, opts ModelOptions) Mo
 			historyPath:       historyPath,
 		},
 		transcriptModel: transcriptModel{
-			messages:            make([]chatMessage, 0),
-			historyNav:          newHistoryNav(),
-			followBottomIntent:  true,
+			messages:           make([]chatMessage, 0),
+			historyNav:         newHistoryNav(),
+			followBottomIntent: true,
 		},
 		activeSession: ipc.ReservedTUIChatID,
 	}
@@ -262,8 +275,9 @@ func projectStateFromEvents(events []ipc.IPCEvent) tuiProjectStateMsg {
 
 // fetchTUIStatus returns a command that asks the daemon for lightweight
 // session status used by the chrome/sidebar. It intentionally does not write
-// into the chat history.
-func fetchTUIStatus(client *ipc.Client, chatID int64) tea.Cmd {
+// into the chat history. seq is the caller's status sequence: tuiStatusMsg
+// responses with a lower sequence than the last applied one are dropped.
+func fetchTUIStatus(client *ipc.Client, chatID int64, seq int64) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := contextWithTimeout(1500 * time.Millisecond)
 		defer cancel()
@@ -276,23 +290,31 @@ func fetchTUIStatus(client *ipc.Client, chatID int64) tea.Cmd {
 			RequestID: fmt.Sprintf("tui-status-%d", time.Now().UnixNano()),
 		})
 		if err != nil {
-			return tuiStatusMsg{err: err}
+			return tuiStatusMsg{err: err, seq: seq}
 		}
-		return statusFromEvents(events)
+		return statusFromEvents(events, seq)
 	}
 }
 
+// fetchTUIStatusCmd is the Model-side helper: it allocates the next status
+// sequence and targets the active session at call time, so the post-command
+// refresh always carries a higher sequence than any intermediate response.
+func (m Model) fetchTUIStatusCmd() tea.Cmd {
+	m.statusSeq++
+	return fetchTUIStatus(m.ipcClient, m.activeSession, m.statusSeq)
+}
+
 // statusFromEvents extracts cwd and model from the daemon's /status response.
-func statusFromEvents(events []ipc.IPCEvent) tuiStatusMsg {
+func statusFromEvents(events []ipc.IPCEvent, seq int64) tuiStatusMsg {
 	for _, ev := range events {
 		if ev.Type != ipc.EventTypeMessage || ev.Body == "" {
 			continue
 		}
 		cwd := cwdFromText(ev.Body)
 		model := modelFromText(ev.Body)
-		return tuiStatusMsg{cwd: cwd, model: model}
+		return tuiStatusMsg{cwd: cwd, model: model, seq: seq}
 	}
-	return tuiStatusMsg{}
+	return tuiStatusMsg{seq: seq}
 }
 
 type tuiHistoryPayload struct {

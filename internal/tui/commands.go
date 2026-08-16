@@ -6,6 +6,18 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+// isModelChangeCommand reports whether text is a model-changing command
+// (/model <name> or /model auto). The bare /model (opens the wizard) and
+// /model refresh (catalog reload) do not change the active model.
+func isModelChangeCommand(text string) bool {
+	text = strings.TrimSpace(text)
+	if !strings.HasPrefix(text, "/model") {
+		return false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(text, "/model"))
+	return rest != "" && rest != "refresh"
+}
+
 // openFormForCommand opens an interactive huh form for bare slash commands.
 // Returns handled=true when the command was consumed.
 func (m Model) openFormForCommand(text string) (Model, tea.Cmd, bool) {
