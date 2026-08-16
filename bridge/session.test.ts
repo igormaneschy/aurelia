@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import {
   bindBridgeSessionExtensions,
+  boundSessionHistoryPayload,
   createBridgeSessionRequestLifecycle,
   disposeBridgeSession,
   installSecurityHook,
@@ -439,6 +440,61 @@ describe("bridge extension lifecycle binding", () => {
     await newerLifecycle.cancel();
     assert.strictEqual(staleDisposeCalls, 1, "stale teardown must be idempotent");
     assert.strictEqual(newerDisposeCalls, 1, "newer teardown must be idempotent");
+  });
+});
+
+describe("boundSessionHistoryPayload", () => {
+  it("keeps small histories intact and preserves ordering", () => {
+    const history = [
+      { sender: "Igor" as const, text: "hello" },
+      { sender: "Aurelia" as const, text: "hi there", timestamp: "2026-01-01T00:00:00.000Z" },
+    ];
+    const bounded = boundSessionHistoryPayload(history);
+    assert.deepStrictEqual(bounded, history);
+    // Serialized payload stays valid JSON under the sanitizer cap.
+    const serialized = JSON.stringify(bounded);
+    assert.ok(Buffer.byteLength(serialized, "utf8") < 16 * 1024);
+  });
+
+  it("truncates oversized messages so the serialized payload always parses", () => {
+    const big = "x".repeat(20_000);
+    const history = [
+      { sender: "Igor" as const, text: big },
+      { sender: "Aurelia" as const, text: "recent reply" },
+    ];
+    const bounded = boundSessionHistoryPayload(history);
+    assert.strictEqual(bounded.length, 2, "both messages must survive (each truncated)");
+    assert.ok(bounded[0].text.length <= 400, "oversized text must be truncated per message");
+    assert.strictEqual(bounded[1].text, "recent reply");
+    // Round-trip must succeed: the whole point of the bound is valid JSON.
+    const serialized = JSON.stringify(bounded);
+    assert.doesNotThrow(() => JSON.parse(serialized));
+    assert.ok(Buffer.byteLength(serialized, "utf8") < 16 * 1024);
+  });
+
+  it("drops oldest messages when the payload budget is exhausted", () => {
+    const history = Array.from({ length: 200 }, (_, i) => ({
+      sender: ("Igor" as const),
+      text: `message ${i} ` + "y".repeat(300),
+    }));
+    const bounded = boundSessionHistoryPayload(history);
+    assert.ok(bounded.length < 200, "budget must drop old messages");
+    assert.ok(bounded.length > 0, "newest message must always survive");
+    // Newest message is the last one in the original list.
+    assert.ok(bounded[bounded.length - 1].text.startsWith("message 199"));
+    const serialized = JSON.stringify(bounded);
+    assert.doesNotThrow(() => JSON.parse(serialized));
+    assert.ok(Buffer.byteLength(serialized, "utf8") < 16 * 1024);
+  });
+
+  it("always emits valid JSON even for a single oversized message", () => {
+    const history = [
+      { sender: "Aurelia" as const, text: "z".repeat(50_000) },
+    ];
+    const bounded = boundSessionHistoryPayload(history);
+    assert.strictEqual(bounded.length, 1);
+    assert.ok(bounded[0].text.length <= 400);
+    assert.doesNotThrow(() => JSON.parse(JSON.stringify(bounded)));
   });
 });
 

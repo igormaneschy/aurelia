@@ -70,6 +70,26 @@ describe("serializeOutEvent", () => {
     assert.strictEqual(parsed.request_id, "bounded-1");
     assert.strictEqual(parsed.payload_truncated, true);
   });
+
+  it("keeps structured result JSON parseable up to the result content cap", () => {
+    // list-models / get-session-history payloads are JSON the Go side must
+    // parse whole. A payload larger than the 16K text cap but under the 48K
+    // result cap must survive sanitization intact and still parse.
+    const models = Array.from({ length: 300 }, (_, i) => ({
+      provider: "opencode",
+      id: `model-${i}`,
+      name: `Model ${i}`,
+      supportsImages: false,
+    }));
+    const content = JSON.stringify(models);
+    assert.ok(Array.from(content).length > 16 * 1024, "fixture must exceed the text cap");
+    const line = serializeOutEvent({ event: "result", request_id: "r-models", content });
+    const parsed = JSON.parse(line) as { event: string; content: string; payload_truncated?: boolean };
+    assert.strictEqual(parsed.event, "result");
+    assert.strictEqual(parsed.payload_truncated, undefined, "structured result must not be truncated");
+    const roundTripped = JSON.parse(parsed.content) as Array<{ id: string }>;
+    assert.strictEqual(roundTripped.length, 300);
+  });
 });
 
 describe("validateBridgeRequest", () => {

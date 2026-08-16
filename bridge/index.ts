@@ -337,6 +337,11 @@ const MAX_BRIDGE_LOG_RUNES = 2048;
 const MAX_REQUEST_ID_RUNES = 128;
 const MAX_TELEMETRY_LABEL_RUNES = 128;
 const MAX_EVENT_TEXT_RUNES = 16 * 1024;
+// Structured result payloads (list-models, get-session-history, stats) are
+// JSON the Go side must parse whole; the 16K text cap would cut them mid-
+// JSON. Allow up to 48K runes for result content, still bounded well below
+// the 64KB serialized-event cap so the fallback path stays reachable.
+const MAX_RESULT_CONTENT_RUNES = 48 * 1024;
 const MAX_EVENT_VALUE_RUNES = 2048;
 const MAX_OUT_EVENT_BYTES = 64 * 1024;
 const MAX_BRIDGE_REQUEST_BYTES = 256 * 1024;
@@ -530,7 +535,11 @@ function sanitizeOutEvent(obj: OutEvent): OutEvent {
     if (key === "event" || key === "request_id" || key === "timestamp") continue;
     if (fieldCount++ >= MAX_TOOL_INPUT_KEYS) break;
     if (key === "content" || key === "text" || key === "message") {
-      out[key] = sanitizeBridgeText(value, MAX_EVENT_TEXT_RUNES);
+      // Structured result payloads (list-models, get-session-history) are
+      // JSON that must stay parseable end-to-end; give them a larger cap so
+      // the 16K text limit cannot cut them mid-JSON.
+      const limit = event === "result" && key === "content" ? MAX_RESULT_CONTENT_RUNES : MAX_EVENT_TEXT_RUNES;
+      out[key] = sanitizeBridgeText(value, limit);
     } else if (key === "input") {
       out[key] = sanitizeToolInput(value);
     } else if (key === "name" || key === "tool_name") {
@@ -2040,6 +2049,37 @@ function sessionHistoryFromMessages(messages: unknown[], limit = 100): SessionHi
   return history.slice(history.length - limit);
 }
 
+// Bound the serialized get-session-history payload so it always stays below
+// MAX_EVENT_TEXT_RUNES (16K) — sanitizeOutEvent truncates `content` by runes
+// and a history JSON cut mid-string would fail the Go side's json.Unmarshal
+// with "unexpected end of JSON input" (observed with long sessions whose
+// history JSON exceeded the cap). Each message text is truncated to
+// maxTextRunes and the list is trimmed newest-first until the serialized
+// payload fits maxPayloadRunes, keeping the emitted JSON always valid.
+export function boundSessionHistoryPayload(
+  history: SessionHistoryMessage[],
+  maxTextRunes = 400,
+  maxPayloadRunes = 12_000,
+): SessionHistoryMessage[] {
+  const bounded: SessionHistoryMessage[] = [];
+  let budget = maxPayloadRunes;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const msg = history[i];
+    const text = truncateBridgeRunes(msg.text, maxTextRunes);
+    const entry: SessionHistoryMessage = {
+      sender: msg.sender,
+      text,
+      ...(msg.timestamp ? { timestamp: msg.timestamp } : {}),
+    };
+    const cost = Array.from(JSON.stringify(entry)).length;
+    if (budget - cost < 0) break;
+    budget -= cost;
+    bounded.push(entry);
+  }
+  bounded.reverse();
+  return bounded;
+}
+
 export function resolveModel(
   modelRuntime: Pick<ModelRuntime, "getModel" | "getModels">,
   provider: string | undefined,
@@ -2997,7 +3037,7 @@ async function handleGetSessionHistory(req: Request): Promise<void> {
     await bindBridgeSessionExtensions(session);
     const messages = session.state.messages ?? [];
     const history = sessionHistoryFromMessages(messages, 100);
-    emitReq({ event: "result", content: JSON.stringify(history) });
+    emitReq({ event: "result", content: JSON.stringify(boundSessionHistoryPayload(history)) });
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
     redactedLog(`get-session-history error: rid=${reqId} ${errMsg}`);

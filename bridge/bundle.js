@@ -150,6 +150,7 @@ var MAX_BRIDGE_LOG_RUNES = 2048;
 var MAX_REQUEST_ID_RUNES = 128;
 var MAX_TELEMETRY_LABEL_RUNES = 128;
 var MAX_EVENT_TEXT_RUNES = 16 * 1024;
+var MAX_RESULT_CONTENT_RUNES = 48 * 1024;
 var MAX_EVENT_VALUE_RUNES = 2048;
 var MAX_OUT_EVENT_BYTES = 64 * 1024;
 var MAX_BRIDGE_REQUEST_BYTES = 256 * 1024;
@@ -307,7 +308,8 @@ function sanitizeOutEvent(obj) {
     if (key === "event" || key === "request_id" || key === "timestamp") continue;
     if (fieldCount++ >= MAX_TOOL_INPUT_KEYS) break;
     if (key === "content" || key === "text" || key === "message") {
-      out[key] = sanitizeBridgeText(value, MAX_EVENT_TEXT_RUNES);
+      const limit = event === "result" && key === "content" ? MAX_RESULT_CONTENT_RUNES : MAX_EVENT_TEXT_RUNES;
+      out[key] = sanitizeBridgeText(value, limit);
     } else if (key === "input") {
       out[key] = sanitizeToolInput(value);
     } else if (key === "name" || key === "tool_name") {
@@ -1328,6 +1330,25 @@ function sessionHistoryFromMessages(messages, limit = 100) {
   if (history.length <= limit) return history;
   return history.slice(history.length - limit);
 }
+function boundSessionHistoryPayload(history, maxTextRunes = 400, maxPayloadRunes = 12e3) {
+  const bounded = [];
+  let budget = maxPayloadRunes;
+  for (let i = history.length - 1; i >= 0; i--) {
+    const msg = history[i];
+    const text = truncateBridgeRunes(msg.text, maxTextRunes);
+    const entry = {
+      sender: msg.sender,
+      text,
+      ...msg.timestamp ? { timestamp: msg.timestamp } : {}
+    };
+    const cost = Array.from(JSON.stringify(entry)).length;
+    if (budget - cost < 0) break;
+    budget -= cost;
+    bounded.push(entry);
+  }
+  bounded.reverse();
+  return bounded;
+}
 function resolveModel(modelRuntime, provider, modelID) {
   if (!modelID) return void 0;
   const mappedProvider = mapProvider(provider);
@@ -2053,7 +2074,7 @@ async function handleGetSessionHistory(req) {
     await bindBridgeSessionExtensions(session);
     const messages = session.state.messages ?? [];
     const history = sessionHistoryFromMessages(messages, 100);
-    emitReq({ event: "result", content: JSON.stringify(history) });
+    emitReq({ event: "result", content: JSON.stringify(boundSessionHistoryPayload(history)) });
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     redactedLog("get-session-history error: rid=".concat(reqId, " ").concat(errMsg));
@@ -2449,6 +2470,7 @@ export {
   StdoutEmissionBudget,
   ToolDurationTracker,
   bindBridgeSessionExtensions,
+  boundSessionHistoryPayload,
   compactionEndPayload,
   compactionReason,
   createBridgeSessionRequestLifecycle,

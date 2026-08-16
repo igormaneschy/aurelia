@@ -789,7 +789,13 @@ func (b *Bridge) GetSessionHistory(ctx context.Context, opts RequestOptions) ([]
 	}
 	var messages []SessionHistoryMessage
 	if err := json.Unmarshal([]byte(ev.Content), &messages); err != nil {
-		return nil, fmt.Errorf("bridge: get-session-history parse: %w", err)
+		// An oversized history truncated by the bridge sanitizer (or any
+		// other malformed payload) must not surface as a fatal error: the
+		// TUI treats history as best-effort. Log for diagnosis and degrade
+		// to an empty history instead.
+		slog.Warn("bridge: get-session-history parse error; returning empty history",
+			"error", err, "content_bytes", len(ev.Content))
+		return []SessionHistoryMessage{}, nil
 	}
 	return messages, nil
 }
@@ -818,7 +824,12 @@ func (b *Bridge) ListModels(ctx context.Context, refresh bool) ([]ModelInfo, err
 	}
 	var models []ModelInfo
 	if err := json.Unmarshal([]byte(ev.Content), &models); err != nil {
-		return nil, fmt.Errorf("bridge: list-models parse: %w", err)
+		// A truncated/malformed payload must not surface as a fatal error:
+		// the TUI model picker treats the catalog as best-effort. Log for
+		// diagnosis and degrade to an empty catalog instead.
+		slog.Warn("bridge: list-models parse error; returning empty catalog",
+			"error", err, "content_bytes", len(ev.Content))
+		return []ModelInfo{}, nil
 	}
 	return models, nil
 }
