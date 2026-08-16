@@ -299,9 +299,11 @@ func fetchTUIStatus(client *ipc.Client, chatID int64, seq int64) tea.Cmd {
 // fetchTUIStatusCmd is the Model-side helper: it allocates the next status
 // sequence and targets the active session at call time, so the post-command
 // refresh always carries a higher sequence than any intermediate response.
-func (m Model) fetchTUIStatusCmd() tea.Cmd {
+// NOTE: value receiver — callers must use the returned model (the increment
+// lives in the persistent Model state flowing through Update).
+func (m Model) fetchTUIStatusCmd() (Model, tea.Cmd) {
 	m.statusSeq++
-	return fetchTUIStatus(m.ipcClient, m.activeSession, m.statusSeq)
+	return m, fetchTUIStatus(m.ipcClient, m.activeSession, m.statusSeq)
 }
 
 // statusFromEvents extracts cwd and model from the daemon's /status response.

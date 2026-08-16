@@ -69,8 +69,9 @@ func (m Model) updateLoading(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Timestamp: time.Now(),
 		})
 		m.ensureViewport()
+		m, statusCmd := m.fetchTUIStatusCmd()
 		return m, tea.Batch(
-			m.fetchTUIStatusCmd(),
+			statusCmd,
 			fetchTUIHistory(m.ipcClient, m.activeSession),
 			fetchTUISessions(m.ipcClient),
 			scheduleHealthCheck(),
@@ -233,7 +234,11 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tuiStatusMsg:
-		if msg.err == nil && msg.seq >= m.lastStatusSeq {
+		// Strict ordering: only responses with a strictly higher sequence
+		// than the last applied one are accepted. Equal seqs (e.g. a
+		// duplicate or a path that forgot to increment) are stale by
+		// definition and dropped.
+		if msg.err == nil && msg.seq > m.lastStatusSeq {
 			m.lastStatusSeq = msg.seq
 			if msg.cwd != "" {
 				m.cwdPath = msg.cwd
@@ -295,6 +300,9 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Text:      fmt.Sprintf("Error: %s", msg.err),
 			Timestamp: time.Now(),
 		})
+		// A send failure is not a confirmed command outcome: the last
+		// confirmed model stays visible.
+		m.refreshStatusOnStreamEnd = false
 		m.updateViewport()
 		return m.continueWithNextQueuedMessage()
 
@@ -407,10 +415,11 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.syncSidebarRows()
 		m.updateViewport()
 		m.sessionFlashUntil = time.Now().Add(500 * time.Millisecond)
+		m, statusCmd := m.fetchTUIStatusCmd()
 		cmds := []tea.Cmd{
 			fetchTUISessions(m.ipcClient),
 			fetchTUIHistory(m.ipcClient, m.activeSession),
-			m.fetchTUIStatusCmd(),
+			statusCmd,
 			m.animations.pulseNewMessages(),
 		}
 		if model := strings.TrimSpace(m.pendingSessionModel); model != "" && model != "auto" {
@@ -450,9 +459,10 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sidebarTable.Blur()
 		m.sessionFlashUntil = time.Now().Add(500 * time.Millisecond)
 		// Reload history + status for the new session.
+		m, statusCmd := m.fetchTUIStatusCmd()
 		return m, tea.Batch(
 			fetchTUIHistory(m.ipcClient, m.activeSession),
-			m.fetchTUIStatusCmd(),
+			statusCmd,
 			m.animations.pulseNewMessages(),
 		)
 
@@ -477,10 +487,11 @@ func (m Model) updateChat(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.historyNav.resetToLastPage(0)
 			m.viewportSet = false
 			m.updateViewport()
+			m, statusCmd := m.fetchTUIStatusCmd()
 			return m, tea.Batch(
 				fetchTUISessions(m.ipcClient),
 				fetchTUIHistory(m.ipcClient, m.activeSession),
-				m.fetchTUIStatusCmd(),
+				statusCmd,
 			)
 		}
 		m.repositionCursorToActive()
@@ -1353,6 +1364,9 @@ func (m Model) cancelStreaming() (tea.Model, tea.Cmd) {
 		Text:      "(cancelled — pipeline aborting)",
 		Timestamp: time.Now(),
 	})
+	// A user cancel is not a confirmed command outcome: the last confirmed
+	// model stays visible until a real refresh says otherwise.
+	m.refreshStatusOnStreamEnd = false
 	m.updateViewport()
 	return m.continueWithNextQueuedMessage()
 }
@@ -1475,7 +1489,7 @@ func (m Model) handleStreamEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 		var refreshCmd tea.Cmd
 		if m.refreshStatusOnStreamEnd {
 			m.refreshStatusOnStreamEnd = false
-			refreshCmd = m.fetchTUIStatusCmd()
+			m, refreshCmd = m.fetchTUIStatusCmd()
 		}
 		vpCmd := m.updateViewport()
 		next, queueCmd := m.continueWithNextQueuedMessage()

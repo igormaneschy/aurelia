@@ -1926,7 +1926,7 @@ func TestModel_TuiStatusUpdatesCWD(t *testing.T) {
 	m := NewModel("/tmp/test.sock", ThemeDark)
 	m.state = stateChat
 
-	updated, _ := m.Update(tuiStatusMsg{cwd: "/Users/igor/dev/aurelia"})
+	updated, _ := m.Update(tuiStatusMsg{cwd: "/Users/igor/dev/aurelia", seq: 1})
 	m2 := updated.(Model)
 
 	if m2.cwdPath != "/Users/igor/dev/aurelia" {

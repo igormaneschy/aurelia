@@ -227,3 +227,53 @@ func TestModelChangeRefresh_EndToEnd(t *testing.T) {
 		t.Fatalf("activeModel = %q, want model-b after end-to-end flow", m4.activeModel)
 	}
 }
+
+// TestModelChangeRefresh_SequencesAdvance covers the High review finding: the
+// status sequence must advance through the real Update loop so the ordering
+// guard is effective. Two consecutive refresh cycles must produce seq 1 then
+// seq 2 on the persistent model.
+func TestModelChangeRefresh_SequencesAdvance(t *testing.T) {
+	m := testChatModel()
+	m.streamID = 1
+
+	// First cycle: /model model-b → stream_end → refresh scheduled.
+	m.refreshStatusOnStreamEnd = true
+	updated, _ := m.Update(streamEventMsg{streamID: 1, event: ipc.IPCEvent{Type: "stream_end"}})
+	m2 := updated.(Model)
+	if m2.statusSeq != 1 {
+		t.Fatalf("statusSeq after first cycle = %d, want 1", m2.statusSeq)
+	}
+	updated, _ = m2.Update(tuiStatusMsg{model: "model-b", seq: 1})
+	m3 := updated.(Model)
+	if m3.activeModel != "model-b" || m3.lastStatusSeq != 1 {
+		t.Fatalf("after first status: activeModel=%q lastStatusSeq=%d, want model-b/1", m3.activeModel, m3.lastStatusSeq)
+	}
+
+	// Second cycle: another model change must issue a strictly higher seq.
+	m3.streamID = 2
+	m3.refreshStatusOnStreamEnd = true
+	updated, _ = m3.Update(streamEventMsg{streamID: 2, event: ipc.IPCEvent{Type: "stream_end"}})
+	m4 := updated.(Model)
+	if m4.statusSeq != 2 {
+		t.Fatalf("statusSeq after second cycle = %d, want 2 (must advance)", m4.statusSeq)
+	}
+}
+
+// TestStatusMsg_DuplicateSeqDropped covers the strict-ordering guard: two
+// responses with the SAME sequence (e.g. a path that forgot to increment)
+// never overwrite the first applied one — the older content arriving last
+// must be rejected (the actual A1 failure mode).
+func TestStatusMsg_DuplicateSeqDropped(t *testing.T) {
+	m := testChatModel()
+	updated, _ := m.Update(tuiStatusMsg{model: "model-b", seq: 2})
+	m2 := updated.(Model)
+	if m2.activeModel != "model-b" {
+		t.Fatalf("activeModel = %q, want model-b", m2.activeModel)
+	}
+	// Same seq with different content: dropped under the strict > guard.
+	updated, _ = m2.Update(tuiStatusMsg{model: "model-a", seq: 2})
+	m3 := updated.(Model)
+	if m3.activeModel != "model-b" {
+		t.Fatalf("activeModel = %q, want model-b (duplicate seq dropped)", m3.activeModel)
+	}
+}
