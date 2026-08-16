@@ -132,6 +132,7 @@ type RunEvent struct {
 // together with the terminal status in a single SQLite operation, so the
 // aggregates can never be split from the terminal row.
 type CompletionAggregates struct {
+	DurationMs      int64
 	FirstFeedbackMs int64
 	MaxSilenceMs    int64
 	StallCount      int

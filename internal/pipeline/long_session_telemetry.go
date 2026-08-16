@@ -1079,7 +1079,14 @@ func (s *Service) completeRunLogOwned(chatID int64, threadID int, userID int64, 
 	// Persist the terminal status and the long-session aggregates in the same
 	// operation when the store supports it (SQLite); other stores fall back to
 	// Complete + Update. A failure degrades diagnostics, never the run result.
+	durationMs := int64(0)
+	if !state.startedAt.IsZero() {
+		if d := time.Since(state.startedAt).Milliseconds(); d > 0 {
+			durationMs = d
+		}
+	}
 	agg := runlog.CompletionAggregates{
+		DurationMs:      durationMs,
 		FirstFeedbackMs: firstFeedbackMs,
 		MaxSilenceMs:    maxSilenceMs,
 		StallCount:      stallCount,
@@ -1118,6 +1125,7 @@ func (s *Service) completeRunLogOwned(chatID int64, threadID int, userID int64, 
 	}
 	if err := s.runLog.Update(completeCtx, runlog.RunUpdate{
 		RunID:           state.runID,
+		DurationMs:      &durationMs,
 		FirstFeedbackMs: &firstFeedbackMs,
 		MaxSilenceMs:    &maxSilenceMs,
 		StallCount:      &stallCount,

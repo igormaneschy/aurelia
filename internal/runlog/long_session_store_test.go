@@ -284,6 +284,7 @@ func TestSQLiteStore_CompleteWithAggregates(t *testing.T) {
 	}
 
 	agg := CompletionAggregates{
+		DurationMs:      60000,
 		FirstFeedbackMs: 1200,
 		MaxSilenceMs:    45000,
 		StallCount:      3,
@@ -299,6 +300,9 @@ func TestSQLiteStore_CompleteWithAggregates(t *testing.T) {
 	}
 	if got.Status != RunFailed {
 		t.Fatalf("status = %s, want failed (atomic terminal write)", got.Status)
+	}
+	if got.DurationMs != 60000 {
+		t.Fatalf("duration_ms = %d, want 60000 (terminal write must persist duration)", got.DurationMs)
 	}
 	if got.FirstFeedbackMs != 1200 || got.MaxSilenceMs != 45000 {
 		t.Fatalf("aggregate ms = %d/%d, want 1200/45000", got.FirstFeedbackMs, got.MaxSilenceMs)
