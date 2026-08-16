@@ -17,10 +17,10 @@ import (
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/continuity"
-	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/internal/cron"
 	"github.com/igormaneschy/aurelia/internal/deps"
 	"github.com/igormaneschy/aurelia/internal/dream"
+	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/internal/persona"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
@@ -34,19 +34,19 @@ import (
 )
 
 type app struct {
-	config     *config.AppConfig
-	resolver   *runtime.PathResolver
-	bridge     *bridge.Bridge
-	agents     *agents.Registry
-	cronStore  *cron.SQLiteCronStore
-	bindings   projectbinding.Store
-	runLog     runlog.Store
-	continuity continuity.Store
-	bot        *telegram.BotController
-	sessions   *session.Store
-	scheduler  *cron.Scheduler
-	cronCtx    context.Context
-	cronCancel context.CancelFunc
+	config      *config.AppConfig
+	resolver    *runtime.PathResolver
+	bridge      *bridge.Bridge
+	agents      *agents.Registry
+	cronStore   *cron.SQLiteCronStore
+	bindings    projectbinding.Store
+	runLog      runlog.Store
+	continuity  continuity.Store
+	bot         *telegram.BotController
+	sessions    *session.Store
+	scheduler   *cron.Scheduler
+	cronCtx     context.Context
+	cronCancel  context.CancelFunc
 	ipcServer   *ipc.Server
 	tuiRunGuard *tuiRunGuard
 	tuiSessions tuisessions.Store
@@ -579,6 +579,20 @@ func (a *app) reconcileStaleRuns() {
 	if a.continuity != nil {
 		if err := a.continuity.MarkColdForSessions(ctx, "daemon restarted/deployed"); err != nil {
 			log.Printf("Warning: failed to mark continuity cold on startup: %v", err)
+		}
+	}
+
+	// Mark stale run_journal rows as interrupted: any row still running
+	// after a restart belonged to the previous process. This keeps the
+	// timeline honest (A5/T5) — a run cut off by deploy/shutdown is
+	// interrupted, never silently left as "running". The cutoff (boot time)
+	// protects runs started after boot (e.g. cron racing the reconcile).
+	if a.runLog != nil {
+		marked, err := a.runLog.MarkStaleRunsInterrupted(ctx, time.Now())
+		if err != nil {
+			log.Printf("Warning: failed to mark stale runs interrupted: %v", err)
+		} else if marked > 0 {
+			log.Printf("runlog: marked %d stale run(s) as interrupted (daemon restart)", marked)
 		}
 	}
 }

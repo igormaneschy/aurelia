@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -219,11 +220,11 @@ func debugPrune(ctx context.Context, resolver *runtime.PathResolver, store *runl
 
 	if jsonOut {
 		return printJSON(struct {
-			Days          int                `json:"days"`
-			Cutoff        time.Time          `json:"cutoff"`
-			DryRun        bool               `json:"dry_run"`
-			RunsDeleted   int64              `json:"runs_deleted"`
-			EventsDeleted int64              `json:"events_deleted"`
+			Days          int       `json:"days"`
+			Cutoff        time.Time `json:"cutoff"`
+			DryRun        bool      `json:"dry_run"`
+			RunsDeleted   int64     `json:"runs_deleted"`
+			EventsDeleted int64     `json:"events_deleted"`
 		}{
 			Days:          days,
 			Cutoff:        cutoff,
@@ -345,7 +346,9 @@ func printRunDetail(r *runlog.RunRecord, events []runlog.RunEvent) {
 	}
 	fmt.Printf("  CWD:          %s\n", r.CWD)
 	if r.SessionFile != "" {
-		fmt.Printf("  Session:      %s\n", r.SessionFile)
+		// Absolute paths may expose the operator's home layout in shared
+		// shell recordings; the basename identifies the session uniquely.
+		fmt.Printf("  Session:      %s\n", filepath.Base(r.SessionFile))
 	}
 	if r.DurationMs > 0 {
 		dur := time.Duration(r.DurationMs) * time.Millisecond
@@ -374,6 +377,12 @@ func printRunDetail(r *runlog.RunRecord, events []runlog.RunEvent) {
 	}
 	if r.ParentRunID != "" {
 		fmt.Printf("  Parent:       %s\n", r.ParentRunID)
+	}
+	if r.FirstFeedbackMs > 0 || r.MaxSilenceMs > 0 || r.StallCount > 0 || r.SteerCount > 0 {
+		fmt.Printf("  First feedback: %s\n", time.Duration(r.FirstFeedbackMs)*time.Millisecond)
+		fmt.Printf("  Max silêncio:   %s\n", time.Duration(r.MaxSilenceMs)*time.Millisecond)
+		fmt.Printf("  Stalls:         %d\n", r.StallCount)
+		fmt.Printf("  Steers:         %d\n", r.SteerCount)
 	}
 
 	if len(events) > 0 {
@@ -411,6 +420,9 @@ func printMetricsTable(m *runlog.MetricsResult, days int) {
 	fmt.Printf("  ⏰ Timeout:    %d\n", m.RunsTimedOut)
 	fmt.Printf("  🛑 Canceladas: %d\n", m.RunsCanceled)
 	fmt.Printf("  ⏳ Em andamento: %d\n", m.RunsRunning)
+	if m.RunsInterrupted > 0 {
+		fmt.Printf("  🔌 Interrompidas (restart/deploy): %d\n", m.RunsInterrupted)
+	}
 	if m.FallbackCount > 0 {
 		fmt.Printf("  ⚠️  Fallbacks:  %d\n", m.FallbackCount)
 	}
@@ -425,6 +437,18 @@ func printMetricsTable(m *runlog.MetricsResult, days int) {
 	if m.DurationP50Ms > 0 {
 		fmt.Printf("\n  Duração p50:  %s\n", time.Duration(m.DurationP50Ms)*time.Millisecond)
 		fmt.Printf("  Duração p95:  %s\n", time.Duration(m.DurationP95Ms)*time.Millisecond)
+	}
+
+	// Long-session aggregates.
+	if m.StallsTotal > 0 || m.SteersTotal > 0 || m.AvgFirstFeedbackMs > 0 || m.AvgMaxSilenceMs > 0 {
+		fmt.Printf("\n  Stalls:       %d\n", m.StallsTotal)
+		fmt.Printf("  Steers:       %d\n", m.SteersTotal)
+		if m.AvgFirstFeedbackMs > 0 {
+			fmt.Printf("  First feedback (méd): %s\n", time.Duration(m.AvgFirstFeedbackMs)*time.Millisecond)
+		}
+		if m.AvgMaxSilenceMs > 0 {
+			fmt.Printf("  Max silêncio (méd):   %s\n", time.Duration(m.AvgMaxSilenceMs)*time.Millisecond)
+		}
 	}
 
 	// Breakdowns

@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -38,20 +39,105 @@ func TestRequestStream_DeliverDropsWhenOverflowFull(t *testing.T) {
 	}
 }
 
-func TestRequestStream_EvictOneForTerminalPreservesOrder(t *testing.T) {
-	s := newRequestStream(1)
-	_ = s.deliver(Event{Type: "assistant", Text: "keep"})
-	_ = s.deliver(Event{Type: "assistant", Text: "overflow"})
+func TestAggregateStreamBudget_ReservesTerminalCapacity(t *testing.T) {
+	budget := newAggregateStreamBudget()
+	if !budget.acquire() {
+		t.Fatal("first stream should acquire aggregate budget")
+	}
+	s := newRequestStream(eventChannelBuffer, budget)
 
-	if _, ok := s.evictOneForTerminal(); !ok {
-		t.Fatal("expected eviction from full channel")
+	// Fill the stream with bounded-but-large non-terminal events until the
+	// per-stream budget rejects one. The terminal must still evict history and
+	// fit through the reserved path.
+	large := Event{Type: "assistant", Text: strings.Repeat("x", 100)}
+	for s.deliver(large) {
 	}
-	ev, ok := s.dequeueOverflow()
-	if !ok || ev.Text != "overflow" {
-		t.Fatalf("first overflow = %+v, want overflow", ev)
+	dropped, ok := s.deliverTerminal(Event{Type: "result", Content: "done"})
+	if !ok {
+		t.Fatal("terminal event was not preserved after non-terminal budget exhaustion")
 	}
-	ev, ok = s.dequeueOverflow()
-	if !ok || ev.Text != "keep" {
-		t.Fatalf("evicted channel head = %+v, want keep", ev)
+	if dropped == 0 {
+		t.Fatal("terminal delivery should evict at least one queued non-terminal")
+	}
+
+	seenTerminal := false
+drainLoop:
+	for {
+		select {
+		case ev, open := <-s.ch:
+			if !open {
+				break
+			}
+			if ev.Type == "result" {
+				seenTerminal = true
+			}
+		default:
+			if ev, ok := s.dequeueOverflow(); ok {
+				if ev.Type == "result" {
+					seenTerminal = true
+				}
+				continue
+			}
+			break drainLoop
+		}
+	}
+
+	if !seenTerminal {
+		t.Fatal("terminal result was lost from the bounded stream")
+	}
+	s.close()
+}
+
+func TestRequestStream_DiscardQueuedReleasesAggregateBytes(t *testing.T) {
+	budget := newAggregateStreamBudget()
+	if !budget.acquire() {
+		t.Fatal("stream should acquire aggregate budget")
+	}
+	s := newRequestStream(1, budget)
+	if !s.deliver(Event{Type: "assistant", Text: "queued"}) {
+		t.Fatal("event should be queued")
+	}
+	if budget.queuedBytes == 0 {
+		t.Fatal("expected queued bytes before discard")
+	}
+
+	s.close()
+	s.discardQueued()
+	if budget.queuedBytes != 0 {
+		t.Fatalf("queued bytes = %d, want 0 after discard", budget.queuedBytes)
+	}
+}
+
+func TestAggregateStreamBudget_BoundsActiveStreams(t *testing.T) {
+	budget := newAggregateStreamBudget()
+	for i := 0; i < maxActiveRequestStreams; i++ {
+		if !budget.acquire() {
+			t.Fatalf("stream %d failed before active-stream cap", i)
+		}
+	}
+	if budget.acquire() {
+		t.Fatal("active stream cap was not enforced")
+	}
+	for i := 0; i < maxActiveRequestStreams; i++ {
+		budget.releaseStream()
+	}
+}
+
+func TestAggregateStreamBudget_ControlSlotSurvivesOrdinaryCap(t *testing.T) {
+	budget := newAggregateStreamBudget()
+	for i := 0; i < maxActiveRequestStreams; i++ {
+		if !budget.acquire() {
+			t.Fatalf("ordinary stream %d failed before active-stream cap", i)
+		}
+	}
+	if !budget.acquireControl() {
+		t.Fatal("control stream should remain available at ordinary stream cap")
+	}
+	if budget.acquireControl() {
+		t.Fatal("second control stream should be rejected")
+	}
+	budget.releaseControlStream()
+	for i := 0; i < maxActiveRequestStreams; i++ {
+		budget.releaseStream()
 	}
 }

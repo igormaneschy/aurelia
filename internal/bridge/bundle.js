@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, truncateSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { createHash } from "node:crypto";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -145,11 +146,401 @@ function rememberSession(id, lookup) {
     sessionByID.delete(oldest);
   }
 }
+var MAX_BRIDGE_LOG_RUNES = 2048;
+var MAX_REQUEST_ID_RUNES = 128;
+var MAX_TELEMETRY_LABEL_RUNES = 128;
+var MAX_EVENT_TEXT_RUNES = 16 * 1024;
+var MAX_EVENT_VALUE_RUNES = 2048;
+var MAX_OUT_EVENT_BYTES = 64 * 1024;
+var MAX_BRIDGE_REQUEST_BYTES = 256 * 1024;
+var MAX_TOOL_INPUT_DEPTH = 3;
+var MAX_TOOL_INPUT_KEYS = 32;
+var MAX_TOOL_INPUT_ITEMS = 16;
+var MAX_COUNTER_VALUE = 1e8;
+var MAX_DURATION_MS = 24 * 60 * 60 * 1e3;
+function truncateBridgeRunes(value, maxRunes) {
+  if (maxRunes <= 0) return "";
+  const runes = Array.from(value);
+  return runes.length <= maxRunes ? value : runes.slice(0, maxRunes).join("");
+}
+function removeBridgeControls(value) {
+  return Array.from(value).filter((r) => {
+    const code = r.codePointAt(0) ?? 0;
+    return code >= 32 && code !== 127 && (code < 128 || code > 159);
+  }).join("");
+}
+function sanitizeBridgeText(value, maxRunes) {
+  const raw = typeof value === "string" ? value : String(value ?? "");
+  return truncateBridgeRunes(removeBridgeControls(redactSDKError(raw)), maxRunes);
+}
+function safeRequestID(value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > MAX_REQUEST_ID_RUNES) return "";
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value) ? value : "";
+}
+var BRIDGE_COMMANDS = /* @__PURE__ */ new Set([
+  "query",
+  "ping",
+  "cancel",
+  "list-models",
+  "steer",
+  "follow-up",
+  "abort",
+  "get-state",
+  "get-session-stats",
+  "get-session-history",
+  "compact-session",
+  "rotate-session"
+]);
+function validateBridgeRequest(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ok: false, error: "request must be an object" };
+  }
+  const raw = value;
+  const requestID = safeRequestID(raw.request_id);
+  if (!requestID) return { ok: false, error: "missing or invalid 'request_id'" };
+  if (typeof raw.command !== "string" || !BRIDGE_COMMANDS.has(raw.command)) {
+    return { ok: false, error: "missing or invalid 'command' field" };
+  }
+  if (raw.target_request_id !== void 0 && !safeRequestID(raw.target_request_id)) {
+    return { ok: false, error: "invalid 'target_request_id'" };
+  }
+  if (raw.prompt !== void 0 && typeof raw.prompt !== "string") {
+    return { ok: false, error: "'prompt' must be a string" };
+  }
+  if (raw.options !== void 0 && (typeof raw.options !== "object" || raw.options === null || Array.isArray(raw.options))) {
+    return { ok: false, error: "'options' must be an object" };
+  }
+  if (raw.refresh !== void 0 && typeof raw.refresh !== "boolean") {
+    return { ok: false, error: "'refresh' must be a boolean" };
+  }
+  const command = raw.command;
+  if ((command === "query" || command === "steer" || command === "follow-up") && (typeof raw.prompt !== "string" || raw.prompt.length === 0)) {
+    return { ok: false, error: "missing 'prompt' field for ".concat(command, " command") };
+  }
+  if (command === "cancel" && !safeRequestID(raw.target_request_id)) {
+    return { ok: false, error: "missing or invalid 'target_request_id' for cancel command" };
+  }
+  return {
+    ok: true,
+    request: { ...raw, command, request_id: requestID }
+  };
+}
+function toolCallKey(value) {
+  if (value === null || value === void 0) return void 0;
+  if (typeof value === "string") return "s:".concat(sanitizeBridgeText(value, MAX_TELEMETRY_LABEL_RUNES));
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return "".concat(typeof value, ":").concat(String(value));
+  }
+  return "opaque_tool_id";
+}
+function safeToolCallID(value) {
+  const digest = createHash("sha256").update(toolCallKey(value) ?? "missing_tool_id").digest("hex").slice(0, 20);
+  return "tool-".concat(digest);
+}
+function safeLabel(value, fallback) {
+  const label = sanitizeBridgeText(value, MAX_TELEMETRY_LABEL_RUNES).trim();
+  return label || fallback;
+}
+function boundedCounter(value) {
+  if (typeof value !== "number" || !Number.isFinite(value) || !Number.isSafeInteger(value)) return void 0;
+  if (value < 0) return 0;
+  return Math.min(value, MAX_COUNTER_VALUE);
+}
+function boundedDuration(value) {
+  if (typeof value !== "number" || !Number.isFinite(value) || !Number.isSafeInteger(value)) return void 0;
+  if (value < 0 || value > MAX_DURATION_MS) return void 0;
+  return value;
+}
+function sanitizeToolInput(value, depth = 0) {
+  if (depth >= MAX_TOOL_INPUT_DEPTH) return "[input_depth_limit]";
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : "[invalid_number]";
+  if (typeof value === "string") return sanitizeBridgeText(value, MAX_EVENT_VALUE_RUNES);
+  if (Array.isArray(value)) {
+    return value.slice(0, MAX_TOOL_INPUT_ITEMS).map((item) => sanitizeToolInput(item, depth + 1));
+  }
+  if (typeof value === "object") {
+    const out = {};
+    let count = 0;
+    for (const key in value) {
+      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+      if (count++ >= MAX_TOOL_INPUT_KEYS) break;
+      const item = value[key];
+      const safeKey = sanitizeBridgeText(key, MAX_TELEMETRY_LABEL_RUNES);
+      if (safeKey) out[safeKey] = sanitizeToolInput(item, depth + 1);
+    }
+    return out;
+  }
+  return "[unsupported_input]";
+}
+function sanitizeOutValue(value, depth = 0) {
+  if (depth >= 3) return "[value_depth_limit]";
+  if (typeof value === "string") return sanitizeBridgeText(value, MAX_EVENT_VALUE_RUNES);
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (Array.isArray(value)) {
+    return value.slice(0, MAX_TOOL_INPUT_ITEMS).map((item) => sanitizeOutValue(item, depth + 1));
+  }
+  if (typeof value === "object") {
+    const out = {};
+    let count = 0;
+    for (const key in value) {
+      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+      if (count++ >= MAX_TOOL_INPUT_KEYS) break;
+      const item = value[key];
+      const safeKey = sanitizeBridgeText(key, MAX_TELEMETRY_LABEL_RUNES);
+      if (safeKey) out[safeKey] = sanitizeOutValue(item, depth + 1);
+    }
+    return out;
+  }
+  return "[unsupported_value]";
+}
+function sanitizeOutEvent(obj) {
+  const event = safeLabel(obj.event, "unknown");
+  const out = { event };
+  const requestID = safeRequestID(obj.request_id);
+  if (requestID) out.request_id = requestID;
+  let fieldCount = 0;
+  for (const key in obj) {
+    if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+    const value = obj[key];
+    if (key === "event" || key === "request_id" || key === "timestamp") continue;
+    if (fieldCount++ >= MAX_TOOL_INPUT_KEYS) break;
+    if (key === "content" || key === "text" || key === "message") {
+      out[key] = sanitizeBridgeText(value, MAX_EVENT_TEXT_RUNES);
+    } else if (key === "input") {
+      out[key] = sanitizeToolInput(value);
+    } else if (key === "name" || key === "tool_name") {
+      out[key] = safeLabel(value, "tool");
+    } else if (key === "id" || key === "tool_call_id") {
+      out[key] = safeToolCallID(value);
+    } else if (key === "error") {
+      out[key] = safeLabel(value, "unknown");
+    } else if (key === "reason") {
+      out[key] = compactionReason(value);
+    } else if (key === "source") {
+      out[key] = value === "bridge_health" ? "bridge_health" : "unknown";
+    } else if (key === "severity") {
+      out[key] = value === "warning" || value === "urgent" ? value : "unknown";
+    } else if (key === "error_class") {
+      out[key] = value === "compaction_error" ? value : "unknown";
+    } else {
+      out[key] = sanitizeOutValue(value);
+    }
+  }
+  return out;
+}
+function serializedByteLength(value) {
+  return Buffer.byteLength(value, "utf8");
+}
+var StdoutEmissionBudget = class {
+  constructor(maxActiveStreams = 32, maxAggregateBytes = 2 * 1024 * 1024, maxPerStreamBytes = 512 * 1024, reservedTerminalBytes = MAX_OUT_EVENT_BYTES) {
+    this.maxActiveStreams = maxActiveStreams;
+    this.maxAggregateBytes = maxAggregateBytes;
+    this.maxPerStreamBytes = maxPerStreamBytes;
+    this.reservedTerminalBytes = reservedTerminalBytes;
+  }
+  maxActiveStreams;
+  maxAggregateBytes;
+  maxPerStreamBytes;
+  reservedTerminalBytes;
+  streams = /* @__PURE__ */ new Map();
+  aggregateBytes = 0;
+  backpressured = false;
+  pendingBytes = 0;
+  drainAttached = false;
+  register(requestID) {
+    if (this.streams.has(requestID)) return true;
+    if (this.streams.size >= this.maxActiveStreams) return false;
+    this.streams.set(requestID, 0);
+    return true;
+  }
+  release(requestID) {
+    const bytes = this.streams.get(requestID);
+    if (bytes === void 0) return;
+    this.streams.delete(requestID);
+    this.aggregateBytes = Math.max(0, this.aggregateBytes - bytes);
+  }
+  markBackpressure(bytes) {
+    this.backpressured = true;
+    this.pendingBytes += bytes;
+    if (this.drainAttached) return;
+    this.drainAttached = true;
+    process.stdout.once("drain", () => {
+      this.pendingBytes = 0;
+      this.backpressured = false;
+      this.drainAttached = false;
+    });
+  }
+  /** Write one already-serialized line, returning false when a non-terminal
+   * event was bounded/dropped. Terminal events always use the reserved path. */
+  write(line, requestID, terminal) {
+    const bytes = serializedByteLength(line);
+    if (bytes > MAX_OUT_EVENT_BYTES) return false;
+    if (!terminal) {
+      const streamBytes = this.streams.get(requestID);
+      if (streamBytes === void 0 || this.backpressured) return false;
+      if (streamBytes + bytes > this.maxPerStreamBytes) return false;
+      if (this.aggregateBytes + bytes > this.maxAggregateBytes - this.reservedTerminalBytes) return false;
+      this.streams.set(requestID, streamBytes + bytes);
+      this.aggregateBytes += bytes;
+    }
+    try {
+      const accepted = process.stdout.write(line);
+      if (!accepted) this.markBackpressure(bytes);
+      if (terminal) this.release(requestID);
+      return true;
+    } catch {
+      if (!terminal) {
+        const current = this.streams.get(requestID) ?? 0;
+        this.streams.set(requestID, Math.max(0, current - bytes));
+        this.aggregateBytes = Math.max(0, this.aggregateBytes - bytes);
+      }
+      return false;
+    }
+  }
+  finish(requestID) {
+    this.release(requestID);
+  }
+  activeStreamCount() {
+    return this.streams.size;
+  }
+};
+var stdoutEmissionBudget = new StdoutEmissionBudget();
+function serializeOutEvent(obj) {
+  const sanitized = sanitizeOutEvent(obj);
+  const candidate = JSON.stringify({ ...sanitized, timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+  if (serializedByteLength(candidate) <= MAX_OUT_EVENT_BYTES) return candidate;
+  const fallback = {
+    event: sanitized.event,
+    ...sanitized.request_id ? { request_id: sanitized.request_id } : {},
+    timestamp: (/* @__PURE__ */ new Date()).toISOString(),
+    payload_truncated: true
+  };
+  if (sanitized.event === "result" && typeof sanitized.content === "string") {
+    fallback.content = truncateBridgeRunes(sanitized.content, 4096);
+  } else if (sanitized.event === "error" && typeof sanitized.message === "string") {
+    fallback.message = truncateBridgeRunes(sanitized.message, 2048);
+  }
+  return JSON.stringify(fallback);
+}
 function emit(obj) {
-  process.stdout.write(JSON.stringify(obj) + "\n");
+  const line = serializeOutEvent(obj) + "\n";
+  const requestID = safeRequestID(obj.request_id) || "__untracked__";
+  const terminal = obj.event === "result" || obj.event === "error" || obj.event === "pong";
+  if (!terminal && stdoutEmissionBudget.activeStreamCount() === 0) {
+    return;
+  }
+  if (!stdoutEmissionBudget.write(line, requestID, terminal)) {
+    if (!terminal) redactedLog("stdout emission budget dropped event=".concat(safeLabel(obj.event, "unknown")));
+  }
+}
+function formatLogLine(msg) {
+  return "[".concat((/* @__PURE__ */ new Date()).toISOString(), "] [bridge] ").concat(sanitizeBridgeText(msg, MAX_BRIDGE_LOG_RUNES));
 }
 function log(msg) {
-  process.stderr.write("[bridge] ".concat(msg, "\n"));
+  process.stderr.write(formatLogLine(msg) + "\n");
+}
+var ToolDurationTracker = class {
+  constructor(maxEntries = 512, maxAgeMs = 2 * 60 * 60 * 1e3) {
+    this.maxEntries = maxEntries;
+    this.maxAgeMs = maxAgeMs;
+  }
+  maxEntries;
+  maxAgeMs;
+  starts = /* @__PURE__ */ new Map();
+  start(toolCallId, now = Date.now()) {
+    const key = toolCallKey(toolCallId);
+    const safeID = safeToolCallID(toolCallId);
+    if (key === void 0) return safeID;
+    if (!this.starts.has(key) && this.starts.size >= this.maxEntries) {
+      const oldest = this.starts.keys().next().value;
+      if (oldest !== void 0) this.starts.delete(oldest);
+    }
+    this.starts.set(key, { safeID, startedAt: now });
+    return safeID;
+  }
+  end(toolCallId, now = Date.now()) {
+    return this.endWithID(toolCallId, now)?.durationMs;
+  }
+  endWithID(toolCallId, now = Date.now()) {
+    const key = toolCallKey(toolCallId);
+    if (key === void 0) return void 0;
+    const started = this.starts.get(key);
+    if (started === void 0) return void 0;
+    this.starts.delete(key);
+    if (now < started.startedAt) return void 0;
+    return { toolCallID: started.safeID, durationMs: now - started.startedAt };
+  }
+  prune(now = Date.now()) {
+    for (const [id, started] of this.starts) {
+      if (now - started.startedAt > this.maxAgeMs) this.starts.delete(id);
+    }
+  }
+  /**
+   * Drops ALL tracked starts. Called at request teardown (finally) and when
+   * the persistent subscription is unsubscribed so no tool-duration state is
+   * retained by chatSessions after the request, and leaked starts can never
+   * cross into a later request on the same session.
+   */
+  clear() {
+    this.starts.clear();
+  }
+};
+function compactionReason(raw) {
+  if (typeof raw !== "string" || !raw) return "unknown";
+  switch (raw.trim().toLowerCase()) {
+    case "manual":
+    case "user":
+      return "manual";
+    case "auto":
+    case "automatic":
+    case "system":
+    case "context":
+    case "context_window":
+    case "threshold":
+    case "overflow":
+      return "automatic";
+    default:
+      return "unknown";
+  }
+}
+function compactionEndPayload(args) {
+  const tokensBefore = boundedCounter(args.tokensBefore) ?? 0;
+  const tokensAfter = boundedCounter(args.tokensAfter);
+  const durationMs = boundedDuration(args.durationMs);
+  return {
+    event: "compaction_end",
+    reason: args.reason,
+    tokens_before: tokensBefore,
+    success: args.success,
+    // Static enum value only — raw errorMessage never leaves the bridge.
+    ...args.errored ? { error_class: "compaction_error" } : {},
+    // tokens_after/delta_tokens are only present when the SDK measured
+    // them; a negative delta means the context was reduced (effective) and
+    // stays observable so a regression is never silently marked as success.
+    ...tokensAfter !== void 0 ? { tokens_after: tokensAfter, delta_tokens: tokensAfter - tokensBefore } : {},
+    // duration_measured=true is the authoritative presence marker — present
+    // even when the measured duration is 0ms.
+    ...durationMs !== void 0 ? { duration_measured: true, duration_ms: durationMs } : {}
+  };
+}
+function measuredElapsed(startedAt, now = Date.now()) {
+  if (startedAt === void 0) return void 0;
+  const elapsed = now - startedAt;
+  return elapsed >= 0 ? elapsed : void 0;
+}
+function stallTelemetryFor(silentMs, warningSent, urgentSent) {
+  const out = {};
+  if (silentMs >= 6e4 && !warningSent) {
+    out.stall = "warning";
+    out.steer = "warning";
+  }
+  if (silentMs >= 12e4 && !urgentSent) {
+    out.stall = "urgent";
+    out.steer = "urgent";
+  }
+  return out;
 }
 function redactSDKError(msg) {
   return msg.replace(/\bsk-[A-Za-z0-9]{20,}/g, "[API_KEY_REDACTED]").replace(/\bpk-[A-Za-z0-9]{20,}/g, "[API_KEY_REDACTED]").replace(/\bsk-ant-[A-Za-z0-9]{20,}/g, "[API_KEY_REDACTED]").replace(/\bsk-proj-[A-Za-z0-9]{20,}/g, "[API_KEY_REDACTED]").replace(/\bsk_live_[A-Za-z0-9]+/g, "[STRIPE_KEY_REDACTED]").replace(/\bsk_test_[A-Za-z0-9]+/g, "[STRIPE_KEY_REDACTED]").replace(/\bAKIA[A-Z0-9]{16}/g, "[AWS_KEY_REDACTED]").replace(/\bAIza[0-9A-Za-z_-]{35}/g, "[GCP_KEY_REDACTED]").replace(/\bghp_[A-Za-z0-9]{36}/g, "[GH_TOKEN_REDACTED]").replace(/\bgho_[A-Za-z0-9]{36}/g, "[GH_TOKEN_REDACTED]").replace(/\bghu_[A-Za-z0-9]{36}/g, "[GH_TOKEN_REDACTED]").replace(/\bghs_[A-Za-z0-9]{36}/g, "[GH_TOKEN_REDACTED]").replace(/\bghr_[A-Za-z0-9]{36}/g, "[GH_TOKEN_REDACTED]").replace(/\bgithub_pat_[0-9A-Za-z_-]+/g, "[GH_PAT_REDACTED]").replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+/g, "[JWT_REDACTED]").replace(/-----BEGIN (OPENSSH |RSA |DSA |EC |PGP )?PRIVATE KEY-----[\s\S]*?-----END (OPENSSH |RSA |DSA |EC |PGP )?PRIVATE KEY-----/g, "[PRIVATE_KEY_BLOCK_REDACTED]").replace(/(Authorization:\s*(?:Bearer|Basic)\s+)\S+/gi, "$1[REDACTED]").replace(/\bxai-[A-Za-z0-9]{20,}/g, "[XAI_KEY_REDACTED]").replace(/\bglpat-[A-Za-z0-9_-]{20,}/g, "[GL_TOKEN_REDACTED]").replace(/\bhf_[A-Za-z0-9]{20,}/g, "[HF_TOKEN_REDACTED]").replace(/\bnpm_[A-Za-z0-9]{36}/g, "[NPM_TOKEN_REDACTED]").replace(/\bxox[bpasa]-[A-Za-z0-9-]{20,}/g, "[SLACK_TOKEN_REDACTED]").replace(/\bxapp-[A-Za-z0-9-]{20,}/g, "[SLACK_TOKEN_REDACTED]");
@@ -719,6 +1110,7 @@ function evaluateToolPolicy(toolName, input, security) {
 }
 var auditLogMaxBytes = 5 * 1024 * 1024;
 var auditLogBackups = 3;
+var MAX_AUDIT_LINE_BYTES = 16 * 1024;
 function auditLogPath() {
   const root = process.env.AURELIA_HOME?.trim() || join(homedir(), ".aurelia");
   return join(root, "audit.log");
@@ -743,6 +1135,7 @@ function rotateAuditLogIfNeeded(path, incomingBytes) {
 }
 function writeAuditFile(line) {
   try {
+    if (serializedByteLength(line) > MAX_AUDIT_LINE_BYTES) return;
     const path = auditLogPath();
     mkdirSync(dirname(path), { recursive: true, mode: 448 });
     rotateAuditLogIfNeeded(path, Buffer.byteLength(line));
@@ -753,10 +1146,28 @@ function writeAuditFile(line) {
 function logAudit(entry) {
   entry.timestamp = (/* @__PURE__ */ new Date()).toISOString();
   entry.redacted = true;
-  entry.reason = redactAuditPath(redactSDKError(entry.reason));
-  entry.cwd = redactAuditPath(redactSDKError(entry.cwd));
-  if (entry.agent_name) entry.agent_name = redactAuditPath(redactSDKError(entry.agent_name));
-  const line = "[security] " + JSON.stringify(entry) + "\n";
+  const sanitizeAuditText = (value, maxRunes) => {
+    const redacted = redactAuditPath(redactSDKError(typeof value === "string" ? value : String(value ?? "")));
+    return truncateBridgeRunes(removeBridgeControls(redacted), maxRunes);
+  };
+  entry.decision = sanitizeAuditText(entry.decision, 64);
+  entry.tool_name = sanitizeAuditText(entry.tool_name, 128);
+  entry.reason = sanitizeAuditText(entry.reason, MAX_BRIDGE_LOG_RUNES);
+  entry.cwd = sanitizeAuditText(entry.cwd, MAX_EVENT_VALUE_RUNES);
+  entry.profile = sanitizeAuditText(entry.profile, 64);
+  if (entry.agent_name) entry.agent_name = sanitizeAuditText(entry.agent_name, 128);
+  let serialized = JSON.stringify(entry);
+  if (serializedByteLength(serialized) > MAX_AUDIT_LINE_BYTES) {
+    serialized = JSON.stringify({
+      timestamp: entry.timestamp,
+      decision: entry.decision,
+      tool_name: entry.tool_name,
+      profile: entry.profile,
+      redacted: true,
+      audit_truncated: true
+    });
+  }
+  const line = "[security] " + serialized + "\n";
   process.stderr.write(line);
   writeAuditFile(line);
 }
@@ -867,12 +1278,19 @@ function installSecurityHook(agent, security, audit = logAudit) {
 }
 function textFromContent(content) {
   if (!Array.isArray(content)) return "";
-  return content.map((item) => {
-    if (typeof item !== "object" || item === null) return "";
+  let text = "";
+  let usedRunes = 0;
+  for (const item of content.slice(0, MAX_TOOL_INPUT_ITEMS)) {
+    if (typeof item !== "object" || item === null) continue;
     const block = item;
-    if (block.type !== "text") return "";
-    return typeof block.text === "string" ? block.text : "";
-  }).join("");
+    if (block.type !== "text" || typeof block.text !== "string") continue;
+    const safeBlock = sanitizeBridgeText(block.text, MAX_EVENT_TEXT_RUNES);
+    const piece = truncateBridgeRunes(safeBlock, MAX_EVENT_TEXT_RUNES - usedRunes);
+    text += piece;
+    usedRunes += Array.from(piece).length;
+    if (usedRunes >= MAX_EVENT_TEXT_RUNES) break;
+  }
+  return text;
 }
 function textFromMessageContent(content) {
   if (typeof content === "string") return content;
@@ -1102,9 +1520,11 @@ async function handleQuery(req) {
   const cKey = chatKey(chatID, threadID, userID);
   const sessionOwner = claimChatSessionOwner(cKey);
   const emitReq = (obj) => emit({ ...obj, request_id: reqId });
-  const redactedPrompt = redactSDKError(req.prompt);
+  const toolDurations = new ToolDurationTracker();
+  let compactionStartAt;
+  let compactionEndObserved = false;
   redactedLog(
-    "query start \u2014 rid=".concat(reqId, " chat=").concat(chatID, " thread=").concat(threadID, " user=").concat(userID, " provider=").concat(opts?.provider ?? "default", " model=").concat(opts?.model ?? "default", " resume=").concat(opts?.resume ?? "none", ' prompt="').concat(redactedPrompt.slice(0, 80), '..."')
+    "query start \u2014 rid=".concat(reqId, " chat=").concat(chatID, " thread=").concat(threadID, " user=").concat(userID, " provider=").concat(opts?.provider ?? "default", " model=").concat(opts?.model ?? "default", " resume=").concat(opts?.resume ?? "none")
   );
   const timeoutMs = 30 * 60 * 1e3;
   let timeout;
@@ -1173,98 +1593,118 @@ async function handleQuery(req) {
       model: liveSession.model ? "".concat(liveSession.model.provider, "/").concat(liveSession.model.id) : ""
     });
     let lastEventTime = Date.now();
-    const unsubPersistent = liveSession.subscribe((event) => {
-      if (terminalEmitted) return;
-      const rid = chatSessions.get(cKey)?.currentReqId || reqId;
-      const eReq = (obj) => emit({ ...obj, request_id: rid });
-      switch (event.type) {
-        // lastEventTime is only updated on content-producing events so lifecycle
-        // events (turn_start/end, compactions, retries) don't mask real stalls.
-        case "message_update": {
-          lastEventTime = Date.now();
-          const update = event.assistantMessageEvent;
-          if (update.type === "text_delta") {
-            eReq({ event: "assistant", text: update.delta });
+    const rawUnsubPersistent = liveSession.subscribe((event) => {
+      try {
+        if (terminalEmitted) return;
+        const sdkEvent = event;
+        const rid = safeRequestID(chatSessions.get(cKey)?.currentReqId || reqId);
+        const eReq = (obj) => emit({ ...obj, request_id: rid });
+        switch (sdkEvent?.type) {
+          // lastEventTime is only updated on content-producing events so lifecycle
+          // events (turn_start/end, compactions, retries) don't mask real stalls.
+          case "message_update": {
+            lastEventTime = Date.now();
+            const update = sdkEvent.assistantMessageEvent;
+            if (update?.type === "text_delta" && typeof update.delta === "string") {
+              eReq({ event: "assistant", text: sanitizeBridgeText(update.delta, MAX_EVENT_TEXT_RUNES) });
+            }
+            break;
           }
-          break;
+          case "tool_execution_start": {
+            lastEventTime = Date.now();
+            const safeID = toolDurations.start(sdkEvent.toolCallId);
+            const safeName = safeLabel(sdkEvent.toolName, "tool");
+            redactedLog("tool: ".concat(safeName, " id=").concat(safeID, " rid=").concat(rid));
+            eReq({
+              event: "tool_use",
+              // Keep the legacy id field while adding the explicit field used
+              // by Go to pair the safe start/result identifiers.
+              id: safeID,
+              tool_call_id: safeID,
+              name: safeName,
+              input: sanitizeToolInput(sdkEvent.args)
+            });
+            break;
+          }
+          case "tool_execution_end": {
+            lastEventTime = Date.now();
+            const pair = toolDurations.endWithID(sdkEvent.toolCallId);
+            const safeID = pair?.toolCallID ?? safeToolCallID(sdkEvent.toolCallId);
+            eReq({
+              event: "tool_result",
+              content: textFromContent(sdkEvent.result?.content),
+              tool_call_id: safeID,
+              ...pair ? { duration_measured: true, duration_ms: pair.durationMs } : {}
+            });
+            break;
+          }
+          case "agent_start":
+            eReq({ event: "agent_start" });
+            break;
+          case "agent_end":
+            eReq({ event: "agent_end" });
+            break;
+          case "turn_start":
+            eReq({ event: "turn_start" });
+            break;
+          case "turn_end":
+            turnCount = Math.min(turnCount + 1, MAX_COUNTER_VALUE);
+            eReq({ event: "turn_end" });
+            break;
+          case "auto_retry_start":
+            eReq({
+              event: "auto_retry_start",
+              attempt: boundedCounter(sdkEvent.attempt),
+              max_attempts: boundedCounter(sdkEvent.maxAttempts),
+              error: safeLabel(sdkEvent.errorMessage, "unknown")
+            });
+            break;
+          case "auto_retry_end":
+            eReq({
+              event: "auto_retry_end",
+              success: sdkEvent.success === true,
+              attempt: boundedCounter(sdkEvent.attempt),
+              error: safeLabel(sdkEvent.finalError, "unknown")
+            });
+            break;
+          case "compaction_start":
+            if (compactionStartAt === void 0) {
+              compactionStartAt = Date.now();
+              compactionEndObserved = false;
+              eReq({ event: "compaction_start", reason: compactionReason(sdkEvent.reason) });
+            }
+            break;
+          case "compaction_end": {
+            if (compactionEndObserved) break;
+            compactionEndObserved = true;
+            const result = sdkEvent.result;
+            const tokensBefore = boundedCounter(result?.tokensBefore) ?? 0;
+            const tokensAfter = boundedCounter(result?.estimatedTokensAfter);
+            const durationMs = measuredElapsed(compactionStartAt);
+            compactionStartAt = void 0;
+            eReq(compactionEndPayload({
+              reason: compactionReason(sdkEvent.reason),
+              tokensBefore,
+              success: !!result && sdkEvent.aborted !== true && typeof sdkEvent.errorMessage !== "string",
+              errored: !result || sdkEvent.aborted === true || typeof sdkEvent.errorMessage === "string",
+              tokensAfter,
+              durationMs
+            }));
+            break;
+          }
+          default:
+            break;
         }
-        case "tool_execution_start": {
-          lastEventTime = Date.now();
-          redactedLog(
-            "tool: ".concat(event.toolName, " id=").concat(event.toolCallId.slice(0, 8), " rid=").concat(rid)
-          );
-          eReq({
-            event: "tool_use",
-            id: event.toolCallId,
-            name: event.toolName,
-            input: event.args
-          });
-          break;
-        }
-        case "tool_execution_end": {
-          lastEventTime = Date.now();
-          eReq({
-            event: "tool_result",
-            content: textFromContent(event.result?.content)
-          });
-          break;
-        }
-        case "agent_start": {
-          eReq({ event: "agent_start" });
-          break;
-        }
-        case "agent_end": {
-          eReq({ event: "agent_end" });
-          break;
-        }
-        case "turn_start": {
-          eReq({ event: "turn_start" });
-          break;
-        }
-        case "turn_end": {
-          turnCount += 1;
-          eReq({ event: "turn_end" });
-          break;
-        }
-        case "auto_retry_start": {
-          eReq({
-            event: "auto_retry_start",
-            attempt: event.attempt,
-            max_attempts: event.maxAttempts,
-            error: event.errorMessage
-          });
-          break;
-        }
-        case "auto_retry_end": {
-          eReq({
-            event: "auto_retry_end",
-            success: event.success,
-            attempt: event.attempt,
-            error: event.finalError
-          });
-          break;
-        }
-        case "compaction_start": {
-          eReq({
-            event: "compaction_start",
-            reason: event.reason
-          });
-          break;
-        }
-        case "compaction_end": {
-          eReq({
-            event: "compaction_end",
-            reason: event.reason,
-            tokens_before: event.result?.tokensBefore ?? 0,
-            success: !!event.result && !event.aborted,
-            error: event.errorMessage
-          });
-          break;
-        }
-        default:
-          break;
+      } catch (err) {
+        redactedLog("malformed SDK event ignored: ".concat(err instanceof Error ? err.message : String(err)));
       }
     });
+    const unsubPersistent = () => {
+      toolDurations.clear();
+      compactionStartAt = void 0;
+      compactionEndObserved = false;
+      rawUnsubPersistent();
+    };
     let stallSteerSent = false;
     let stallUrgentSent = false;
     healthTimer = setInterval(() => {
@@ -1282,12 +1722,36 @@ async function handleQuery(req) {
           "streaming stall: no PI SDK events for ".concat(Math.round(silent / 1e3), "s (rid=").concat(reqId, ")")
         );
       }
-      if (silent >= 6e4 && !stallSteerSent) {
+      const telemetry = stallTelemetryFor(silent, stallSteerSent, stallUrgentSent);
+      if (telemetry.stall === "warning") {
         stallSteerSent = true;
+        emitReq({
+          event: "stall",
+          severity: "warning",
+          silent_ms: silent,
+          source: "bridge_health"
+        });
+      }
+      if (telemetry.stall === "urgent") {
+        stallUrgentSent = true;
+        emitReq({
+          event: "stall",
+          severity: "urgent",
+          silent_ms: silent,
+          source: "bridge_health"
+        });
+      }
+      if (telemetry.steer === "warning") {
         try {
           liveSession.steer(
             "Continue please. You have been silent for over a minute. If you have finished your current task, present your findings."
           ).then(() => {
+            emitReq({
+              event: "steer",
+              severity: "warning",
+              silent_ms: silent,
+              source: "bridge_health"
+            });
             redactedLog("stall steer sent at ".concat(Math.round(silent / 1e3), "s (rid=").concat(reqId, ")"));
           }).catch((err) => {
             redactedLog("stall steer failed: ".concat(err instanceof Error ? err.message : String(err)));
@@ -1296,12 +1760,17 @@ async function handleQuery(req) {
           redactedLog("stall steer failed (sync): ".concat(err instanceof Error ? err.message : String(err)));
         }
       }
-      if (silent >= 12e4 && !stallUrgentSent) {
-        stallUrgentSent = true;
+      if (telemetry.steer === "urgent") {
         try {
           liveSession.steer(
             "You have been silent for over 2 minutes. Stop your current activity and present a summary of what you have done so far."
           ).then(() => {
+            emitReq({
+              event: "steer",
+              severity: "urgent",
+              silent_ms: silent,
+              source: "bridge_health"
+            });
             redactedLog("stall urgent steer sent at ".concat(Math.round(silent / 1e3), "s (rid=").concat(reqId, ")"));
           }).catch((err) => {
             redactedLog("stall urgent steer failed: ".concat(err instanceof Error ? err.message : String(err)));
@@ -1422,6 +1891,8 @@ async function handleQuery(req) {
     if (timeout) clearTimeout(timeout);
     if (healthTimer) clearInterval(healthTimer);
     activeRequests.delete(reqId);
+    toolDurations.clear();
+    compactionStartAt = void 0;
     sessionLifecycle.markSessionCreationComplete();
     if (!chatSessions.has(cKey) && ownsChatSession(cKey, sessionOwner)) {
       chatSessionOwners.delete(cKey);
@@ -1597,60 +2068,143 @@ async function handleCompactSession(req) {
   const reqId = req.request_id || "";
   const emitReq = (obj) => emit({ ...obj, request_id: reqId });
   let piSession;
+  let session;
   let unsub;
+  let canceled = false;
+  let cancelPromise;
+  let resolveCompactDone;
+  const compactDone = new Promise((resolve2) => {
+    resolveCompactDone = resolve2;
+  });
+  const sessionLifecycle = createBridgeSessionRequestLifecycle();
+  const cancelActive = async (reason) => {
+    if (cancelPromise) return cancelPromise;
+    canceled = true;
+    redactedLog("compact-session cancel \u2014 rid=".concat(reqId, " reason=").concat(reason));
+    cancelPromise = (async () => {
+      if (session) {
+        try {
+          session.abortCompaction();
+        } catch (err) {
+          redactedLog("compact-session abort failed: ".concat(err instanceof Error ? err.message : String(err)));
+        }
+      } else {
+        await sessionLifecycle.cancel();
+      }
+      await compactDone;
+    })();
+    return cancelPromise;
+  };
+  activeRequests.set(reqId, { cancel: cancelActive });
+  let compactionStartAt;
+  let terminalEmitted = false;
+  let sdkCompactionStartObserved = false;
+  let sdkCompactionEndObserved = false;
+  const emitCompactionEndIfNeeded = (result, success) => {
+    if (!sdkCompactionStartObserved || sdkCompactionEndObserved) return;
+    sdkCompactionEndObserved = true;
+    const tokensBefore = boundedCounter(result?.tokensBefore) ?? 0;
+    const tokensAfter = boundedCounter(result?.estimatedTokensAfter);
+    const durationMs = measuredElapsed(compactionStartAt);
+    compactionStartAt = void 0;
+    emitReq(compactionEndPayload({
+      reason: "manual",
+      tokensBefore,
+      success,
+      errored: !success,
+      tokensAfter,
+      durationMs
+    }));
+  };
   try {
-    piSession = await createPiSession(req.options);
-    const session = piSession.session;
-    await bindBridgeSessionExtensions(session);
-    let terminalEmitted = false;
+    piSession = await sessionLifecycle.createSession(() => createPiSession(req.options));
+    session = piSession.session;
+    if (canceled) throw new Error("compact-session canceled");
+    await sessionLifecycle.bindSession(session);
+    if (canceled) throw new Error("compact-session canceled");
     unsub = session.subscribe((event) => {
-      if (terminalEmitted) return;
-      if (event.type === "compaction_start") {
-        emitReq({ event: "compaction_start", reason: event.reason });
-      } else if (event.type === "compaction_end") {
-        emitReq({
-          event: "compaction_end",
-          reason: event.reason,
-          tokens_before: event.result?.tokensBefore ?? 0,
-          success: !!event.result && !event.aborted,
-          error: event.errorMessage
-        });
+      try {
+        if (terminalEmitted) return;
+        const sdkEvent = event;
+        if (sdkEvent?.type === "compaction_start") {
+          if (sdkCompactionStartObserved) return;
+          sdkCompactionStartObserved = true;
+          compactionStartAt = Date.now();
+          emitReq({ event: "compaction_start", reason: compactionReason(sdkEvent.reason) });
+        } else if (sdkEvent?.type === "compaction_end") {
+          if (sdkCompactionEndObserved) return;
+          sdkCompactionEndObserved = true;
+          const result2 = sdkEvent.result;
+          const tokensBefore = boundedCounter(result2?.tokensBefore) ?? 0;
+          const tokensAfter = boundedCounter(result2?.estimatedTokensAfter);
+          const durationMs = measuredElapsed(compactionStartAt);
+          compactionStartAt = void 0;
+          emitReq(compactionEndPayload({
+            reason: compactionReason(sdkEvent.reason),
+            tokensBefore,
+            success: !!result2 && sdkEvent.aborted !== true && typeof sdkEvent.errorMessage !== "string",
+            errored: !result2 || sdkEvent.aborted === true || typeof sdkEvent.errorMessage === "string",
+            tokensAfter,
+            durationMs
+          }));
+        }
+      } catch (err) {
+        redactedLog("malformed compaction SDK event ignored: ".concat(err instanceof Error ? err.message : String(err)));
       }
     });
-    emitReq({ event: "compaction_start", reason: "manual" });
     const customInstructions = req.prompt || void 0;
     const result = await session.compact(customInstructions);
+    if (canceled) throw new Error("compact-session canceled");
     if (!terminalEmitted) {
+      const tokensBefore = boundedCounter(result?.tokensBefore) ?? 0;
+      const tokensAfter = boundedCounter(result?.estimatedTokensAfter);
+      if (!sdkCompactionEndObserved) {
+        const durationMs = measuredElapsed(compactionStartAt);
+        compactionStartAt = void 0;
+        emitReq(compactionEndPayload({
+          reason: "manual",
+          tokensBefore,
+          success: !!result,
+          errored: !result,
+          tokensAfter,
+          durationMs
+        }));
+      }
       terminalEmitted = true;
-      emitReq({
-        event: "compaction_end",
-        reason: "manual",
-        tokens_before: result?.tokensBefore ?? 0,
-        success: !!result
-      });
       emitReq({
         event: "result",
         content: JSON.stringify({
           success: !!result,
-          tokens_before: result?.tokensBefore ?? 0,
-          summary: result?.summary ?? "",
-          session_id: session.sessionId,
-          session_file: session.sessionFile
+          tokens_before: tokensBefore,
+          summary: sanitizeBridgeText(result?.summary, MAX_EVENT_TEXT_RUNES),
+          session_id: sanitizeBridgeText(session.sessionId, MAX_TELEMETRY_LABEL_RUNES),
+          session_file: sanitizeBridgeText(session.sessionFile, MAX_EVENT_VALUE_RUNES)
         })
       });
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
     redactedLog("compact-session error: rid=".concat(reqId, " ").concat(errMsg));
-    emitReq({ event: "error", message: redactSDKError(errMsg) });
+    emitCompactionEndIfNeeded(void 0, false);
+    if (!terminalEmitted) {
+      terminalEmitted = true;
+      emitReq({
+        event: "error",
+        message: canceled ? "compact-session canceled" : "compact-session failed"
+      });
+    }
   } finally {
+    activeRequests.delete(reqId);
     if (unsub) try {
       unsub();
     } catch {
     }
+    compactionStartAt = void 0;
     if (piSession) {
       await disposeBridgeSession(piSession.session);
     }
+    sessionLifecycle.markSessionCreationComplete();
+    resolveCompactDone();
   }
 }
 async function waitForPendingMessageCount(session, timeoutMs) {
@@ -1722,119 +2276,136 @@ async function handleRotateSession(req) {
   }
 }
 async function handleRequest(line) {
-  let req;
+  if (serializedByteLength(line) > MAX_BRIDGE_REQUEST_BYTES) {
+    const requestID = safeRequestIDFromLine(line);
+    emit({ event: "error", ...requestID ? { request_id: requestID } : {}, message: "request exceeds maximum serialized size" });
+    return;
+  }
+  let parsed;
   try {
-    req = JSON.parse(line);
+    parsed = JSON.parse(line);
   } catch {
-    emit({ event: "error", message: "invalid JSON: ".concat(redactSDKError(line).slice(0, 200)) });
+    emit({ event: "error", message: "invalid JSON" });
     return;
   }
-  if (!req.command) {
-    emit({ event: "error", request_id: req.request_id || "", message: "missing 'command' field" });
+  const validation = validateBridgeRequest(parsed);
+  if (!validation.ok) {
+    const candidate = typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : void 0;
+    const requestID = safeRequestID(candidate?.request_id);
+    emit({
+      event: "error",
+      ...requestID ? { request_id: requestID } : {},
+      message: "invalid bridge request"
+    });
     return;
   }
-  const reqId = req.request_id || "";
+  const req = validation.request;
+  const reqId = req.request_id;
   const emitReq = (obj) => emit({ ...obj, request_id: reqId });
-  switch (req.command) {
-    case "query": {
-      if (!req.prompt) {
-        emit({ event: "error", request_id: reqId, message: "missing 'prompt' field for query command" });
-        return;
-      }
-      await handleQuery(req);
-      break;
+  if (activeRequests.has(reqId)) {
+    emitReq({ event: "error", message: "duplicate request_id" });
+    return;
+  }
+  if (req.command === "cancel") {
+    const target = req.target_request_id;
+    const active = activeRequests.get(target);
+    if (!active) {
+      emitReq({ event: "result", content: "request ".concat(target, " is not active") });
+      return;
     }
-    case "ping": {
-      emit({ event: "pong", request_id: reqId });
-      break;
-    }
-    case "cancel": {
-      const target = req.target_request_id || "";
-      if (!target) {
-        emitReq({ event: "error", message: "missing 'target_request_id' for cancel command" });
-        return;
+    await active.cancel("request canceled");
+    emitReq({ event: "result", content: "request ".concat(target, " canceled") });
+    return;
+  }
+  if (!stdoutEmissionBudget.register(reqId)) {
+    emitReq({ event: "error", message: "too many active bridge streams" });
+    return;
+  }
+  try {
+    switch (req.command) {
+      case "query": {
+        await handleQuery(req);
+        break;
       }
-      const active = activeRequests.get(target);
-      if (!active) {
-        emitReq({ event: "result", content: "request ".concat(target, " is not active") });
-        return;
+      case "ping": {
+        emit({ event: "pong", request_id: reqId });
+        break;
       }
-      await active.cancel("request canceled");
-      emitReq({ event: "result", content: "request ".concat(target, " canceled") });
-      break;
-    }
-    case "list-models": {
-      try {
-        const agentDir = piAgentDir() || getAgentDir();
-        const modelRuntime = await createModelRuntime(agentDir);
-        if (req.refresh) {
-          await modelRuntime.refresh({ allowNetwork: true });
-        }
-        const available = await modelRuntime.getAvailable();
-        const filtered = available.filter((m) => {
-          const found = resolveModel(modelRuntime, m.provider, m.id);
-          if (!found) {
-            redactedLog("list-models: excluding unresolvable model provider=".concat(m.provider, " model=").concat(m.id));
+      case "list-models": {
+        try {
+          const agentDir = piAgentDir() || getAgentDir();
+          const modelRuntime = await createModelRuntime(agentDir);
+          if (req.refresh) {
+            await modelRuntime.refresh({ allowNetwork: true });
           }
-          return !!found;
-        });
-        const summary = filtered.map((m) => ({
-          provider: m.provider,
-          id: m.id,
-          name: m.name ?? m.id,
-          supportsImages: m.input?.includes("image") ?? false
-        }));
-        emitReq({ event: "result", content: JSON.stringify(summary) });
-      } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
-        redactedLog("list-models error: ".concat(errMsg));
-        emitReq({ event: "error", message: "list-models failed: ".concat(redactSDKError(errMsg)) });
+          const available = await modelRuntime.getAvailable();
+          const filtered = available.filter((m) => {
+            const found = resolveModel(modelRuntime, m.provider, m.id);
+            if (!found) {
+              redactedLog("list-models: excluding unresolvable model provider=".concat(m.provider, " model=").concat(m.id));
+            }
+            return !!found;
+          });
+          const summary = filtered.map((m) => ({
+            provider: m.provider,
+            id: m.id,
+            name: m.name ?? m.id,
+            supportsImages: m.input?.includes("image") ?? false
+          }));
+          emitReq({ event: "result", content: JSON.stringify(summary) });
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          redactedLog("list-models error: ".concat(errMsg));
+          emitReq({ event: "error", message: "list-models failed: ".concat(redactSDKError(errMsg)) });
+        }
+        break;
       }
-      break;
-    }
-    case "steer": {
-      if (!req.prompt) {
-        emit({ event: "error", request_id: reqId, message: "missing 'prompt' field for steer command" });
-        return;
+      case "steer": {
+        await handleSteer(req);
+        break;
       }
-      await handleSteer(req);
-      break;
-    }
-    case "follow-up": {
-      if (!req.prompt) {
-        emit({ event: "error", request_id: reqId, message: "missing 'prompt' field for follow-up command" });
-        return;
+      case "follow-up": {
+        await handleFollowUp(req);
+        break;
       }
-      await handleFollowUp(req);
-      break;
+      case "abort": {
+        await handleAbort(req);
+        break;
+      }
+      case "get-state": {
+        await handleGetState(req);
+        break;
+      }
+      case "get-session-stats": {
+        await handleGetSessionStats(req);
+        break;
+      }
+      case "get-session-history": {
+        await handleGetSessionHistory(req);
+        break;
+      }
+      case "compact-session": {
+        await handleCompactSession(req);
+        break;
+      }
+      case "rotate-session": {
+        await handleRotateSession(req);
+        break;
+      }
+      default:
+        emitReq({ event: "error", message: "invalid command" });
     }
-    case "abort": {
-      await handleAbort(req);
-      break;
-    }
-    case "get-state": {
-      await handleGetState(req);
-      break;
-    }
-    case "get-session-stats": {
-      await handleGetSessionStats(req);
-      break;
-    }
-    case "get-session-history": {
-      await handleGetSessionHistory(req);
-      break;
-    }
-    case "compact-session": {
-      await handleCompactSession(req);
-      break;
-    }
-    case "rotate-session": {
-      await handleRotateSession(req);
-      break;
-    }
-    default: {
-      emit({ event: "error", request_id: reqId, message: "unknown command: ".concat(req.command) });
-    }
+  } finally {
+    stdoutEmissionBudget.finish(reqId);
+  }
+}
+function safeRequestIDFromLine(line) {
+  try {
+    const value = JSON.parse(line);
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return void 0;
+    return safeRequestID(value.request_id) || void 0;
+  } catch {
+    return void 0;
   }
 }
 function main() {
@@ -1849,7 +2420,12 @@ function main() {
     handleRequest(trimmed).catch((err) => {
       const errMsg = err instanceof Error ? err.message : String(err);
       redactedLog("unhandled error in request processing: ".concat(errMsg));
-      emit({ event: "error", message: "internal bridge error: ".concat(redactSDKError(errMsg)) });
+      const requestID = safeRequestIDFromLine(trimmed);
+      emit({
+        event: "error",
+        ...requestID ? { request_id: requestID } : {},
+        message: "internal bridge error: ".concat(redactSDKError(errMsg))
+      });
     });
   });
   rl.on("close", () => {
@@ -1870,11 +2446,16 @@ function main() {
 main();
 export {
   DEFAULT_SENSITIVE_PATTERNS,
+  StdoutEmissionBudget,
+  ToolDurationTracker,
   bindBridgeSessionExtensions,
+  compactionEndPayload,
+  compactionReason,
   createBridgeSessionRequestLifecycle,
   deriveProjectName,
   disposeBridgeSession,
   evaluateToolPolicy,
+  formatLogLine,
   gitHasSensitiveArgs,
   injectMcpProjectScope,
   installSecurityHook,
@@ -1885,12 +2466,17 @@ export {
   matchesBuildOrTest,
   matchesEnvAccess,
   matchesSafeGit,
+  measuredElapsed,
   redactAuditPath,
   redactSDKError,
   redactedCommandExcerpt,
   registerSessionIfOwner,
   removeSessionIfOwner,
   resolveModel,
+  sanitizeBridgeText,
+  serializeOutEvent,
+  stallTelemetryFor,
   translateAllowedTools,
+  validateBridgeRequest,
   waitForPendingMessageCount
 };

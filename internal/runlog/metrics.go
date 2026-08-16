@@ -19,6 +19,7 @@ type MetricsResult struct {
 	RunsTimedOut    int
 	RunsCanceled    int
 	RunsRunning     int
+	RunsInterrupted int     // cut off by daemon restart/deploy
 	SuccessRate     float64 // 0-100
 	FallbackCount   int
 
@@ -31,14 +32,20 @@ type MetricsResult struct {
 	DurationP50Ms float64
 	DurationP95Ms float64
 
+	// Long-session aggregates over the window (zero for windows without data).
+	StallsTotal        int64   // sum of stall_count
+	SteersTotal        int64   // sum of steer_count
+	AvgFirstFeedbackMs float64 // AVG(first_feedback_ms) over runs with first_feedback_ms > 0
+	AvgMaxSilenceMs    float64 // AVG(max_silence_ms) over runs with max_silence_ms > 0
+
 	// Breakdowns
-	ProviderBreakdown []BreakdownItem
-	ModelBreakdown    []BreakdownItem
+	ProviderBreakdown   []BreakdownItem
+	ModelBreakdown      []BreakdownItem
 	EntrypointBreakdown []BreakdownItem
 
 	// Cron (if available)
-	CronRunsTotal    int
-	CronSuccessRate  float64
+	CronRunsTotal   int
+	CronSuccessRate float64
 }
 
 // BreakdownItem is a metric breakdown key-value pair.
@@ -71,13 +78,14 @@ func (s *SQLiteStore) Metrics(ctx context.Context, filter MetricsFilter) (*Metri
 			COALESCE(SUM(CASE WHEN status = 'timed_out' THEN 1 ELSE 0 END), 0) AS timed_out,
 			COALESCE(SUM(CASE WHEN status = 'canceled' THEN 1 ELSE 0 END), 0) AS canceled,
 			COALESCE(SUM(CASE WHEN status = 'running' THEN 1 ELSE 0 END), 0) AS running,
+			COALESCE(SUM(CASE WHEN status = 'interrupted' THEN 1 ELSE 0 END), 0) AS interrupted,
 			COALESCE(SUM(used_fallback), 0) AS fallbacks
 		FROM run_journal
 		WHERE started_at >= ? AND started_at < ?`,
 		filter.Since.Unix(), filter.Until.Unix())
 
 	if err := row.Scan(&m.RunsTotal, &m.RunsCompleted, &m.RunsFailed,
-		&m.RunsTimedOut, &m.RunsCanceled, &m.RunsRunning, &m.FallbackCount); err != nil {
+		&m.RunsTimedOut, &m.RunsCanceled, &m.RunsRunning, &m.RunsInterrupted, &m.FallbackCount); err != nil {
 		return nil, fmt.Errorf("metrics run counts: %w", err)
 	}
 
@@ -102,16 +110,19 @@ func (s *SQLiteStore) Metrics(ctx context.Context, filter MetricsFilter) (*Metri
 
 	// ── Duration percentiles ──
 	// SQLite percentile approximation: use subquery with completed runs
-	// that have non-zero duration.
+	// that have non-zero duration. MAX(0, ...) keeps the offset non-negative
+	// (SQLite also clamps negative offsets to 0) while still resolving to
+	// the first row for small result sets — MAX(1, ...) would skip the only
+	// row and yield NULL.
 	durationRow := s.db.QueryRowContext(ctx, `
 		SELECT
-			AVG(duration_ms) AS avg_dur,
+			COALESCE(AVG(duration_ms), 0) AS avg_dur,
 			COALESCE(
 				(SELECT duration_ms FROM run_journal
 				 WHERE started_at >= ? AND started_at < ?
 				   AND duration_ms > 0 AND status IN ('completed', 'failed', 'timed_out')
 				 ORDER BY duration_ms ASC
-				 LIMIT 1 OFFSET (SELECT MAX(1, COUNT(*)/2 - 1) FROM run_journal
+				 LIMIT 1 OFFSET (SELECT MAX(0, COUNT(*)/2 - 1) FROM run_journal
 				   WHERE started_at >= ? AND started_at < ?
 				     AND duration_ms > 0 AND status IN ('completed', 'failed', 'timed_out'))),
 			0) AS p50,
@@ -120,7 +131,7 @@ func (s *SQLiteStore) Metrics(ctx context.Context, filter MetricsFilter) (*Metri
 				 WHERE started_at >= ? AND started_at < ?
 				   AND duration_ms > 0 AND status IN ('completed', 'failed', 'timed_out')
 				 ORDER BY duration_ms ASC
-				 LIMIT 1 OFFSET (SELECT MAX(1, (COUNT(*) * 95 / 100) - 1) FROM run_journal
+				 LIMIT 1 OFFSET (SELECT MAX(0, (COUNT(*) * 95 / 100) - 1) FROM run_journal
 				   WHERE started_at >= ? AND started_at < ?
 				     AND duration_ms > 0 AND status IN ('completed', 'failed', 'timed_out'))),
 			0) AS p95
@@ -140,6 +151,22 @@ func (s *SQLiteStore) Metrics(ctx context.Context, filter MetricsFilter) (*Metri
 
 	// ── Provider breakdown ──
 	m.ProviderBreakdown = s.breakdown(ctx, "provider", filter)
+
+	// ── Long-session aggregates ──
+	row = s.db.QueryRowContext(ctx, `
+		SELECT
+			COALESCE(SUM(stall_count), 0),
+			COALESCE(SUM(steer_count), 0),
+			COALESCE(AVG(CASE WHEN first_feedback_ms > 0 THEN first_feedback_ms END), 0),
+			COALESCE(AVG(CASE WHEN max_silence_ms > 0 THEN max_silence_ms END), 0)
+		FROM run_journal
+		WHERE started_at >= ? AND started_at < ?`,
+		filter.Since.Unix(), filter.Until.Unix())
+
+	if err := row.Scan(&m.StallsTotal, &m.SteersTotal,
+		&m.AvgFirstFeedbackMs, &m.AvgMaxSilenceMs); err != nil {
+		return nil, fmt.Errorf("metrics long-session aggregates: %w", err)
+	}
 
 	// ── Model breakdown ──
 	m.ModelBreakdown = s.breakdown(ctx, "model", filter)

@@ -2,6 +2,7 @@ import { createInterface } from "node:readline";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, truncateSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { createHash } from "node:crypto";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -328,12 +329,559 @@ function rememberSession(id: string, lookup: SessionLookup): void {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+// Runtime data crossing the Bridge boundary is untrusted even when its
+// TypeScript type came from the SDK. Keep every emitted/logged value bounded,
+// control-safe and redacted before truncation. These limits are deliberately
+// small because the Go side also maintains a per-request byte budget.
+const MAX_BRIDGE_LOG_RUNES = 2048;
+const MAX_REQUEST_ID_RUNES = 128;
+const MAX_TELEMETRY_LABEL_RUNES = 128;
+const MAX_EVENT_TEXT_RUNES = 16 * 1024;
+const MAX_EVENT_VALUE_RUNES = 2048;
+const MAX_OUT_EVENT_BYTES = 64 * 1024;
+const MAX_BRIDGE_REQUEST_BYTES = 256 * 1024;
+const MAX_TOOL_INPUT_DEPTH = 3;
+const MAX_TOOL_INPUT_KEYS = 32;
+const MAX_TOOL_INPUT_ITEMS = 16;
+const MAX_COUNTER_VALUE = 100_000_000;
+const MAX_DURATION_MS = 24 * 60 * 60 * 1000;
+
+function truncateBridgeRunes(value: string, maxRunes: number): string {
+  if (maxRunes <= 0) return "";
+  const runes = Array.from(value);
+  return runes.length <= maxRunes ? value : runes.slice(0, maxRunes).join("");
+}
+
+function removeBridgeControls(value: string): string {
+  return Array.from(value)
+    .filter((r) => {
+      const code = r.codePointAt(0) ?? 0;
+      return code >= 0x20 && code !== 0x7f && (code < 0x80 || code > 0x9f);
+    })
+    .join("");
+}
+
+// Redaction intentionally precedes control cleanup and truncation. A secret
+// that crosses a truncation boundary must be replaced while still complete.
+export function sanitizeBridgeText(value: unknown, maxRunes: number): string {
+  const raw = typeof value === "string" ? value : String(value ?? "");
+  return truncateBridgeRunes(removeBridgeControls(redactSDKError(raw)), maxRunes);
+}
+
+function safeRequestID(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0 || value.length > MAX_REQUEST_ID_RUNES) return "";
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value) ? value : "";
+}
+
+const BRIDGE_COMMANDS = new Set([
+  "query",
+  "ping",
+  "cancel",
+  "list-models",
+  "steer",
+  "follow-up",
+  "abort",
+  "get-state",
+  "get-session-stats",
+  "get-session-history",
+  "compact-session",
+  "rotate-session",
+]);
+
+export type BridgeRequestValidation =
+  | { ok: true; request: Request }
+  | { ok: false; error: string };
+
+/**
+ * Validate the wire schema before any SDK/session work. Missing or malformed
+ * request IDs fail closed; accepting them as the empty correlation key would
+ * merge unrelated streams and make cancellation target the wrong operation.
+ */
+export function validateBridgeRequest(value: unknown): BridgeRequestValidation {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ok: false, error: "request must be an object" };
+  }
+  const raw = value as Record<string, unknown>;
+  const requestID = safeRequestID(raw.request_id);
+  if (!requestID) return { ok: false, error: "missing or invalid 'request_id'" };
+  if (typeof raw.command !== "string" || !BRIDGE_COMMANDS.has(raw.command)) {
+    return { ok: false, error: "missing or invalid 'command' field" };
+  }
+  if (raw.target_request_id !== undefined && !safeRequestID(raw.target_request_id)) {
+    return { ok: false, error: "invalid 'target_request_id'" };
+  }
+  if (raw.prompt !== undefined && typeof raw.prompt !== "string") {
+    return { ok: false, error: "'prompt' must be a string" };
+  }
+  if (raw.options !== undefined &&
+      (typeof raw.options !== "object" || raw.options === null || Array.isArray(raw.options))) {
+    return { ok: false, error: "'options' must be an object" };
+  }
+  if (raw.refresh !== undefined && typeof raw.refresh !== "boolean") {
+    return { ok: false, error: "'refresh' must be a boolean" };
+  }
+
+  const command = raw.command;
+  if ((command === "query" || command === "steer" || command === "follow-up") &&
+      (typeof raw.prompt !== "string" || raw.prompt.length === 0)) {
+    return { ok: false, error: `missing 'prompt' field for ${command} command` };
+  }
+  if (command === "cancel" && !safeRequestID(raw.target_request_id)) {
+    return { ok: false, error: "missing or invalid 'target_request_id' for cancel command" };
+  }
+  return {
+    ok: true,
+    request: { ...(raw as Omit<Request, "command" | "request_id">), command, request_id: requestID } as Request,
+  };
+}
+
+function toolCallKey(value: unknown): string | undefined {
+  if (value === null || value === undefined) return undefined;
+  if (typeof value === "string") return `s:${sanitizeBridgeText(value, MAX_TELEMETRY_LABEL_RUNES)}`;
+  if (typeof value === "number" || typeof value === "boolean" || typeof value === "bigint") {
+    return `${typeof value}:${String(value)}`;
+  }
+  // Tool IDs are opaque scalar SDK values. Never stringify an arbitrary
+  // object/function here: Object/JSON serialization can allocate unbounded
+  // memory before the event-size cap gets a chance to run.
+  return "opaque_tool_id";
+}
+
+function safeToolCallID(value: unknown): string {
+  // The SDK's opaque ID remains request-local only. A short digest gives the
+  // Go timeline a stable pair identifier without exposing the raw SDK value.
+  const digest = createHash("sha256").update(toolCallKey(value) ?? "missing_tool_id").digest("hex").slice(0, 20);
+  return `tool-${digest}`;
+}
+
+function safeLabel(value: unknown, fallback: string): string {
+  const label = sanitizeBridgeText(value, MAX_TELEMETRY_LABEL_RUNES).trim();
+  return label || fallback;
+}
+
+function boundedCounter(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || !Number.isSafeInteger(value)) return undefined;
+  if (value < 0) return 0;
+  return Math.min(value, MAX_COUNTER_VALUE);
+}
+
+function boundedDuration(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value) || !Number.isSafeInteger(value)) return undefined;
+  if (value < 0 || value > MAX_DURATION_MS) return undefined;
+  return value;
+}
+
+function sanitizeToolInput(value: unknown, depth = 0): unknown {
+  if (depth >= MAX_TOOL_INPUT_DEPTH) return "[input_depth_limit]";
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : "[invalid_number]";
+  if (typeof value === "string") return sanitizeBridgeText(value, MAX_EVENT_VALUE_RUNES);
+  if (Array.isArray(value)) {
+    return value.slice(0, MAX_TOOL_INPUT_ITEMS).map((item) => sanitizeToolInput(item, depth + 1));
+  }
+  if (typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    let count = 0;
+    for (const key in value as Record<string, unknown>) {
+      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+      if (count++ >= MAX_TOOL_INPUT_KEYS) break;
+      const item = (value as Record<string, unknown>)[key];
+      const safeKey = sanitizeBridgeText(key, MAX_TELEMETRY_LABEL_RUNES);
+      if (safeKey) out[safeKey] = sanitizeToolInput(item, depth + 1);
+    }
+    return out;
+  }
+  return "[unsupported_input]";
+}
+
+function sanitizeOutValue(value: unknown, depth = 0): unknown {
+  if (depth >= 3) return "[value_depth_limit]";
+  if (typeof value === "string") return sanitizeBridgeText(value, MAX_EVENT_VALUE_RUNES);
+  if (value === null || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+  if (Array.isArray(value)) {
+    return value.slice(0, MAX_TOOL_INPUT_ITEMS).map((item) => sanitizeOutValue(item, depth + 1));
+  }
+  if (typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    let count = 0;
+    for (const key in value as Record<string, unknown>) {
+      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+      if (count++ >= MAX_TOOL_INPUT_KEYS) break;
+      const item = (value as Record<string, unknown>)[key];
+      const safeKey = sanitizeBridgeText(key, MAX_TELEMETRY_LABEL_RUNES);
+      if (safeKey) out[safeKey] = sanitizeOutValue(item, depth + 1);
+    }
+    return out;
+  }
+  return "[unsupported_value]";
+}
+
+function sanitizeOutEvent(obj: OutEvent): OutEvent {
+  const event = safeLabel(obj.event, "unknown");
+  const out: OutEvent = { event };
+  const requestID = safeRequestID(obj.request_id);
+  if (requestID) out.request_id = requestID;
+
+  let fieldCount = 0;
+  for (const key in obj) {
+    if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+    const value = obj[key];
+    if (key === "event" || key === "request_id" || key === "timestamp") continue;
+    if (fieldCount++ >= MAX_TOOL_INPUT_KEYS) break;
+    if (key === "content" || key === "text" || key === "message") {
+      out[key] = sanitizeBridgeText(value, MAX_EVENT_TEXT_RUNES);
+    } else if (key === "input") {
+      out[key] = sanitizeToolInput(value);
+    } else if (key === "name" || key === "tool_name") {
+      out[key] = safeLabel(value, "tool");
+    } else if (key === "id" || key === "tool_call_id") {
+      out[key] = safeToolCallID(value);
+    } else if (key === "error") {
+      out[key] = safeLabel(value, "unknown");
+    } else if (key === "reason") {
+      out[key] = compactionReason(value);
+    } else if (key === "source") {
+      out[key] = value === "bridge_health" ? "bridge_health" : "unknown";
+    } else if (key === "severity") {
+      out[key] = value === "warning" || value === "urgent" ? value : "unknown";
+    } else if (key === "error_class") {
+      out[key] = value === "compaction_error" ? value : "unknown";
+    } else {
+      out[key] = sanitizeOutValue(value);
+    }
+  }
+  return out;
+}
+
+function serializedByteLength(value: string): number {
+  return Buffer.byteLength(value, "utf8");
+}
+
+/**
+ * Bounds aggregate Bridge stdout pressure, not just one event. A malicious
+ * or malfunctioning SDK can otherwise fill Node's stdout buffer with many
+ * individually-valid events while several requests are active. Non-terminal
+ * events are dropped once either the per-stream or aggregate emission budget
+ * is exhausted; every stream retains a reserved terminal delivery path.
+ */
+export class StdoutEmissionBudget {
+  private readonly streams = new Map<string, number>();
+  private aggregateBytes = 0;
+  private backpressured = false;
+  private pendingBytes = 0;
+  private drainAttached = false;
+
+  constructor(
+    private readonly maxActiveStreams = 32,
+    private readonly maxAggregateBytes = 2 * 1024 * 1024,
+    private readonly maxPerStreamBytes = 512 * 1024,
+    private readonly reservedTerminalBytes = MAX_OUT_EVENT_BYTES,
+  ) {}
+
+  register(requestID: string): boolean {
+    if (this.streams.has(requestID)) return true;
+    if (this.streams.size >= this.maxActiveStreams) return false;
+    this.streams.set(requestID, 0);
+    return true;
+  }
+
+  private release(requestID: string): void {
+    const bytes = this.streams.get(requestID);
+    if (bytes === undefined) return;
+    this.streams.delete(requestID);
+    this.aggregateBytes = Math.max(0, this.aggregateBytes - bytes);
+  }
+
+  private markBackpressure(bytes: number): void {
+    this.backpressured = true;
+    this.pendingBytes += bytes;
+    if (this.drainAttached) return;
+    this.drainAttached = true;
+    process.stdout.once("drain", () => {
+      this.pendingBytes = 0;
+      this.backpressured = false;
+      this.drainAttached = false;
+    });
+  }
+
+  /** Write one already-serialized line, returning false when a non-terminal
+   * event was bounded/dropped. Terminal events always use the reserved path. */
+  write(line: string, requestID: string, terminal: boolean): boolean {
+    const bytes = serializedByteLength(line);
+    if (bytes > MAX_OUT_EVENT_BYTES) return false;
+
+    if (!terminal) {
+      const streamBytes = this.streams.get(requestID);
+      if (streamBytes === undefined || this.backpressured) return false;
+      if (streamBytes + bytes > this.maxPerStreamBytes) return false;
+      if (this.aggregateBytes + bytes > this.maxAggregateBytes - this.reservedTerminalBytes) return false;
+      this.streams.set(requestID, streamBytes + bytes);
+      this.aggregateBytes += bytes;
+    }
+
+    try {
+      const accepted = process.stdout.write(line);
+      if (!accepted) this.markBackpressure(bytes);
+      if (terminal) this.release(requestID);
+      return true;
+    } catch {
+      if (!terminal) {
+        const current = this.streams.get(requestID) ?? 0;
+        this.streams.set(requestID, Math.max(0, current - bytes));
+        this.aggregateBytes = Math.max(0, this.aggregateBytes - bytes);
+      }
+      return false;
+    }
+  }
+
+  finish(requestID: string): void {
+    this.release(requestID);
+  }
+
+  activeStreamCount(): number {
+    return this.streams.size;
+  }
+}
+
+const stdoutEmissionBudget = new StdoutEmissionBudget();
+
+// Serialize an NDJSON out-event, always stamping it with an ISO-8601
+// timestamp. The timestamp is the correlation source for Bridge -> pipeline ->
+// runlog; Go keeps it as raw correlation metadata only (see
+// internal/bridge/events.go Timestamp field).
+export function serializeOutEvent(obj: OutEvent): string {
+  const sanitized = sanitizeOutEvent(obj);
+  const candidate = JSON.stringify({ ...sanitized, timestamp: new Date().toISOString() });
+  if (serializedByteLength(candidate) <= MAX_OUT_EVENT_BYTES) return candidate;
+
+  // Preserve the event envelope and terminal payload class even when an SDK
+  // supplies an unexpectedly large object. Non-terminal payloads are dropped
+  // explicitly; the event itself remains countable and routable.
+  const fallback: OutEvent = {
+    event: sanitized.event,
+    ...(sanitized.request_id ? { request_id: sanitized.request_id } : {}),
+    timestamp: new Date().toISOString(),
+    payload_truncated: true,
+  };
+  if (sanitized.event === "result" && typeof sanitized.content === "string") {
+    fallback.content = truncateBridgeRunes(sanitized.content, 4096);
+  } else if (sanitized.event === "error" && typeof sanitized.message === "string") {
+    fallback.message = truncateBridgeRunes(sanitized.message, 2048);
+  }
+  return JSON.stringify(fallback);
+}
+
 function emit(obj: OutEvent): void {
-  process.stdout.write(JSON.stringify(obj) + "\n");
+  const line = serializeOutEvent(obj) + "\n";
+  const requestID = safeRequestID(obj.request_id) || "__untracked__";
+  const terminal = obj.event === "result" || obj.event === "error" || obj.event === "pong";
+  if (!terminal && stdoutEmissionBudget.activeStreamCount() === 0) {
+    // Untracked internal diagnostics are not a stream and are allowed to use
+    // the terminal-reserved path only; suppressing them avoids amplification.
+    return;
+  }
+  if (!stdoutEmissionBudget.write(line, requestID, terminal)) {
+    if (!terminal) redactedLog(`stdout emission budget dropped event=${safeLabel(obj.event, "unknown")}`);
+  }
+}
+
+// Every operational log line carries an ISO-8601 timestamp so the bridge's
+// own diagnostics are always time-correlatable with the NDJSON stream.
+export function formatLogLine(msg: string): string {
+  return `[${new Date().toISOString()}] [bridge] ${sanitizeBridgeText(msg, MAX_BRIDGE_LOG_RUNES)}`;
 }
 
 function log(msg: string): void {
-  process.stderr.write(`[bridge] ${msg}\n`);
+  process.stderr.write(formatLogLine(msg) + "\n");
+}
+
+/**
+ * Pairs tool_execution_start/end timestamps so tool_result can carry a
+ * duration_ms without ever adding command, args, or raw result telemetry.
+ *
+ * `end()` returns the duration in ms only when a matching start was observed;
+ * undefined means "no reliable pair" (duration_ms is simply omitted then).
+ * The map is bounded: starts are pruned oldest-first once the cap is hit and
+ * any entry older than maxAgeMs is dropped so a leaked start cannot inflate
+ * the map forever.
+ */
+export class ToolDurationTracker {
+  private readonly starts = new Map<string, { safeID: string; startedAt: number }>();
+
+  constructor(
+    private readonly maxEntries = 512,
+    private readonly maxAgeMs = 2 * 60 * 60 * 1000,
+  ) {}
+
+  start(toolCallId: unknown, now = Date.now()): string {
+    const key = toolCallKey(toolCallId);
+    const safeID = safeToolCallID(toolCallId);
+    if (key === undefined) return safeID;
+    if (!this.starts.has(key) && this.starts.size >= this.maxEntries) {
+      // Prune oldest inserted entries (Map preserves insertion order).
+      const oldest = this.starts.keys().next().value as string | undefined;
+      if (oldest !== undefined) this.starts.delete(oldest);
+    }
+    this.starts.set(key, { safeID, startedAt: now });
+    return safeID;
+  }
+
+  end(toolCallId: unknown, now = Date.now()): number | undefined {
+    return this.endWithID(toolCallId, now)?.durationMs;
+  }
+
+  endWithID(
+    toolCallId: unknown,
+    now = Date.now(),
+  ): { toolCallID: string; durationMs: number } | undefined {
+    const key = toolCallKey(toolCallId);
+    if (key === undefined) return undefined;
+    const started = this.starts.get(key);
+    if (started === undefined) return undefined;
+    this.starts.delete(key);
+    if (now < started.startedAt) return undefined; // clock moved backwards: no reliable pair
+    return { toolCallID: started.safeID, durationMs: now - started.startedAt };
+  }
+
+  prune(now = Date.now()): void {
+    for (const [id, started] of this.starts) {
+      if (now - started.startedAt > this.maxAgeMs) this.starts.delete(id);
+    }
+  }
+
+  /**
+   * Drops ALL tracked starts. Called at request teardown (finally) and when
+   * the persistent subscription is unsubscribed so no tool-duration state is
+   * retained by chatSessions after the request, and leaked starts can never
+   * cross into a later request on the same session.
+   */
+  clear(): void {
+    this.starts.clear();
+  }
+}
+
+/**
+ * Bounded compaction reason enum. The raw SDK reason string is free text and
+ * must never be emitted or persisted: only the normalized enum value leaves
+ * the bridge, with an explicit `unknown` fallback.
+ */
+export function compactionReason(
+  raw: unknown,
+): "manual" | "automatic" | "unknown" {
+  if (typeof raw !== "string" || !raw) return "unknown";
+  switch (raw.trim().toLowerCase()) {
+    case "manual":
+    case "user":
+      return "manual";
+    case "auto":
+    case "automatic":
+    case "system":
+    case "context":
+    case "context_window":
+    case "threshold":
+    case "overflow":
+      return "automatic";
+    default:
+      return "unknown";
+  }
+}
+
+/**
+ * Elapsed time from a request-local start marker, or undefined when the
+ * marker is missing or the wall clock moved backwards. Never negative.
+ * Compaction/tool durations are measured against request-local markers, so
+ * concurrent requests can never share or corrupt each other's timers.
+ */
+
+/**
+ * Bounded compaction_end payload emitted to the NDJSON stream. Only static
+ * enum values leave the bridge: reason is normalized, error_class is the
+ * compaction_error enum, and the raw SDK error message is never included.
+ * duration_measured=true is the authoritative presence marker — present even
+ * when the measured duration is 0ms; a duration_ms without the marker is
+ * never emitted.
+ */
+export interface CompactionEndPayload {
+  event: "compaction_end";
+  reason: "manual" | "automatic" | "unknown";
+  tokens_before: number;
+  success: boolean;
+  error_class?: "compaction_error";
+  tokens_after?: number;
+  delta_tokens?: number;
+  duration_measured?: true;
+  duration_ms?: number;
+  [key: string]: unknown;
+}
+
+/**
+ * Builds the bounded compaction_end payload shared by the streaming,
+ * subscription and terminal paths so the telemetry contract (static
+ * error_class, explicit negative/zero deltas, duration_measured presence)
+ * is identical everywhere.
+ */
+export function compactionEndPayload(args: {
+  reason: "manual" | "automatic" | "unknown";
+  tokensBefore: number;
+  success: boolean;
+  errored: boolean;
+  tokensAfter?: number;
+  durationMs?: number;
+}): CompactionEndPayload {
+  const tokensBefore = boundedCounter(args.tokensBefore) ?? 0;
+  const tokensAfter = boundedCounter(args.tokensAfter);
+  const durationMs = boundedDuration(args.durationMs);
+  return {
+    event: "compaction_end",
+    reason: args.reason,
+    tokens_before: tokensBefore,
+    success: args.success,
+    // Static enum value only — raw errorMessage never leaves the bridge.
+    ...(args.errored ? { error_class: "compaction_error" as const } : {}),
+    // tokens_after/delta_tokens are only present when the SDK measured
+    // them; a negative delta means the context was reduced (effective) and
+    // stays observable so a regression is never silently marked as success.
+    ...(tokensAfter !== undefined
+      ? { tokens_after: tokensAfter, delta_tokens: tokensAfter - tokensBefore }
+      : {}),
+    // duration_measured=true is the authoritative presence marker — present
+    // even when the measured duration is 0ms.
+    ...(durationMs !== undefined
+      ? { duration_measured: true as const, duration_ms: durationMs }
+      : {}),
+  };
+}
+export function measuredElapsed(
+  startedAt: number | undefined,
+  now = Date.now(),
+): number | undefined {
+  if (startedAt === undefined) return undefined;
+  const elapsed = now - startedAt;
+  return elapsed >= 0 ? elapsed : undefined;
+}
+
+/**
+ * Pure stall-detection decision for the health monitor. Returns which
+ * telemetry events should be emitted at the current silence level, at most
+ * once per severity during a silence transition (the flags reset when
+ * productive activity resumes).
+ */
+export function stallTelemetryFor(
+  silentMs: number,
+  warningSent: boolean,
+  urgentSent: boolean,
+): { stall?: "warning" | "urgent"; steer?: "warning" | "urgent" } {
+  const out: { stall?: "warning" | "urgent"; steer?: "warning" | "urgent" } = {};
+  if (silentMs >= 60_000 && !warningSent) {
+    out.stall = "warning";
+    out.steer = "warning";
+  }
+  if (silentMs >= 120_000 && !urgentSent) {
+    out.stall = "urgent";
+    out.steer = "urgent";
+  }
+  return out;
 }
 
 // Redact common credential patterns from log/error messages to prevent leaking
@@ -1181,6 +1729,7 @@ export function evaluateToolPolicy(
 
 const auditLogMaxBytes = 5 * 1024 * 1024;
 const auditLogBackups = 3;
+const MAX_AUDIT_LINE_BYTES = 16 * 1024;
 
 function auditLogPath(): string {
   const root = process.env.AURELIA_HOME?.trim() || join(homedir(), ".aurelia");
@@ -1209,6 +1758,7 @@ function rotateAuditLogIfNeeded(path: string, incomingBytes: number): void {
 
 function writeAuditFile(line: string): void {
   try {
+    if (serializedByteLength(line) > MAX_AUDIT_LINE_BYTES) return;
     const path = auditLogPath();
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     rotateAuditLogIfNeeded(path, Buffer.byteLength(line));
@@ -1224,10 +1774,32 @@ function logAudit(entry: AuditEntry): void {
   // Redact BEFORE serialization so secrets in reason/cwd/agent_name
   // are caught (see redaction-before-truncation.md).
   // Token redaction first, then path redaction, so both are caught.
-  entry.reason = redactAuditPath(redactSDKError(entry.reason));
-  entry.cwd = redactAuditPath(redactSDKError(entry.cwd));
-  if (entry.agent_name) entry.agent_name = redactAuditPath(redactSDKError(entry.agent_name));
-  const line = "[security] " + JSON.stringify(entry) + "\n";
+  const sanitizeAuditText = (value: unknown, maxRunes: number): string => {
+    // Path and credential redaction happen before control removal/truncation.
+    const redacted = redactAuditPath(redactSDKError(typeof value === "string" ? value : String(value ?? "")));
+    return truncateBridgeRunes(removeBridgeControls(redacted), maxRunes);
+  };
+  entry.decision = sanitizeAuditText(entry.decision, 64);
+  entry.tool_name = sanitizeAuditText(entry.tool_name, 128);
+  entry.reason = sanitizeAuditText(entry.reason, MAX_BRIDGE_LOG_RUNES);
+  entry.cwd = sanitizeAuditText(entry.cwd, MAX_EVENT_VALUE_RUNES);
+  entry.profile = sanitizeAuditText(entry.profile, 64);
+  if (entry.agent_name) entry.agent_name = sanitizeAuditText(entry.agent_name, 128);
+  let serialized = JSON.stringify(entry);
+  if (serializedByteLength(serialized) > MAX_AUDIT_LINE_BYTES) {
+    // Never slice serialized JSON: that can create invalid durable output and
+    // can cut a redaction marker/secret at the boundary. Use a static bounded
+    // fallback instead.
+    serialized = JSON.stringify({
+      timestamp: entry.timestamp,
+      decision: entry.decision,
+      tool_name: entry.tool_name,
+      profile: entry.profile,
+      redacted: true,
+      audit_truncated: true,
+    });
+  }
+  const line = "[security] " + serialized + "\n";
   process.stderr.write(line);
   writeAuditFile(line);
 }
@@ -1409,14 +1981,19 @@ export function installSecurityHook(
 
 function textFromContent(content: unknown): string {
   if (!Array.isArray(content)) return "";
-  return content
-    .map((item) => {
-      if (typeof item !== "object" || item === null) return "";
-      const block = item as Record<string, unknown>;
-      if (block.type !== "text") return "";
-      return typeof block.text === "string" ? block.text : "";
-    })
-    .join("");
+  let text = "";
+  let usedRunes = 0;
+  for (const item of content.slice(0, MAX_TOOL_INPUT_ITEMS)) {
+    if (typeof item !== "object" || item === null) continue;
+    const block = item as Record<string, unknown>;
+    if (block.type !== "text" || typeof block.text !== "string") continue;
+    const safeBlock = sanitizeBridgeText(block.text, MAX_EVENT_TEXT_RUNES);
+    const piece = truncateBridgeRunes(safeBlock, MAX_EVENT_TEXT_RUNES - usedRunes);
+    text += piece;
+    usedRunes += Array.from(piece).length;
+    if (usedRunes >= MAX_EVENT_TEXT_RUNES) break;
+  }
+  return text;
 }
 
 function textFromMessageContent(content: unknown): string {
@@ -1754,11 +2331,16 @@ async function handleQuery(req: Request): Promise<void> {
   const sessionOwner = claimChatSessionOwner(cKey);
   const emitReq = (obj: OutEvent) => emit({ ...obj, request_id: reqId });
 
-  // Redact BEFORE truncation so secrets straddling the boundary aren't
-  // sliced in half (see redaction-before-truncation.md).
-  const redactedPrompt = redactSDKError(req.prompt);
+  // Request-local telemetry state: never shared between requests or with
+  // handleCompactSession. Pruned/cleared in the finally below.
+  const toolDurations = new ToolDurationTracker();
+  let compactionStartAt: number | undefined;
+  let compactionEndObserved = false;
+
+  // Operational log: IDs and non-sensitive configuration only — never the
+  // prompt text.
   redactedLog(
-    `query start — rid=${reqId} chat=${chatID} thread=${threadID} user=${userID} provider=${opts?.provider ?? "default"} model=${opts?.model ?? "default"} resume=${opts?.resume ?? "none"} prompt="${redactedPrompt.slice(0, 80)}..."`,
+    `query start — rid=${reqId} chat=${chatID} thread=${threadID} user=${userID} provider=${opts?.provider ?? "default"} model=${opts?.model ?? "default"} resume=${opts?.resume ?? "none"}`,
   );
 
   const timeoutMs = 30 * 60 * 1000;
@@ -1854,104 +2436,137 @@ async function handleQuery(req: Request): Promise<void> {
     // Set up persistent subscription for this session
     // Counts events for health diagnostics (logged after 30s of silence).
     let lastEventTime = Date.now();
-    const unsubPersistent = liveSession.subscribe((event) => {
-      if (terminalEmitted) return;
-      const rid = chatSessions.get(cKey)?.currentReqId || reqId;
-      const eReq = (obj: OutEvent) => emit({ ...obj, request_id: rid });
+    const rawUnsubPersistent = liveSession.subscribe((event) => {
+      try {
+        if (terminalEmitted) return;
+        const sdkEvent = event as any;
+        const rid = safeRequestID(chatSessions.get(cKey)?.currentReqId || reqId);
+        const eReq = (obj: OutEvent) => emit({ ...obj, request_id: rid });
 
-      switch (event.type) {
-        // lastEventTime is only updated on content-producing events so lifecycle
-        // events (turn_start/end, compactions, retries) don't mask real stalls.
-        case "message_update": {
-          lastEventTime = Date.now();
-          const update = event.assistantMessageEvent;
-          if (update.type === "text_delta") {
-            eReq({ event: "assistant", text: update.delta });
+        switch (sdkEvent?.type) {
+          // lastEventTime is only updated on content-producing events so lifecycle
+          // events (turn_start/end, compactions, retries) don't mask real stalls.
+          case "message_update": {
+            lastEventTime = Date.now();
+            const update = sdkEvent.assistantMessageEvent;
+            if (update?.type === "text_delta" && typeof update.delta === "string") {
+              eReq({ event: "assistant", text: sanitizeBridgeText(update.delta, MAX_EVENT_TEXT_RUNES) });
+            }
+            break;
           }
-          break;
+          case "tool_execution_start": {
+            lastEventTime = Date.now();
+            const safeID = toolDurations.start(sdkEvent.toolCallId);
+            const safeName = safeLabel(sdkEvent.toolName, "tool");
+            redactedLog(`tool: ${safeName} id=${safeID} rid=${rid}`);
+            eReq({
+              event: "tool_use",
+              // Keep the legacy id field while adding the explicit field used
+              // by Go to pair the safe start/result identifiers.
+              id: safeID,
+              tool_call_id: safeID,
+              name: safeName,
+              input: sanitizeToolInput(sdkEvent.args),
+            });
+            break;
+          }
+          case "tool_execution_end": {
+            lastEventTime = Date.now();
+            const pair = toolDurations.endWithID(sdkEvent.toolCallId);
+            const safeID = pair?.toolCallID ?? safeToolCallID(sdkEvent.toolCallId);
+            // duration_ms is telemetry only: never add command, args/raw result.
+            // tool_call_id is a safe request-local correlation digest;
+            // duration_measured marks an observed start/end pair.
+            eReq({
+              event: "tool_result",
+              content: textFromContent(sdkEvent.result?.content),
+              tool_call_id: safeID,
+              ...(pair
+                ? { duration_measured: true, duration_ms: pair.durationMs }
+                : {}),
+            });
+            break;
+          }
+          case "agent_start":
+            eReq({ event: "agent_start" });
+            break;
+          case "agent_end":
+            eReq({ event: "agent_end" });
+            break;
+          case "turn_start":
+            eReq({ event: "turn_start" });
+            break;
+          case "turn_end":
+            turnCount = Math.min(turnCount + 1, MAX_COUNTER_VALUE);
+            eReq({ event: "turn_end" });
+            break;
+          case "auto_retry_start":
+            eReq({
+              event: "auto_retry_start",
+              attempt: boundedCounter(sdkEvent.attempt),
+              max_attempts: boundedCounter(sdkEvent.maxAttempts),
+              error: safeLabel(sdkEvent.errorMessage, "unknown"),
+            });
+            break;
+          case "auto_retry_end":
+            eReq({
+              event: "auto_retry_end",
+              success: sdkEvent.success === true,
+              attempt: boundedCounter(sdkEvent.attempt),
+              error: safeLabel(sdkEvent.finalError, "unknown"),
+            });
+            break;
+          case "compaction_start":
+            if (compactionStartAt === undefined) {
+              compactionStartAt = Date.now();
+              compactionEndObserved = false;
+              eReq({ event: "compaction_start", reason: compactionReason(sdkEvent.reason) });
+            }
+            break;
+          case "compaction_end": {
+            if (compactionEndObserved) break;
+            compactionEndObserved = true;
+            const result = sdkEvent.result as Record<string, unknown> | undefined;
+            const tokensBefore = boundedCounter(result?.tokensBefore) ?? 0;
+            const tokensAfter = boundedCounter(result?.estimatedTokensAfter);
+            const durationMs = measuredElapsed(compactionStartAt);
+            compactionStartAt = undefined;
+            eReq(compactionEndPayload({
+              reason: compactionReason(sdkEvent.reason),
+              tokensBefore,
+              success: !!result && sdkEvent.aborted !== true && typeof sdkEvent.errorMessage !== "string",
+              errored: !result || sdkEvent.aborted === true || typeof sdkEvent.errorMessage === "string",
+              tokensAfter,
+              durationMs,
+            }));
+            break;
+          }
+          default:
+            break;
         }
-        case "tool_execution_start": {
-          lastEventTime = Date.now();
-          redactedLog(
-            `tool: ${event.toolName} id=${event.toolCallId.slice(0, 8)} rid=${rid}`,
-          );
-          eReq({
-            event: "tool_use",
-            id: event.toolCallId,
-            name: event.toolName,
-            input: event.args,
-          });
-          break;
-        }
-        case "tool_execution_end": {
-          lastEventTime = Date.now();
-          eReq({
-            event: "tool_result",
-            content: textFromContent(event.result?.content),
-          });
-          break;
-        }
-        case "agent_start": {
-          eReq({ event: "agent_start" });
-          break;
-        }
-        case "agent_end": {
-          eReq({ event: "agent_end" });
-          break;
-        }
-        case "turn_start": {
-          eReq({ event: "turn_start" });
-          break;
-        }
-        case "turn_end": {
-          turnCount += 1;
-          eReq({ event: "turn_end" });
-          break;
-        }
-        case "auto_retry_start": {
-          eReq({
-            event: "auto_retry_start",
-            attempt: event.attempt,
-            max_attempts: event.maxAttempts,
-            error: event.errorMessage,
-          });
-          break;
-        }
-        case "auto_retry_end": {
-          eReq({
-            event: "auto_retry_end",
-            success: event.success,
-            attempt: event.attempt,
-            error: event.finalError,
-          });
-          break;
-        }
-        case "compaction_start": {
-          eReq({
-            event: "compaction_start",
-            reason: event.reason,
-          });
-          break;
-        }
-        case "compaction_end": {
-          eReq({
-            event: "compaction_end",
-            reason: event.reason,
-            tokens_before: event.result?.tokensBefore ?? 0,
-            success: !!event.result && !event.aborted,
-            error: event.errorMessage,
-          });
-          break;
-        }
-        default:
-          break;
+      } catch (err: unknown) {
+        // A malformed SDK callback must not tear down the persistent
+        // subscription or kill the Bridge process. Emit only a bounded log.
+        redactedLog(`malformed SDK event ignored: ${err instanceof Error ? err.message : String(err)}`);
       }
     });
+
+    // Unsubscribe wrapper: the persistent subscription outlives this request
+    // (session stays alive for steer/followUp), so tearing it down must also
+    // drop the request-local telemetry state captured by its closure.
+    const unsubPersistent = () => {
+      toolDurations.clear();
+      compactionStartAt = undefined;
+      compactionEndObserved = false;
+      rawUnsubPersistent();
+    };
 
     // Health check: monitor for stalls during active query.
     // At 30s: log warning (diagnostic).
     // At 60s: send a steer to nudge the model back to producing output.
     // At 120s: send a more urgent steer.
+    // Stall/steer NDJSON events are telemetry only (source=bridge_health);
+    // they are never user-facing text and never carry the steer payload.
     let stallSteerSent = false;
     let stallUrgentSent = false;
     healthTimer = setInterval(() => {
@@ -1970,13 +2585,39 @@ async function handleQuery(req: Request): Promise<void> {
           `streaming stall: no PI SDK events for ${Math.round(silent / 1000)}s (rid=${reqId})`,
         );
       }
-      if (silent >= 60_000 && !stallSteerSent) {
+      const telemetry = stallTelemetryFor(silent, stallSteerSent, stallUrgentSent);
+      if (telemetry.stall === "warning") {
         stallSteerSent = true;
+        emitReq({
+          event: "stall",
+          severity: "warning",
+          silent_ms: silent,
+          source: "bridge_health",
+        });
+      }
+      if (telemetry.stall === "urgent") {
+        stallUrgentSent = true;
+        emitReq({
+          event: "stall",
+          severity: "urgent",
+          silent_ms: silent,
+          source: "bridge_health",
+        });
+      }
+      if (telemetry.steer === "warning") {
         try {
           liveSession.steer(
             "Continue please. You have been silent for over a minute. " +
             "If you have finished your current task, present your findings."
           ).then(() => {
+            // Telemetry only when the steer was actually delivered; a failed
+            // steer must not be recorded as if it happened (timeline honesty).
+            emitReq({
+              event: "steer",
+              severity: "warning",
+              silent_ms: silent,
+              source: "bridge_health",
+            });
             redactedLog(`stall steer sent at ${Math.round(silent / 1000)}s (rid=${reqId})`);
           }).catch((err: unknown) => {
             redactedLog(`stall steer failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -1985,13 +2626,18 @@ async function handleQuery(req: Request): Promise<void> {
           redactedLog(`stall steer failed (sync): ${err instanceof Error ? err.message : String(err)}`);
         }
       }
-      if (silent >= 120_000 && !stallUrgentSent) {
-        stallUrgentSent = true;
+      if (telemetry.steer === "urgent") {
         try {
           liveSession.steer(
             "You have been silent for over 2 minutes. " +
             "Stop your current activity and present a summary of what you have done so far."
           ).then(() => {
+            emitReq({
+              event: "steer",
+              severity: "urgent",
+              silent_ms: silent,
+              source: "bridge_health",
+            });
             redactedLog(`stall urgent steer sent at ${Math.round(silent / 1000)}s (rid=${reqId})`);
           }).catch((err: unknown) => {
             redactedLog(`stall urgent steer failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -2153,6 +2799,11 @@ async function handleQuery(req: Request): Promise<void> {
     if (timeout) clearTimeout(timeout);
     if (healthTimer) clearInterval(healthTimer);
     activeRequests.delete(reqId);
+    // Request-local telemetry cleanup: drop ALL tool duration state and the
+    // compaction marker so nothing outlives this request (prune would leave
+    // leaked starts behind for the persistent subscription to observe).
+    toolDurations.clear();
+    compactionStartAt = undefined;
     sessionLifecycle.markSessionCreationComplete();
     if (!chatSessions.has(cKey) && ownsChatSession(cKey, sessionOwner)) {
       chatSessionOwners.delete(cKey);
@@ -2365,66 +3016,162 @@ async function handleCompactSession(req: Request): Promise<void> {
   const emitReq = (obj: OutEvent) => emit({ ...obj, request_id: reqId });
 
   let piSession: Awaited<ReturnType<typeof createPiSession>> | undefined;
+  let session: Awaited<ReturnType<typeof createPiSession>>["session"] | undefined;
   let unsub: (() => void) | undefined;
-  try {
-    piSession = await createPiSession(req.options);
-    const session = piSession.session;
-    await bindBridgeSessionExtensions(session);
+  let canceled = false;
+  let cancelPromise: Promise<void> | undefined;
+  let resolveCompactDone!: () => void;
+  const compactDone = new Promise<void>((resolve) => { resolveCompactDone = resolve; });
+  const sessionLifecycle = createBridgeSessionRequestLifecycle();
 
-    let terminalEmitted = false;
+  const cancelActive = async (reason: string): Promise<void> => {
+    if (cancelPromise) return cancelPromise;
+    canceled = true;
+    redactedLog(`compact-session cancel — rid=${reqId} reason=${reason}`);
+    cancelPromise = (async () => {
+      if (session) {
+        try {
+          // compact() owns a distinct AbortController in the PI SDK. Calling
+          // session.abort() only aborts the agent turn and can leave a manual
+          // compaction waiting forever. abortCompaction() is the exact public
+          // primitive for this operation; compact() then emits its terminal
+          // compaction_end from its own catch/finally path.
+          session.abortCompaction();
+        } catch (err: unknown) {
+          redactedLog(`compact-session abort failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      } else {
+        await sessionLifecycle.cancel();
+      }
+      // Do not acknowledge the cancel command until the compact operation has
+      // reached its own terminal/finally path. The Go caller can then safely
+      // fall back without an SDK mutation continuing in the background.
+      await compactDone;
+    })();
+    return cancelPromise;
+  };
+  activeRequests.set(reqId, { cancel: cancelActive });
+
+  // Request-local compaction timer: never shared with handleQuery or other
+  // concurrent compact-session requests. Cleared in the finally below.
+  let compactionStartAt: number | undefined;
+  let terminalEmitted = false;
+  let sdkCompactionStartObserved = false;
+  let sdkCompactionEndObserved = false;
+
+  const emitCompactionEndIfNeeded = (result: Record<string, unknown> | undefined, success: boolean): void => {
+    if (!sdkCompactionStartObserved || sdkCompactionEndObserved) return;
+    sdkCompactionEndObserved = true;
+    const tokensBefore = boundedCounter(result?.tokensBefore) ?? 0;
+    const tokensAfter = boundedCounter(result?.estimatedTokensAfter);
+    const durationMs = measuredElapsed(compactionStartAt);
+    compactionStartAt = undefined;
+    emitReq(compactionEndPayload({
+      reason: "manual",
+      tokensBefore,
+      success,
+      errored: !success,
+      tokensAfter,
+      durationMs,
+    }));
+  };
+
+  try {
+    piSession = await sessionLifecycle.createSession(() => createPiSession(req.options));
+    session = piSession.session;
+    if (canceled) throw new Error("compact-session canceled");
+    await sessionLifecycle.bindSession(session);
+    if (canceled) throw new Error("compact-session canceled");
 
     // Subscribe to compaction events and forward them
     unsub = session.subscribe((event) => {
-      if (terminalEmitted) return;
-      if (event.type === "compaction_start") {
-        emitReq({ event: "compaction_start", reason: event.reason });
-      } else if (event.type === "compaction_end") {
-        emitReq({
-          event: "compaction_end",
-          reason: event.reason,
-          tokens_before: event.result?.tokensBefore ?? 0,
-          success: !!event.result && !event.aborted,
-          error: event.errorMessage,
-        });
+      try {
+        if (terminalEmitted) return;
+        const sdkEvent = event as any;
+        if (sdkEvent?.type === "compaction_start") {
+          // The SDK event is authoritative. Ignore duplicate starts from a
+          // malformed/re-entrant callback instead of opening a second pair.
+          if (sdkCompactionStartObserved) return;
+          sdkCompactionStartObserved = true;
+          compactionStartAt = Date.now();
+          emitReq({ event: "compaction_start", reason: compactionReason(sdkEvent.reason) });
+        } else if (sdkEvent?.type === "compaction_end") {
+          if (sdkCompactionEndObserved) return;
+           sdkCompactionEndObserved = true;
+          const result = sdkEvent.result as Record<string, unknown> | undefined;
+          const tokensBefore = boundedCounter(result?.tokensBefore) ?? 0;
+          const tokensAfter = boundedCounter(result?.estimatedTokensAfter);
+          const durationMs = measuredElapsed(compactionStartAt);
+          compactionStartAt = undefined;
+          emitReq(compactionEndPayload({
+            reason: compactionReason(sdkEvent.reason),
+            tokensBefore,
+            success: !!result && sdkEvent.aborted !== true && typeof sdkEvent.errorMessage !== "string",
+            errored: !result || sdkEvent.aborted === true || typeof sdkEvent.errorMessage === "string",
+            tokensAfter,
+            durationMs,
+          }));
+        }
+      } catch (err: unknown) {
+        redactedLog(`malformed compaction SDK event ignored: ${err instanceof Error ? err.message : String(err)}`);
       }
     });
 
-    // Signal start
-    emitReq({ event: "compaction_start", reason: "manual" });
-
     const customInstructions = req.prompt || undefined;
     const result = await session.compact(customInstructions);
+    if (canceled) throw new Error("compact-session canceled");
 
     if (!terminalEmitted) {
+      const tokensBefore = boundedCounter((result as any)?.tokensBefore) ?? 0;
+      const tokensAfter = boundedCounter((result as any)?.estimatedTokensAfter);
+      // A synthetic fallback is allowed only for the missing SDK end. The
+      // SDK start/end pair must never be duplicated by the command wrapper.
+      if (!sdkCompactionEndObserved) {
+        const durationMs = measuredElapsed(compactionStartAt);
+        compactionStartAt = undefined;
+        emitReq(compactionEndPayload({
+          reason: "manual",
+          tokensBefore,
+          success: !!result,
+          errored: !result,
+          tokensAfter,
+          durationMs,
+        }));
+      }
       terminalEmitted = true;
-      emitReq({
-        event: "compaction_end",
-        reason: "manual",
-        tokens_before: result?.tokensBefore ?? 0,
-        success: !!result,
-      });
 
       // Return result as terminal event
       emitReq({
         event: "result",
         content: JSON.stringify({
           success: !!result,
-          tokens_before: result?.tokensBefore ?? 0,
-          summary: result?.summary ?? "",
-          session_id: session.sessionId,
-          session_file: session.sessionFile,
+          tokens_before: tokensBefore,
+          summary: sanitizeBridgeText((result as any)?.summary, MAX_EVENT_TEXT_RUNES),
+          session_id: sanitizeBridgeText(session.sessionId, MAX_TELEMETRY_LABEL_RUNES),
+          session_file: sanitizeBridgeText(session.sessionFile, MAX_EVENT_VALUE_RUNES),
         }),
       });
     }
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
     redactedLog(`compact-session error: rid=${reqId} ${errMsg}`);
-    emitReq({ event: "error", message: redactSDKError(errMsg) });
+    emitCompactionEndIfNeeded(undefined, false);
+    if (!terminalEmitted) {
+      terminalEmitted = true;
+      emitReq({
+        event: "error",
+        message: canceled ? "compact-session canceled" : "compact-session failed",
+      });
+    }
   } finally {
+    activeRequests.delete(reqId);
     if (unsub) try { unsub(); } catch { /* ignore */ }
+    compactionStartAt = undefined;
     if (piSession) {
       await disposeBridgeSession(piSession.session);
     }
+    sessionLifecycle.markSessionCreationComplete();
+    resolveCompactDone();
   }
 }
 
@@ -2549,31 +3296,70 @@ ${summary}
 // ── Handle incoming request ──────────────────────────────────────────────────
 
 async function handleRequest(line: string): Promise<void> {
-  let req: Request;
+	if (serializedByteLength(line) > MAX_BRIDGE_REQUEST_BYTES) {
+		const requestID = safeRequestIDFromLine(line);
+		emit({ event: "error", ...(requestID ? { request_id: requestID } : {}), message: "request exceeds maximum serialized size" });
+		return;
+	}
 
-  try {
-    req = JSON.parse(line) as Request;
-  } catch {
-    emit({ event: "error", message: `invalid JSON: ${redactSDKError(line).slice(0, 200)}` });
-    return;
-  }
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(line);
+	} catch {
+		// Never echo malformed input into the durable/error stream. There is no
+		// trustworthy request identity until JSON has parsed.
+		emit({ event: "error", message: "invalid JSON" });
+		return;
+	}
 
-  if (!req.command) {
-    emit({ event: "error", request_id: req.request_id || "", message: "missing 'command' field" });
-    return;
-  }
+	const validation = validateBridgeRequest(parsed);
+	if (!validation.ok) {
+		const candidate = (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed))
+			? parsed as Record<string, unknown>
+			: undefined;
+		const requestID = safeRequestID(candidate?.request_id);
+		emit({
+			event: "error",
+			...(requestID ? { request_id: requestID } : {}),
+			message: "invalid bridge request",
+		});
+		return;
+	}
+	const req = validation.request;
+	const reqId = req.request_id!;
+	const emitReq = (obj: OutEvent) => emit({ ...obj, request_id: reqId });
 
-  const reqId = req.request_id || "";
-  const emitReq = (obj: OutEvent) => emit({ ...obj, request_id: reqId });
+	// A duplicate active request ID must not replace the cancellation handle
+	// for the first stream. Go rejects duplicates too; this guard protects the
+	// TypeScript boundary when it is exercised directly.
+	if (activeRequests.has(reqId)) {
+		emitReq({ event: "error", message: "duplicate request_id" });
+		return;
+	}
+	// Cancellation is a control-plane operation and must remain available even
+	// when all ordinary stdout stream slots are occupied. Its terminal result is
+	// bounded by emit(), while the target lifecycle owns the actual cleanup.
+	if (req.command === "cancel") {
+		const target = req.target_request_id!;
+		const active = activeRequests.get(target);
+		if (!active) {
+			emitReq({ event: "result", content: `request ${target} is not active` });
+			return;
+		}
+		await active.cancel("request canceled");
+		emitReq({ event: "result", content: `request ${target} canceled` });
+		return;
+	}
+	if (!stdoutEmissionBudget.register(reqId)) {
+		emitReq({ event: "error", message: "too many active bridge streams" });
+		return;
+	}
 
-  switch (req.command) {
-    case "query": {
-      if (!req.prompt) {
-        emit({ event: "error", request_id: reqId, message: "missing 'prompt' field for query command" });
-        return;
-      }
-      await handleQuery(req);
-      break;
+	try {
+		switch (req.command) {
+		case "query": {
+			await handleQuery(req);
+			break;
     }
 
     case "ping": {
@@ -2581,23 +3367,7 @@ async function handleRequest(line: string): Promise<void> {
       break;
     }
 
-    case "cancel": {
-      const target = req.target_request_id || "";
-      if (!target) {
-        emitReq({ event: "error", message: "missing 'target_request_id' for cancel command" });
-        return;
-      }
-      const active = activeRequests.get(target);
-      if (!active) {
-        emitReq({ event: "result", content: `request ${target} is not active` });
-        return;
-      }
-      await active.cancel("request canceled");
-      emitReq({ event: "result", content: `request ${target} canceled` });
-      break;
-    }
-
-    case "list-models": {
+		case "list-models": {
       try {
         const agentDir = piAgentDir() || getAgentDir();
         const modelRuntime = await createModelRuntime(agentDir);
@@ -2636,21 +3406,13 @@ async function handleRequest(line: string): Promise<void> {
       break;
     }
 
-    case "steer": {
-      if (!req.prompt) {
-        emit({ event: "error", request_id: reqId, message: "missing 'prompt' field for steer command" });
-        return;
-      }
-      await handleSteer(req);
+		case "steer": {
+			await handleSteer(req);
       break;
     }
 
-    case "follow-up": {
-      if (!req.prompt) {
-        emit({ event: "error", request_id: reqId, message: "missing 'prompt' field for follow-up command" });
-        return;
-      }
-      await handleFollowUp(req);
+		case "follow-up": {
+			await handleFollowUp(req);
       break;
     }
 
@@ -2684,9 +3446,25 @@ async function handleRequest(line: string): Promise<void> {
       break;
     }
 
-    default: {
-      emit({ event: "error", request_id: reqId, message: `unknown command: ${req.command}` });
-    }
+		default:
+			// validateBridgeRequest rejects unknown commands before this switch.
+			emitReq({ event: "error", message: "invalid command" });
+		}
+	} finally {
+		stdoutEmissionBudget.finish(reqId);
+	}
+}
+
+// Best-effort correlation for failures that occur before normal request
+// validation (size limits and the outer async rejection guard). Never echo the
+// input; only accept a syntactically safe request_id from a parsed object.
+function safeRequestIDFromLine(line: string): string | undefined {
+  try {
+    const value = JSON.parse(line) as unknown;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+    return safeRequestID((value as Record<string, unknown>).request_id) || undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -2707,7 +3485,12 @@ function main(): void {
     handleRequest(trimmed).catch((err: unknown) => {
       const errMsg = err instanceof Error ? err.message : String(err);
       redactedLog(`unhandled error in request processing: ${errMsg}`);
-      emit({ event: "error", message: `internal bridge error: ${redactSDKError(errMsg)}` });
+      const requestID = safeRequestIDFromLine(trimmed);
+      emit({
+        event: "error",
+        ...(requestID ? { request_id: requestID } : {}),
+        message: `internal bridge error: ${redactSDKError(errMsg)}`,
+      });
     });
   });
 

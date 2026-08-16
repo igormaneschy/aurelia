@@ -121,9 +121,9 @@ func TestBuildBridgeRequest_SecurityContext_PrivilegedDowngraded(t *testing.T) {
 	svc := &Service{
 		config: &config.AppConfig{
 			SecurityConfig: security.SecurityConfig{
-				Mode:                  security.PolicyBlock,
-				AllowPrivilegedAgents: false,
-				SensitivePathPatterns: []string{".env"},
+				Mode:                   security.PolicyBlock,
+				AllowPrivilegedAgents:  false,
+				SensitivePathPatterns:  []string{".env"},
 				AllowedOutsideCWDPaths: []string{"/backup"},
 			},
 		},

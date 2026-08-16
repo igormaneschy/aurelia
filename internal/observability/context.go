@@ -35,6 +35,12 @@ const (
 	PhaseBridgeToolResult     = "bridge_tool_result"
 	PhaseBridgeResult           = "bridge_result"
 	PhaseBridgeContentDiverges = "bridge_content_diverges"
+
+	// Long-session telemetry phases. stall/steer/compaction are telemetry —
+	// they must never be classified as productive feedback.
+	PhaseBridgeStall      = "bridge_stall"
+	PhaseBridgeSteer      = "bridge_steer"
+	PhaseBridgeCompaction = "bridge_compaction"
 	PhaseReplyStarted         = "reply_started"
 	PhaseReplySent            = "reply_sent"
 	PhaseContinuityPatched    = "continuity_patched"

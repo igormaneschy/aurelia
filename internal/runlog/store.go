@@ -1,6 +1,9 @@
 package runlog
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Store persists run lifecycle events for observability and checkpointing.
 type Store interface {
@@ -13,6 +16,16 @@ type Store interface {
 	// Complete transitions a run to a terminal status, persisting checkpoint,
 	// error, and optional tool_summary in a single write.
 	Complete(ctx context.Context, runID string, status RunStatus, checkpoint, errMsg, toolSummary string) error
+
+	// MarkStaleRunsInterrupted transitions every row still in status=running
+	// that started BEFORE the given cutoff to status=interrupted. Called at
+	// daemon startup with cutoff = boot time: any row still running after a
+	// restart is stale by definition (the process that owned it is gone),
+	// while rows started after boot (e.g. cron jobs racing the reconcile)
+	// must never be touched. The terminal status is interrupted — the run did
+	// not fail, it was cut off.
+	// Returns the number of rows updated.
+	MarkStaleRunsInterrupted(ctx context.Context, before time.Time) (int64, error)
 
 	// RecordEvents persists multiple timeline events in one transaction.
 	// Best-effort: errors are logged by callers, never block the pipeline.
@@ -50,4 +63,19 @@ type Store interface {
 
 	// Close releases the store's resources.
 	Close() error
+}
+
+// AtomicCompletionStore is an optional capability implemented by stores that
+// can commit the terminal run row and its pending timeline events together.
+// SQLiteStore is the production implementation. Generic stores may use the
+// Store methods as a best-effort fallback when this capability is absent.
+type AtomicCompletionStore interface {
+	CompleteWithEvents(ctx context.Context, runID string, status RunStatus, checkpoint, errMsg, toolSummary string, agg CompletionAggregates, events []RunEvent) error
+}
+
+// AggregateCompletionStore is the older atomic terminal capability retained
+// for generic test stores and non-SQLite backends that can commit aggregates
+// with the terminal row but do not own the pending timeline transaction.
+type AggregateCompletionStore interface {
+	CompleteWithAggregates(ctx context.Context, runID string, status RunStatus, checkpoint, errMsg, toolSummary string, agg CompletionAggregates) error
 }

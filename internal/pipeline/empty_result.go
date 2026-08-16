@@ -23,9 +23,7 @@ func buildEmptyResultRecoveryMessage(toolSummary string) string {
 
 	if toolSummary != "" {
 		sb.WriteString("\n\nFerramentas utilizadas: ")
-		if len(toolSummary) > maxToolSummaryChars {
-			toolSummary = toolSummary[:maxToolSummaryChars] + "..."
-		}
+		toolSummary = truncateRunes(toolSummary, maxToolSummaryChars)
 		sb.WriteString(toolSummary)
 	}
 
@@ -34,38 +32,46 @@ func buildEmptyResultRecoveryMessage(toolSummary string) string {
 }
 
 // runUsedWriteTools reports whether Write or Edit tools ran during the active turn.
-func (s *Service) runUsedWriteTools(chatID int64, threadID int, userID int64) bool {
+func (s *Service) runUsedWriteTools(chatID int64, threadID int, userID int64, owners ...runOwnership) bool {
 	key := runLogKey(chatID, threadID, userID)
-	s.runLogMu.Lock()
-	state, ok := s.runLogStates[key]
-	s.runLogMu.Unlock()
-	if !ok || state == nil {
-		return false
-	}
-	state.mu.Lock()
-	used := state.writeToolsUsed
-	state.mu.Unlock()
+	ownership := firstRunOwnership(owners)
+	used := false
+	s.withRunOwnership(chatID, threadID, userID, owners, func() {
+		s.runLogMu.Lock()
+		state, ok := s.runLogStates[key]
+		s.runLogMu.Unlock()
+		if !ok || state == nil || (ownership.runID != "" && state.runID != ownership.runID) ||
+			(ownership.owner != nil && state.owner != ownership.owner) {
+			return
+		}
+		state.mu.Lock()
+		used = state.writeToolsUsed
+		state.mu.Unlock()
+	})
 	return used
 }
 
 // getRunToolSummary reads the in-memory tool summary from the active runLogState
 // without consulting the persisted store. Returns empty string if unavailable.
-func (s *Service) getRunToolSummary(chatID int64, threadID int, userID int64) string {
+func (s *Service) getRunToolSummary(chatID int64, threadID int, userID int64, owners ...runOwnership) string {
 	if s.runLog == nil {
 		return ""
 	}
 
 	key := runLogKey(chatID, threadID, userID)
-	s.runLogMu.Lock()
-	state, ok := s.runLogStates[key]
-	s.runLogMu.Unlock()
-
-	if !ok || state == nil {
-		return ""
-	}
-
-	state.mu.Lock()
-	summary := state.summary.String()
-	state.mu.Unlock()
+	ownership := firstRunOwnership(owners)
+	summary := ""
+	s.withRunOwnership(chatID, threadID, userID, owners, func() {
+		s.runLogMu.Lock()
+		state, ok := s.runLogStates[key]
+		s.runLogMu.Unlock()
+		if !ok || state == nil || (ownership.runID != "" && state.runID != ownership.runID) ||
+			(ownership.owner != nil && state.owner != ownership.owner) {
+			return
+		}
+		state.mu.Lock()
+		summary = state.summary.String()
+		state.mu.Unlock()
+	})
 	return summary
 }

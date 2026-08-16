@@ -244,7 +244,8 @@ func (o telegramPipelineOutput) ConfirmMessage(chatID int64, messageID int) {
 
 type noopPipelineProgress struct{}
 
-func (noopPipelineProgress) ReportTool(_, _ string)  {}
-func (noopPipelineProgress) ReportToolResult(string) {}
-func (noopPipelineProgress) ReportText(string)       {}
-func (noopPipelineProgress) Delete()                 {}
+func (noopPipelineProgress) ReportTool(_, _ string)                        {}
+func (noopPipelineProgress) ReportToolResult(string)                       {}
+func (noopPipelineProgress) ReportText(string)                             {}
+func (noopPipelineProgress) ReportState(pipelinepkg.ProgressState, string) {}
+func (noopPipelineProgress) Delete()                                       {}

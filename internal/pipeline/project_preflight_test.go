@@ -19,9 +19,9 @@ type testOutputRecorder struct {
 	confirmCalled bool
 }
 
-func (r *testOutputRecorder) StartTyping(int64, int) func() { return func() {} }
-func (r *testOutputRecorder) NewProgress(int64, int) ProgressReporter { return nil }
-func (r *testOutputRecorder) SendError(int64, int, string) error { return nil }
+func (r *testOutputRecorder) StartTyping(int64, int) func()               { return func() {} }
+func (r *testOutputRecorder) NewProgress(int64, int) ProgressReporter     { return nil }
+func (r *testOutputRecorder) SendError(int64, int, string) error          { return nil }
 func (r *testOutputRecorder) SendReply(int64, int, string) (int64, error) { return 0, nil }
 
 func (r *testOutputRecorder) SendText(_ int64, _ int, text string) (transport.MessageHandle, error) {
@@ -30,8 +30,8 @@ func (r *testOutputRecorder) SendText(_ int64, _ int, text string) (transport.Me
 	return nil, nil
 }
 
-func (r *testOutputRecorder) DeleteMessage(transport.MessageHandle)                   {}
-func (r *testOutputRecorder) ConfirmMessage(int64, int) { r.confirmCalled = true }
+func (r *testOutputRecorder) DeleteMessage(transport.MessageHandle) {}
+func (r *testOutputRecorder) ConfirmMessage(int64, int)             { r.confirmCalled = true }
 
 func TestCheckProjectPreflight_NoCwdWithKnownProjects(t *testing.T) {
 	// Setup known projects for user 42

@@ -2,15 +2,15 @@ package pipeline
 
 import (
 	"context"
-	"path/filepath"
-	"strings"
-	"testing"
-	"time"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/session"
 	"github.com/igormaneschy/aurelia/internal/users"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
 )
 
 // TestContinuityAfterSuccessfulTurn verifies that after a successful turn,

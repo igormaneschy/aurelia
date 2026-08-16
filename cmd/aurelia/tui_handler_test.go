@@ -17,6 +17,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/ipc"
+	"github.com/igormaneschy/aurelia/internal/pipeline"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
@@ -69,16 +70,16 @@ func testApp(t *testing.T) (*app, context.Context, func()) {
 	}
 
 	return &app{
-		bindings:    bindings,
-		sessions:    sessions,
-		config:      cfg,
-		resolver:    resolver,
-		tuiRunGuard: &tuiRunGuard{},
-		tuiSessions: tuiSessions,
-	}, ctx, func() {
-		bindings.Close()
-		tuiSessions.Close()
-	}
+			bindings:    bindings,
+			sessions:    sessions,
+			config:      cfg,
+			resolver:    resolver,
+			tuiRunGuard: &tuiRunGuard{},
+			tuiSessions: tuiSessions,
+		}, ctx, func() {
+			bindings.Close()
+			tuiSessions.Close()
+		}
 }
 
 func TestTUIHandler_StatusReturnsMessageAndStreamEnd(t *testing.T) {
@@ -1144,9 +1145,9 @@ func TestTUIHandler_AttachmentWithCWD_CopiesAndEnriches(t *testing.T) {
 	// Set up CWD binding directly.
 	now := time.Now()
 	err := a.bindings.Set(ctx, projectbinding.ProjectBinding{
-		Key:   projectbinding.ConversationKey{ChatID: ipc.ReservedTUIChatID, ThreadID: 0},
-		CWD:   cwd,
-		Source: projectbinding.BindingManual,
+		Key:       projectbinding.ConversationKey{ChatID: ipc.ReservedTUIChatID, ThreadID: 0},
+		CWD:       cwd,
+		Source:    projectbinding.BindingManual,
 		CreatedBy: int64(os.Getuid()),
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -1209,9 +1210,9 @@ func TestTUIHandler_AttachmentPlusImagePlusText(t *testing.T) {
 	// Set up CWD binding.
 	now := time.Now()
 	err := a.bindings.Set(ctx, projectbinding.ProjectBinding{
-		Key:   projectbinding.ConversationKey{ChatID: ipc.ReservedTUIChatID, ThreadID: 0},
-		CWD:   cwd,
-		Source: projectbinding.BindingManual,
+		Key:       projectbinding.ConversationKey{ChatID: ipc.ReservedTUIChatID, ThreadID: 0},
+		CWD:       cwd,
+		Source:    projectbinding.BindingManual,
 		CreatedBy: int64(os.Getuid()),
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -1321,9 +1322,9 @@ func TestTUIHandler_AttachmentEmptyName_FallsBackToBasename(t *testing.T) {
 
 	now := time.Now()
 	err := a.bindings.Set(ctx, projectbinding.ProjectBinding{
-		Key:   projectbinding.ConversationKey{ChatID: ipc.ReservedTUIChatID, ThreadID: 0},
-		CWD:   cwd,
-		Source: projectbinding.BindingManual,
+		Key:       projectbinding.ConversationKey{ChatID: ipc.ReservedTUIChatID, ThreadID: 0},
+		CWD:       cwd,
+		Source:    projectbinding.BindingManual,
 		CreatedBy: int64(os.Getuid()),
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -1363,6 +1364,84 @@ func TestTUIHandler_AttachmentEmptyName_FallsBackToBasename(t *testing.T) {
 	for _, ev := range te.events {
 		if ev.Type == ipc.EventTypeError && strings.Contains(ev.Error, "attachment") {
 			t.Errorf("unexpected attachment error: %s", ev.Error)
+		}
+	}
+}
+
+// TestTUIProgress_EmitsProgressEventsInsteadOfToolChunks covers T2: tool and
+// state changes go through EventTypeProgress with a typed payload, and no
+// technical markers (🔧/✅ tool_done) ever reach stream_chunk — the transcript
+// stays clean. Real assistant text still flows as stream_chunk.
+func TestTUIProgress_EmitsProgressEventsInsteadOfToolChunks(t *testing.T) {
+	em := &testEmit{}
+	out := newTUIOutput(em.emit)
+	p := out.NewProgress(1, 0).(*tuiProgress)
+
+	p.ReportTool("Bash", "ls -la")
+	p.ReportToolResult("done")
+	p.ReportState(pipeline.ProgressStateStallWarning, "silêncio de 45s")
+	p.ReportText("hello world")
+
+	em.mu.Lock()
+	events := make([]ipc.IPCEvent, len(em.events))
+	copy(events, em.events)
+	em.mu.Unlock()
+
+	var progressEvents []ipc.IPCEvent
+	for _, ev := range events {
+		if ev.Type == ipc.EventTypeStreamChunk && (strings.Contains(ev.Body, "🔧") || strings.Contains(ev.Body, "tool_done")) {
+			t.Fatalf("technical marker leaked into stream_chunk: %q", ev.Body)
+		}
+		if ev.Type == ipc.EventTypeProgress {
+			progressEvents = append(progressEvents, ev)
+		}
+	}
+
+	// ReportText must still arrive as a stream chunk.
+	var textChunks int
+	for _, ev := range events {
+		if ev.Type == ipc.EventTypeStreamChunk && strings.Contains(ev.Body, "hello world") {
+			textChunks++
+		}
+	}
+	if textChunks != 1 {
+		t.Fatalf("ReportText stream chunks = %d, want 1", textChunks)
+	}
+
+	// ReportTool + ReportToolResult + ReportState → 3 progress events.
+	if len(progressEvents) != 3 {
+		t.Fatalf("progress events = %d, want 3: %+v", len(progressEvents), progressEvents)
+	}
+
+	var payload ipc.ProgressPayload
+	if err := json.Unmarshal([]byte(progressEvents[0].Body), &payload); err != nil {
+		t.Fatalf("progress event 0 not JSON: %v", err)
+	}
+	if payload.State != string(pipeline.ProgressStateWorking) || payload.ToolName != "Bash" || payload.Detail != "ls -la" {
+		t.Fatalf("progress event 0 = %+v, want working/Bash/ls -la", payload)
+	}
+
+	if err := json.Unmarshal([]byte(progressEvents[1].Body), &payload); err != nil {
+		t.Fatalf("progress event 1 not JSON: %v", err)
+	}
+	if !payload.ToolDone {
+		t.Fatalf("progress event 1 = %+v, want ToolDone=true", payload)
+	}
+
+	if err := json.Unmarshal([]byte(progressEvents[2].Body), &payload); err != nil {
+		t.Fatalf("progress event 2 not JSON: %v", err)
+	}
+	if payload.State != string(pipeline.ProgressStateStallWarning) || payload.Detail != "silêncio de 45s" {
+		t.Fatalf("progress event 2 = %+v, want stall_warning with detail", payload)
+	}
+
+	for _, ev := range progressEvents {
+		var pl ipc.ProgressPayload
+		if err := json.Unmarshal([]byte(ev.Body), &pl); err != nil {
+			t.Fatalf("bad progress payload: %v", err)
+		}
+		if pl.ElapsedMs < 0 {
+			t.Fatalf("ElapsedMs = %d, want >= 0", pl.ElapsedMs)
 		}
 	}
 }

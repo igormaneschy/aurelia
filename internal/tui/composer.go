@@ -8,10 +8,10 @@ import (
 )
 
 const (
-	composerPromptRunes        = 2 // "> " or "… "
-	inputBoxChromeWidth        = 4 // rounded border + horizontal padding
-	composerTextareaMinHeight  = 2
-	composerTextareaMaxHeight  = 6
+	composerPromptRunes       = 2 // "> " or "… "
+	inputBoxChromeWidth       = 4 // rounded border + horizontal padding
+	composerTextareaMinHeight = 2
+	composerTextareaMaxHeight = 6
 )
 
 // composerTextareaWidth is the bubbles textarea wrap width inside the bordered
@@ -104,6 +104,9 @@ func (m Model) renderInput() string {
 	}
 	if attachmentBadges != "" {
 		badgeLines = append(badgeLines, attachmentBadges)
+	}
+	if m.stallLine != "" {
+		badgeLines = append(badgeLines, m.styles.StatusBusyStyle.Render(m.stallLine))
 	}
 	if toolBar := m.renderToolActivity(); toolBar != "" {
 		badgeLines = append(badgeLines, toolBar)

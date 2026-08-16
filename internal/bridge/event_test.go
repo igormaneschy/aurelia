@@ -1,6 +1,10 @@
 package bridge
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestEventContent(t *testing.T) {
 	tests := []struct {
@@ -20,5 +24,138 @@ func TestEventContent(t *testing.T) {
 				t.Fatalf("EventContent(%+v) = %q, want %q", tc.ev, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestEventParseLongSessionFields verifies the NDJSON contract additions
+// (ISO timestamp, stall/steer telemetry, tool duration, compaction delta)
+// survive Bridge -> Go parsing with explicit units.
+func TestEventParseLongSessionFields(t *testing.T) {
+	line := `{"event":"stall","request_id":"req-1","timestamp":"2026-08-11T10:00:00.123Z",` +
+		`"severity":"warning","silent_ms":120000,"source":"bridge_health"}`
+	var ev Event
+	if err := json.Unmarshal([]byte(line), &ev); err != nil {
+		t.Fatalf("unmarshal stall: %v", err)
+	}
+	if ev.Type != "stall" || ev.RequestID != "req-1" {
+		t.Fatalf("unexpected stall base fields: %+v", ev)
+	}
+	if ev.Timestamp != "2026-08-11T10:00:00.123Z" {
+		t.Fatalf("timestamp = %q, want raw ISO preserved", ev.Timestamp)
+	}
+	if ev.Severity != "warning" || ev.SilentMs != 120000 || ev.Source != "bridge_health" {
+		t.Fatalf("unexpected stall telemetry fields: %+v", ev)
+	}
+
+	// tool_result carries duration_ms only when the Bridge observed a pair;
+	// tool_call_id is the opaque non-sensitive correlation id and
+	// duration_measured=true is present even for a measured 0ms pair.
+	var tr Event
+	if err := json.Unmarshal([]byte(
+		`{"event":"tool_result","request_id":"req-1","content":"summary","tool_call_id":"tc-1","duration_measured":true,"duration_ms":0}`), &tr); err != nil {
+		t.Fatalf("unmarshal tool_result: %v", err)
+	}
+	if tr.ToolCallID != "tc-1" || !tr.DurationMeasured || tr.DurationMs != 0 {
+		t.Fatalf("unexpected tool_result fields: %+v", tr)
+	}
+	var tr2 Event
+	if err := json.Unmarshal([]byte(
+		`{"event":"tool_result","request_id":"req-1","content":"summary","tool_call_id":"tc-2","duration_measured":true,"duration_ms":1234}`), &tr2); err != nil {
+		t.Fatalf("unmarshal tool_result: %v", err)
+	}
+	if tr2.ToolCallID != "tc-2" || !tr2.DurationMeasured || tr2.DurationMs != 1234 {
+		t.Fatalf("unexpected tool_result fields: %+v", tr2)
+	}
+
+	// compaction_end carries tokens_after/delta_tokens; a negative delta
+	// (effective reduction) stays observable, and a measured zero
+	// (neutral compaction) is explicit, not "unmeasured". error_class is a
+	// static enum — the raw error message is never part of the contract.
+	var ce Event
+	if err := json.Unmarshal([]byte(
+		`{"event":"compaction_end","request_id":"req-1","tokens_before":1000,`+
+			`"tokens_after":1200,"delta_tokens":200,"success":true,"duration_ms":5000}`), &ce); err != nil {
+		t.Fatalf("unmarshal compaction_end: %v", err)
+	}
+	if ce.TokensBefore != 1000 || ce.TokensAfter == nil || *ce.TokensAfter != 1200 ||
+		ce.DeltaTokens == nil || *ce.DeltaTokens != 200 || !ce.Success {
+		t.Fatalf("unexpected compaction fields: %+v", ce)
+	}
+	var errComp Event
+	if err := json.Unmarshal([]byte(
+		`{"event":"compaction_end","success":false,"error_class":"compaction_error"}`), &errComp); err != nil {
+		t.Fatalf("unmarshal compaction error: %v", err)
+	}
+	if errComp.ErrorClass != "compaction_error" || errComp.Success {
+		t.Fatalf("unexpected compaction error fields: %+v", errComp)
+	}
+	var neg Event
+	if err := json.Unmarshal([]byte(
+		`{"event":"compaction_end","tokens_before":1000,"tokens_after":800,"delta_tokens":-200}`), &neg); err != nil {
+		t.Fatalf("unmarshal negative delta: %v", err)
+	}
+	if neg.DeltaTokens == nil || *neg.DeltaTokens != -200 {
+		t.Fatalf("delta_tokens = %v, want -200 (negative reduction observable)", neg.DeltaTokens)
+	}
+	var neutral Event
+	if err := json.Unmarshal([]byte(
+		`{"event":"compaction_end","tokens_before":1000,"tokens_after":1000,"delta_tokens":0}`), &neutral); err != nil {
+		t.Fatalf("unmarshal neutral delta: %v", err)
+	}
+	if neutral.DeltaTokens == nil || *neutral.DeltaTokens != 0 {
+		t.Fatalf("delta_tokens = %v, want explicit 0 (neutral observable)", neutral.DeltaTokens)
+	}
+
+	// Absent optional telemetry fields remain nil/zero (duration_ms=0 means
+	// no reliable pair was observed).
+	var bare Event
+	if err := json.Unmarshal([]byte(`{"event":"tool_result","content":"x"}`), &bare); err != nil {
+		t.Fatalf("unmarshal bare tool_result: %v", err)
+	}
+	if bare.DurationMs != 0 || bare.SilentMs != 0 || bare.Timestamp != "" ||
+		bare.TokensAfter != nil || bare.DeltaTokens != nil || bare.ToolCallID != "" ||
+		bare.DurationMeasured || bare.ErrorClass != "" {
+		t.Fatalf("expected nil/zero-valued optional fields, got %+v", bare)
+	}
+}
+
+func TestNormalizeEventPreservesBoundedTelemetryEnums(t *testing.T) {
+	got := normalizeEvent(Event{
+		Type:       "stall",
+		Severity:   "warning",
+		Source:     "bridge_health",
+		ErrorClass: "compaction_error",
+		Reason:     "threshold",
+	})
+	if got.Severity != "warning" || got.Source != "bridge_health" {
+		t.Fatalf("bounded bridge-health fields were lost: %+v", got)
+	}
+	if got.ErrorClass != "compaction_error" || got.Reason != "automatic" {
+		t.Fatalf("bounded compaction fields were lost: %+v", got)
+	}
+
+	unsafe := normalizeEvent(Event{Severity: "provider supplied text", ErrorClass: "provider supplied text", Source: "attacker"})
+	if unsafe.Severity != "unknown" || unsafe.ErrorClass != "unknown" || unsafe.Source != "" {
+		t.Fatalf("unsafe enum values were not bounded: %+v", unsafe)
+	}
+}
+
+func TestNormalizeEventCapsSerializedPayload(t *testing.T) {
+	got := normalizeEvent(Event{
+		Type:    "result",
+		Content: strings.Repeat("x", maxEventTextBytes),
+		Text:    strings.Repeat("y", maxEventTextBytes),
+		Message: strings.Repeat("z", maxEventTextBytes),
+		Input:   strings.Repeat("input", maxEventTextBytes),
+	})
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal normalized event: %v", err)
+	}
+	if len(encoded) > maxEventPayloadBytes {
+		t.Fatalf("normalized payload = %d bytes, want <= %d", len(encoded), maxEventPayloadBytes)
+	}
+	if got.Content == "" {
+		t.Fatal("terminal result content was discarded while bounding payload")
 	}
 }
