@@ -43,6 +43,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   obrigatório.
 - `duration_ms` é persistido na finalização atômica do runlog (percentis
   de duração funcionam; encontrado na validação live do Telegram).
+- Percentis de duração (`p50`/`p95`) resolvem corretamente para janelas
+  com um único run (OFFSET de aproximação não pula a única linha).
 - Runs iniciadas após o boot (ex.: cron) nunca são marcadas como
   interrompidas (cutoff no reconcile).
 - Atividade que chega durante a sonda de liveness não é ignorada.
