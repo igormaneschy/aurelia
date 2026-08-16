@@ -18,6 +18,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   run/request.
 - Retry de process death injeta contexto recuperado no prompt de retomada
   e eventos de steer são registrados somente quando efetivamente entregues.
+- Timeout liveness-aware: o watchdog sonda o Bridge (ping) em vez de
+  cancelar por silêncio; Bridge vivo mas mudo recebe avisos escalonados
+  (warning → urgent) + steer e só encerra após janela de graça com
+  checkpoint; Bridge morto/travado encerra com origem `process_death`.
+- Avisos de stall não são mais apagados pelos heartbeats (prioridade de
+  stall no indicador de progresso).
+- Notificação de compactação no recibo de progresso (uma vez por run;
+  compactação regressiva sobe como stall_warning).
+- `make deploy` consulta runs ativos antes do kickstart: espera DRAIN_WAIT
+  (5s) e aborta a menos que `FORCE=1`.
+- Runs interrompidas por restart/deploy são marcadas `interrupted`
+  (error=daemon_restart) na inicialização; `debug metrics` expõe o
+  contador.
 
 ### Fixed
 - Run superseded não é mais registrado como completed sem entregar a
@@ -28,6 +41,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   com duração (AVG NULL).
 - Goroutine do watcher de cancelamento de compactação agora tem recovery
   obrigatório.
+- `duration_ms` é persistido na finalização atômica do runlog (percentis
+  de duração funcionam; encontrado na validação live do Telegram).
+- Runs iniciadas após o boot (ex.: cron) nunca são marcadas como
+  interrompidas (cutoff no reconcile).
+- Atividade que chega durante a sonda de liveness não é ignorada.
 
 ### Changed
 - Go toolchain 1.26.6; golang.org/x/net v0.56.0 e x/text v0.39.0
