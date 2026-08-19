@@ -920,7 +920,7 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 			// Flush pending thought block before showing tool
 			if progress != nil {
 				if text := strings.TrimSpace(assistantText.String()); text != "" {
-					progress.ReportText(text)
+					progress.ReportText(redactSecrets(text))
 				}
 				progress.ReportState(ProgressStateWorking, "")
 				progress.ReportTool(toolName, SummarizeToolInput(toolName, ev.Input))
@@ -998,7 +998,7 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 			if time.Since(lastStreamFlush) >= streamFlushInterval {
 				if progress != nil {
 					if text := strings.TrimSpace(assistantText.String()); text != "" {
-						progress.ReportText(text)
+						progress.ReportText(redactSecrets(text))
 					}
 				}
 				// Save partial assistant text for checkpoint on timeout
@@ -1114,7 +1114,7 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 					observability.PhaseBridgeSystem, msg), ownership)
 			}
 		default:
-			log.Printf("Bridge event (ignored): %s", ev.Type)
+			log.Printf("Bridge event (ignored): %s", sanitizeForPersistence(ev.Type, maxRunlogErrorRunes))
 		}
 	}
 

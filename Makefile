@@ -148,7 +148,12 @@ deploy: install install-tui
 		echo "binaries updated at: $(BINARY) and $(TUI_BINARY)"; \
 	fi
 
+# Manual restart without rebuilding. NOTE: unlike `make deploy`, this does
+# NOT run scripts/deploy-guard.sh — it is the manual equivalent of
+# `FORCE=1 make deploy` and will cut any in-flight run (marked `interrupted`
+# in the runlog on next start). Use `make deploy` for guarded restarts.
 restart:
+	@echo "note: make restart skips the deploy guard (equivalent to FORCE=1) — in-flight runs will be interrupted" >&2
 	@if launchctl print $(SERVICE) >/dev/null 2>&1; then \
 		launchctl kickstart -k $(SERVICE); \
 		echo "service restarted"; \

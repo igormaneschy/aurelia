@@ -15,11 +15,16 @@ type recordingProgress struct {
 	mu      sync.Mutex
 	states  []ProgressState
 	details []string
+	texts   []string
 }
 
 func (r *recordingProgress) ReportTool(_, _ string)    {}
 func (r *recordingProgress) ReportToolResult(_ string) {}
-func (r *recordingProgress) ReportText(_ string)       {}
+func (r *recordingProgress) ReportText(text string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.texts = append(r.texts, text)
+}
 func (r *recordingProgress) ReportState(s ProgressState, detail string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -44,6 +49,41 @@ func (r *recordingProgress) firstReport() (ProgressState, string) {
 		return "", ""
 	}
 	return r.states[0], r.details[0]
+}
+
+func (r *recordingProgress) recordedTexts() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, len(r.texts))
+	copy(out, r.texts)
+	return out
+}
+
+// TestProcessBridgeEvents_ProgressTextRedactsBeforeForwarding proves the
+// pipeline boundary, before Telegram/TUI adapters apply user-surface limits.
+func TestProcessBridgeEvents_ProgressTextRedactsBeforeForwarding(t *testing.T) {
+	s := &Service{output: &fakeOutput{}}
+	progress := &recordingProgress{}
+
+	ch := make(chan bridge.Event, 2)
+	ch <- bridge.Event{Type: "assistant", Content: "normal xoxb-12345678901234567890 text"}
+	ch <- bridge.Event{Type: "tool_use", Name: "Read"}
+	close(ch)
+
+	if outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil); outcome != OutcomeProcessDeath {
+		t.Fatalf("outcome = %v, want process-death after closed channel without result", outcome)
+	}
+
+	texts := progress.recordedTexts()
+	if len(texts) != 1 {
+		t.Fatalf("progress texts = %q, want one tool-flush payload", texts)
+	}
+	if strings.Contains(texts[0], "xoxb-") || strings.Contains(texts[0], "12345678901234567890") {
+		t.Fatalf("credential-like content leaked through pipeline progress: %q", texts[0])
+	}
+	if !strings.Contains(texts[0], "normal") || !strings.Contains(texts[0], "text") {
+		t.Fatalf("normal progress text changed unexpectedly: %q", texts[0])
+	}
 }
 
 // TestProcessBridgeEvents_ProgressStates covers the surface-neutral state
