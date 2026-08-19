@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.42.1] - 2026-08-19
+
+### Fixed
+- Watchdog de liveness com correções de concorrência: sends de resultado
+  de probe (normal e panic-recovery) selecionam em `ctx.Done()` para que
+  nenhuma goroutine de probe fique bloqueada após a saída do watchdog;
+  drain pós-probe limitado e ciente de cancelamento impede que atividade
+  retomada seja mascarada em escalada/cancelamento falso; worker de
+  notificação com lifetime amarrado ao wrapper (fila fechada em qualquer
+  caminho de saída); notificações limitadas por timeout (10s) para que um
+  transporte Telegram travado não prenda o worker; panic recovery em toda
+  goroutine nova.
+- Classificação de eventos produtivos endurecida: `tool_use`/`tool_result`
+  vazios não resetam mais a janela de idle.
+- Redação de segredos antes do encaminhamento do texto de progresso e
+  sanitização do tipo de evento ignorado no log de debug.
+- Deploy guard fail-closed: aborta em binário ausente, `WAIT` inválido,
+  `jq` ausente, falha do comando de métricas, JSON malformado e falhas de
+  `date`/`sleep`; `make restart` documentado como equivalente manual de
+  `FORCE=1`.
+
 ## [0.42.0] - 2026-08-16
 
 ### Added
