@@ -163,14 +163,15 @@ func TestNormalizeEventCapsSerializedPayload(t *testing.T) {
 
 // TestNormalizeEvent_ResultContentKeepsStructuredJSON pins the list-models /
 // get-session-history contract: structured result payloads are JSON the Go
-// callers must parse whole. A catalog larger than the 12K text bound (real
-// catalogs reach ~23KB) must survive normalization without being cut
-// mid-JSON — the Go-side truncation regression behind empty model pickers.
+// callers must parse whole. A catalog larger than every historical bound
+// (12K text, then 48K first-attempt) must survive normalization without
+// being cut mid-JSON — the Go-side truncation regression behind empty model
+// pickers. Real daemon catalogs with cloud keys reach tens of KB.
 func TestNormalizeEvent_ResultContentKeepsStructuredJSON(t *testing.T) {
-	models := make([]map[string]any, 0, 160)
-	for i := range 160 {
+	models := make([]map[string]any, 0, 640)
+	for i := range 640 {
 		models = append(models, map[string]any{
-			"provider": "opencode", "id": fmt.Sprintf("model-%03d", i),
+			"provider": fmt.Sprintf("provider-%02d", i%40), "id": fmt.Sprintf("model-%03d", i),
 			"name": fmt.Sprintf("Model %03d long display name for catalog fixture", i), "supportsImages": false,
 		})
 	}

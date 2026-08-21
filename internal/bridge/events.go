@@ -13,10 +13,10 @@ import (
 const (
 	// maxEventPayloadBytes bounds one normalized event crossing the Go
 	// boundary. The request stream has a separate aggregate byte budget.
-	// The TS bridge never emits a serialized event above its own 64KB
-	// MAX_OUT_EVENT_BYTES, so this backstop sits above that with headroom
-	// and only triggers on hostile/buggy bridge output.
-	maxEventPayloadBytes = 80 * 1024
+	// The TS bridge never emits a serialized event above its own
+	// MAX_OUT_EVENT_BYTES (320KB), so this backstop sits above that with
+	// headroom and only triggers on hostile/buggy bridge output.
+	maxEventPayloadBytes = 384 * 1024
 	// maxEventTextBytes bounds free text (streaming deltas, messages, log
 	// content). Structured JSON result payloads have their own bound below.
 	maxEventTextBytes = 12 * 1024
@@ -24,8 +24,9 @@ const (
 	// MAX_RESULT_CONTENT_RUNES for structured result payloads (list-models,
 	// get-session-history): they are JSON the Go callers must parse whole,
 	// so cutting them at the text bound produces invalid JSON and empty
-	// catalogs/histories downstream.
-	maxEventResultContentBytes = 48 * 1024
+	// catalogs/histories downstream. Daemon catalogs with cloud provider
+	// keys exceed 48KB; 256KB leaves ~10x headroom.
+	maxEventResultContentBytes = 256 * 1024
 	maxEventIDBytes            = 128
 	maxEventInputBytes         = 4 * 1024
 	maxEventListEntries        = 64

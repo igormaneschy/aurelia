@@ -61,10 +61,10 @@ describe("serializeOutEvent", () => {
     const line = serializeOutEvent({
       event: "result",
       request_id: "bounded-1",
-      content: "x".repeat(200_000),
+      content: "x".repeat(400_000),
       nested: huge,
     });
-    assert.ok(Buffer.byteLength(line, "utf8") <= 64 * 1024);
+    assert.ok(Buffer.byteLength(line, "utf8") <= 320 * 1024);
     const parsed = JSON.parse(line) as Record<string, unknown>;
     assert.strictEqual(parsed.event, "result");
     assert.strictEqual(parsed.request_id, "bounded-1");
@@ -73,8 +73,8 @@ describe("serializeOutEvent", () => {
 
   it("keeps structured result JSON parseable up to the result content cap", () => {
     // list-models / get-session-history payloads are JSON the Go side must
-    // parse whole. A payload larger than the 16K text cap but under the 48K
-    // result cap must survive sanitization intact and still parse.
+    // parse whole. A payload larger than the 16K text cap but under the
+    // 256K result cap must survive sanitization intact and still parse.
     const models = Array.from({ length: 300 }, (_, i) => ({
       provider: "opencode",
       id: `model-${i}`,

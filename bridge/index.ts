@@ -339,11 +339,15 @@ const MAX_TELEMETRY_LABEL_RUNES = 128;
 const MAX_EVENT_TEXT_RUNES = 16 * 1024;
 // Structured result payloads (list-models, get-session-history, stats) are
 // JSON the Go side must parse whole; the 16K text cap would cut them mid-
-// JSON. Allow up to 48K runes for result content, still bounded well below
-// the 64KB serialized-event cap so the fallback path stays reachable.
-const MAX_RESULT_CONTENT_RUNES = 48 * 1024;
+// JSON. Daemon catalogs with cloud provider keys exceed 48KB, so allow up
+// to 256K runes for result content, still bounded well below the 320KB
+// serialized-event cap so the fallback path stays reachable.
+const MAX_RESULT_CONTENT_RUNES = 256 * 1024;
 const MAX_EVENT_VALUE_RUNES = 2048;
-const MAX_OUT_EVENT_BYTES = 64 * 1024;
+// Serialized-event ceiling. Must stay above the largest legitimate event:
+// a full model catalog summary approaches ~64KB, so keep ~5x headroom while
+// bounding one NDJSON line far below the Go reader's 10MB scanner limit.
+const MAX_OUT_EVENT_BYTES = 320 * 1024;
 const MAX_BRIDGE_REQUEST_BYTES = 256 * 1024;
 const MAX_TOOL_INPUT_DEPTH = 3;
 const MAX_TOOL_INPUT_KEYS = 32;
