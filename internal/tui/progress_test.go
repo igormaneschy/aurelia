@@ -45,7 +45,7 @@ func TestStreamProgress_ResetOnStreamEnd(t *testing.T) {
 func TestElapsedLabel_UsesTimerPrefix(t *testing.T) {
 	m := testChatModel()
 	m.turnStart = time.Now().Add(-3200 * time.Millisecond)
-	l := m.elapsedLabel()
+	l := stripANSIForTest(m.elapsedLabel())
 	if !strings.HasPrefix(l, "⏱ ") {
 		t.Fatalf("%q", l)
 	}

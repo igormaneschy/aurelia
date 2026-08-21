@@ -118,6 +118,28 @@ func TestRenderModalOverlay_FormUsesModal(t *testing.T) {
 	}
 }
 
+// TestOverlayPanel_UsesThemedBorder pins the modal border to the theme token:
+// dark renders with the dark accent (205), light with the light accent (125).
+func TestOverlayPanel_UsesThemedBorder(t *testing.T) {
+	dark := testChatModel()
+	dark.width = 80
+	dark.height = 24
+	darkView := dark.overlayPanel("bg", "panel")
+	if !strings.Contains(darkView, "38;5;205") {
+		t.Fatal("expected dark modal border color 205 in overlay output")
+	}
+
+	light := testChatModel()
+	light.theme = ThemeLight
+	light.styles = newStylesForTheme(ThemeLight)
+	light.width = 80
+	light.height = 24
+	lightView := light.overlayPanel("bg", "panel")
+	if !strings.Contains(lightView, "38;5;125") {
+		t.Fatal("expected light modal border color 125 in overlay output")
+	}
+}
+
 func TestToggleProjectPanel_FetchesState(t *testing.T) {
 	m := testChatModel()
 	m.activeSession = ipc.ReservedTUIChatID

@@ -174,7 +174,7 @@ func (m *Model) renderMessages(messages []chatMessage, width int) string {
 
 		bodyText := msg.Text
 		if m.historySearch.active && m.historySearch.query != "" {
-			bodyText = highlightSearchText(bodyText, globalIndex, activeMatch, m.historySearch.matches, m.styles.SearchHighlightStyle)
+			bodyText = highlightSearchText(bodyText, globalIndex, activeMatch, m.historySearch.matches, m.styles.SearchActiveMatchStyle)
 		}
 		bodyWidth := messageBodyWidth(width)
 		userBodyWidth := m.userMessageWrapWidth(width)
@@ -263,7 +263,7 @@ func renderEmptyState(width int, styles themeStyles) string {
 	)
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("238")).
+		BorderForeground(styles.CodeBlockBorderStyle.GetForeground()).
 		Padding(1, 2).
 		Width(contentWidth).
 		Render(title + "\n\n" + hint)

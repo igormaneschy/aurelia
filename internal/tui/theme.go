@@ -60,6 +60,20 @@ type themeStyles struct {
 	MessageSeparatorStyle lipgloss.Style
 	ChatModeStyle         lipgloss.Style
 	SearchHighlightStyle  lipgloss.Style
+
+	// Overlays, badges, and search chrome. Every view-layer color must come
+	// from here so light/dark themes stay consistent.
+	ModalBorderStyle          lipgloss.Style // border color for centered overlay panels
+	AutocompleteStyle         lipgloss.Style
+	PendingBadgeStyle         lipgloss.Style // queued-message badge
+	ImageBadgeStyle           lipgloss.Style // pending image attachments (muted)
+	DocBadgeStyle             lipgloss.Style // pending document attachments (accent)
+	CodeBlockBorderStyle      lipgloss.Style // empty-state / code block frames
+	SpinnerStyle              lipgloss.Style
+	SearchHintStyle           lipgloss.Style // muted search bar text
+	SearchBarAccentStyle      lipgloss.Style // search bar icon/accent
+	SearchActiveMatchStyle    lipgloss.Style // current match marker in transcript
+	SidebarPrimaryActionStyle lipgloss.Style // "+ New session" button
 }
 
 // Theme represents the TUI color theme.
@@ -276,6 +290,18 @@ func newDarkStyles() themeStyles {
 			Background(lipgloss.Color("236")),
 		ProgressBarStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
 		ProgressFullColor: "244", ProgressEmptyColor: "238",
+
+		ModalBorderStyle:          lipgloss.NewStyle().Foreground(lipgloss.Color("205")),
+		AutocompleteStyle:         lipgloss.NewStyle().Foreground(lipgloss.Color("111")),
+		PendingBadgeStyle:         lipgloss.NewStyle().Foreground(lipgloss.Color("214")),
+		ImageBadgeStyle:           lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Italic(true),
+		DocBadgeStyle:             lipgloss.NewStyle().Foreground(lipgloss.Color("226")),
+		CodeBlockBorderStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color("238")),
+		SpinnerStyle:              lipgloss.NewStyle().Foreground(lipgloss.Color("205")),
+		SearchHintStyle:           lipgloss.NewStyle().Foreground(lipgloss.Color("244")),
+		SearchBarAccentStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color("111")),
+		SearchActiveMatchStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("229")).Background(lipgloss.Color("166")).Bold(true).Underline(true),
+		SidebarPrimaryActionStyle: lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("205")).Foreground(lipgloss.Color("205")).Padding(0, 1),
 	}
 }
 
@@ -399,5 +425,17 @@ func newLightStyles() themeStyles {
 			Background(lipgloss.Color("254")),
 		ProgressBarStyle:  lipgloss.NewStyle().Foreground(lipgloss.Color("245")),
 		ProgressFullColor: "245", ProgressEmptyColor: "250",
+
+		ModalBorderStyle:          lipgloss.NewStyle().Foreground(lipgloss.Color("125")),
+		AutocompleteStyle:         lipgloss.NewStyle().Foreground(lipgloss.Color("25")),
+		PendingBadgeStyle:         lipgloss.NewStyle().Foreground(lipgloss.Color("130")),
+		ImageBadgeStyle:           lipgloss.NewStyle().Foreground(lipgloss.Color("245")).Italic(true),
+		DocBadgeStyle:             lipgloss.NewStyle().Foreground(lipgloss.Color("130")),
+		CodeBlockBorderStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color("248")),
+		SpinnerStyle:              lipgloss.NewStyle().Foreground(lipgloss.Color("125")),
+		SearchHintStyle:           lipgloss.NewStyle().Foreground(lipgloss.Color("240")),
+		SearchBarAccentStyle:      lipgloss.NewStyle().Foreground(lipgloss.Color("25")),
+		SearchActiveMatchStyle:    lipgloss.NewStyle().Foreground(lipgloss.Color("235")).Background(lipgloss.Color("130")).Bold(true).Underline(true),
+		SidebarPrimaryActionStyle: lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("125")).Foreground(lipgloss.Color("125")).Padding(0, 1),
 	}
 }

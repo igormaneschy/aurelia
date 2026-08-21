@@ -192,9 +192,7 @@ func (m Model) renderAutocomplete() string {
 		}
 		parts = append(parts, label)
 	}
-	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("111")).
-		Render(strings.Join(parts, "  "))
+	return m.styles.AutocompleteStyle.Render(strings.Join(parts, "  "))
 }
 
 func (m Model) renderPendingQueueBadge() string {
@@ -202,9 +200,7 @@ func (m Model) renderPendingQueueBadge() string {
 	if count == 0 {
 		return ""
 	}
-	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("214")).
-		Render(fmt.Sprintf("⏳ %d pending", count))
+	return m.styles.PendingBadgeStyle.Render(fmt.Sprintf("⏳ %d pending", count))
 }
 
 // renderPendingImageBadges renders a line of image badges above the input.
@@ -216,14 +212,11 @@ func (m Model) renderPendingImageBadges() string {
 	for _, img := range m.pendingImages {
 		names = append(names, img.name)
 	}
-	badgeStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("243")).
-		Italic(true)
-	return badgeStyle.Render(fmt.Sprintf("📎 %s", strings.Join(names, ", ")))
+	return m.styles.ImageBadgeStyle.Render(fmt.Sprintf("📎 %s", strings.Join(names, ", ")))
 }
 
 // renderPendingAttachmentBadges renders a line of document attachment badges
-// above the input. Uses distinct styling (yellow) from image badges (grey).
+// above the input. Uses distinct styling (accent) from image badges (muted).
 func (m Model) renderPendingAttachmentBadges() string {
 	if len(m.pendingAttachments) == 0 {
 		return ""
@@ -232,9 +225,7 @@ func (m Model) renderPendingAttachmentBadges() string {
 	for _, att := range m.pendingAttachments {
 		badges = append(badges, fmt.Sprintf("[📎 %s]", att.name))
 	}
-	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("226")).
-		Render(strings.Join(badges, " "))
+	return m.styles.DocBadgeStyle.Render(strings.Join(badges, " "))
 }
 
 func renderPromptedTextarea(prompt, rawPrompt, text string) string {
@@ -419,7 +410,7 @@ func (m Model) overlayPanel(bg, panel string) string {
 
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("205")).
+		BorderForeground(m.styles.ModalBorderStyle.GetForeground()).
 		Padding(1, 2).
 		Width(panelWidth).
 		Render(panel)

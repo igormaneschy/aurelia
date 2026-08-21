@@ -28,6 +28,7 @@ func stylesForAppearance(theme Theme, transparent bool) themeStyles {
 
 func (m *Model) applyChromeTheme() {
 	m.styles = stylesForAppearance(m.theme, m.transparent)
+	m.spinner.Style = m.styles.SpinnerStyle
 	m.helpModel = newHelpModel(m.styles, m.theme)
 	m.sidebarTable.SetStyles(sidebarTableStyles(m.styles))
 	if m.streamProgress.active {

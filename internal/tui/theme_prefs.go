@@ -36,12 +36,19 @@ func LoadTUIPrefs() TUIPrefs {
 	if err := json.Unmarshal(data, &prefs); err != nil {
 		return TUIPrefs{}
 	}
-	switch prefs.Theme {
-	case ThemeAuto, ThemeLight, ThemeDark:
-	default:
-		prefs.Theme = ThemeAuto
-	}
+	prefs.Theme = normalizeStoredTheme(prefs.Theme)
 	return prefs
+}
+
+// normalizeStoredTheme maps missing or invalid stored themes to the dark
+// default. Explicitly saved values ("auto", "light", "dark") are preserved.
+func normalizeStoredTheme(t Theme) Theme {
+	switch t {
+	case ThemeAuto, ThemeLight, ThemeDark:
+		return t
+	default:
+		return ThemeDark
+	}
 }
 
 func saveTUIPrefs(prefs TUIPrefs) error {

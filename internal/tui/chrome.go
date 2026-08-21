@@ -129,11 +129,12 @@ func (m Model) activeModelLabel() string {
 }
 
 func (m Model) mouseStatusLabel() string {
-	if m.mouseEnabled {
-		return "🖱️ mouse"
+	label := "✋ mouse (Ctrl+O)"
+	switch {
+	case m.mouseEnabled:
+		label = "🖱️ mouse"
+	case m.noMouse:
+		label = "✋ mouse"
 	}
-	if m.noMouse {
-		return "✋ mouse"
-	}
-	return "✋ mouse (Ctrl+O)"
+	return m.styles.HeaderMetaStyle.Render(label)
 }
