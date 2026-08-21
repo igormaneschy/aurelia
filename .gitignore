@@ -92,3 +92,7 @@ internal/bridge/bundle.js
 # Personal study notes
 ESTUDO.md
 
+
+# OpenSpec durable artifacts (override generic specs/ ignore)
+!openspec/specs/
+!openspec/changes/archive/*/specs/
