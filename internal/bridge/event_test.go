@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -157,5 +158,52 @@ func TestNormalizeEventCapsSerializedPayload(t *testing.T) {
 	}
 	if got.Content == "" {
 		t.Fatal("terminal result content was discarded while bounding payload")
+	}
+}
+
+// TestNormalizeEvent_ResultContentKeepsStructuredJSON pins the list-models /
+// get-session-history contract: structured result payloads are JSON the Go
+// callers must parse whole. A catalog larger than the 12K text bound (real
+// catalogs reach ~23KB) must survive normalization without being cut
+// mid-JSON — the Go-side truncation regression behind empty model pickers.
+func TestNormalizeEvent_ResultContentKeepsStructuredJSON(t *testing.T) {
+	models := make([]map[string]any, 0, 160)
+	for i := range 160 {
+		models = append(models, map[string]any{
+			"provider": "opencode", "id": fmt.Sprintf("model-%03d", i),
+			"name": fmt.Sprintf("Model %03d long display name for catalog fixture", i), "supportsImages": false,
+		})
+	}
+	content, err := json.Marshal(models)
+	if err != nil {
+		t.Fatalf("marshal fixture: %v", err)
+	}
+	if len(content) <= maxEventTextBytes {
+		t.Fatalf("fixture too small (%d bytes); must exceed the %d text bound", len(content), maxEventTextBytes)
+	}
+
+	got := normalizeEvent(Event{Type: "result", Content: string(content)})
+	if got.Content != string(content) {
+		t.Fatalf("result content was altered by normalization: got %d bytes, want %d", len(got.Content), len(content))
+	}
+	var parsed []map[string]any
+	if err := json.Unmarshal([]byte(got.Content), &parsed); err != nil {
+		t.Fatalf("normalized result content no longer parses: %v", err)
+	}
+}
+
+// TestNormalizeEvent_NonResultTextStillBounded guards the other direction:
+// streaming text, messages, and non-result content keep the tight 12K bound.
+func TestNormalizeEvent_NonResultTextStillBounded(t *testing.T) {
+	big := strings.Repeat("x", maxEventTextBytes+2048)
+
+	got := normalizeEvent(Event{Type: "assistant", Text: big})
+	if len(got.Text) != maxEventTextBytes {
+		t.Fatalf("assistant text = %d bytes, want %d", len(got.Text), maxEventTextBytes)
+	}
+
+	got = normalizeEvent(Event{Type: "log", Content: big})
+	if len(got.Content) != maxEventTextBytes {
+		t.Fatalf("log content = %d bytes, want %d", len(got.Content), maxEventTextBytes)
 	}
 }

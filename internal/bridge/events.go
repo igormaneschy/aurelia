@@ -13,13 +13,24 @@ import (
 const (
 	// maxEventPayloadBytes bounds one normalized event crossing the Go
 	// boundary. The request stream has a separate aggregate byte budget.
-	maxEventPayloadBytes = 16 * 1024
-	maxEventTextBytes    = 12 * 1024
-	maxEventIDBytes      = 128
-	maxEventInputBytes   = 4 * 1024
-	maxEventListEntries  = 64
-	maxEventMetric       = 100_000_000
-	maxEventDurationMs   = int64(24 * time.Hour / time.Millisecond)
+	// The TS bridge never emits a serialized event above its own 64KB
+	// MAX_OUT_EVENT_BYTES, so this backstop sits above that with headroom
+	// and only triggers on hostile/buggy bridge output.
+	maxEventPayloadBytes = 80 * 1024
+	// maxEventTextBytes bounds free text (streaming deltas, messages, log
+	// content). Structured JSON result payloads have their own bound below.
+	maxEventTextBytes = 12 * 1024
+	// maxEventResultContentBytes mirrors the TS bridge's
+	// MAX_RESULT_CONTENT_RUNES for structured result payloads (list-models,
+	// get-session-history): they are JSON the Go callers must parse whole,
+	// so cutting them at the text bound produces invalid JSON and empty
+	// catalogs/histories downstream.
+	maxEventResultContentBytes = 48 * 1024
+	maxEventIDBytes            = 128
+	maxEventInputBytes         = 4 * 1024
+	maxEventListEntries        = 64
+	maxEventMetric             = 100_000_000
+	maxEventDurationMs         = int64(24 * time.Hour / time.Millisecond)
 
 	// maxRequestStreamBytes is enforced by requestStream across its fast
 	// channel and overflow queue. Terminal delivery may evict non-terminals
@@ -225,7 +236,11 @@ func normalizeEvent(ev Event) Event {
 		ev.ToolCallID = safeEventID(ev.ID)
 	}
 	ev.ID = ev.ToolCallID
-	ev.Content = boundedEventText(ev.Content, maxEventTextBytes)
+	contentBound := maxEventTextBytes
+	if ev.Type == "result" {
+		contentBound = maxEventResultContentBytes
+	}
+	ev.Content = boundedEventText(ev.Content, contentBound)
 	ev.Text = boundedEventText(ev.Text, maxEventTextBytes)
 	ev.Message = boundedEventText(ev.Message, maxEventTextBytes)
 	ev.Input = normalizeEventInput(ev.Input)
