@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.43.0] - 2026-08-21
+
+### Added
+- TUI: tokens de design semânticos no tema (borda de modais, badges,
+  busca, spinner, ação primária da sidebar); cores hardcoded fora de
+  theme.go migradas para o sistema de tema (dark/light consistentes).
+- TUI: tema escuro como padrão — `--theme` e prefs ausentes/inválidas
+  caem em dark; auto/light/dark continuam disponíveis.
+
+### Changed
+- TUI: régua do header com traço único silencioso (sem padrão animado
+  ░▒▓); chips de saúde com dot monocromático colorido por estado.
+- TUI: sessão ativa na sidebar sempre em accent; botão "+ New session"
+  promovido a ação primária.
+- TUI: status bar com hierarquia visual (hints muted, badge ⏳ e timer
+  estilizados, separadores esmaecidos).
+
+### Fixed
+- Bridge: catálogo de modelos truncado em camadas deixava o seletor de
+  modelos vazio na TUI e no Telegram (/model) — caps de payload
+  estruturado elevados em coerência TS/Go (result content 256K, evento
+  320/384K, orçamento agregado 16MB); texto de streaming segue em 12K.
+
 ## [0.42.1] - 2026-08-19
 
 ### Fixed
