@@ -9,19 +9,6 @@ import (
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
 
-func (m Model) healthChipIcon() string {
-	switch m.chromeState() {
-	case "ready":
-		return "🟢"
-	case "waiting", "connecting":
-		return "🟡"
-	case "offline", "error":
-		return "🔴"
-	default:
-		return "🟡"
-	}
-}
-
 func (m Model) renderHealthChip() string {
 	state := m.chromeState()
 	if m.waiting {
@@ -32,7 +19,8 @@ func (m Model) renderHealthChip() string {
 		return spinnerView + " thinking" + thinkingDots()
 	}
 
-	label := fmt.Sprintf("%s %s", m.healthChipIcon(), state)
+	// Monochrome dot; the caller's Status* style supplies the state color.
+	label := fmt.Sprintf("● %s", state)
 	switch state {
 	case "offline", "error":
 		return m.styles.StatusErrorStyle.Render(label)
@@ -75,18 +63,10 @@ func (m Model) headerMetaChips() []string {
 }
 
 func (m Model) decorativeHeaderRule(width int) string {
-	var runes []rune
-	if m.animations.enabled {
-		runes = []rune("░▒▓")
-	} else {
-		runes = []rune("─")
-	}
+	// Single-tone rule: quiet enough to sit above long transcripts while
+	// still separating the header from the chat body.
 	repeat := maxInt(20, width)
-	var b strings.Builder
-	for i := 0; i < repeat; i++ {
-		b.WriteRune(runes[i%len(runes)])
-	}
-	return m.styles.HeaderRuleStyle.Render(b.String())
+	return m.styles.HeaderRuleStyle.Render(strings.Repeat("─", repeat))
 }
 
 func (m Model) renderChatHeaderTitleLine(width int, sessionName string) string {

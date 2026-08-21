@@ -179,10 +179,16 @@ func (m *Model) syncSidebarRows() {
 		label = truncateMiddle(label, sidebarColNameWidth)
 
 		icon := m.sessionNavIcon(i, s) + " " + m.sessionEmoji(s)
-		if s.ChatID == m.activeSession &&
+		isActive := s.ChatID == m.activeSession
+		if isActive &&
 			!m.sessionFlashUntil.IsZero() && time.Now().Before(m.sessionFlashUntil) &&
 			m.animations.enabled && m.animations.BadgeScale() > 1.05 {
 			icon = m.styles.SidebarActiveStyle.Render(icon)
+		}
+		// Persistent accent on the active row so it stays scannable when
+		// the cursor/hover highlight is elsewhere.
+		if isActive {
+			label = m.styles.SidebarActiveStyle.Render(label)
 		}
 
 		rows = append(rows, table.Row{icon, label, formatSidebarBadgeCell(m.styles, m.sessionUnreadBadge(s.ChatID))})
@@ -242,7 +248,8 @@ func (m Model) renderSidebarContextPanel() string {
 
 func (m Model) renderSidebarHealthChip() string {
 	state := m.chromeState()
-	label := fmt.Sprintf("%s %s", m.healthChipIcon(), state)
+	// Monochrome dot; the Status* style supplies the state color.
+	label := fmt.Sprintf("● %s", state)
 	switch state {
 	case "offline", "error":
 		return m.styles.StatusErrorStyle.Render(label)
@@ -255,7 +262,7 @@ func (m Model) renderSidebarHealthChip() string {
 
 func (m Model) renderSidebarActionsPanel() string {
 	section := m.styles.SidebarSectionStyle.Render("Actions")
-	button := m.styles.SidebarButtonStyle.Render(" + New session ")
+	button := m.styles.SidebarPrimaryActionStyle.Render("+ New session")
 	return "\n" + m.sidebarSectionRule() + "\n" + section + "\n" + button
 }
 
@@ -306,8 +313,7 @@ func (m Model) renderSidebarTable() string {
 		return lipgloss.NewStyle().
 			Width(sidebarWidth).
 			Padding(1, 2).
-			Foreground(lipgloss.Color("243")).
-			Render("(no sessions)")
+			Render(m.styles.SidebarMutedStyle.Render("(no sessions)"))
 	}
 
 	var b strings.Builder

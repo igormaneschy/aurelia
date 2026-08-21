@@ -178,6 +178,58 @@ rl.on('close', () => process.exit(0));
 	}
 }
 
+// TestBridge_ListModels_ParsesCatalogAbove12KB reproduces the empty model
+// picker: a real catalog (~23KB) crossed the bridge intact but the Go event
+// normalizer cut it at the 12K text bound, so json.Unmarshal failed and
+// ListModels degraded to an empty catalog. The full payload must survive.
+func TestBridge_ListModels_ParsesCatalogAbove12KB(t *testing.T) {
+	dir := t.TempDir()
+
+	bigCatalogMockJS := `
+const readline = require('readline');
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
+rl.on('line', (line) => {
+    const req = JSON.parse(line);
+    const rid = req.request_id || "";
+    if (req.command !== "list-models") {
+        process.stdout.write(JSON.stringify({event:"error", request_id:rid, message:"unknown command"}) + "\n");
+        return;
+    }
+    const models = [];
+    for (let i = 0; i < 160; i++) {
+        models.push({
+            provider: "opencode",
+            id: "model-" + String(i).padStart(3, "0"),
+            name: "Model " + String(i).padStart(3, "0") + " long display name for catalog fixture",
+            supportsImages: false
+        });
+    }
+    const content = JSON.stringify(models);
+    if (Buffer.byteLength(content, "utf8") <= 12 * 1024) {
+        process.stdout.write(JSON.stringify({event:"error", request_id:rid, message:"fixture catalog not big enough"}) + "\n");
+        return;
+    }
+    process.stdout.write(JSON.stringify({event:"result", request_id:rid, content}) + "\n");
+});
+rl.on('close', () => process.exit(0));
+`
+	b := newMockBridge(t, dir, bigCatalogMockJS)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	models, err := b.ListModels(ctx, false)
+	if err != nil {
+		t.Fatalf("ListModels() error: %v", err)
+	}
+	if len(models) != 160 {
+		t.Fatalf("ListModels() returned %d models, want 160 (payload must not be truncated)", len(models))
+	}
+	if models[0].ID != "model-000" || models[159].ID != "model-159" {
+		t.Fatalf("catalog tail lost — truncation still happening: first=%q last=%q", models[0].ID, models[159].ID)
+	}
+}
+
 func TestBridge_Execute_ErrorEvent(t *testing.T) {
 	dir := t.TempDir()
 

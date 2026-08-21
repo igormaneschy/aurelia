@@ -66,7 +66,11 @@ func (m Model) statusBarSegments() []statusBarSegment {
 		if item.min > 0 && m.width < item.min {
 			continue
 		}
-		segments = append(segments, statusBarSegment{label: item.label})
+		// Keybinding hints are secondary information: muted so functional
+		// badges (pending, elapsed, theme) read first.
+		segments = append(segments, statusBarSegment{
+			label: m.styles.HeaderMetaStyle.Render(item.label),
+		})
 	}
 
 	return segments
@@ -92,7 +96,8 @@ func (m Model) renderStatusBar() string {
 		parts = append(parts, m.renderStatusBarSegment(seg))
 	}
 
-	content := strings.Join(parts, statusBarSegmentSep)
+	sep := m.styles.MessageSeparatorStyle.Render(statusBarSegmentSep)
+	content := strings.Join(parts, sep)
 	width := m.composerColumnWidth()
 	border := m.styles.MessageSeparatorStyle.Render(strings.Repeat("─", maxInt(20, width)))
 	return border + "\n" + m.styles.StatusBarStyle.Width(maxInt(20, width)).Render(content)
@@ -104,7 +109,7 @@ func (m Model) pendingCountLabel() string {
 	if count == 0 {
 		return ""
 	}
-	return fmt.Sprintf("⏳ %d", count)
+	return m.styles.PendingBadgeStyle.Render(fmt.Sprintf("⏳ %d", count))
 }
 
 // elapsedLabel returns the elapsed time label for the status bar.
@@ -118,5 +123,5 @@ func (m Model) elapsedLabel() string {
 	default:
 		return ""
 	}
-	return "⏱ " + formatElapsed(elapsed)
+	return m.styles.HeaderMetaStyle.Render("⏱ " + formatElapsed(elapsed))
 }

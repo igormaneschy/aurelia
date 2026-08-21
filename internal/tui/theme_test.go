@@ -59,6 +59,17 @@ func TestNewDarkStylesPopulatesAllFields(t *testing.T) {
 	checkRenderable("MessageSeparatorStyle", s.MessageSeparatorStyle)
 	checkRenderable("MessageDividerStyle", s.MessageDividerStyle)
 	checkRenderable("ChatModeStyle", s.ChatModeStyle)
+	checkRenderable("ModalBorderStyle", s.ModalBorderStyle)
+	checkRenderable("AutocompleteStyle", s.AutocompleteStyle)
+	checkRenderable("PendingBadgeStyle", s.PendingBadgeStyle)
+	checkRenderable("ImageBadgeStyle", s.ImageBadgeStyle)
+	checkRenderable("DocBadgeStyle", s.DocBadgeStyle)
+	checkRenderable("CodeBlockBorderStyle", s.CodeBlockBorderStyle)
+	checkRenderable("SpinnerStyle", s.SpinnerStyle)
+	checkRenderable("SearchHintStyle", s.SearchHintStyle)
+	checkRenderable("SearchBarAccentStyle", s.SearchBarAccentStyle)
+	checkRenderable("SearchActiveMatchStyle", s.SearchActiveMatchStyle)
+	checkRenderable("SidebarPrimaryActionStyle", s.SidebarPrimaryActionStyle)
 }
 
 // TestNewLightStylesPopulatesAllFields ensures the light theme has all fields
@@ -102,6 +113,17 @@ func TestNewLightStylesPopulatesAllFields(t *testing.T) {
 	checkRenderable("MessageSeparatorStyle", s.MessageSeparatorStyle)
 	checkRenderable("MessageDividerStyle", s.MessageDividerStyle)
 	checkRenderable("ChatModeStyle", s.ChatModeStyle)
+	checkRenderable("ModalBorderStyle", s.ModalBorderStyle)
+	checkRenderable("AutocompleteStyle", s.AutocompleteStyle)
+	checkRenderable("PendingBadgeStyle", s.PendingBadgeStyle)
+	checkRenderable("ImageBadgeStyle", s.ImageBadgeStyle)
+	checkRenderable("DocBadgeStyle", s.DocBadgeStyle)
+	checkRenderable("CodeBlockBorderStyle", s.CodeBlockBorderStyle)
+	checkRenderable("SpinnerStyle", s.SpinnerStyle)
+	checkRenderable("SearchHintStyle", s.SearchHintStyle)
+	checkRenderable("SearchBarAccentStyle", s.SearchBarAccentStyle)
+	checkRenderable("SearchActiveMatchStyle", s.SearchActiveMatchStyle)
+	checkRenderable("SidebarPrimaryActionStyle", s.SidebarPrimaryActionStyle)
 }
 
 // TestLightThemeDiffersFromDark verifies the light palette is not a copy of dark.
@@ -114,6 +136,26 @@ func TestLightThemeDiffersFromDark(t *testing.T) {
 	lightBg := renderColored(light.StatusBarStyle, "x")
 	if darkBg == lightBg {
 		t.Error("light StatusBarStyle should differ from dark")
+	}
+}
+
+// TestNormalizeStoredTheme validates that missing or invalid stored themes
+// fall back to the dark default while explicit values are preserved.
+func TestNormalizeStoredTheme(t *testing.T) {
+	tests := []struct {
+		input    Theme
+		expected Theme
+	}{
+		{ThemeAuto, ThemeAuto},
+		{ThemeLight, ThemeLight},
+		{ThemeDark, ThemeDark},
+		{"", ThemeDark},
+		{"banana", ThemeDark},
+	}
+	for _, tt := range tests {
+		if got := normalizeStoredTheme(tt.input); got != tt.expected {
+			t.Errorf("normalizeStoredTheme(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
 	}
 }
 

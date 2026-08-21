@@ -7,9 +7,13 @@ import (
 const (
 	// eventOverflowBuffer is the per-request spillover capacity when the fast
 	// channel buffer is full. Events beyond channel+overflow are dropped.
-	eventOverflowBuffer     = 512
+	eventOverflowBuffer = 512
 	maxActiveRequestStreams = 32
-	maxAggregateStreamBytes = 4 * 1024 * 1024
+	// maxAggregateStreamBytes bounds total queued stdout-derived bytes. It
+	// must stay comfortably above the worst-case terminal reserve
+	// (maxActiveRequestStreams × maxEventPayloadBytes) so non-terminal
+	// delivery keeps working while every ordinary stream slot is occupied.
+	maxAggregateStreamBytes = 16 * 1024 * 1024
 )
 
 // aggregateStreamBudget bounds the total queued stdout-derived event bytes

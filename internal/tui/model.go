@@ -12,7 +12,6 @@ import (
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 
 	"github.com/igormaneschy/aurelia/internal/ipc"
 )
@@ -115,7 +114,6 @@ func NewModelWithOptions(socketPath string, theme Theme, opts ModelOptions) Mode
 
 func newModel(socketPath, historyPath string, theme Theme, opts ModelOptions) Model {
 	s := spinner.New()
-	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
 	ta := textarea.New()
 	ta.Prompt = ""
@@ -130,6 +128,7 @@ func newModel(socketPath, historyPath string, theme Theme, opts ModelOptions) Mo
 	inputHistory := loadInputHistory(historyPath)
 
 	styles := stylesForAppearance(theme, opts.Transparent)
+	s.Style = styles.SpinnerStyle
 	m := Model{
 		state:      stateLoading,
 		socketPath: socketPath,

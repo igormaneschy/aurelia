@@ -181,16 +181,15 @@ func (m Model) renderSearchBar() string {
 	count := len(m.historySearch.matches)
 	pos := ""
 	if count > 0 {
-		pos = lipgloss.NewStyle().Foreground(lipgloss.Color("244")).
-			Render(strings.TrimSpace(" " + formatSearchPos(m.historySearch.matchCursor+1, count)))
+		pos = m.styles.SearchHintStyle.Render(strings.TrimSpace(" " + formatSearchPos(m.historySearch.matchCursor+1, count)))
 	}
 	query := m.historySearch.query
 	if query == "" {
-		query = lipgloss.NewStyle().Italic(true).Foreground(lipgloss.Color("244")).Render("type to search…")
+		query = m.styles.SearchHintStyle.Italic(true).Render("type to search…")
 	} else {
 		query = m.styles.SearchHighlightStyle.Render(query)
 	}
-	line := lipgloss.NewStyle().Foreground(lipgloss.Color("111")).Render("🔍 ") + query + pos
+	line := m.styles.SearchBarAccentStyle.Render("🔍 ") + query + pos
 	return lipgloss.NewStyle().Width(maxInt(20, m.width-4)).Render(line)
 }
 
@@ -201,17 +200,8 @@ func formatSearchPos(cur, total int) string {
 	return "(" + strconv.Itoa(cur) + "/" + strconv.Itoa(total) + ")"
 }
 
-func activeSearchStyle() lipgloss.Style {
-	// High-contrast marker without Reverse (reverse paints whole cells in tables).
-	return lipgloss.NewStyle().
-		Foreground(lipgloss.Color("229")).
-		Background(lipgloss.Color("166")).
-		Bold(true).
-		Underline(true)
-}
-
 // highlightSearchText marks only the active match on the current message.
-func highlightSearchText(text string, msgIndex int, activeCursor int, matches []searchMatch, _ lipgloss.Style) string {
+func highlightSearchText(text string, msgIndex int, activeCursor int, matches []searchMatch, active lipgloss.Style) string {
 	if len(matches) == 0 || activeCursor < 0 || activeCursor >= len(matches) {
 		return text
 	}
@@ -223,7 +213,7 @@ func highlightSearchText(text string, msgIndex int, activeCursor int, matches []
 	if end > len(text) {
 		end = len(text)
 	}
-	return text[:match.start] + activeSearchStyle().Render(text[match.start:end]) + text[end:]
+	return text[:match.start] + active.Render(text[match.start:end]) + text[end:]
 }
 
 func lineOffsetBeforeMessage(content string, messageIndex int) int {

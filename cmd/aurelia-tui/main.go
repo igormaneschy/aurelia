@@ -18,7 +18,9 @@ import (
 
 func main() {
 	prefs := tui.LoadTUIPrefs()
-	themeDefault := string(tui.ThemeAuto)
+	// Dark is the default theme; "auto" remains available via --theme auto
+	// or a saved preference.
+	themeDefault := string(tui.ThemeDark)
 	if prefs.Theme != "" {
 		themeDefault = string(prefs.Theme)
 	}
