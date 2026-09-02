@@ -3420,7 +3420,25 @@ async function handleRequest(line: string): Promise<void> {
         // edits to models.json or dynamic provider registrations may not be
         // reflected until the bridge process restarts.
         if (req.refresh) {
-          await modelRuntime.refresh({ allowNetwork: true });
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 15_000);
+          try {
+            const result = await modelRuntime.refresh({
+              allowNetwork: true,
+              force: true,
+              signal: controller.signal,
+            });
+            if (result.aborted) {
+              redactedLog(`list-models refresh aborted (timeout)`);
+            }
+            if (result.errors.size > 0) {
+              for (const [provider, err] of result.errors) {
+                redactedLog(`list-models refresh error provider=${provider}: ${err.message}`);
+              }
+            }
+          } finally {
+            clearTimeout(timeout);
+          }
         }
         // Only show models with configured auth (checks auth.json, env vars, and models.json apiKey fallback)
         const available = await modelRuntime.getAvailable();

@@ -269,7 +269,7 @@ func TestBridgeModelRuntimeBoundary(t *testing.T) {
 	if activeCodeContains("AuthStorage.create(") || activeCodeContains("ModelRegistry.create(") {
 		t.Fatal("PI boundary violation: bridge must not use removed AuthStorage or ModelRegistry construction")
 	}
-	if !activeCodeContains("await modelRuntime.refresh({ allowNetwork: true })") {
-		t.Fatal("PI boundary violation: catalog network refresh must be explicit")
+	if !activeCodeContains("await modelRuntime.refresh({") || !activeCodeContains("allowNetwork: true") || !activeCodeContains("force: true") {
+		t.Fatal("PI boundary violation: catalog network refresh must be explicit with allowNetwork and force")
 	}
 }
