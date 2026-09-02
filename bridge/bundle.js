@@ -2357,7 +2357,25 @@ async function handleRequest(line) {
           const agentDir = piAgentDir() || getAgentDir();
           const modelRuntime = await createModelRuntime(agentDir);
           if (req.refresh) {
-            await modelRuntime.refresh({ allowNetwork: true });
+            const controller = new AbortController();
+            const timeout = setTimeout(() => controller.abort(), 15e3);
+            try {
+              const result = await modelRuntime.refresh({
+                allowNetwork: true,
+                force: true,
+                signal: controller.signal
+              });
+              if (result.aborted) {
+                redactedLog("list-models refresh aborted (timeout)");
+              }
+              if (result.errors.size > 0) {
+                for (const [provider, err] of result.errors) {
+                  redactedLog("list-models refresh error provider=".concat(provider, ": ").concat(err.message));
+                }
+              }
+            } finally {
+              clearTimeout(timeout);
+            }
           }
           const available = await modelRuntime.getAvailable();
           const filtered = available.filter((m) => {
