@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.43.3] - 2026-09-03
+
+### Fixed
+- Bridge alinha o HTTP dispatcher com o PI SDK no boot (`configureHttpDispatcher`, igual ao PI CLI). Importar o SDK envenenava o `fetch` global no Node 26 (respostas br/gzip sem headers → `response.json()` falhava), deixando o catálogo remoto stale: `muse-spark-1.3-contributor` (opencode-go) nunca aparecia (33 vs 34 no CLI). Bump `@earendil-works/pi-ai` + `pi-coding-agent` 0.82.1 → 0.84.4.
+
 ## [0.43.2] - 2026-09-02
 
 ### Fixed
