@@ -63,7 +63,10 @@ feature/xxx  →  stable/xxx  →  main
 9. **Push** — Push `main` to remote
 
 For trivial fixes (one file, no risk of regression), the user may skip the
-feature/stable branching and approve a direct commit to `main`.
+feature/stable branching and approve a direct commit to `main`. This repo opts
+out of the global protected-branch hooks for that purpose:
+`git config opencode.allowDirectMain true` (already set locally) — direct
+commits/pushes to `main` are allowed here, other repos keep the guard.
 
 ### Step 6-8: Promotion to main
 
