@@ -5,6 +5,7 @@ import { createInterface } from "node:readline";
 import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, truncateSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import {
   createAgentSession,
@@ -2482,6 +2483,18 @@ function main() {
     process.exit(1);
   });
 }
+async function ensureHttpDispatcherAligned() {
+  try {
+    const entry = await import.meta.resolve("@earendil-works/pi-coding-agent");
+    const url = pathToFileURL(join(dirname(fileURLToPath(entry)), "core/http-dispatcher.js")).href;
+    const mod = await import(url);
+    mod.configureHttpDispatcher?.();
+    redactedLog("bridge: HTTP dispatcher aligned with PI SDK");
+  } catch (err) {
+    redactedLog("bridge: HTTP dispatcher alignment skipped: ".concat(err instanceof Error ? err.message : String(err)));
+  }
+}
+await ensureHttpDispatcherAligned();
 main();
 export {
   DEFAULT_SENSITIVE_PATTERNS,

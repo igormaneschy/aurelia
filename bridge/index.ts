@@ -2,6 +2,7 @@ import { createInterface } from "node:readline";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, truncateSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import {
   createAgentSession,
@@ -3573,5 +3574,33 @@ function main(): void {
     process.exit(1);
   });
 }
+
+// Align Node's global fetch with the PI SDK's undici dispatcher.
+//
+// WHY: importing @earendil-works/pi-coding-agent mutates process-global HTTP
+// state in a way that breaks compressed (br/gzip) responses on Node 26:
+// catalog fetches to pi.dev come back with empty headers and raw compressed
+// bytes, so response.json() throws "Unexpected token" and the persisted
+// models-store overlay goes stale — newly launched remote models (e.g.
+// muse-spark-1.3-contributor on opencode-go) never appear no matter how often
+// list-models forces refresh. The PI CLI avoids this by calling
+// configureHttpDispatcher() at startup (matched undici fetch + dispatcher
+// globals); the bridge must do the same before serving requests.
+// The module is not exposed via the package "exports" map, so resolve the
+// package entry and import the file by URL (bypasses the map).
+// Best-effort: if a future SDK renames the file, the bridge still boots and
+// catalog refresh degrades to the last persisted store.
+async function ensureHttpDispatcherAligned(): Promise<void> {
+  try {
+    const entry = await import.meta.resolve("@earendil-works/pi-coding-agent");
+    const url = pathToFileURL(join(dirname(fileURLToPath(entry)), "core/http-dispatcher.js")).href;
+    const mod = await import(url) as { configureHttpDispatcher?: (timeoutMs?: number) => void };
+    mod.configureHttpDispatcher?.();
+    redactedLog("bridge: HTTP dispatcher aligned with PI SDK");
+  } catch (err) {
+    redactedLog(`bridge: HTTP dispatcher alignment skipped: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+await ensureHttpDispatcherAligned();
 
 main();

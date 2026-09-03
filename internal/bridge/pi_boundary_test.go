@@ -272,4 +272,7 @@ func TestBridgeModelRuntimeBoundary(t *testing.T) {
 	if !activeCodeContains("await modelRuntime.refresh({") || !activeCodeContains("allowNetwork: true") || !activeCodeContains("force: true") {
 		t.Fatal("PI boundary violation: catalog network refresh must be explicit with allowNetwork and force")
 	}
+	if !activeCodeContains("configureHttpDispatcher") {
+		t.Fatal("PI boundary violation: bridge must align HTTP dispatcher with PI SDK at startup (Node fetch/undici mismatch breaks compressed catalog responses)")
+	}
 }
