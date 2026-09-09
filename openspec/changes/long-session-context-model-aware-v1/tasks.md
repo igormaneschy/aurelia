@@ -71,8 +71,9 @@ config valida faixas.
 - [x] `make bridge` + sincronização de bundle.
 - [x] Self-review (backend/segurança): métrica correta, sem segredos nos novos
       campos, bounds preservados, desconhecido não escala.
-- [ ] `make deploy` + validação live: stats com `context_tokens/window`; `/usage`
-      com contexto atual; sessão com janela 1M não rotaciona por cumulativo.
+- [x] `make deploy` + validação live: `get-session-stats` retorna
+      `context_tokens=15794`/`context_window=1048576`/`context_pct=1.5%` com
+      `billing_in=15686` — métrica de contexto correta e distinta do cumulativo.
 - [x] Evidence Matrix abaixo.
 - [ ] Propor bump/changelog ao Igor.
 
@@ -86,7 +87,7 @@ config valida faixas.
 | A9 rotação de emergência por % | `TestTokenGuard_ImmediateRotateAtEmergencyCeiling`, `TestApplyLifecycle_TokenGuardImmediateRotate` | PASS |
 | A9 redução de compactação detectável | `TestTokenGuard_ResetOnMeaningfulContextReduction`, `TestContextReduced` | PASS |
 | A9 desconhecido não escala | `TestEvaluateLifecycle_UnknownContextIsHealthy`, `TestTokenGuard_UnknownContextNeverEscalates` | PASS |
-| A9 contexto exposto | parse dos novos campos + live `/usage` | PASS (código) / live pendente |
+| A9 contexto exposto | parse dos novos campos + live `/usage` | PASS |
 
 ## Explicit non-goals checklist
 
