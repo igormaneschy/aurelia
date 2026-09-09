@@ -18,6 +18,7 @@ type fakeOutput struct {
 	mu            sync.Mutex
 	lastError     string
 	lastReply     string
+	sentTexts     []string
 	confirmCalled bool
 }
 
@@ -111,8 +112,18 @@ func TestHandleResultEvent_LiveOwnerSessionFileCompletes(t *testing.T) {
 	}
 }
 
-func (f *fakeOutput) SendText(_ int64, _ int, _ string) (transport.MessageHandle, error) {
+func (f *fakeOutput) SendText(_ int64, _ int, text string) (transport.MessageHandle, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sentTexts = append(f.sentTexts, text)
 	return nil, nil
+}
+
+// sentTextCount returns how many SendText calls were recorded.
+func (f *fakeOutput) sentTextCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.sentTexts)
 }
 
 func (f *fakeOutput) DeleteMessage(_ transport.MessageHandle) {}

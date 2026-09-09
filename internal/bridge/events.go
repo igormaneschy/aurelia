@@ -170,6 +170,7 @@ func normalizeEventType(s string) string {
 	switch s {
 	case "system", "tool_use", "tool_result", "assistant", "result", "error",
 		"pong", "compaction_start", "compaction_end", "stall", "steer",
+		"tool_running", "tool_slow",
 		"turn_start", "turn_end", "agent_start", "agent_end", "auto_retry_start", "auto_retry_end":
 		return s
 	default:
@@ -273,6 +274,11 @@ func normalizeEvent(ev Event) Event {
 	} else {
 		ev.DurationMs = 0
 		ev.DurationMeasured = false
+	}
+	if elapsed, ok := boundedEventDuration(ev.ElapsedMs); ok {
+		ev.ElapsedMs = elapsed
+	} else {
+		ev.ElapsedMs = 0
 	}
 	if ev.SilentMs < 0 || ev.SilentMs > maxEventDurationMs {
 		ev.SilentMs = 0
@@ -391,6 +397,12 @@ type Event struct {
 	Severity string `json:"severity,omitempty"`
 	SilentMs int64  `json:"silent_ms,omitempty"`
 	Source   string `json:"source,omitempty"`
+
+	// tool_running / tool_slow telemetry (source=bridge_health). ElapsedMs is
+	// the measured time the correlated tool has been executing; Name is the
+	// bounded safe label and ToolCallID the request-local correlation digest.
+	// Never carries the command, args or result.
+	ElapsedMs int64 `json:"elapsed_ms,omitempty"`
 }
 
 // IsTerminal returns true if the event signals the end of a request stream.

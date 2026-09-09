@@ -51,6 +51,16 @@ func (r *recordingProgress) firstReport() (ProgressState, string) {
 	return r.states[0], r.details[0]
 }
 
+// recordedDetails returns a copy of every ReportState detail, aligned by index
+// with recorded().
+func (r *recordingProgress) recordedDetails() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	out := make([]string, len(r.details))
+	copy(out, r.details)
+	return out
+}
+
 func (r *recordingProgress) recordedTexts() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()

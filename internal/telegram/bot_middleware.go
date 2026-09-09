@@ -312,10 +312,12 @@ func (bc *BotController) handleResetCommand(c telebot.Context) error {
 func (bc *BotController) handleUsageCommand(c telebot.Context) error {
 	defer bc.confirmMessage(c.Message())
 	threadID := c.Message().ThreadID
-	msg := "📊 O gerenciamento de tokens agora é feito pelo PI SDK (compaction automática).\n\n" +
-		"O contexto é podado automaticamente conforme necessário — não é mais necessário " +
-		"monitorar manualmente o uso de tokens."
-	return SendTextWithThread(bc.bot, c.Chat(), msg, threadID)
+	userID := safeSenderID(c.Sender())
+	reply, err := bc.cmdUsage(c.Chat().ID, threadID, userID)
+	if err != nil {
+		return SendErrorWithThread(bc.bot, c.Chat(), err.Error(), threadID)
+	}
+	return SendTextWithThread(bc.bot, c.Chat(), reply, threadID)
 }
 
 func (bc *BotController) handleStatusCommand(c telebot.Context) error {

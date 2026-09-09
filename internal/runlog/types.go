@@ -137,6 +137,14 @@ type CompletionAggregates struct {
 	MaxSilenceMs    int64
 	StallCount      int
 	SteerCount      int
+
+	// Usage captured from the bridge result event. Persisted in the same
+	// terminal transaction as the outcome so usage can never be split from
+	// the run it belongs to (and can never be written after finalization).
+	InputTokens  int64
+	OutputTokens int64
+	CostUSD      float64
+	ToolCount    int
 }
 
 // RunResult carries completion fields computed from a bridge result event.

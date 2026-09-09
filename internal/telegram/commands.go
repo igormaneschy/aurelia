@@ -681,6 +681,71 @@ func (bc *BotController) cmdStatus(chatID int64, threadID int, userID int64) (st
 	return strings.Join(lines, "\n"), nil
 }
 
+// cmdUsage renders the live session usage (context and cost) from the Bridge
+// session stats. A missing session or a stats failure degrades to an explicit
+// message — never silence, never a raw error.
+func (bc *BotController) cmdUsage(chatID int64, threadID int, userID int64) (string, error) {
+	if bc.bridge == nil {
+		return "📊 Uso da sessão indisponível: processador não configurado.", nil
+	}
+	sessionFile := ""
+	if bc.sessions != nil {
+		sessionFile = bc.sessions.GetSession(chatID, threadID, userID)
+	}
+	if sessionFile == "" {
+		return "📊 Nenhuma sessão ativa ainda. Envie uma mensagem para começar.", nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	stats, err := bc.bridge.GetSessionStats(ctx, bridge.RequestOptions{
+		ChatID:   chatID,
+		ThreadID: threadID,
+		UserID:   userID,
+		Resume:   sessionFile,
+	})
+	if err != nil || stats == nil {
+		log.Printf("usage: get-session-stats failed chat=%d thread=%d: %v", chatID, threadID, err)
+		return "📊 Não consegui ler o uso da sessão agora. Tente novamente em instantes.", nil
+	}
+
+	lines := []string{"**Uso da sessão**\n"}
+	compactAfter := 0
+	if bc.config != nil {
+		compactAfter = bc.config.SessionLifecycle.CompactAfterInputTokens
+	}
+	contextLine := fmt.Sprintf("🧠 Contexto: **%s tokens**", formatTokenCount(int64(stats.InputTokens)))
+	if compactAfter > 0 {
+		pct := float64(stats.InputTokens) / float64(compactAfter) * 100
+		contextLine += fmt.Sprintf(" (%.0f%% do limite de compactação de %s)", pct, formatTokenCount(int64(compactAfter)))
+	}
+	lines = append(lines, contextLine)
+	if stats.ContextUsagePct > 0 {
+		lines = append(lines, fmt.Sprintf("📈 Janela do modelo: **%.0f%%** em uso", stats.ContextUsagePct))
+	}
+	lines = append(lines, fmt.Sprintf("💵 Custo: **$%.4f** · Turnos: **%d** · Mensagens: **%d**",
+		stats.Cost, stats.AssistantMessages, stats.TotalMessages))
+	if stats.OutputTokens > 0 {
+		lines = append(lines, fmt.Sprintf("📤 Saída acumulada: %s tokens", formatTokenCount(int64(stats.OutputTokens))))
+	}
+	return strings.Join(lines, "\n"), nil
+}
+
+// formatTokenCount renders a token count compactly (121000 -> "121k").
+func formatTokenCount(n int64) string {
+	if n < 0 {
+		n = 0
+	}
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.0fk", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
+}
+
 // statusRunLogSummary returns formatted lines describing the latest run state,
 // including run_id, status, provider/model, duration, cost, and a checkpoint
 // excerpt. The output is concise and redacted.

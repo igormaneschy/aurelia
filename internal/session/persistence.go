@@ -26,6 +26,7 @@ type sessionSnapshot struct {
 	EmptyResults        int       `json:"empty_results,omitempty"`
 	ProcessDeaths       int       `json:"process_deaths,omitempty"`
 	LastLifecycleAction string    `json:"last_lifecycle_action,omitempty"`
+	LongSessionNudged   bool      `json:"long_session_nudged,omitempty"`
 }
 
 type cwdSnapshot struct {
@@ -87,6 +88,7 @@ func (s *Store) loadSnapshot(path string) error {
 			emptyResults:        item.EmptyResults,
 			processDeaths:       item.ProcessDeaths,
 			lastLifecycleAction: item.LastLifecycleAction,
+			longSessionNudged:   item.LongSessionNudged,
 		}
 	}
 	for _, item := range snap.Cwds {
@@ -149,6 +151,7 @@ func (s *Store) serializeLocked() ([]byte, error) {
 			EmptyResults:        item.emptyResults,
 			ProcessDeaths:       item.processDeaths,
 			LastLifecycleAction: item.lastLifecycleAction,
+			LongSessionNudged:   item.longSessionNudged,
 		})
 	}
 	for key, cwd := range s.cwds {

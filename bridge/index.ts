@@ -481,6 +481,14 @@ function boundedDuration(value: unknown): number | undefined {
   return value;
 }
 
+// Clamps an already-computed elapsed time into [0, MAX_DURATION_MS]. Used by
+// the tool-aware health monitor, where a clock regression must never produce a
+// negative or unbounded elapsed_ms on the wire.
+function boundedElapsedMs(value: number): number {
+  if (!Number.isFinite(value) || value < 0) return 0;
+  return Math.min(Math.round(value), MAX_DURATION_MS);
+}
+
 function sanitizeToolInput(value: unknown, depth = 0): unknown {
   if (depth >= MAX_TOOL_INPUT_DEPTH) return "[input_depth_limit]";
   if (value === null || typeof value === "boolean") return value;
@@ -719,16 +727,23 @@ function log(msg: string): void {
  * The map is bounded: starts are pruned oldest-first once the cap is hit and
  * any entry older than maxAgeMs is dropped so a leaked start cannot inflate
  * the map forever.
+ *
+ * `inflight()` exposes the oldest still-open tool so the health monitor can
+ * distinguish "tool running" from "model silent". Only the bounded safe label
+ * is retained — never the command, args or result.
  */
 export class ToolDurationTracker {
-  private readonly starts = new Map<string, { safeID: string; startedAt: number }>();
+  private readonly starts = new Map<
+    string,
+    { safeID: string; label: string; startedAt: number }
+  >();
 
   constructor(
     private readonly maxEntries = 512,
     private readonly maxAgeMs = 2 * 60 * 60 * 1000,
   ) {}
 
-  start(toolCallId: unknown, now = Date.now()): string {
+  start(toolCallId: unknown, now = Date.now(), label = "tool"): string {
     const key = toolCallKey(toolCallId);
     const safeID = safeToolCallID(toolCallId);
     if (key === undefined) return safeID;
@@ -737,8 +752,25 @@ export class ToolDurationTracker {
       const oldest = this.starts.keys().next().value as string | undefined;
       if (oldest !== undefined) this.starts.delete(oldest);
     }
-    this.starts.set(key, { safeID, startedAt: now });
+    this.starts.set(key, { safeID, label: safeLabel(label, "tool"), startedAt: now });
     return safeID;
+  }
+
+  /**
+   * Returns the tool that has been open the longest (largest elapsed), or null
+   * when nothing is in flight. Clock regressions skip the entry rather than
+   * reporting a negative elapsed.
+   */
+  inflight(now = Date.now()): InflightTool | null {
+    let oldest: InflightTool | null = null;
+    for (const started of this.starts.values()) {
+      if (now < started.startedAt) continue;
+      const elapsedMs = now - started.startedAt;
+      if (oldest === null || elapsedMs > oldest.elapsedMs) {
+        oldest = { toolCallID: started.safeID, name: started.label, elapsedMs };
+      }
+    }
+    return oldest;
   }
 
   end(toolCallId: unknown, now = Date.now()): number | undefined {
@@ -875,26 +907,84 @@ export function measuredElapsed(
   return elapsed >= 0 ? elapsed : undefined;
 }
 
+// Tool-aware health thresholds. A tool in flight means the silence belongs to
+// the tool, not the model: the bridge emits tool_running (progress) and never
+// stall/steer. tool_slow is an honest, once-per-tool warning for a command
+// that genuinely runs long.
+const TOOL_SLOW_WARN_MS = 10 * 60 * 1000;
+
+/** Oldest still-open tool, as reported by ToolDurationTracker.inflight(). */
+export interface InflightTool {
+  toolCallID: string;
+  name: string;
+  elapsedMs: number;
+}
+
+export interface HealthDecisionInput {
+  silentMs: number;
+  inflight: InflightTool | null;
+  stallWarningSent: boolean;
+  stallUrgentSent: boolean;
+  toolSlowWarned: boolean;
+}
+
+export interface HealthDecision {
+  toolRunning?: InflightTool;
+  toolSlow?: boolean;
+  stall?: "warning" | "urgent";
+  steer?: "warning" | "urgent";
+}
+
 /**
- * Pure stall-detection decision for the health monitor. Returns which
- * telemetry events should be emitted at the current silence level, at most
- * once per severity during a silence transition (the flags reset when
- * productive activity resumes).
+ * Pure tool-aware health decision for the streaming monitor.
+ *
+ * While a tool is executing, the absence of SDK events is expected: emit
+ * `toolRunning` (progress) and never `stall`/`steer`, which would tell the
+ * model to stop a legitimate command. `toolSlow` fires once per tool beyond
+ * TOOL_SLOW_WARN_MS. With no tool in flight the historical stall/steer ladder
+ * is preserved unchanged.
+ */
+export function healthDecisionFor(input: HealthDecisionInput): HealthDecision {
+  const out: HealthDecision = {};
+  const { inflight, silentMs } = input;
+  if (inflight) {
+    out.toolRunning = inflight;
+    if (inflight.elapsedMs >= TOOL_SLOW_WARN_MS && !input.toolSlowWarned) {
+      out.toolSlow = true;
+    }
+    return out;
+  }
+  if (silentMs >= 60_000 && !input.stallWarningSent) {
+    out.stall = "warning";
+    out.steer = "warning";
+  }
+  if (silentMs >= 120_000 && !input.stallUrgentSent) {
+    out.stall = "urgent";
+    out.steer = "urgent";
+  }
+  return out;
+}
+
+/**
+ * Pure stall-detection decision for the health monitor when no tool is in
+ * flight. Kept as the narrow projection for callers/tests that do not track
+ * tool state; delegates to healthDecisionFor so thresholds have one source.
  */
 export function stallTelemetryFor(
   silentMs: number,
   warningSent: boolean,
   urgentSent: boolean,
 ): { stall?: "warning" | "urgent"; steer?: "warning" | "urgent" } {
+  const decision = healthDecisionFor({
+    silentMs,
+    inflight: null,
+    stallWarningSent: warningSent,
+    stallUrgentSent: urgentSent,
+    toolSlowWarned: true,
+  });
   const out: { stall?: "warning" | "urgent"; steer?: "warning" | "urgent" } = {};
-  if (silentMs >= 60_000 && !warningSent) {
-    out.stall = "warning";
-    out.steer = "warning";
-  }
-  if (silentMs >= 120_000 && !urgentSent) {
-    out.stall = "urgent";
-    out.steer = "urgent";
-  }
+  if (decision.stall) out.stall = decision.stall;
+  if (decision.steer) out.steer = decision.steer;
   return out;
 }
 
@@ -2501,8 +2591,8 @@ async function handleQuery(req: Request): Promise<void> {
           }
           case "tool_execution_start": {
             lastEventTime = Date.now();
-            const safeID = toolDurations.start(sdkEvent.toolCallId);
             const safeName = safeLabel(sdkEvent.toolName, "tool");
+            const safeID = toolDurations.start(sdkEvent.toolCallId, Date.now(), safeName);
             redactedLog(`tool: ${safeName} id=${safeID} rid=${rid}`);
             eReq({
               event: "tool_use",
@@ -2607,31 +2697,73 @@ async function handleQuery(req: Request): Promise<void> {
     };
 
     // Health check: monitor for stalls during active query.
-    // At 30s: log warning (diagnostic).
-    // At 60s: send a steer to nudge the model back to producing output.
-    // At 120s: send a more urgent steer.
+    // Tool-aware: while a tool is executing, its silence is not a model stall.
+    //   - tool_running every tick proves the tool is alive (progress, live-only)
+    //   - tool_slow once per tool beyond TOOL_SLOW_WARN_MS (honest warning)
+    //   - stall/steer only when no tool is in flight (model genuinely silent)
     // Stall/steer NDJSON events are telemetry only (source=bridge_health);
     // they are never user-facing text and never carry the steer payload.
     let stallSteerSent = false;
     let stallUrgentSent = false;
+    let toolSlowWarnedFor: string | null = null;
     healthTimer = setInterval(() => {
       if (terminalEmitted || canceled) {
         clearInterval(healthTimer);
         return;
       }
-      const silent = Date.now() - lastEventTime;
-      // Reset steer flags when activity resumes (content events arrived).
-      if (silent < 30_000) {
+      const now = Date.now();
+      const silent = now - lastEventTime;
+      const inflight = toolDurations.inflight(now);
+      const inflightID = inflight?.toolCallID ?? null;
+
+      // A different (or finished) tool resets the once-per-tool slow warning.
+      if (toolSlowWarnedFor !== null && toolSlowWarnedFor !== inflightID) {
+        toolSlowWarnedFor = null;
+      }
+
+      // Resumed activity — or an in-flight tool, whose silence belongs to the
+      // command and not the model — clears the stall escalation flags.
+      if (silent < 30_000 || inflight) {
         stallSteerSent = false;
         stallUrgentSent = false;
       }
-      if (silent >= 30_000) {
+      if (silent >= 30_000 && !inflight) {
         redactedLog(
           `streaming stall: no PI SDK events for ${Math.round(silent / 1000)}s (rid=${reqId})`,
         );
       }
-      const telemetry = stallTelemetryFor(silent, stallSteerSent, stallUrgentSent);
-      if (telemetry.stall === "warning") {
+
+      const decision = healthDecisionFor({
+        silentMs: silent,
+        inflight,
+        stallWarningSent: stallSteerSent,
+        stallUrgentSent: stallUrgentSent,
+        toolSlowWarned: toolSlowWarnedFor !== null,
+      });
+
+      if (decision.toolRunning) {
+        emitReq({
+          event: "tool_running",
+          tool_call_id: decision.toolRunning.toolCallID,
+          name: decision.toolRunning.name,
+          elapsed_ms: boundedElapsedMs(decision.toolRunning.elapsedMs),
+          source: "bridge_health",
+        });
+      }
+      if (decision.toolSlow && inflight) {
+        toolSlowWarnedFor = inflight.toolCallID;
+        redactedLog(
+          `tool slow: ${inflight.name} running for ${Math.round(inflight.elapsedMs / 1000)}s (rid=${reqId})`,
+        );
+        emitReq({
+          event: "tool_slow",
+          tool_call_id: inflight.toolCallID,
+          name: inflight.name,
+          elapsed_ms: boundedElapsedMs(inflight.elapsedMs),
+          source: "bridge_health",
+        });
+      }
+      if (decision.stall === "warning") {
         stallSteerSent = true;
         emitReq({
           event: "stall",
@@ -2640,7 +2772,7 @@ async function handleQuery(req: Request): Promise<void> {
           source: "bridge_health",
         });
       }
-      if (telemetry.stall === "urgent") {
+      if (decision.stall === "urgent") {
         stallUrgentSent = true;
         emitReq({
           event: "stall",
@@ -2649,7 +2781,7 @@ async function handleQuery(req: Request): Promise<void> {
           source: "bridge_health",
         });
       }
-      if (telemetry.steer === "warning") {
+      if (decision.steer === "warning") {
         try {
           liveSession.steer(
             "Continue please. You have been silent for over a minute. " +
@@ -2671,7 +2803,7 @@ async function handleQuery(req: Request): Promise<void> {
           redactedLog(`stall steer failed (sync): ${err instanceof Error ? err.message : String(err)}`);
         }
       }
-      if (telemetry.steer === "urgent") {
+      if (decision.steer === "urgent") {
         try {
           liveSession.steer(
             "You have been silent for over 2 minutes. " +

@@ -100,6 +100,9 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 	sessionKey := session.SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID}
 
 	if dec.Action == session.ActionContinue && signals.Active && signals.InputTokens > 0 {
+		if attentionAt := longSessionAttentionThreshold(policy); attentionAt > 0 && signals.InputTokens >= attentionAt {
+			s.maybeNudgeLongSession(chatID, threadID, userID, signals.InputTokens)
+		}
 		if warnAt := session.WarnInputTokensThreshold(policy); signals.InputTokens >= warnAt {
 			log.Printf("lifecycle: WARN high input_tokens=%d chat=%d thread=%d user=%d (warn_threshold=%d)",
 				signals.InputTokens, chatID, threadID, userID, warnAt)
@@ -491,6 +494,39 @@ func (s *Service) getLifecyclePolicy() session.LifecyclePolicy {
 		return session.DefaultLifecyclePolicy()
 	}
 	return s.config.SessionLifecycle.LifecyclePolicy()
+}
+
+// longSessionAttentionThreshold returns the input-token count at which the
+// one-shot long-session nudge fires: the smaller of 60% of the compaction
+// threshold and the existing warn threshold. Returns 0 when the compaction
+// threshold is not configured (feature disabled).
+func longSessionAttentionThreshold(policy session.LifecyclePolicy) int {
+	if policy.CompactAfterInputTokens <= 0 {
+		return 0
+	}
+	attention := policy.CompactAfterInputTokens * 6 / 10
+	if warn := session.WarnInputTokensThreshold(policy); warn > 0 && warn < attention {
+		attention = warn
+	}
+	return attention
+}
+
+// maybeNudgeLongSession tells the user once per session that the conversation
+// is getting long, offering /new as a clean start. It never compacts or rotates
+// — the decision stays with the user and TokenGuard remains the only emergency
+// fallback. The nudge is claimed atomically in the session store, so concurrent
+// runs cannot duplicate it.
+func (s *Service) maybeNudgeLongSession(chatID int64, threadID int, userID int64, inputTokens int) {
+	if s == nil || s.sessions == nil || s.output == nil {
+		return
+	}
+	if !s.sessions.MarkLongSessionNudged(chatID, threadID, userID) {
+		return
+	}
+	msg := fmt.Sprintf("📈 Esta conversa está longa (~%dk tokens). Posso seguir normalmente; se quiser um começo limpo, use /new (o histórico fica no Telegram).", inputTokens/1000)
+	if _, err := s.output.SendText(chatID, threadID, msg); err != nil {
+		log.Printf("pipeline: SendText(long-session nudge) failed for chat=%d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
+	}
 }
 
 // getIdleTimeout returns the configured idle timeout, falling back to defaultIdleTimeout

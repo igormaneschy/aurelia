@@ -48,6 +48,53 @@ func TestProgressReporter_ReportState_NoBotUpdatesStatusLine(t *testing.T) {
 	p.mu.Unlock()
 }
 
+// TestProgressReporter_ReportState_ToolAndCompactionDetail pins the new
+// adapter contract: tool-in-flight states render calm factual copy (never the
+// "model struggling" text) and the informational detail of a working state
+// (compaction tokens) is rendered instead of being dropped.
+func TestProgressReporter_ReportState_ToolAndCompactionDetail(t *testing.T) {
+	p := &progressReporter{}
+
+	p.ReportState(pipelinepkg.ProgressStateToolRunning, "Bash em execução há 3m15s")
+	p.mu.Lock()
+	running := p.statusLine
+	p.mu.Unlock()
+	if !strings.Contains(running, "⚙️") || !strings.Contains(running, "Bash em execução há 3m15s") {
+		t.Fatalf("tool_running statusLine = %q", running)
+	}
+	if strings.Contains(running, "dificuldade") || strings.Contains(running, "demorando") {
+		t.Fatalf("tool_running reused the model-stall copy: %q", running)
+	}
+
+	p.ReportState(pipelinepkg.ProgressStateToolSlow, "Bash ainda em execução há 10m0s (comando longo)")
+	p.mu.Lock()
+	slow := p.statusLine
+	p.mu.Unlock()
+	if !strings.Contains(slow, "⏳") || !strings.Contains(slow, "comando longo") {
+		t.Fatalf("tool_slow statusLine = %q", slow)
+	}
+	if strings.Contains(slow, "dificuldade") {
+		t.Fatalf("tool_slow reused the model-stall copy: %q", slow)
+	}
+
+	p.ReportState(pipelinepkg.ProgressStateWorking, "contexto compactado (tokens: 146528 → 90400)")
+	p.mu.Lock()
+	compacted := p.statusLine
+	p.mu.Unlock()
+	if !strings.Contains(compacted, "contexto compactado") || !strings.Contains(compacted, "146528") {
+		t.Fatalf("working detail was dropped: %q", compacted)
+	}
+
+	// Working without a detail still clears the informational line.
+	p.ReportState(pipelinepkg.ProgressStateWorking, "")
+	p.mu.Lock()
+	cleared := p.statusLine
+	p.mu.Unlock()
+	if cleared != "" {
+		t.Fatalf("working without detail must clear the line, got %q", cleared)
+	}
+}
+
 // TestProgressReporter_ReportState_TerminalStatesAreNoOps covers término and
 // cancelamento: done/canceled/failed must not mutate the receipt state — the
 // run caller deletes the receipt once the final reply/error is out.

@@ -395,11 +395,43 @@ func (m Model) renderProjectPanel() string {
 		}
 	}
 
+	// Session usage (context/cost). Hidden when the stats call returned nothing.
+	if state.SessionInputTokens > 0 || state.SessionCostUSD > 0 || state.SessionContextPct > 0 {
+		b.WriteString("\n")
+		b.WriteString(m.styles.HeaderTitleStyle.Render("Session Usage"))
+		b.WriteString("\n")
+		contextLine := fmt.Sprintf(" Context: %s tokens", formatTokenCountTUI(state.SessionInputTokens))
+		if state.CompactAfterTokens > 0 {
+			pct := float64(state.SessionInputTokens) / float64(state.CompactAfterTokens) * 100
+			contextLine += fmt.Sprintf(" (%.0f%% of compact limit)", pct)
+		}
+		fmt.Fprintf(&b, "%s\n", contextLine)
+		if state.SessionContextPct > 0 {
+			fmt.Fprintf(&b, " Window: %.0f%% used\n", state.SessionContextPct)
+		}
+		fmt.Fprintf(&b, " Cost: $%.4f\n", state.SessionCostUSD)
+	}
+
 	// Footer hint
 	b.WriteString("\n")
 	b.WriteString(m.styles.SidebarMutedStyle.Render("Ctrl+P to close"))
 
 	return b.String()
+}
+
+// formatTokenCountTUI renders a token count compactly (121000 -> "121k").
+func formatTokenCountTUI(n int) string {
+	if n < 0 {
+		n = 0
+	}
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.0fk", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
+	}
 }
 
 // overlayPanel renders the full view with a centered panel overlay on top of

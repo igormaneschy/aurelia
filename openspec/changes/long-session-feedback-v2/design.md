@@ -118,19 +118,24 @@ label seguro para `start()` (parâmetro novo, compatível) para que
 
 ### 2.3 Pipeline: estado de progresso
 
-- Novo `ProgressState`: `ProgressStateToolRunning = "tool_running"`.
-- `ProcessBridgeEvents` mapeia `ev.Type == "tool_running"` →
-  `progress.ReportState(ProgressStateToolRunning, detail)` com
-  `detail = "<label> em execução há <d>"` (bounded, redigido).
-- `tool_slow` → `ProgressStateStallWarning` **com detalhe de tool**, nunca o
-  texto genérico de "modelo com dificuldade".
+**As-implemented (2026-09-09):**
+
+- Novos `ProgressState`: `ProgressStateToolRunning = "tool_running"` e
+  `ProgressStateToolSlow = "tool_slow"`.
+- `ProcessBridgeEvents` mapeia `ev.Type == "tool_running"`/`"tool_slow"` →
+  `progress.ReportState(state, detail)`, com
+  `detail = "<label> em execução há <d>"` (ou "ainda em execução há <d>
+  (comando longo)") — bounded e redigido. **Não** há `ToolElapsedMs` no
+  `ProgressPayload`: o contrato `ReportState(state, detail)` foi preservado, o
+  cronômetro é atualizado a cada evento de 15s e os adapters renderizam o
+  `detail` (evita ampliar a interface do reporter e todos os seus call sites).
+- `tool_slow` → `ProgressStateToolSlow` **com detalhe de tool**, nunca o texto
+  genérico de "modelo com dificuldade".
 - `ProgressReporter` continua surface-neutral; nenhuma mensagem nova no chat.
-- Prioridade: `tool_running` é classe "produtiva" — limpa a linha de stall e
-  impede que o heartbeat `Waiting` a sobrescreva. Estender
-  `stallPriorityReporter` (`liveness_timeout.go:335`) para segurar também
-  `tool_running` na `stallHoldWindow` (90s) resolve sem novo decorator.
-- `ProgressPayload` ganha `ToolElapsedMs int64` para os adapters renderizarem o
-  cronômetro sem parsing de string.
+- Prioridade: `tool_running`/`tool_slow` são classe "produtiva" — limpam a linha
+  de stall e impedem que o heartbeat `Waiting` a sobrescreva. O
+  `stallPriorityReporter` (`liveness_timeout.go:335`) foi estendido para segurar
+  os dois estados na `stallHoldWindow` (90s).
 
 ### 2.4 Pipeline: watchdog de liveness
 

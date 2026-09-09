@@ -1663,3 +1663,52 @@ func stringContains(s, sub string) bool {
 	}
 	return false
 }
+
+// TestCmdUsage_DegradesExplicitly covers A7: a missing bridge or an inactive
+// session produces an explicit message instead of silence or a raw error.
+func TestCmdUsage_DegradesExplicitly(t *testing.T) {
+	t.Parallel()
+
+	noBridge := &BotController{}
+	reply, err := noBridge.cmdUsage(1, 0, 1)
+	if err != nil {
+		t.Fatalf("cmdUsage(no bridge) error = %v", err)
+	}
+	if !strings.Contains(reply, "indisponível") {
+		t.Fatalf("no-bridge reply = %q, want explicit unavailable message", reply)
+	}
+
+	noSession := &BotController{
+		config:   &config.AppConfig{},
+		sessions: session.NewStore(),
+		bridge:   &bridge.Bridge{},
+	}
+	reply, err = noSession.cmdUsage(42, 0, 100)
+	if err != nil {
+		t.Fatalf("cmdUsage(no session) error = %v", err)
+	}
+	if !strings.Contains(reply, "Nenhuma sessão ativa") {
+		t.Fatalf("no-session reply = %q, want no-session message", reply)
+	}
+}
+
+// TestFormatTokenCount pins the compact token formatting used by /usage.
+func TestFormatTokenCount(t *testing.T) {
+	cases := []struct {
+		in   int64
+		want string
+	}{
+		{0, "0"},
+		{999, "999"},
+		{1000, "1k"},
+		{121000, "121k"},
+		{200000, "200k"},
+		{1500000, "1.5M"},
+		{-5, "0"},
+	}
+	for _, tc := range cases {
+		if got := formatTokenCount(tc.in); got != tc.want {
+			t.Errorf("formatTokenCount(%d) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

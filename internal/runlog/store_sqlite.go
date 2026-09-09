@@ -475,11 +475,14 @@ func (s *SQLiteStore) CompleteWithEvents(ctx context.Context, runID string, stat
 		    updated_at = ?, completed_at = ?,
 		    first_feedback_ms = ?, max_silence_ms = ?,
 		    stall_count = ?, steer_count = ?,
-		    duration_ms = ?
+		    duration_ms = ?,
+		    input_tokens = ?, output_tokens = ?, cost_usd = ?, tool_count = ?
 		WHERE run_id = ? AND status = 'running'`,
 		string(status), checkpoint, errMsg, toolSummary, now, now,
 		agg.FirstFeedbackMs, agg.MaxSilenceMs, agg.StallCount, agg.SteerCount,
-		agg.DurationMs, runID)
+		agg.DurationMs,
+		agg.InputTokens, agg.OutputTokens, agg.CostUSD, agg.ToolCount,
+		runID)
 	if err != nil {
 		return fmt.Errorf("runlog complete terminal %s: %w", runID, err)
 	}

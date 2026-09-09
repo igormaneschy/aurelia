@@ -1550,7 +1550,24 @@ func (m Model) handleProgressEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 				m.activeTools[n-1].Done = true
 			}
 		}
-		m.stallLine = ""
+		switch {
+		case payload.ToolName != "" || payload.ToolDone:
+			// Normal tool activity — the tool line already carries the detail.
+			m.stallLine = ""
+		case payload.Detail != "":
+			// Informational detail from the core (e.g. compaction tokens):
+			// render it instead of dropping it.
+			m.stallLine = "🧠 " + payload.Detail
+		default:
+			// Steer resume / productive activity resumed.
+			m.stallLine = ""
+		}
+	case "tool_running":
+		// A tool is executing: silence belongs to the tool, not the model.
+		m.stallLine = "⚙️ " + payload.Detail
+	case "tool_slow":
+		// Honest long-command notice — never the "model struggling" copy.
+		m.stallLine = "⏳ " + payload.Detail
 	case "waiting":
 		// Model thinking without tools — the spinner already covers this.
 		m.stallLine = ""

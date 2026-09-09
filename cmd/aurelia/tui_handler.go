@@ -678,6 +678,9 @@ func handleTUIProjectState(ctx context.Context, a *app, msg ipc.IPCMessage, emit
 	// Latest run log entry.
 	fillTUIProjectRunLog(ctx, a, chatID, threadID, &payload)
 
+	// Live session context/cost (best-effort).
+	fillTUIProjectUsage(ctx, a, chatID, threadID, userID, &payload)
+
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal project state: %w", err)
@@ -808,5 +811,38 @@ func fillTUIProjectRunLog(ctx context.Context, a *app, chatID int64, threadID in
 		AgentName:  rec.AgentName,
 		StartedAt:  rec.StartedAt,
 		DurationMs: rec.DurationMs,
+	}
+}
+
+// fillTUIProjectUsage populates live session context/cost from the Bridge
+// session stats. Best-effort: a missing session or a stats failure leaves the
+// fields zero and the panel hides the section instead of showing misleading
+// data.
+func fillTUIProjectUsage(ctx context.Context, a *app, chatID int64, threadID int, userID int64, payload *ipc.ProjectStatePayload) {
+	if a.bridge == nil || a.sessions == nil {
+		return
+	}
+	sessionFile := a.sessions.GetSession(chatID, threadID, userID)
+	if sessionFile == "" {
+		return
+	}
+	statsCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	stats, err := a.bridge.GetSessionStats(statsCtx, bridge.RequestOptions{
+		ChatID:   chatID,
+		ThreadID: threadID,
+		UserID:   userID,
+		Resume:   sessionFile,
+	})
+	if err != nil || stats == nil {
+		log.Printf("tui: project state session stats error: %v", err)
+		return
+	}
+	payload.SessionInputTokens = stats.InputTokens
+	payload.SessionOutputTokens = stats.OutputTokens
+	payload.SessionCostUSD = stats.Cost
+	payload.SessionContextPct = stats.ContextUsagePct
+	if a.config != nil {
+		payload.CompactAfterTokens = a.config.SessionLifecycle.CompactAfterInputTokens
 	}
 }

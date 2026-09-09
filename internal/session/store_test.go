@@ -279,3 +279,36 @@ func TestStore_UserSessionIsolation(t *testing.T) {
 		t.Fatalf("user 200 session should be preserved, got %q", got)
 	}
 }
+
+// TestMarkLongSessionNudged_OneShotAndResetOnNewSession covers A8 exactly-once
+// semantics: the first claim wins, later claims are rejected, re-setting the
+// same session file does not re-arm, a new file does, and an unknown
+// conversation fails closed.
+func TestMarkLongSessionNudged_OneShotAndResetOnNewSession(t *testing.T) {
+	s := NewStore()
+	s.SetSession(1, 0, 100, "/tmp/a.jsonl")
+
+	if !s.MarkLongSessionNudged(1, 0, 100) {
+		t.Fatal("first claim should win")
+	}
+	if s.MarkLongSessionNudged(1, 0, 100) {
+		t.Fatal("second claim must be rejected")
+	}
+
+	// Re-setting the SAME session file must not re-arm the nudge.
+	s.SetSession(1, 0, 100, "/tmp/a.jsonl")
+	if s.MarkLongSessionNudged(1, 0, 100) {
+		t.Fatal("re-setting the same session file must not re-arm")
+	}
+
+	// A different session file means a new conversation: re-arm.
+	s.SetSession(1, 0, 100, "/tmp/b.jsonl")
+	if !s.MarkLongSessionNudged(1, 0, 100) {
+		t.Fatal("new session file must re-arm the nudge")
+	}
+
+	// Unknown conversation fails closed (no unbounded tracking).
+	if s.MarkLongSessionNudged(2, 0, 200) {
+		t.Fatal("unknown conversation must fail closed")
+	}
+}

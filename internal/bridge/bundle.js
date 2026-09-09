@@ -253,6 +253,10 @@ function boundedDuration(value) {
   if (value < 0 || value > MAX_DURATION_MS) return void 0;
   return value;
 }
+function boundedElapsedMs(value) {
+  if (!Number.isFinite(value) || value < 0) return 0;
+  return Math.min(Math.round(value), MAX_DURATION_MS);
+}
 function sanitizeToolInput(value, depth = 0) {
   if (depth >= MAX_TOOL_INPUT_DEPTH) return "[input_depth_limit]";
   if (value === null || typeof value === "boolean") return value;
@@ -452,7 +456,7 @@ var ToolDurationTracker = class {
   maxEntries;
   maxAgeMs;
   starts = /* @__PURE__ */ new Map();
-  start(toolCallId, now = Date.now()) {
+  start(toolCallId, now = Date.now(), label = "tool") {
     const key = toolCallKey(toolCallId);
     const safeID = safeToolCallID(toolCallId);
     if (key === void 0) return safeID;
@@ -460,8 +464,24 @@ var ToolDurationTracker = class {
       const oldest = this.starts.keys().next().value;
       if (oldest !== void 0) this.starts.delete(oldest);
     }
-    this.starts.set(key, { safeID, startedAt: now });
+    this.starts.set(key, { safeID, label: safeLabel(label, "tool"), startedAt: now });
     return safeID;
+  }
+  /**
+   * Returns the tool that has been open the longest (largest elapsed), or null
+   * when nothing is in flight. Clock regressions skip the entry rather than
+   * reporting a negative elapsed.
+   */
+  inflight(now = Date.now()) {
+    let oldest = null;
+    for (const started of this.starts.values()) {
+      if (now < started.startedAt) continue;
+      const elapsedMs = now - started.startedAt;
+      if (oldest === null || elapsedMs > oldest.elapsedMs) {
+        oldest = { toolCallID: started.safeID, name: started.label, elapsedMs };
+      }
+    }
+    return oldest;
   }
   end(toolCallId, now = Date.now()) {
     return this.endWithID(toolCallId, now)?.durationMs;
@@ -533,16 +553,38 @@ function measuredElapsed(startedAt, now = Date.now()) {
   const elapsed = now - startedAt;
   return elapsed >= 0 ? elapsed : void 0;
 }
-function stallTelemetryFor(silentMs, warningSent, urgentSent) {
+var TOOL_SLOW_WARN_MS = 10 * 60 * 1e3;
+function healthDecisionFor(input) {
   const out = {};
-  if (silentMs >= 6e4 && !warningSent) {
+  const { inflight, silentMs } = input;
+  if (inflight) {
+    out.toolRunning = inflight;
+    if (inflight.elapsedMs >= TOOL_SLOW_WARN_MS && !input.toolSlowWarned) {
+      out.toolSlow = true;
+    }
+    return out;
+  }
+  if (silentMs >= 6e4 && !input.stallWarningSent) {
     out.stall = "warning";
     out.steer = "warning";
   }
-  if (silentMs >= 12e4 && !urgentSent) {
+  if (silentMs >= 12e4 && !input.stallUrgentSent) {
     out.stall = "urgent";
     out.steer = "urgent";
   }
+  return out;
+}
+function stallTelemetryFor(silentMs, warningSent, urgentSent) {
+  const decision = healthDecisionFor({
+    silentMs,
+    inflight: null,
+    stallWarningSent: warningSent,
+    stallUrgentSent: urgentSent,
+    toolSlowWarned: true
+  });
+  const out = {};
+  if (decision.stall) out.stall = decision.stall;
+  if (decision.steer) out.steer = decision.steer;
   return out;
 }
 function redactSDKError(msg) {
@@ -1634,8 +1676,8 @@ async function handleQuery(req) {
           }
           case "tool_execution_start": {
             lastEventTime = Date.now();
-            const safeID = toolDurations.start(sdkEvent.toolCallId);
             const safeName = safeLabel(sdkEvent.toolName, "tool");
+            const safeID = toolDurations.start(sdkEvent.toolCallId, Date.now(), safeName);
             redactedLog("tool: ".concat(safeName, " id=").concat(safeID, " rid=").concat(rid));
             eReq({
               event: "tool_use",
@@ -1729,23 +1771,58 @@ async function handleQuery(req) {
     };
     let stallSteerSent = false;
     let stallUrgentSent = false;
+    let toolSlowWarnedFor = null;
     healthTimer = setInterval(() => {
       if (terminalEmitted || canceled) {
         clearInterval(healthTimer);
         return;
       }
-      const silent = Date.now() - lastEventTime;
-      if (silent < 3e4) {
+      const now = Date.now();
+      const silent = now - lastEventTime;
+      const inflight = toolDurations.inflight(now);
+      const inflightID = inflight?.toolCallID ?? null;
+      if (toolSlowWarnedFor !== null && toolSlowWarnedFor !== inflightID) {
+        toolSlowWarnedFor = null;
+      }
+      if (silent < 3e4 || inflight) {
         stallSteerSent = false;
         stallUrgentSent = false;
       }
-      if (silent >= 3e4) {
+      if (silent >= 3e4 && !inflight) {
         redactedLog(
           "streaming stall: no PI SDK events for ".concat(Math.round(silent / 1e3), "s (rid=").concat(reqId, ")")
         );
       }
-      const telemetry = stallTelemetryFor(silent, stallSteerSent, stallUrgentSent);
-      if (telemetry.stall === "warning") {
+      const decision = healthDecisionFor({
+        silentMs: silent,
+        inflight,
+        stallWarningSent: stallSteerSent,
+        stallUrgentSent,
+        toolSlowWarned: toolSlowWarnedFor !== null
+      });
+      if (decision.toolRunning) {
+        emitReq({
+          event: "tool_running",
+          tool_call_id: decision.toolRunning.toolCallID,
+          name: decision.toolRunning.name,
+          elapsed_ms: boundedElapsedMs(decision.toolRunning.elapsedMs),
+          source: "bridge_health"
+        });
+      }
+      if (decision.toolSlow && inflight) {
+        toolSlowWarnedFor = inflight.toolCallID;
+        redactedLog(
+          "tool slow: ".concat(inflight.name, " running for ").concat(Math.round(inflight.elapsedMs / 1e3), "s (rid=").concat(reqId, ")")
+        );
+        emitReq({
+          event: "tool_slow",
+          tool_call_id: inflight.toolCallID,
+          name: inflight.name,
+          elapsed_ms: boundedElapsedMs(inflight.elapsedMs),
+          source: "bridge_health"
+        });
+      }
+      if (decision.stall === "warning") {
         stallSteerSent = true;
         emitReq({
           event: "stall",
@@ -1754,7 +1831,7 @@ async function handleQuery(req) {
           source: "bridge_health"
         });
       }
-      if (telemetry.stall === "urgent") {
+      if (decision.stall === "urgent") {
         stallUrgentSent = true;
         emitReq({
           event: "stall",
@@ -1763,7 +1840,7 @@ async function handleQuery(req) {
           source: "bridge_health"
         });
       }
-      if (telemetry.steer === "warning") {
+      if (decision.steer === "warning") {
         try {
           liveSession.steer(
             "Continue please. You have been silent for over a minute. If you have finished your current task, present your findings."
@@ -1782,7 +1859,7 @@ async function handleQuery(req) {
           redactedLog("stall steer failed (sync): ".concat(err instanceof Error ? err.message : String(err)));
         }
       }
-      if (telemetry.steer === "urgent") {
+      if (decision.steer === "urgent") {
         try {
           liveSession.steer(
             "You have been silent for over 2 minutes. Stop your current activity and present a summary of what you have done so far."
@@ -2510,6 +2587,7 @@ export {
   evaluateToolPolicy,
   formatLogLine,
   gitHasSensitiveArgs,
+  healthDecisionFor,
   injectMcpProjectScope,
   installSecurityHook,
   isDestructiveCommand,

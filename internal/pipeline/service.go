@@ -44,6 +44,14 @@ const (
 	// ProgressStateStallUrgent means the bridge reported a stall with
 	// severity=urgent.
 	ProgressStateStallUrgent ProgressState = "stall_urgent"
+	// ProgressStateToolRunning means a tool is executing: the silence belongs
+	// to the tool, not the model. The detail carries the safe tool label and
+	// the elapsed time.
+	ProgressStateToolRunning ProgressState = "tool_running"
+	// ProgressStateToolSlow means a single tool has been executing beyond the
+	// slow-warning threshold. Honest long-command notice — never the
+	// "model struggling" copy.
+	ProgressStateToolSlow ProgressState = "tool_slow"
 	// ProgressStateDone means the run completed with a result.
 	ProgressStateDone ProgressState = "done"
 	// ProgressStateCanceled means the run was canceled before completion.

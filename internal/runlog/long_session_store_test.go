@@ -347,8 +347,7 @@ func TestSQLiteStore_CompleteWithAggregates(t *testing.T) {
 	}
 }
 
-func TestSQLiteStore_CompleteWithEvents_CommitsTimelineAndTerminalTogether(t *testing.T) {
-	s := newTestStore(t)
+func TestSQLiteStore_CompleteWithEvents_CommitsTimelineAndTerminalTogether(t *testing.T) {	s := newTestStore(t)
 	ctx := context.Background()
 	runID := idgen.New()
 	if err := s.Start(ctx, RunRecord{RunID: runID, ChatID: 1, RequestID: "req-tx", Prompt: "test"}); err != nil {
@@ -366,6 +365,35 @@ func TestSQLiteStore_CompleteWithEvents_CommitsTimelineAndTerminalTogether(t *te
 	events, err := s.ListEvents(ctx, runID)
 	if err != nil || len(events) != 1 || events[0].Phase != "bridge_stall" {
 		t.Fatalf("timeline = %#v, err=%v", events, err)
+	}
+}
+
+// TestSQLiteStore_CompleteWithEvents_PersistsUsageAtomically covers A5/A7:
+// tokens, cost and tool count from the bridge result are committed in the same
+// terminal transaction as the outcome, so metrics stop reporting zero for
+// runs that did real work.
+func TestSQLiteStore_CompleteWithEvents_PersistsUsageAtomically(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	runID := idgen.New()
+	if err := s.Start(ctx, RunRecord{RunID: runID, ChatID: 1, RequestID: "req-usage", Prompt: "test"}); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := s.CompleteWithEvents(ctx, runID, RunCompleted, "done", "", "Read, Bash", CompletionAggregates{
+		InputTokens:  399368,
+		OutputTokens: 28731,
+		CostUSD:      0.0561,
+		ToolCount:    5,
+	}, nil); err != nil {
+		t.Fatalf("CompleteWithEvents: %v", err)
+	}
+
+	got, err := s.GetRun(ctx, runID)
+	if err != nil || got == nil {
+		t.Fatalf("GetRun: %v (%#v)", err, got)
+	}
+	if got.InputTokens != 399368 || got.OutputTokens != 28731 || got.CostUSD != 0.0561 || got.ToolCount != 5 {
+		t.Fatalf("usage not persisted: %+v", got)
 	}
 }
 

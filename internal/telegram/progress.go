@@ -163,11 +163,23 @@ func (p *progressReporter) ReportState(state pipelinepkg.ProgressState, detail s
 		p.statusLine = "⚠️ Estou demorando mais que o normal — aguarde."
 	case pipelinepkg.ProgressStateStallUrgent:
 		p.statusLine = "🚨 Estou com dificuldade para responder. Se não voltar, tente /stop e reenvie."
+	case pipelinepkg.ProgressStateToolRunning:
+		// The silence belongs to the tool, not the model. Calm and factual.
+		p.statusLine = "⚙️ " + detail
+	case pipelinepkg.ProgressStateToolSlow:
+		// Honest long-command notice — never the "model struggling" copy.
+		p.statusLine = "⏳ " + detail
 	case pipelinepkg.ProgressStateWaiting:
 		p.statusLine = "⏳ Ainda estou processando."
 	case pipelinepkg.ProgressStateWorking:
-		// Back to productive activity — clear the stall/waiting line.
-		p.statusLine = ""
+		if detail != "" {
+			// Informational detail (e.g. compaction tokens) must reach the
+			// user instead of being dropped.
+			p.statusLine = "🧠 " + detail
+		} else {
+			// Back to productive activity — clear the stall/waiting line.
+			p.statusLine = ""
+		}
 	default:
 		// done/canceled/failed: receipt is deleted by the caller.
 		return

@@ -805,6 +805,22 @@ func progressSilenceDetail(silentMs int64) string {
 	return fmt.Sprintf("silêncio de %s", d.Round(time.Second))
 }
 
+// toolProgressDetail formats the surface-neutral detail for a tool-in-flight
+// progress state. It carries only the bounded tool label (already normalized)
+// and the elapsed time — never the command, args or result. `slow` switches to
+// the honest long-command wording instead of the "model struggling" copy.
+func toolProgressDetail(toolName string, elapsedMs int64, slow bool) string {
+	label := normalizeToolLabel(toolName)
+	if label == "" || label == "tool" {
+		label = "ferramenta"
+	}
+	d := time.Duration(elapsedMs) * time.Millisecond
+	if slow {
+		return fmt.Sprintf("%s ainda em execução há %s (comando longo)", label, d.Round(time.Second))
+	}
+	return fmt.Sprintf("%s em execução há %s", label, d.Round(time.Second))
+}
+
 // buildHeartbeatMessage formats the human detail for the waiting state.
 // Per Long Flow UX v2: human progress language, no technical terms like
 // "chamadas de ferramenta" or tool counts. Milestones escalate with elapsed
@@ -1058,6 +1074,20 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 					progress.ReportState(ProgressStateWorking, fmt.Sprintf("contexto compactado (tokens: %d → %d)", ev.TokensBefore, *ev.TokensAfter))
 				}
 			}
+		case "tool_running", "tool_slow":
+			// Tool-aware progress. The tool is executing, so this silence is
+			// the tool's, not the model's: emit a progress state with the safe
+			// label and elapsed time, and never a stall/steer (the Bridge
+			// already suppresses those). Live-only: not persisted, so the
+			// per-run telemetry budget stays reserved for stall/steer/
+			// compaction.
+			if progress != nil {
+				state := ProgressStateToolRunning
+				if ev.Type == "tool_slow" {
+					state = ProgressStateToolSlow
+				}
+				progress.ReportState(state, toolProgressDetail(ev.Name, ev.ElapsedMs, ev.Type == "tool_slow"))
+			}
 		case "stall", "steer":
 			// bridge_health telemetry. Redacted, correlated by run/request,
 			// and never treated as productive feedback or user text.
@@ -1197,6 +1227,7 @@ func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, e
 	}
 
 	s.recordUsage(chatID, threadID, ev, userID)
+	s.recordRunUsage(chatID, threadID, userID, ev, ownership)
 
 	// Record bridge_result event with usage data.
 	s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent("",
