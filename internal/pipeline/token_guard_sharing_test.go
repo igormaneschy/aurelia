@@ -27,10 +27,10 @@ func TestApplyLifecycle_SharedTokenGuardAcrossPipelineInstances(t *testing.T) {
 		return s
 	}
 
-	inputs := []int{250_000, 300_000, 350_000}
+	inputs := []float64{75, 80, 85}
 	call := 0
 	statsHook := func(_ context.Context, _ bridge.RequestOptions) (*bridge.SessionStats, error) {
-		stats := &bridge.SessionStats{InputTokens: inputs[call]}
+		stats := &bridge.SessionStats{ContextUsagePct: inputs[call]}
 		if call < len(inputs)-1 {
 			call++
 		}

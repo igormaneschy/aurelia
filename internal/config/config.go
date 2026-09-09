@@ -81,6 +81,12 @@ type SessionLifecycleConfig struct {
 	InterruptedSessionMaxAgeMinutes int  `json:"interrupted_session_max_age_minutes,omitempty"`
 	KeepRecentTokens                int  `json:"keep_recent_tokens"`
 	ReserveTokens                   int  `json:"reserve_tokens"`
+	// WarnContextPct is the context usage (percentage of the model window) that
+	// marks a session as large and triggers the one-shot long-session nudge.
+	WarnContextPct int `json:"warn_context_pct,omitempty"`
+	// EmergencyRotateContextPct is the context usage at which Go rotates as a
+	// last resort. Normal compaction is owned by the PI SDK.
+	EmergencyRotateContextPct int `json:"emergency_rotate_context_pct,omitempty"`
 }
 
 // DefaultSessionLifecycleConfig returns safe defaults for session lifecycle.
@@ -95,6 +101,8 @@ func DefaultSessionLifecycleConfig() SessionLifecycleConfig {
 		InterruptedSessionMaxAgeMinutes: 1,
 		KeepRecentTokens:                8000,
 		ReserveTokens:                   32768,
+		WarnContextPct:                  70,
+		EmergencyRotateContextPct:       95,
 	}
 }
 
@@ -129,6 +137,18 @@ func (c SessionLifecycleConfig) Validate() error {
 		if c.ReserveTokens <= 0 {
 			return fmt.Errorf("session_lifecycle.reserve_tokens must be > 0, got %d", c.ReserveTokens)
 		}
+		if c.WarnContextPct < 0 || c.WarnContextPct > 100 {
+			return fmt.Errorf("session_lifecycle.warn_context_pct must be between 0 and 100, got %d", c.WarnContextPct)
+		}
+		if c.EmergencyRotateContextPct < 0 || c.EmergencyRotateContextPct > 100 {
+			return fmt.Errorf("session_lifecycle.emergency_rotate_context_pct must be between 0 and 100, got %d", c.EmergencyRotateContextPct)
+		}
+		if c.WarnContextPct > 0 && c.EmergencyRotateContextPct > 0 && c.EmergencyRotateContextPct <= c.WarnContextPct {
+			return fmt.Errorf(
+				"session_lifecycle.emergency_rotate_context_pct (%d) must be > warn_context_pct (%d)",
+				c.EmergencyRotateContextPct, c.WarnContextPct,
+			)
+		}
 	}
 	return nil
 }
@@ -144,6 +164,8 @@ func (c SessionLifecycleConfig) LifecyclePolicy() session.LifecyclePolicy {
 		IdleTimeoutMinutes:           c.IdleTimeoutMinutes,
 		KeepRecentTokens:             c.KeepRecentTokens,
 		ReserveTokens:                c.ReserveTokens,
+		WarnContextPct:               c.WarnContextPct,
+		EmergencyRotateContextPct:    c.EmergencyRotateContextPct,
 	}
 }
 
@@ -487,6 +509,12 @@ func normalizeFileConfig(cfg fileConfig, r *runtime.PathResolver, preserveAutoMo
 	}
 	if cfg.SessionLifecycle.InterruptedSessionMaxAgeMinutes <= 0 {
 		cfg.SessionLifecycle.InterruptedSessionMaxAgeMinutes = defaults.SessionLifecycle.InterruptedSessionMaxAgeMinutes
+	}
+	if cfg.SessionLifecycle.WarnContextPct <= 0 {
+		cfg.SessionLifecycle.WarnContextPct = defaults.SessionLifecycle.WarnContextPct
+	}
+	if cfg.SessionLifecycle.EmergencyRotateContextPct <= 0 {
+		cfg.SessionLifecycle.EmergencyRotateContextPct = defaults.SessionLifecycle.EmergencyRotateContextPct
 	}
 	return cfg
 }

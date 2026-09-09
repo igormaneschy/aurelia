@@ -196,11 +196,16 @@ type ProjectStatePayload struct {
 
 	// Session usage from get-session-stats. Zero/absent when no session file
 	// exists or the stats call failed; the panel hides the section then.
-	SessionInputTokens  int     `json:"session_input_tokens,omitempty"`
-	SessionOutputTokens int     `json:"session_output_tokens,omitempty"`
-	SessionCostUSD      float64 `json:"session_cost_usd,omitempty"`
-	SessionContextPct   float64 `json:"session_context_pct,omitempty"`
-	CompactAfterTokens  int     `json:"compact_after_tokens,omitempty"`
+	// SessionContextTokens/Window/Pct describe the CURRENT context relative to
+	// the model window; the Input/Output/Cost fields are cumulative billing.
+	SessionInputTokens   int     `json:"session_input_tokens,omitempty"`
+	SessionOutputTokens  int     `json:"session_output_tokens,omitempty"`
+	SessionCostUSD       float64 `json:"session_cost_usd,omitempty"`
+	SessionContextPct    float64 `json:"session_context_pct,omitempty"`
+	SessionContextTokens int     `json:"session_context_tokens,omitempty"`
+	SessionContextWindow int     `json:"session_context_window,omitempty"`
+	// CompactAfterTokens is deprecated (absolute billing threshold).
+	CompactAfterTokens int `json:"compact_after_tokens,omitempty"`
 }
 
 // ProjectStateMemoryLayer describes one memory layer in the project state.

@@ -709,26 +709,32 @@ func (bc *BotController) cmdUsage(chatID int64, threadID int, userID int64) (str
 		return "📊 Não consegui ler o uso da sessão agora. Tente novamente em instantes.", nil
 	}
 
+	return formatSessionUsage(stats), nil
+}
+
+// formatSessionUsage renders the session usage: current context relative to
+// the model window first, then cumulative billing totals. Pure and bounded so
+// it can be unit-tested without a bridge.
+func formatSessionUsage(stats *bridge.SessionStats) string {
+	if stats == nil {
+		return "📊 Não consegui ler o uso da sessão agora. Tente novamente em instantes."
+	}
 	lines := []string{"**Uso da sessão**\n"}
-	compactAfter := 0
-	if bc.config != nil {
-		compactAfter = bc.config.SessionLifecycle.CompactAfterInputTokens
+	switch {
+	case stats.ContextWindow > 0:
+		lines = append(lines, fmt.Sprintf("🧠 Contexto: **%s / %s tokens** (%.0f%% da janela)",
+			formatTokenCount(int64(stats.ContextTokens)), formatTokenCount(int64(stats.ContextWindow)), stats.ContextUsagePct))
+	case stats.ContextUsagePct > 0:
+		lines = append(lines, fmt.Sprintf("🧠 Contexto: **%.0f%%** da janela do modelo", stats.ContextUsagePct))
+	default:
+		lines = append(lines, "🧠 Contexto: indisponível nesta janela")
 	}
-	contextLine := fmt.Sprintf("🧠 Input acumulado: **%s tokens**", formatTokenCount(int64(stats.InputTokens)))
-	if compactAfter > 0 {
-		pct := float64(stats.InputTokens) / float64(compactAfter) * 100
-		contextLine += fmt.Sprintf(" (%.0f%% do limite de compactação de %s)", pct, formatTokenCount(int64(compactAfter)))
-	}
-	lines = append(lines, contextLine)
-	if stats.ContextUsagePct > 0 {
-		lines = append(lines, fmt.Sprintf("📈 Janela do modelo: **%.0f%%** em uso", stats.ContextUsagePct))
-	}
-	lines = append(lines, fmt.Sprintf("💵 Custo: **$%.4f** · Respostas: **%d** · Mensagens: **%d**",
+	// Cumulative billing totals (not the context size).
+	lines = append(lines, fmt.Sprintf("💵 Custo acumulado: **$%.4f** · Respostas: **%d** · Mensagens: **%d**",
 		stats.Cost, stats.AssistantMessages, stats.TotalMessages))
-	if stats.OutputTokens > 0 {
-		lines = append(lines, fmt.Sprintf("📤 Saída acumulada: %s tokens", formatTokenCount(int64(stats.OutputTokens))))
-	}
-	return strings.Join(lines, "\n"), nil
+	lines = append(lines, fmt.Sprintf("📊 Billing: in **%s** · out **%s** tokens",
+		formatTokenCount(int64(stats.InputTokens)), formatTokenCount(int64(stats.OutputTokens))))
+	return strings.Join(lines, "\n")
 }
 
 // formatTokenCount renders a token count compactly (121000 -> "121k").

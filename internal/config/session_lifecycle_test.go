@@ -149,6 +149,37 @@ func TestSessionLifecycleConfig_Validate(t *testing.T) {
 			},
 			wantErr: "session_lifecycle.idle_timeout_minutes must be > 0, got 0",
 		},
+		{
+			name: "warn context pct out of range",
+			cfg: SessionLifecycleConfig{
+				Enabled:                      true,
+				CompactAfterInputTokens:      200000,
+				RotateAfterInputTokens:       500000,
+				MaxEmptyResultsBeforeRotate:  2,
+				MaxProcessDeathsBeforeRotate: 2,
+				IdleTimeoutMinutes:           20,
+				KeepRecentTokens:             8000,
+				ReserveTokens:                32768,
+				WarnContextPct:               120,
+			},
+			wantErr: "session_lifecycle.warn_context_pct must be between 0 and 100, got 120",
+		},
+		{
+			name: "emergency rotate pct <= warn pct",
+			cfg: SessionLifecycleConfig{
+				Enabled:                      true,
+				CompactAfterInputTokens:      200000,
+				RotateAfterInputTokens:       500000,
+				MaxEmptyResultsBeforeRotate:  2,
+				MaxProcessDeathsBeforeRotate: 2,
+				IdleTimeoutMinutes:           20,
+				KeepRecentTokens:             8000,
+				ReserveTokens:                32768,
+				WarnContextPct:               90,
+				EmergencyRotateContextPct:    80,
+			},
+			wantErr: "session_lifecycle.emergency_rotate_context_pct (80) must be > warn_context_pct (90)",
+		},
 	}
 
 	for _, tt := range tests {

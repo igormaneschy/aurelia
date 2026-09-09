@@ -99,15 +99,11 @@ func (s *Service) applyLifecycle(ctx context.Context, req *bridge.Request, chatI
 	dec := session.EvaluateLifecycle(signals, policy)
 	sessionKey := session.SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID}
 
-	if dec.Action == session.ActionContinue && signals.Active && signals.InputTokens > 0 {
-		if attentionAt := longSessionAttentionThreshold(policy); attentionAt > 0 && signals.InputTokens >= attentionAt {
-			s.maybeNudgeLongSession(chatID, threadID, userID, signals.InputTokens)
+	if dec.Action == session.ActionContinue && signals.Active && signals.ContextUsagePct > 0 {
+		if warnPct := longSessionAttentionPct(policy); warnPct > 0 && signals.ContextUsagePct >= float64(warnPct) {
+			s.maybeNudgeLongSession(chatID, threadID, userID, signals.ContextTokens, signals.ContextWindow, signals.ContextUsagePct)
 		}
-		if warnAt := session.WarnInputTokensThreshold(policy); signals.InputTokens >= warnAt {
-			log.Printf("lifecycle: WARN high input_tokens=%d chat=%d thread=%d user=%d (warn_threshold=%d)",
-				signals.InputTokens, chatID, threadID, userID, warnAt)
-		}
-		if guardDec, escalated := s.tokenGuard.Evaluate(sessionKey, signals.InputTokens, policy); escalated {
+		if guardDec, escalated := s.tokenGuard.Evaluate(sessionKey, signals.ContextUsagePct, policy); escalated {
 			dec = guardDec
 			log.Printf("lifecycle: token guard escalation chat=%d thread=%d user=%d action=%s reason=%q",
 				chatID, threadID, userID, dec.Action, dec.Reason)
@@ -320,6 +316,11 @@ func (s *Service) enrichLifecycleSignals(ctx context.Context, req *bridge.Reques
 	signals.TotalMessages = stats.TotalMessages
 	signals.AssistantMessages = stats.AssistantMessages
 	signals.ToolResults = stats.ToolResults
+	// Current context relative to the model window — the metric that drives
+	// context decisions (not the cumulative billing tokens above).
+	signals.ContextUsagePct = stats.ContextUsagePct
+	signals.ContextTokens = stats.ContextTokens
+	signals.ContextWindow = stats.ContextWindow
 	return signals
 }
 
@@ -496,19 +497,26 @@ func (s *Service) getLifecyclePolicy() session.LifecyclePolicy {
 	return s.config.SessionLifecycle.LifecyclePolicy()
 }
 
-// longSessionAttentionThreshold returns the input-token count at which the
-// one-shot long-session nudge fires: the smaller of 60% of the compaction
-// threshold and the existing warn threshold. Returns 0 when the compaction
-// threshold is not configured (feature disabled).
-func longSessionAttentionThreshold(policy session.LifecyclePolicy) int {
-	if policy.CompactAfterInputTokens <= 0 {
-		return 0
+// formatTokenCount renders a token count compactly (121000 -> "121k").
+func formatTokenCount(n int64) string {
+	if n < 0 {
+		n = 0
 	}
-	attention := policy.CompactAfterInputTokens * 6 / 10
-	if warn := session.WarnInputTokensThreshold(policy); warn > 0 && warn < attention {
-		attention = warn
+	switch {
+	case n >= 1_000_000:
+		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
+	case n >= 1_000:
+		return fmt.Sprintf("%.0fk", float64(n)/1_000)
+	default:
+		return fmt.Sprintf("%d", n)
 	}
-	return attention
+}
+
+// longSessionAttentionPct returns the context-usage percentage at which the
+// one-shot long-session nudge fires (percentage of the model's context window).
+// Returns 0 when disabled.
+func longSessionAttentionPct(policy session.LifecyclePolicy) int {
+	return policy.WarnContextPct
 }
 
 // maybeNudgeLongSession tells the user once per session that the conversation
@@ -516,14 +524,18 @@ func longSessionAttentionThreshold(policy session.LifecyclePolicy) int {
 // — the decision stays with the user and TokenGuard remains the only emergency
 // fallback. The nudge is claimed atomically in the session store, so concurrent
 // runs cannot duplicate it.
-func (s *Service) maybeNudgeLongSession(chatID int64, threadID int, userID int64, inputTokens int) {
+func (s *Service) maybeNudgeLongSession(chatID int64, threadID int, userID int64, contextTokens, contextWindow int, contextPct float64) {
 	if s == nil || s.sessions == nil || s.output == nil {
 		return
 	}
 	if !s.sessions.MarkLongSessionNudged(chatID, threadID, userID) {
 		return
 	}
-	msg := fmt.Sprintf("📈 Esta conversa está longa (~%dk tokens). Posso seguir normalmente; se quiser um começo limpo, use /new (o histórico da conversa fica salvo).", inputTokens/1000)
+	usage := fmt.Sprintf("%.0f%% da janela", contextPct)
+	if contextTokens > 0 && contextWindow > 0 {
+		usage = fmt.Sprintf("%s / %s tokens, %.0f%% da janela", formatTokenCount(int64(contextTokens)), formatTokenCount(int64(contextWindow)), contextPct)
+	}
+	msg := fmt.Sprintf("📈 Esta conversa está longa (%s). Posso seguir normalmente; se quiser um começo limpo, use /new (o histórico da conversa fica salvo).", usage)
 	if _, err := s.output.SendText(chatID, threadID, msg); err != nil {
 		log.Printf("pipeline: SendText(long-session nudge) failed for chat=%d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
 	}

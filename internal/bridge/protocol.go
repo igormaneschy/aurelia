@@ -65,7 +65,15 @@ type SessionStats struct {
 	CacheWriteTokens  int     `json:"cache_write_tokens,omitempty"`
 	TotalTokens       int     `json:"total_tokens,omitempty"`
 	Cost              float64 `json:"cost,omitempty"`
-	ContextUsagePct   float64 `json:"context_usage_pct,omitempty"`
+	// ContextUsagePct is the CURRENT context size as a percentage of the
+	// model's context window (PI SDK estimateContextTokens / contextWindow).
+	// It is NOT the cumulative billing input tokens. Negative/zero means the
+	// SDK could not estimate the context (e.g. right after compaction).
+	ContextUsagePct float64 `json:"context_usage_pct,omitempty"`
+	// ContextTokens is the current context size in tokens (0 when unknown).
+	ContextTokens int `json:"context_tokens,omitempty"`
+	// ContextWindow is the model's context window in tokens (0 when unknown).
+	ContextWindow int `json:"context_window,omitempty"`
 }
 
 // SessionHistoryMessage is a UI-safe transcript message derived from the PI

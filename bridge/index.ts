@@ -3141,7 +3141,12 @@ async function handleGetSessionStats(req: Request): Promise<void> {
         cache_write_tokens: stats.tokens.cacheWrite,
         total_tokens: stats.tokens.total,
         cost: stats.cost,
-        context_usage_pct: usage?.percent ?? 0,
+        // Current context size relative to the model window (not the
+        // cumulative billing tokens above). -1 marks "unknown" so the Go side
+        // never mistakes an unavailable estimate for an empty context.
+        context_usage_pct: usage?.percent ?? -1,
+        context_tokens: usage?.tokens ?? 0,
+        context_window: usage?.contextWindow ?? 0,
       }),
     });
   } catch (err: unknown) {

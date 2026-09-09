@@ -39,6 +39,17 @@ type HealthSignals struct {
 	RecentProcessDeaths int
 	LastError           string
 	LastSeen            time.Time
+
+	// ContextUsagePct is the CURRENT context size as a percentage of the
+	// model's context window (PI SDK estimateContextTokens / contextWindow).
+	// It is NOT the cumulative InputTokens above. <= 0 means the SDK could not
+	// estimate the context (e.g. right after compaction) and no context-based
+	// escalation must happen.
+	ContextUsagePct float64
+	// ContextTokens is the current context size in tokens (0 when unknown).
+	ContextTokens int
+	// ContextWindow is the model's context window in tokens (0 when unknown).
+	ContextWindow int
 }
 
 // Decision is the output of lifecycle evaluation.
@@ -62,6 +73,14 @@ type LifecyclePolicy struct {
 	IdleTimeoutMinutes           int
 	KeepRecentTokens             int
 	ReserveTokens                int
+
+	// WarnContextPct is the context usage (percentage of the model window) at
+	// which the session is reported as large and the long-session nudge fires.
+	WarnContextPct int
+	// EmergencyRotateContextPct is the context usage at which Go rotates as a
+	// last resort. Normal compaction is owned by the PI SDK
+	// (contextWindow - reserveTokens).
+	EmergencyRotateContextPct int
 }
 
 // DefaultLifecyclePolicy returns safe defaults for session lifecycle policy.
@@ -71,13 +90,15 @@ type LifecyclePolicy struct {
 func DefaultLifecyclePolicy() LifecyclePolicy {
 	return LifecyclePolicy{
 		Enabled:                      true,
-		CompactAfterInputTokens:      200000, // token guard starts tracking above this
-		RotateAfterInputTokens:       500000, // token guard rotates immediately above this
+		CompactAfterInputTokens:      200000, // DEPRECATED: no longer drives context decisions
+		RotateAfterInputTokens:       500000, // DEPRECATED: no longer drives context decisions
 		MaxEmptyResultsBeforeRotate:  2,
 		MaxProcessDeathsBeforeRotate: 2,
 		IdleTimeoutMinutes:           20,
 		KeepRecentTokens:             8000,
 		ReserveTokens:                32768,
+		WarnContextPct:               70,
+		EmergencyRotateContextPct:    95,
 	}
 }
 
@@ -126,11 +147,15 @@ func EvaluateLifecycle(signals HealthSignals, policy LifecyclePolicy) Decision {
 
 	// 3. Large but healthy: PI SDK manages normal compaction internally; Go
 	// continues the original session without proactive compaction or rotation.
-	if signals.InputTokens >= policy.CompactAfterInputTokens {
+	// The decision is based on the CURRENT context relative to the model window
+	// (not the cumulative billing input tokens), and only when the SDK could
+	// estimate it.
+	if signals.ContextUsagePct > 0 && policy.WarnContextPct > 0 &&
+		signals.ContextUsagePct >= float64(policy.WarnContextPct) {
 		return Decision{
 			State:  HealthLarge,
 			Action: ActionContinue,
-			Reason: fmt.Sprintf("input_tokens=%d >= compact_after=%d (PI SDK owns compaction/continuity)", signals.InputTokens, policy.CompactAfterInputTokens),
+			Reason: fmt.Sprintf("context_usage=%.1f%% >= warn_context_pct=%d (PI SDK owns compaction/continuity)", signals.ContextUsagePct, policy.WarnContextPct),
 		}
 	}
 

@@ -395,21 +395,22 @@ func (m Model) renderProjectPanel() string {
 		}
 	}
 
-	// Session usage (context/cost). Hidden when the stats call returned nothing.
+	// Session usage: CURRENT context (relative to the model window) first,
+	// then cumulative billing. Hidden when the stats call returned nothing.
 	if state.SessionInputTokens > 0 || state.SessionCostUSD > 0 || state.SessionContextPct > 0 {
 		b.WriteString("\n")
 		b.WriteString(m.styles.HeaderTitleStyle.Render("Session Usage"))
 		b.WriteString("\n")
-		contextLine := fmt.Sprintf(" Input: %s tokens", formatTokenCountTUI(state.SessionInputTokens))
-		if state.CompactAfterTokens > 0 {
-			pct := float64(state.SessionInputTokens) / float64(state.CompactAfterTokens) * 100
-			contextLine += fmt.Sprintf(" (%.0f%% of compact limit)", pct)
+		contextLine := fmt.Sprintf(" Context: %s tokens", formatTokenCountTUI(state.SessionContextTokens))
+		if state.SessionContextWindow > 0 {
+			contextLine = fmt.Sprintf(" Context: %s / %s tokens", formatTokenCountTUI(state.SessionContextTokens), formatTokenCountTUI(state.SessionContextWindow))
+		}
+		if state.SessionContextPct > 0 {
+			contextLine += fmt.Sprintf(" (%.0f%%)", state.SessionContextPct)
 		}
 		fmt.Fprintf(&b, "%s\n", contextLine)
-		if state.SessionContextPct > 0 {
-			fmt.Fprintf(&b, " Window: %.0f%% used\n", state.SessionContextPct)
-		}
-		fmt.Fprintf(&b, " Cost: $%.4f\n", state.SessionCostUSD)
+		fmt.Fprintf(&b, " Billing: in %s · out %s · $%.4f\n",
+			formatTokenCountTUI(state.SessionInputTokens), formatTokenCountTUI(state.SessionOutputTokens), state.SessionCostUSD)
 	}
 
 	// Footer hint

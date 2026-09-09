@@ -47,8 +47,9 @@ func TestEvaluateLifecycle_InactiveSession(t *testing.T) {
 
 func TestEvaluateLifecycle_LargeInputTokens(t *testing.T) {
 	signals := HealthSignals{
-		Active:      true,
-		InputTokens: 350000, // above compact (200k), below rotate (500k)
+		Active:          true,
+		InputTokens:     350000, // cumulative billing — ignored for context
+		ContextUsagePct: 75,     // current context above warn (70%)
 	}
 	policy := DefaultLifecyclePolicy()
 
@@ -64,8 +65,9 @@ func TestEvaluateLifecycle_LargeInputTokens(t *testing.T) {
 
 func TestEvaluateLifecycle_VeryLargeInputTokensContinue(t *testing.T) {
 	signals := HealthSignals{
-		Active:      true,
-		InputTokens: 550000, // above legacy rotate threshold
+		Active:          true,
+		InputTokens:     550000, // cumulative billing — ignored for context
+		ContextUsagePct: 90,
 	}
 	policy := DefaultLifecyclePolicy()
 
@@ -79,13 +81,38 @@ func TestEvaluateLifecycle_VeryLargeInputTokensContinue(t *testing.T) {
 	}
 }
 
-func TestEvaluateLifecycle_IncidentTokenCountDoesNotRotate(t *testing.T) {
-	// Regression for 2026-06-01: an active topic session with ~371k input
-	// tokens and an older 250k rotate threshold must continue the original PI
-	// session_file. Aurelia must not create a summary-seeded replacement.
+func TestEvaluateLifecycle_CumulativeTokensDoNotDriveContext(t *testing.T) {
+	// Regression for the 2026-09-09 incident: a 1M-window model was rotated at
+	// input_tokens=506751 (cumulative billing) while the CURRENT context was
+	// ~10% of the window. Cumulative tokens must never mark a session large or
+	// rotate it; only context_usage_pct does.
 	signals := HealthSignals{
-		Active:      true,
-		InputTokens: 371682,
+		Active:          true,
+		InputTokens:     506751, // cumulative billing
+		ContextUsagePct: 10,     // current context: 10% of a 1M window
+		ContextTokens:   100000,
+		ContextWindow:   1048576,
+	}
+	policy := DefaultLifecyclePolicy()
+
+	dec := EvaluateLifecycle(signals, policy)
+
+	if dec.State != HealthHealthy {
+		t.Fatalf("expected healthy (low context), got %s (%s)", dec.State, dec.Reason)
+	}
+	if dec.Action != ActionContinue {
+		t.Fatalf("expected continue, got %s", dec.Action)
+	}
+}
+
+func TestEvaluateLifecycle_IncidentTokenCountDoesNotRotate(t *testing.T) {
+	// Regression for 2026-06-01: an active topic session with ~371k cumulative
+	// input tokens and an older 250k rotate threshold must continue the original
+	// PI session_file. Aurelia must not create a summary-seeded replacement.
+	signals := HealthSignals{
+		Active:          true,
+		InputTokens:     371682, // cumulative billing — ignored for context
+		ContextUsagePct: 40,     // current context well within the window
 	}
 	policy := DefaultLifecyclePolicy()
 	policy.CompactAfterInputTokens = 120000
@@ -93,8 +120,8 @@ func TestEvaluateLifecycle_IncidentTokenCountDoesNotRotate(t *testing.T) {
 
 	dec := EvaluateLifecycle(signals, policy)
 
-	if dec.State != HealthLarge {
-		t.Fatalf("expected large for incident token count, got %s", dec.State)
+	if dec.State != HealthHealthy {
+		t.Fatalf("expected healthy (cumulative tokens ignored), got %s", dec.State)
 	}
 	if dec.Action != ActionContinue {
 		t.Fatalf("expected continue for incident token count, got %s", dec.Action)
@@ -181,10 +208,10 @@ func TestEvaluateLifecycle_PrioritySuspectOverHealthy(t *testing.T) {
 }
 
 func TestEvaluateLifecycle_InputTokenBoundary(t *testing.T) {
-	// Exactly at compact threshold should continue (PI SDK manages compaction).
+	// Exactly at the warn percentage continues (PI SDK manages compaction).
 	signals := HealthSignals{
-		Active:      true,
-		InputTokens: 200000,
+		Active:          true,
+		ContextUsagePct: 70,
 	}
 	policy := DefaultLifecyclePolicy()
 
@@ -199,10 +226,10 @@ func TestEvaluateLifecycle_InputTokenBoundary(t *testing.T) {
 }
 
 func TestEvaluateLifecycle_InputTokenBelowCompact(t *testing.T) {
-	// Just below compact threshold should remain healthy.
+	// Just below the warn percentage remains healthy.
 	signals := HealthSignals{
-		Active:      true,
-		InputTokens: 119999,
+		Active:          true,
+		ContextUsagePct: 69,
 	}
 	policy := DefaultLifecyclePolicy()
 
@@ -210,6 +237,20 @@ func TestEvaluateLifecycle_InputTokenBelowCompact(t *testing.T) {
 
 	if dec.State != HealthHealthy {
 		t.Fatalf("expected healthy below threshold, got %s", dec.State)
+	}
+}
+
+func TestEvaluateLifecycle_UnknownContextIsHealthy(t *testing.T) {
+	// When the SDK cannot estimate the context (pct <= 0), the session is not
+	// marked large even with high cumulative tokens.
+	signals := HealthSignals{
+		Active:      true,
+		InputTokens: 900000,
+	}
+	policy := DefaultLifecyclePolicy()
+
+	if dec := EvaluateLifecycle(signals, policy); dec.State != HealthHealthy {
+		t.Fatalf("expected healthy for unknown context, got %s", dec.State)
 	}
 }
 
@@ -305,21 +346,21 @@ func TestEvaluateLifecycle_ColdOverridesDangerousTokens(t *testing.T) {
 }
 
 func TestEvaluateLifecycle_ActiveDangerousTokensStillContinue(t *testing.T) {
-	// Active sessions with tokens above the legacy rotate threshold still
-	// continue. The PI SDK owns compaction and continuity for large sessions.
+	// Active sessions with high CURRENT context still continue. The PI SDK owns
+	// compaction and continuity for large sessions.
 	signals := HealthSignals{
-		Active:      true,
-		InputTokens: 550000,
+		Active:          true,
+		ContextUsagePct: 90,
 	}
 	policy := DefaultLifecyclePolicy()
 
 	dec := EvaluateLifecycle(signals, policy)
 
 	if dec.State != HealthLarge {
-		t.Fatalf("expected large for active session with high tokens, got %s", dec.State)
+		t.Fatalf("expected large for active session with high context, got %s", dec.State)
 	}
 	if dec.Action != ActionContinue {
-		t.Fatalf("expected continue for active session with high tokens, got %s", dec.Action)
+		t.Fatalf("expected continue for active session with high context, got %s", dec.Action)
 	}
 }
 
