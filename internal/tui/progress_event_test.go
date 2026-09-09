@@ -107,6 +107,62 @@ func TestHandleProgressEvent_StallStatesSetIndicatorLine(t *testing.T) {
 	}
 }
 
+// TestHandleProgressEvent_ToolRunningAndCompactionDetail pins the new TUI
+// contract: a tool-in-flight state renders a calm factual line (never the
+// model-stall copy), a slow tool is honest about the long command, and the
+// informational detail of a working state (compaction tokens) is rendered.
+func TestHandleProgressEvent_ToolRunningAndCompactionDetail(t *testing.T) {
+	m := testChatModel()
+	updated, _ := m.handleProgressEvent(ipc.IPCEvent{
+		Type: ipc.EventTypeProgress,
+		Body: mustProgressBody(t, ipc.ProgressPayload{State: "tool_running", Detail: "Bash em execução há 3m15s"}),
+	})
+	m2 := updated.(Model)
+	if !strings.Contains(m2.stallLine, "⚙️") || !strings.Contains(m2.stallLine, "Bash em execução há 3m15s") {
+		t.Fatalf("tool_running stallLine = %q", m2.stallLine)
+	}
+	if strings.Contains(m2.stallLine, "dificuldade") || strings.Contains(m2.stallLine, "demorando") {
+		t.Fatalf("tool_running reused the model-stall copy: %q", m2.stallLine)
+	}
+	if m2.streamBuf != "" || len(m2.messages) != 0 {
+		t.Fatalf("tool_running polluted the transcript: buf=%q msgs=%d", m2.streamBuf, len(m2.messages))
+	}
+
+	m = testChatModel()
+	updated, _ = m.handleProgressEvent(ipc.IPCEvent{
+		Type: ipc.EventTypeProgress,
+		Body: mustProgressBody(t, ipc.ProgressPayload{State: "tool_slow", Detail: "Bash ainda em execução há 10m0s (comando longo)"}),
+	})
+	m2 = updated.(Model)
+	if !strings.Contains(m2.stallLine, "⏳") || !strings.Contains(m2.stallLine, "comando longo") {
+		t.Fatalf("tool_slow stallLine = %q", m2.stallLine)
+	}
+
+	// Informational detail on a working state (compaction) is rendered.
+	m = testChatModel()
+	updated, _ = m.handleProgressEvent(ipc.IPCEvent{
+		Type: ipc.EventTypeProgress,
+		Body: mustProgressBody(t, ipc.ProgressPayload{State: "working", Detail: "contexto compactado (tokens: 146528 → 90400)"}),
+	})
+	m2 = updated.(Model)
+	if !strings.Contains(m2.stallLine, "contexto compactado") || !strings.Contains(m2.stallLine, "146528") {
+		t.Fatalf("working detail was dropped: %q", m2.stallLine)
+	}
+	if len(m2.activeTools) != 0 {
+		t.Fatalf("informational detail must not register a tool: %+v", m2.activeTools)
+	}
+
+	// A real tool event still clears the informational line.
+	updated, _ = m2.handleProgressEvent(ipc.IPCEvent{
+		Type: ipc.EventTypeProgress,
+		Body: mustProgressBody(t, ipc.ProgressPayload{State: "working", ToolName: "Read", Detail: "x.go"}),
+	})
+	m2 = updated.(Model)
+	if m2.stallLine != "" {
+		t.Fatalf("tool activity must clear the info line, got %q", m2.stallLine)
+	}
+}
+
 // TestHandleProgressEvent_TerminalStatesNoOp covers done/canceled/failed:
 // they must not mutate the indicator (stream_end/error reset the chrome).
 func TestHandleProgressEvent_TerminalStatesNoOp(t *testing.T) {

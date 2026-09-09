@@ -56,6 +56,10 @@ type entry struct {
 	emptyResults        int
 	processDeaths       int
 	lastLifecycleAction string
+	// longSessionNudged marks that the one-shot long-session nudge was already
+	// shown for this session file. Reset when the session file changes (new
+	// session, /new, rotate) so a fresh conversation can be nudged again.
+	longSessionNudged bool
 }
 
 // Info is a read-only view of a stored PI session.
@@ -314,6 +318,11 @@ func (s *Store) SetSession(chatID int64, threadID int, userID int64, sessionFile
 	defer s.mu.Unlock()
 	key := SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID}
 	if e, ok := s.sessions[key]; ok {
+		if e.sessionFile != sessionFile {
+			// A different session file means a new conversation: re-arm the
+			// one-shot long-session nudge.
+			e.longSessionNudged = false
+		}
 		e.sessionFile = sessionFile
 		e.active = true
 		e.lastSeen = time.Now()
@@ -321,6 +330,26 @@ func (s *Store) SetSession(chatID int64, threadID int, userID int64, sessionFile
 		s.sessions[key] = &entry{sessionFile: sessionFile, active: true, lastSeen: time.Now()}
 	}
 	s.persistLocked()
+}
+
+// MarkLongSessionNudged claims the one-shot long-session nudge for a session.
+// Returns true when this call claimed it (the nudge was not shown yet) and
+// false when it was already sent — exactly-once under concurrent runs. A
+// conversation the store does not know fails closed (no nudge).
+func (s *Store) MarkLongSessionNudged(chatID int64, threadID int, userID int64) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := SessionKey{ChatID: chatID, ThreadID: threadID, UserID: userID}
+	e, ok := s.sessions[key]
+	if !ok {
+		return false
+	}
+	if e.longSessionNudged {
+		return false
+	}
+	e.longSessionNudged = true
+	s.persistLocked()
+	return true
 }
 
 // ClearSessionForUser removes the session for a specific chat, thread, and user.

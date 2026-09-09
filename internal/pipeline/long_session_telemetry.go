@@ -44,6 +44,12 @@ type runLogState struct {
 	stallCount      int
 	steerCount      int
 
+	// Usage captured from the terminal bridge result event and persisted in
+	// the same terminal write as the outcome (see completeRunLogOwned).
+	inputTokens  int64
+	outputTokens int64
+	costUSD      float64
+
 	// Telemetry budget (stall/steer/compaction). Counted before events are
 	// accumulated in pendingEvents; overflow is dropped explicitly and
 	// countable (telemetryDropped) instead of growing without limit. Terminal
@@ -670,6 +676,31 @@ func (s *Service) trackRunFeedback(chatID int64, threadID int, userID int64, at 
 	})
 }
 
+// recordRunUsage captures the bridge result usage (tokens, cost) into the run
+// state so the terminal write can persist it atomically with the outcome.
+// Missing/zero values leave the previous capture intact; the last result event
+// of the run wins.
+func (s *Service) recordRunUsage(chatID int64, threadID int, userID int64, ev bridge.Event, owners ...runOwnership) {
+	ownership := firstRunOwnership(owners)
+	s.withRunOwnership(chatID, threadID, userID, owners, func() {
+		state, ok := s.runLogStateFor(chatID, threadID, userID, ownership)
+		if !ok || state == nil {
+			return
+		}
+		state.mu.Lock()
+		defer state.mu.Unlock()
+		if ev.InputTokens > 0 {
+			state.inputTokens = int64(ev.InputTokens)
+		}
+		if ev.OutputTokens > 0 {
+			state.outputTokens = int64(ev.OutputTokens)
+		}
+		if ev.CostUSD > 0 {
+			state.costUSD = ev.CostUSD
+		}
+	})
+}
+
 // countBridgeTelemetry increments the per-run stall/steer counters. Telemetry
 // is not productive feedback; it only feeds the diagnostic aggregates. The
 // counters saturate at maxTelemetryEventsPerRun so a runaway bridge telemetry
@@ -1021,6 +1052,10 @@ func (s *Service) completeRunLogOwned(chatID int64, threadID int, userID int64, 
 	state.pendingBytes = 0
 	telemetryDropped := state.telemetryDropped
 	pendingDropped := state.pendingDropped
+	toolCount := state.summaryCount
+	inputTokens := state.inputTokens
+	outputTokens := state.outputTokens
+	costUSD := state.costUSD
 
 	// Long-session aggregates, computed at the terminal boundary:
 	// - first_feedback_ms: run start -> first surface-updating event (0 if none)
@@ -1091,6 +1126,10 @@ func (s *Service) completeRunLogOwned(chatID int64, threadID int, userID int64, 
 		MaxSilenceMs:    maxSilenceMs,
 		StallCount:      stallCount,
 		SteerCount:      steerCount,
+		InputTokens:     inputTokens,
+		OutputTokens:    outputTokens,
+		CostUSD:         costUSD,
+		ToolCount:       toolCount,
 	}
 	if ca, ok := s.runLog.(runlog.AtomicCompletionStore); ok {
 		if err := ca.CompleteWithEvents(completeCtx, state.runID, status, checkpoint, errMsg, summary, agg, pendingEvents); err != nil {
@@ -1130,6 +1169,10 @@ func (s *Service) completeRunLogOwned(chatID int64, threadID int, userID int64, 
 		MaxSilenceMs:    &maxSilenceMs,
 		StallCount:      &stallCount,
 		SteerCount:      &steerCount,
+		InputTokens:     &inputTokens,
+		OutputTokens:    &outputTokens,
+		CostUSD:         &costUSD,
+		ToolCount:       &toolCount,
 	}); err != nil {
 		log.Printf("runlog: failed to persist aggregates for %s (status=%s): %s", state.runID, status, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
 	}

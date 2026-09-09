@@ -193,6 +193,14 @@ type ProjectStatePayload struct {
 	MemoryLayers    []ProjectStateMemoryLayer `json:"memory_layers"`
 	CheckpointLayer string                    `json:"checkpoint_layer"`
 	LatestRun       *ProjectStateRun          `json:"latest_run,omitempty"`
+
+	// Session usage from get-session-stats. Zero/absent when no session file
+	// exists or the stats call failed; the panel hides the section then.
+	SessionInputTokens  int     `json:"session_input_tokens,omitempty"`
+	SessionOutputTokens int     `json:"session_output_tokens,omitempty"`
+	SessionCostUSD      float64 `json:"session_cost_usd,omitempty"`
+	SessionContextPct   float64 `json:"session_context_pct,omitempty"`
+	CompactAfterTokens  int     `json:"compact_after_tokens,omitempty"`
 }
 
 // ProjectStateMemoryLayer describes one memory layer in the project state.

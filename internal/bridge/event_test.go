@@ -208,3 +208,33 @@ func TestNormalizeEvent_NonResultTextStillBounded(t *testing.T) {
 		t.Fatalf("log content = %d bytes, want %d", len(got.Content), maxEventTextBytes)
 	}
 }
+
+// TestNormalizeEvent_KeepsToolRunningTelemetry pins the tool-aware health
+// contract: tool_running/tool_slow survive the type allowlist (unknown types
+// degrade to "unknown" and are dropped downstream), the bounded label and
+// elapsed are preserved, and an out-of-range elapsed degrades to 0.
+func TestNormalizeEvent_KeepsToolRunningTelemetry(t *testing.T) {
+	got := normalizeEvent(Event{
+		Type:       "tool_running",
+		Name:       "Bash",
+		ToolCallID: "tool-abc",
+		ElapsedMs:  195_000,
+		Source:     "bridge_health",
+	})
+	if got.Type != "tool_running" {
+		t.Fatalf("type = %q, want tool_running", got.Type)
+	}
+	if got.ElapsedMs != 195_000 || got.Name != "Bash" || got.Source != "bridge_health" {
+		t.Fatalf("tool_running telemetry lost: %+v", got)
+	}
+
+	slow := normalizeEvent(Event{Type: "tool_slow", Name: "Bash", ElapsedMs: 700_000})
+	if slow.Type != "tool_slow" {
+		t.Fatalf("type = %q, want tool_slow", slow.Type)
+	}
+
+	bogus := normalizeEvent(Event{Type: "tool_running", Name: "Bash", ElapsedMs: -5})
+	if bogus.ElapsedMs != 0 {
+		t.Fatalf("elapsed_ms = %d, want 0 for out-of-range input", bogus.ElapsedMs)
+	}
+}

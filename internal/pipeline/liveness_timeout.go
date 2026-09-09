@@ -314,6 +314,11 @@ func livenessEventIsProductive(ev bridge.Event) bool {
 		return ev.Name != ""
 	case "tool_result":
 		return ev.ContentText() != "" || ev.ToolCallID != ""
+	case "tool_running", "tool_slow":
+		// A tool is executing and the Bridge is alive: the absence of model
+		// output is expected, so the idle window must not escalate while a
+		// real command runs. The 30min hard execution cap remains the ceiling.
+		return ev.Name != ""
 	case "assistant":
 		return ev.ContentText() != ""
 	default:
@@ -341,7 +346,11 @@ type stallPriorityReporter struct {
 func (s *stallPriorityReporter) ReportState(state ProgressState, detail string) {
 	s.mu.Lock()
 	switch state {
-	case ProgressStateStallWarning, ProgressStateStallUrgent:
+	case ProgressStateStallWarning, ProgressStateStallUrgent, ProgressStateToolSlow:
+		s.stallSeen = time.Now()
+	case ProgressStateToolRunning:
+		// A tool in flight is productive: it clears a stale stall line and
+		// must not be clobbered by the heartbeat Waiting re-beat.
 		s.stallSeen = time.Now()
 	case ProgressStateWaiting:
 		if time.Since(s.stallSeen) < stallHoldWindow {

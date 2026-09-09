@@ -4,6 +4,7 @@ import {
   compactionEndPayload,
   compactionReason,
   formatLogLine,
+  healthDecisionFor,
   measuredElapsed,
   serializeOutEvent,
   StdoutEmissionBudget,
@@ -189,6 +190,37 @@ describe("ToolDurationTracker", () => {
     t.start(undefined, 1_000);
     assert.strictEqual(t.end(undefined, 2_000), undefined);
   });
+
+  it("reports the oldest in-flight tool with its safe label and elapsed", () => {
+    const t = new ToolDurationTracker();
+    assert.strictEqual(t.inflight(1_000), null, "nothing in flight -> null");
+    const idA = t.start("tool-a", 1_000, "Read");
+    const idB = t.start("tool-b", 3_000, "Bash");
+    // tool-a is open longest -> largest elapsed wins regardless of map order.
+    assert.deepStrictEqual(t.inflight(5_000), {
+      toolCallID: idA,
+      name: "Read",
+      elapsedMs: 4_000,
+    });
+    t.end("tool-a", 6_000);
+    assert.deepStrictEqual(t.inflight(6_000), {
+      toolCallID: idB,
+      name: "Bash",
+      elapsedMs: 3_000,
+    });
+    t.end("tool-b", 7_000);
+    assert.strictEqual(t.inflight(7_000), null);
+  });
+
+  it("bounds the in-flight label and never exposes a clock regression", () => {
+    const t = new ToolDurationTracker();
+    t.start("tool-a", 10_000, "x".repeat(500));
+    const inflight = t.inflight(12_000);
+    assert.ok(inflight);
+    assert.ok(inflight.name.length <= 128, `label not bounded: ${inflight.name.length}`);
+    // Clock moved backwards: no negative elapsed is reported.
+    assert.strictEqual(t.inflight(9_000), null);
+  });
 });
 
 describe("compactionEndPayload", () => {
@@ -325,5 +357,75 @@ describe("stallTelemetryFor", () => {
 
   it("always reports positive silent_ms from the caller (>= 60s here)", () => {
     assert.ok(stallTelemetryFor(60_000, false, false).stall !== undefined);
+  });
+});
+
+describe("healthDecisionFor", () => {
+  const inflight = { toolCallID: "tool-1", name: "Bash", elapsedMs: 180_000 };
+
+  it("preserves the stall ladder when no tool is in flight", () => {
+    assert.deepStrictEqual(
+      healthDecisionFor({
+        silentMs: 61_000,
+        inflight: null,
+        stallWarningSent: false,
+        stallUrgentSent: false,
+        toolSlowWarned: false,
+      }),
+      { stall: "warning", steer: "warning" },
+    );
+    assert.deepStrictEqual(
+      healthDecisionFor({
+        silentMs: 121_000,
+        inflight: null,
+        stallWarningSent: true,
+        stallUrgentSent: false,
+        toolSlowWarned: false,
+      }),
+      { stall: "urgent", steer: "urgent" },
+    );
+  });
+
+  it("never emits stall/steer while a tool is in flight", () => {
+    const decision = healthDecisionFor({
+      silentMs: 300_000,
+      inflight,
+      stallWarningSent: false,
+      stallUrgentSent: false,
+      toolSlowWarned: true,
+    });
+    assert.deepStrictEqual(decision.toolRunning, inflight);
+    assert.strictEqual(decision.stall, undefined);
+    assert.strictEqual(decision.steer, undefined);
+  });
+
+  it("emits tool_slow exactly once per tool beyond the slow threshold", () => {
+    const slow = { toolCallID: "tool-1", name: "Bash", elapsedMs: 700_000 };
+    const base = {
+      silentMs: 10_000,
+      inflight: slow,
+      stallWarningSent: false,
+      stallUrgentSent: false,
+    };
+    assert.strictEqual(
+      healthDecisionFor({ ...base, toolSlowWarned: false }).toolSlow,
+      true,
+    );
+    assert.strictEqual(
+      healthDecisionFor({ ...base, toolSlowWarned: true }).toolSlow,
+      undefined,
+    );
+  });
+
+  it("does not warn slow before the threshold", () => {
+    const decision = healthDecisionFor({
+      silentMs: 10_000,
+      inflight: { toolCallID: "tool-1", name: "Bash", elapsedMs: 60_000 },
+      stallWarningSent: false,
+      stallUrgentSent: false,
+      toolSlowWarned: false,
+    });
+    assert.strictEqual(decision.toolSlow, undefined);
+    assert.ok(decision.toolRunning);
   });
 });
