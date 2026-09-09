@@ -95,4 +95,5 @@ ESTUDO.md
 
 # OpenSpec durable artifacts (override generic specs/ ignore)
 !openspec/specs/
+!openspec/changes/*/specs/
 !openspec/changes/archive/*/specs/
