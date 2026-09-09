@@ -22,4 +22,7 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.10.1
+          # Must be a release built with Go >= the module's go directive (1.27).
+          # v2.10.1 is built with go1.26 and fails with
+          # "can't load config: ... lower than the targeted Go version (1.27)".
+          version: v2.13.2
