@@ -30,7 +30,7 @@ func TestApplyLifecycle_CompactRecordsCompactionEventsInRun(t *testing.T) {
 		runLogMu:     sync.Mutex{},
 		tokenGuard:   session.NewTokenGuard(),
 		testSessionStats: func(_ context.Context, _ bridge.RequestOptions) (*bridge.SessionStats, error) {
-			return &bridge.SessionStats{InputTokens: 350_000}, nil
+			return &bridge.SessionStats{ContextUsagePct: 85, ContextTokens: 850_000, ContextWindow: 1_000_000}, nil
 		},
 		testCompactSession: func(_ context.Context, _ int64, _ int, _ int64, _ bridge.RequestOptions) (*bridge.CompactSessionResult, error) {
 			return &bridge.CompactSessionResult{Success: true, SessionFile: "/tmp/test.jsonl", TokensBefore: 350_000}, nil

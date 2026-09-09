@@ -17,10 +17,10 @@ func TestApplyLifecycle_TokenGuardEscalatesToCompact(t *testing.T) {
 	s.config.SessionLifecycle = config.DefaultSessionLifecycleConfig()
 	s.sessions.SetSession(1, 2, 100, "/tmp/test.jsonl")
 
-	inputs := []int{250_000, 300_000, 350_000}
+	inputs := []float64{75, 80, 85}
 	call := 0
 	s.testSessionStats = func(_ context.Context, _ bridge.RequestOptions) (*bridge.SessionStats, error) {
-		stats := &bridge.SessionStats{InputTokens: inputs[call]}
+		stats := &bridge.SessionStats{ContextUsagePct: inputs[call]}
 		if call < len(inputs)-1 {
 			call++
 		}
@@ -54,7 +54,7 @@ func TestApplyLifecycle_TokenGuardImmediateRotate(t *testing.T) {
 	s.sessions.SetSession(1, 2, 100, sessionFile)
 
 	s.testSessionStats = func(_ context.Context, _ bridge.RequestOptions) (*bridge.SessionStats, error) {
-		return &bridge.SessionStats{InputTokens: 550_000}, nil
+		return &bridge.SessionStats{ContextUsagePct: 96}, nil
 	}
 	s.testRotateSession = func(_ context.Context, _ int64, _ int, _ int64, _ bridge.RequestOptions) (*bridge.RotateSessionResult, error) {
 		return &bridge.RotateSessionResult{
@@ -72,7 +72,10 @@ func TestApplyLifecycle_TokenGuardImmediateRotate(t *testing.T) {
 	}
 }
 
-func TestApplyLifecycle_TokenGuardWarnsHighTokens(t *testing.T) {
+// TestApplyLifecycle_TokenGuardLargeContextContinues covers the warn state: a
+// context above warn_context_pct but below the emergency ceiling continues
+// (the PI SDK owns compaction); it does not rotate.
+func TestApplyLifecycle_TokenGuardLargeContextContinues(t *testing.T) {
 	s := newLifecycleTestService(t)
 	s.tokenGuard = session.NewTokenGuard()
 	s.config.SessionLifecycle = config.DefaultSessionLifecycleConfig()
@@ -80,21 +83,21 @@ func TestApplyLifecycle_TokenGuardWarnsHighTokens(t *testing.T) {
 	s.sessions.SetSession(1, 2, 100, sessionFile)
 
 	s.testSessionStats = func(_ context.Context, _ bridge.RequestOptions) (*bridge.SessionStats, error) {
-		return &bridge.SessionStats{InputTokens: 520_000}, nil
+		return &bridge.SessionStats{ContextUsagePct: 90, ContextTokens: 900_000, ContextWindow: 1_000_000}, nil
 	}
 	s.testRotateSession = func(_ context.Context, _ int64, _ int, _ int64, _ bridge.RequestOptions) (*bridge.RotateSessionResult, error) {
-		return &bridge.RotateSessionResult{
-			Success:        true,
-			OldSessionFile: sessionFile,
-			NewSessionFile: sessionFile,
-		}, nil
+		t.Fatal("rotate must not be called below the emergency ceiling")
+		return nil, nil
 	}
 
 	req := &bridge.Request{Command: "query", Options: bridge.RequestOptions{Continue: true, Resume: sessionFile}}
 	result := s.applyLifecycle(context.Background(), req, 1, 2, 100)
 
-	if result.Decision.Action != session.ActionRotate {
-		t.Fatalf("expected rotate above rotate_after, got %s", result.Decision.Action)
+	if result.Decision.Action != session.ActionContinue {
+		t.Fatalf("expected continue below emergency ceiling, got %s (%s)", result.Decision.Action, result.Decision.Reason)
+	}
+	if result.Decision.State != session.HealthLarge {
+		t.Fatalf("expected large state, got %s", result.Decision.State)
 	}
 }
 

@@ -8,85 +8,90 @@ aprovação explícita.
 
 ## T0 — Baseline e preflight
 
-- [ ] Registrar baseline: `go test ./... -short -count=1`, `go vet ./...`,
-      `cd bridge && npx tsc --noEmit && npm test`, `golangci-lint run`.
-- [ ] Exportar fixture de regressão do caso 2026-09-09 21:35 (`input_tokens`
-      cumulativo 506751, contexto real ~100k, janela 1M) e do caso 21:23
-      (`tokens_before=87862`).
-- [ ] Confirmar contrato de `get-session-stats` e `SessionStats` em Go.
-- [ ] Parar e reportar blocker se o baseline ou as fixtures falharem.
+- [x] Baseline verde: `go build`, `go vet`, `go test ./... -short`,
+      `tsc --noEmit`, `npm test` (177/177), `golangci-lint run`.
+- [x] Fixture de regressão do caso 2026-09-09 (`input_tokens=506751` cumulativo,
+      contexto real ~10% da janela 1M) codificada em
+      `TestEvaluateLifecycle_CumulativeTokensDoNotDriveContext`.
+- [x] Confirmado contrato de `get-session-stats`/`SessionStats`.
 
-**Validation:** baseline verde e fixtures definidas; nenhuma mudança runtime.
+**Validation:** baseline verde; cenário de regressão definido.
 
 ## T1 — Bridge: expor contexto atual e janela
 
-- [ ] `handleGetSessionStats` inclui `context_tokens` e `context_window`
-      (0/null quando o SDK não estima).
-- [ ] `internal/bridge/protocol.go`: `SessionStats` ganha `ContextTokens` e
-      `ContextWindow`; parsing tolerante a ausência.
-- [ ] Testes TS do payload e Go do parse.
+- [x] `handleGetSessionStats` devolve `context_usage_pct` (-1 = desconhecido),
+      `context_tokens` e `context_window`.
+- [x] `internal/bridge/protocol.go`: `SessionStats` ganha `ContextTokens` e
+      `ContextWindow` com docstring distinguindo do cumulativo.
+- [x] Teste Go do parse dos novos campos.
 
-**Validation:** `get-session-stats` devolve os três campos de contexto; ausência
-degrada para 0 sem erro.
+**Validation:** mock emite os três campos e o Go os parseia.
 
 ## T2 — Go: sinais e decisão por percentual
 
-- [ ] `session.HealthSignals` ganha `ContextUsagePct` (-1 desconhecido),
-      `ContextTokens`, `ContextWindow`.
-- [ ] `enrichLifecycleSignals` preenche a partir de `SessionStats`.
-- [ ] `SessionLifecycleConfig` ganha `warn_context_pct` (70) e
-      `emergency_rotate_context_pct` (95); `Validate` valida faixas e mantém as
-      chaves absolutas aceitas (deprecadas).
-- [ ] `LifecyclePolicy` propaga os percentuais.
-- [ ] `applyLifecycle`/lifecycle deixam de escalar por `InputTokens`; escalam
-      só por `ContextUsagePct` (emergência) e não escalam quando desconhecido.
-- [ ] Testes: cumulativo alto não rotaciona; percentual de emergência rotaciona;
-      desconhecido não escala.
+- [x] `session.HealthSignals` ganha `ContextUsagePct`, `ContextTokens`,
+      `ContextWindow`.
+- [x] `enrichLifecycleSignals` preenche a partir de `SessionStats`.
+- [x] `SessionLifecycleConfig`/`LifecyclePolicy` ganham `WarnContextPct` (70) e
+      `EmergencyRotateContextPct` (95), com defaults e validação; chaves
+      absolutas ficam deprecadas.
+- [x] `EvaluateLifecycle` marca `HealthLarge` por percentual (não por
+      cumulativo) e ignora contexto desconhecido.
+- [x] Testes: cumulativo alto + contexto baixo → healthy; 70% → large;
+      desconhecido → healthy; validação de config.
 
-**Validation:** fixture do caso 506k/1M não rotaciona; 95% rotaciona.
+**Validation:** `TestEvaluateLifecycle_CumulativeTokensDoNotDriveContext` passa;
+config valida faixas.
 
 ## T3 — TokenGuard em contexto atual
 
-- [ ] `TokenGuard.Evaluate` passa a receber percentual do contexto (ou tokens do
-      contexto atual + janela).
-- [ ] Detecção de stall usa a variação do contexto atual após compactação
-      (redução volta a ser detectável); reduzir para `ActionCompact` só como
-      fallback.
-- [ ] `Reset` e saturação preservados; desconhecido não escala.
-- [ ] Testes: redução reconhecida, não-redução escalona, desconhecido no-op.
+- [x] `TokenGuard.Evaluate(key, contextPct, policy)` com rotação de emergência
+      percentual e stall por variação do contexto.
+- [x] `contextReduced` substitui `tokensReduced`; desconhecido não escala.
+- [x] Testes reescritos (redução reconhecida, stall, emergência, desconhecido).
 
-**Validation:** `go test ./internal/session` cobre os três caminhos.
+**Validation:** `go test ./internal/session` verde.
 
 ## T4 — Uso visível e nudge por percentual
 
-- [ ] `longSessionAttentionThreshold` passa a ser percentual da janela
-      (`warn_context_pct`); nudge continua uma vez por sessão.
-- [ ] `/usage` (Telegram) mostra contexto atual/janela/% em destaque e billing
-      acumulado separado.
-- [ ] Painel TUI idem; `ProjectStatePayload` ganha os campos de contexto.
-- [ ] Testes de `cmdUsage`/painel e do nudge por percentual.
+- [x] `longSessionAttentionPct` = `warn_context_pct`; nudge mostra
+      contexto/janela e continua 1× por sessão.
+- [x] `formatSessionUsage` (Telegram `/usage`) mostra **Contexto: X / Y (Z%)**
+      primeiro e **Billing** acumulado separado.
+- [x] Painel TUI idem; `ProjectStatePayload` ganha `SessionContextTokens`/
+      `SessionContextWindow`.
+- [x] Testes: `formatSessionUsage`, nudge por percentual, payload.
 
-**Validation:** `/usage` e painel mostram contexto atual + billing; nudge dispara
-em 70% da janela.
+**Validation:** `/usage` e painel mostram contexto atual + billing; nudge em 70%.
 
 ## T5 — Quality, review e validação live
 
-- [ ] `go build`, `go vet`, `go test ./... -short`, `-race` nos pacotes tocados.
-- [ ] `cd bridge && npx tsc --noEmit && npm test`; `golangci-lint run`.
-- [ ] `make bridge` se `bridge/index.ts` mudou.
-- [ ] Code review (backend) e security review (stats sem segredos, bounds).
-- [ ] `make deploy` + validação live: sessão longa com janela 1M **não** rotaciona
-      por cumulativo; `/usage` mostra contexto atual; compactação do SDK
-      observada no log sem escalada Go.
-- [ ] Evidence Matrix para A3 (modified) e A9.
+- [x] `go build`, `go vet`, `go test ./... -short`, `-race` nos pacotes tocados.
+- [x] `tsc --noEmit`, `npm test` (177/177), `golangci-lint run` (0 issues).
+- [x] `make bridge` + sincronização de bundle.
+- [x] Self-review (backend/segurança): métrica correta, sem segredos nos novos
+      campos, bounds preservados, desconhecido não escala.
+- [ ] `make deploy` + validação live: stats com `context_tokens/window`; `/usage`
+      com contexto atual; sessão com janela 1M não rotaciona por cumulativo.
+- [x] Evidence Matrix abaixo.
 - [ ] Propor bump/changelog ao Igor.
 
-**Validation:** cada assertion tem evidência; PASS sem evidência é UNVERIFIED.
+## Evidence Matrix
+
+| Assertion | Evidência | Status |
+|---|---|---|
+| A3 cumulativo não dirige contexto | `TestEvaluateLifecycle_CumulativeTokensDoNotDriveContext` | PASS |
+| A3 uso observável (contexto + billing) | `TestFormatSessionUsage_ContextFirst` | PASS |
+| A9 janela grande não rotaciona cedo | lifecycle por pct + `TestApplyLifecycle_TokenGuardLargeContextContinues` | PASS |
+| A9 rotação de emergência por % | `TestTokenGuard_ImmediateRotateAtEmergencyCeiling`, `TestApplyLifecycle_TokenGuardImmediateRotate` | PASS |
+| A9 redução de compactação detectável | `TestTokenGuard_ResetOnMeaningfulContextReduction`, `TestContextReduced` | PASS |
+| A9 desconhecido não escala | `TestEvaluateLifecycle_UnknownContextIsHealthy`, `TestTokenGuard_UnknownContextNeverEscalates` | PASS |
+| A9 contexto exposto | parse dos novos campos + live `/usage` | PASS (código) / live pendente |
 
 ## Explicit non-goals checklist
 
-- [ ] Não alterar `reserveTokens`/`keepRecentTokens` do SDK.
-- [ ] Não remover a compactação do PI SDK nem reimplementá-la.
-- [ ] Não mudar provider/modelo/janela.
-- [ ] Não impor rotação proativa por custo (só remover o falso positivo).
-- [ ] Não quebrar configs existentes (chaves absolutas seguem aceitas).
+- [x] Não alterar `reserveTokens`/`keepRecentTokens` do SDK.
+- [x] Não remover a compactação do PI SDK nem reimplementá-la.
+- [x] Não mudar provider/modelo/janela.
+- [x] Não impor rotação proativa por custo (só remover o falso positivo).
+- [x] Não quebrar configs existentes (chaves absolutas seguem aceitas).

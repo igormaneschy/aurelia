@@ -842,6 +842,8 @@ func fillTUIProjectUsage(ctx context.Context, a *app, chatID int64, threadID int
 	payload.SessionOutputTokens = stats.OutputTokens
 	payload.SessionCostUSD = stats.Cost
 	payload.SessionContextPct = stats.ContextUsagePct
+	payload.SessionContextTokens = stats.ContextTokens
+	payload.SessionContextWindow = stats.ContextWindow
 	if a.config != nil {
 		payload.CompactAfterTokens = a.config.SessionLifecycle.CompactAfterInputTokens
 	}

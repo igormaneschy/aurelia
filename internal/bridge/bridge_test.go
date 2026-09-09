@@ -1071,6 +1071,8 @@ rl.on('line', (line) => {
                 total_tokens: 150,
                 cost: 0.005,
                 context_usage_pct: 45.5,
+                context_tokens: 88000,
+                context_window: 1048576,
             }),
         }) + "\n");
     } else if (req.command === "get-session-history") {
@@ -1170,6 +1172,12 @@ func TestBridge_GetSessionStats(t *testing.T) {
 	}
 	if stats.ContextUsagePct != 45.5 {
 		t.Fatalf("ContextUsagePct = %f, want 45.5", stats.ContextUsagePct)
+	}
+	if stats.ContextTokens != 88000 {
+		t.Fatalf("ContextTokens = %d, want 88000", stats.ContextTokens)
+	}
+	if stats.ContextWindow != 1048576 {
+		t.Fatalf("ContextWindow = %d, want 1048576", stats.ContextWindow)
 	}
 }
 

@@ -1712,3 +1712,41 @@ func TestFormatTokenCount(t *testing.T) {
 		}
 	}
 }
+
+// TestFormatSessionUsage_ContextFirst pins the /usage contract: the CURRENT
+// context relative to the model window is shown first, and cumulative billing
+// is clearly separated.
+func TestFormatSessionUsage_ContextFirst(t *testing.T) {
+	t.Parallel()
+
+	reply := formatSessionUsage(&bridge.SessionStats{
+		ContextTokens:     88000,
+		ContextWindow:     1048576,
+		ContextUsagePct:   8.4,
+		InputTokens:       506751, // cumulative billing
+		OutputTokens:      30736,
+		Cost:              0.0616,
+		AssistantMessages: 6,
+		TotalMessages:     20,
+	})
+	for _, want := range []string{
+		"88k / 1.0M tokens", "8%", "Custo acumulado", "$0.0616", "Billing: in **507k**",
+	} {
+		if !strings.Contains(reply, want) {
+			t.Fatalf("reply missing %q:\n%s", want, reply)
+		}
+	}
+	if strings.Contains(reply, "Input acumulado") {
+		t.Fatalf("reply must not label cumulative tokens as context:\n%s", reply)
+	}
+
+	// Unknown window degrades to the percentage or an explicit unavailable line.
+	unknown := formatSessionUsage(&bridge.SessionStats{})
+	if !strings.Contains(unknown, "indisponível") {
+		t.Fatalf("unknown context reply = %q", unknown)
+	}
+	pctOnly := formatSessionUsage(&bridge.SessionStats{ContextUsagePct: 42})
+	if !strings.Contains(pctOnly, "42%") {
+		t.Fatalf("pct-only reply = %q", pctOnly)
+	}
+}

@@ -6,35 +6,34 @@ import (
 	"github.com/igormaneschy/aurelia/internal/session"
 )
 
-// TestLongSessionAttentionThreshold pins the attention threshold: 60% of the
-// compaction threshold, lowered to the warn threshold when that is smaller, and
-// disabled (0) when compaction is not configured.
-func TestLongSessionAttentionThreshold(t *testing.T) {
+// TestLongSessionAttentionPct pins the attention threshold: the configured
+// context-usage percentage of the model window (0 = disabled).
+func TestLongSessionAttentionPct(t *testing.T) {
 	cases := []struct {
 		name   string
 		policy session.LifecyclePolicy
 		want   int
 	}{
 		{
-			name:   "default: 60% of compact_after",
-			policy: session.LifecyclePolicy{CompactAfterInputTokens: 200_000, RotateAfterInputTokens: 500_000},
-			want:   120_000,
+			name:   "default warn percentage",
+			policy: session.LifecyclePolicy{WarnContextPct: 70},
+			want:   70,
 		},
 		{
-			name:   "warn threshold below 60% wins",
-			policy: session.LifecyclePolicy{CompactAfterInputTokens: 1_000_000, RotateAfterInputTokens: 2_000_000},
-			want:   500_000,
+			name:   "custom percentage",
+			policy: session.LifecyclePolicy{WarnContextPct: 55},
+			want:   55,
 		},
 		{
-			name:   "disabled without compact threshold",
+			name:   "disabled",
 			policy: session.LifecyclePolicy{},
 			want:   0,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := longSessionAttentionThreshold(tc.policy); got != tc.want {
-				t.Fatalf("longSessionAttentionThreshold() = %d, want %d", got, tc.want)
+			if got := longSessionAttentionPct(tc.policy); got != tc.want {
+				t.Fatalf("longSessionAttentionPct() = %d, want %d", got, tc.want)
 			}
 		})
 	}
@@ -49,21 +48,21 @@ func TestMaybeNudgeLongSession_OneShotPerSession(t *testing.T) {
 	sessions.SetSession(1, 0, 100, "/tmp/session-a.jsonl")
 	s := &Service{output: output, sessions: sessions}
 
-	s.maybeNudgeLongSession(1, 0, 100, 121_000)
+	s.maybeNudgeLongSession(1, 0, 100, 90_000, 1_000_000, 72)
 	if output.sentTextCount() != 1 {
 		t.Fatalf("first nudge sentTextCount = %d, want 1", output.sentTextCount())
 	}
 
 	// Later turns above the threshold must not repeat the nudge.
-	s.maybeNudgeLongSession(1, 0, 100, 130_000)
-	s.maybeNudgeLongSession(1, 0, 100, 180_000)
+	s.maybeNudgeLongSession(1, 0, 100, 95_000, 1_000_000, 75)
+	s.maybeNudgeLongSession(1, 0, 100, 120_000, 1_000_000, 80)
 	if output.sentTextCount() != 1 {
 		t.Fatalf("repeated nudge sentTextCount = %d, want 1", output.sentTextCount())
 	}
 
 	// A new session file re-arms the one-shot nudge.
 	sessions.SetSession(1, 0, 100, "/tmp/session-b.jsonl")
-	s.maybeNudgeLongSession(1, 0, 100, 125_000)
+	s.maybeNudgeLongSession(1, 0, 100, 91_000, 1_000_000, 71)
 	if output.sentTextCount() != 2 {
 		t.Fatalf("nudge after new session sentTextCount = %d, want 2", output.sentTextCount())
 	}
@@ -77,12 +76,12 @@ func TestMaybeNudgeLongSession_FailsClosedWithoutSession(t *testing.T) {
 	output := &fakeOutput{}
 	sessions := session.NewStore()
 	s := &Service{output: output, sessions: sessions}
-	s.maybeNudgeLongSession(1, 0, 999, 200_000)
+	s.maybeNudgeLongSession(1, 0, 999, 90_000, 1_000_000, 72)
 	if output.sentTextCount() != 0 {
 		t.Fatalf("nudge without a stored session sentTextCount = %d, want 0", output.sentTextCount())
 	}
 
 	// Nil dependencies must be safe.
-	(&Service{}).maybeNudgeLongSession(1, 0, 100, 200_000)
-	(&Service{output: output}).maybeNudgeLongSession(1, 0, 100, 200_000)
+	(&Service{}).maybeNudgeLongSession(1, 0, 100, 90_000, 1_000_000, 72)
+	(&Service{output: output}).maybeNudgeLongSession(1, 0, 100, 90_000, 1_000_000, 72)
 }
