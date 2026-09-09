@@ -76,7 +76,7 @@ func (r *telegramRenderer) renderListItem(w util.BufWriter, source []byte, n ast
 	// prefix, goldmark emits the parent item's newline only after the whole
 	// nested list, so the first child would join the parent's line and the
 	// whole reply collapses into a run-on block in Telegram.
-	if !(r.listDepth == 1 && n.PreviousSibling() == nil) {
+	if r.listDepth != 1 || n.PreviousSibling() != nil {
 		_ = w.WriteByte('\n')
 	}
 	indent := strings.Repeat("  ", r.listDepth-1)
