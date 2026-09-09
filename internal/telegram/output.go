@@ -112,65 +112,6 @@ func splitTelegramMarkdown(text string, limit int) []string {
 	return chunks
 }
 
-// splitHTML splits HTML content at safe boundaries (tag boundaries or whitespace)
-// without breaking HTML tags. Must be called AFTER markdown→HTML conversion.
-func splitHTML(html string, limit int) []string {
-	trimmed := strings.TrimSpace(html)
-	if trimmed == "" {
-		return []string{""}
-	}
-
-	runes := []rune(trimmed)
-	if len(runes) <= limit {
-		return []string{trimmed}
-	}
-
-	var chunks []string
-	for len(runes) > limit {
-		splitAt := findHTMLSplitPoint(runes, limit)
-		chunk := strings.TrimSpace(string(runes[:splitAt]))
-		if chunk != "" {
-			chunks = append(chunks, chunk)
-		}
-		runes = runes[splitAt:]
-		// Drop leading whitespace
-		for len(runes) > 0 && (runes[0] == ' ' || runes[0] == '\t' || runes[0] == '\n' || runes[0] == '\r') {
-			runes = runes[1:]
-		}
-	}
-	if len(runes) > 0 {
-		if tail := strings.TrimSpace(string(runes)); tail != "" {
-			chunks = append(chunks, tail)
-		}
-	}
-	return chunks
-}
-
-// findHTMLSplitPoint finds a safe split position that doesn't break HTML tags.
-// Tries: </tag> boundaries, > (end of opening tag), < (start of tag), then whitespace.
-func findHTMLSplitPoint(runes []rune, limit int) int {
-	if len(runes) <= limit {
-		return len(runes)
-	}
-
-	// Look backwards from limit, trying to find safe split points
-	// Priority: after closing tag, after opening tag, before tag, at whitespace
-	for i := limit; i > 0; i-- {
-		// Check if we're at a tag boundary (after '>' or before '<')
-		if i < len(runes) && runes[i] == '<' {
-			return i
-		}
-		if runes[i-1] == '>' {
-			return i
-		}
-		// Check for whitespace
-		if runes[i] == ' ' || runes[i] == '\n' {
-			return i + 1
-		}
-	}
-	return limit
-}
-
 // splitCandidates lists the preferred boundary substrings, ordered by
 // readability — try paragraph break first, then sentence, then any space.
 var splitCandidates = []string{"\n\n", "\n", ". ", " "}

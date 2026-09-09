@@ -56,3 +56,20 @@ func indexOfSubstring(s, sub string) int {
 	}
 	return -1
 }
+
+// TestMarkdownToHTML_SeparatesBlocksForLongReplies pins the readability fix:
+// block elements end with a blank line so long Telegram replies stay scannable
+// (Telegram collapses a single newline into a plain line break).
+func TestMarkdownToHTML_SeparatesBlocksForLongReplies(t *testing.T) {
+	md := "Intro paragraph.\n\n## Seção\n\nTexto com **destaque**.\n\n```go\nx := 1\n```\n\n> citação\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\nFim.\n"
+	got := MarkdownToHTML(md)
+
+	for _, want := range []string{"</b>\n\n", "</code></pre>\n\n", "</blockquote>\n\n", "</pre>\n\n"} {
+		if !containsSubstring(got, want) {
+			t.Fatalf("expected %q in output:\n%s", want, got)
+		}
+	}
+	if containsSubstring(got, "\n\n\n\n") {
+		t.Fatalf("excessive blank lines in output:\n%s", got)
+	}
+}
