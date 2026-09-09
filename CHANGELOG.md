@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.45.0] - 2026-09-09
+
+### Changed
+- Lifecycle de sessão decide compactação/rotação pelo **contexto atual relativo
+  à janela do modelo** (`context_usage_pct`), não pelo total cumulativo de tokens
+  de input (billing). Fim da rotação prematura: um modelo de 1M era rotacionado a
+  `input_tokens=506751` cumulativos (~10% da janela), bloqueando o pedido por
+  ~145s. O PI SDK segue dono da compactação normal; o Go só escala em emergência
+  (95% da janela).
+- `get-session-stats` passa a expor `context_tokens` e `context_window`;
+  `TokenGuard` volta a detectar redução de contexto após compactação.
+- Config: `warn_context_pct` (70) e `emergency_rotate_context_pct` (95);
+  `compact_after_input_tokens`/`rotate_after_input_tokens` ficam deprecados para
+  a decisão de contexto.
+
+### Added
+- `/usage` e painel da TUI mostram o contexto atual (tokens/janela/%) em
+  destaque e o billing acumulado separado.
+
 ## [0.44.0] - 2026-09-09
 
 ### Added
