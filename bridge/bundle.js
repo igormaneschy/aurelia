@@ -554,6 +554,7 @@ function measuredElapsed(startedAt, now = Date.now()) {
   return elapsed >= 0 ? elapsed : void 0;
 }
 var TOOL_SLOW_WARN_MS = 10 * 60 * 1e3;
+var HEALTH_TICK_MS = 15e3;
 function healthDecisionFor(input) {
   const out = {};
   const { inflight, silentMs } = input;
@@ -1878,7 +1879,7 @@ async function handleQuery(req) {
           redactedLog("stall urgent steer failed (sync): ".concat(err instanceof Error ? err.message : String(err)));
         }
       }
-    }, 15e3);
+    }, HEALTH_TICK_MS);
     let unsubHook;
     if (opts?.security?.enabled) {
       unsubHook = installSecurityHook(liveSession.agent, opts.security);

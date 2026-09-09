@@ -400,7 +400,7 @@ func (m Model) renderProjectPanel() string {
 		b.WriteString("\n")
 		b.WriteString(m.styles.HeaderTitleStyle.Render("Session Usage"))
 		b.WriteString("\n")
-		contextLine := fmt.Sprintf(" Context: %s tokens", formatTokenCountTUI(state.SessionInputTokens))
+		contextLine := fmt.Sprintf(" Input: %s tokens", formatTokenCountTUI(state.SessionInputTokens))
 		if state.CompactAfterTokens > 0 {
 			pct := float64(state.SessionInputTokens) / float64(state.CompactAfterTokens) * 100
 			contextLine += fmt.Sprintf(" (%.0f%% of compact limit)", pct)

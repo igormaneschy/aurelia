@@ -912,6 +912,9 @@ export function measuredElapsed(
 // stall/steer. tool_slow is an honest, once-per-tool warning for a command
 // that genuinely runs long.
 const TOOL_SLOW_WARN_MS = 10 * 60 * 1000;
+// HEALTH_TICK_MS is the health-monitor cadence: stall/steer thresholds are
+// evaluated and tool_running is emitted (while a tool executes) at this rate.
+const HEALTH_TICK_MS = 15_000;
 
 /** Oldest still-open tool, as reported by ToolDurationTracker.inflight(). */
 export interface InflightTool {
@@ -2823,7 +2826,7 @@ async function handleQuery(req: Request): Promise<void> {
           redactedLog(`stall urgent steer failed (sync): ${err instanceof Error ? err.message : String(err)}`);
         }
       }
-    }, 15_000);
+    }, HEALTH_TICK_MS);
 
     // Register security tool_call hook if enabled.
     // Uses session.agent.beforeToolCall (PI SDK hook that can block tools) rather than

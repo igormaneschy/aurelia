@@ -523,7 +523,7 @@ func (s *Service) maybeNudgeLongSession(chatID int64, threadID int, userID int64
 	if !s.sessions.MarkLongSessionNudged(chatID, threadID, userID) {
 		return
 	}
-	msg := fmt.Sprintf("📈 Esta conversa está longa (~%dk tokens). Posso seguir normalmente; se quiser um começo limpo, use /new (o histórico fica no Telegram).", inputTokens/1000)
+	msg := fmt.Sprintf("📈 Esta conversa está longa (~%dk tokens). Posso seguir normalmente; se quiser um começo limpo, use /new (o histórico da conversa fica salvo).", inputTokens/1000)
 	if _, err := s.output.SendText(chatID, threadID, msg); err != nil {
 		log.Printf("pipeline: SendText(long-session nudge) failed for chat=%d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
 	}

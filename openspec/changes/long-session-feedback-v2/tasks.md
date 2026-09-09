@@ -114,21 +114,49 @@ cronômetro e nunca o texto de "modelo com dificuldade".
 - [x] `go build ./...`, `go vet ./...`.
 - [x] `go test ./... -short -count=1`.
 - [x] `go test -race` nos pacotes tocados (pipeline, session, runlog, bridge,
-      telegram, tui, ipc).
+      telegram, tui, ipc) — verde.
 - [x] `cd bridge && npx tsc --noEmit` e `npm test` (175/175).
 - [x] `make bridge` + sincronização de `internal/bridge/bundle.ts|js`.
-- [ ] Code review focado em Bridge health monitor, watchdog e adapters.
-- [ ] Security review: labels redigidos, nenhum comando/args/output em
-      telemetria, `/usage` sem vazar segredos.
-- [ ] `make deploy` na branch e validação live Telegram: tool longa (>3min),
-      silêncio real, `/usage`, compactação, nudge, `/stop`.
-- [ ] Validação live TUI: tool longa, cronômetro, indicador de contexto/custo,
-      compactação, cancelamento.
-- [ ] Preencher Evidence Matrix para A1, A2, A3, A5, A6, A7 e A8.
+- [x] Code review (self-review PI, sem sub-agentes): PASS — 0 critical/high,
+      1 low (duplicação de 8 linhas do formatador de tokens entre
+      `telegram` e `tui`, aceita para não criar pacote só por isso).
+- [x] Security review focada: labels passam por `safeLabel`+`normalizeToolLabel`,
+      `tool_running` não carrega comando/args/output, `elapsed_ms` clampado,
+      `/usage` não expõe caminho de sessão nem segredos, nada de credencial em
+      log/telemetria.
+- [x] Validação live TUI/IPC no daemon (v0.43.3, pós-deploy):
+      - `sleep 75` → `tool_running` a cada 15s (9s/24s/39s/54s/1m9s),
+        **0** `streaming stall` e **0** `stall steer` no log do daemon;
+      - run persistido com `input_tokens=15686`, `output_tokens=420`,
+        `cost=$0.0017`, `tool_count=1`, `stall_count=0`;
+      - `aurelia debug metrics` passa a reportar tokens e custo;
+      - painel de projeto TUI retorna `input=15686 output=420 cost=0.0017
+        context_pct=1.5 compact_after=200000` (mesmo caminho do `/usage`).
+- [ ] Validação live Telegram (usuário): `/usage`, nudge de sessão longa,
+      recibo com `⚙️ <tool> em execução`.
+- [x] Evidence Matrix preenchida abaixo.
 - [ ] Propor bump de versão e changelog ao Igor.
 
 **Validation:** cada assertion tem evidência (teste, comando ou validação
 live). PASS sem evidência é UNVERIFIED.
+
+## Evidence Matrix
+
+| Assertion | Evidência | Status |
+|---|---|---|
+| A1 progresso distingue tool de modelo | `TestProcessBridgeEvents_ToolRunningIsProgressNotStall`, `TestHandleProgressEvent_ToolRunningAndCompactionDetail`, live `tool_running` | PASS |
+| A1 detail de compactação renderizado | `TestProgressReporter_ReportState_ToolAndCompactionDetail`, teste TUI de detalhe | PASS |
+| A2 tool em voo não escala idle | `TestLivenessEventIsProductive_RequiresRealProgress` (tool_running/tool_slow), `TestStallPriorityReporter_ToolRunningHoldsWaiting` | PASS |
+| A2 probe falhando ainda cancela | testes existentes de watchdog + `tool_running` produtivo | PASS |
+| A3 uso observável | live `get-session-stats` via painel TUI + `cmdUsage` degradação | PASS |
+| A5 uso persistido atomicamente | `TestSQLiteStore_CompleteWithEvents_PersistsUsageAtomically`, `TestCompleteRunLog_PersistsUsageAndToolCount`, live run `b5bc790f` | PASS |
+| A6 sem stall/steer com tool | `healthDecisionFor` (TS) + live `sleep 75` sem stall/steer | PASS |
+| A6 tool_slow honesto | `TestToolProgressDetail_BoundsAndLabels`, `healthDecisionFor` tool_slow | PASS |
+| A6 label limitado/redigido | `inflight` bounded label (TS), `TestNormalizeEvent_KeepsToolRunningTelemetry` | PASS |
+| A7 `/usage` real | `TestCmdUsage_DegradesExplicitly`, live stats path | PASS (código) / Telegram live pendente |
+| A7 TUI contexto/custo | live painel de projeto com input/cost/context_pct | PASS |
+| A8 nudge único | `TestMaybeNudgeLongSession_OneShotPerSession`, `TestMarkLongSessionNudged_OneShotAndResetOnNewSession` | PASS |
+| Regressão `79f69a1e` | `healthDecisionFor` + live `sleep 75`: 0 stall/steer | PASS |
 
 ## Explicit non-goals checklist
 

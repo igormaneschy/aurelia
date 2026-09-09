@@ -714,7 +714,7 @@ func (bc *BotController) cmdUsage(chatID int64, threadID int, userID int64) (str
 	if bc.config != nil {
 		compactAfter = bc.config.SessionLifecycle.CompactAfterInputTokens
 	}
-	contextLine := fmt.Sprintf("🧠 Contexto: **%s tokens**", formatTokenCount(int64(stats.InputTokens)))
+	contextLine := fmt.Sprintf("🧠 Input acumulado: **%s tokens**", formatTokenCount(int64(stats.InputTokens)))
 	if compactAfter > 0 {
 		pct := float64(stats.InputTokens) / float64(compactAfter) * 100
 		contextLine += fmt.Sprintf(" (%.0f%% do limite de compactação de %s)", pct, formatTokenCount(int64(compactAfter)))
@@ -723,7 +723,7 @@ func (bc *BotController) cmdUsage(chatID int64, threadID int, userID int64) (str
 	if stats.ContextUsagePct > 0 {
 		lines = append(lines, fmt.Sprintf("📈 Janela do modelo: **%.0f%%** em uso", stats.ContextUsagePct))
 	}
-	lines = append(lines, fmt.Sprintf("💵 Custo: **$%.4f** · Turnos: **%d** · Mensagens: **%d**",
+	lines = append(lines, fmt.Sprintf("💵 Custo: **$%.4f** · Respostas: **%d** · Mensagens: **%d**",
 		stats.Cost, stats.AssistantMessages, stats.TotalMessages))
 	if stats.OutputTokens > 0 {
 		lines = append(lines, fmt.Sprintf("📤 Saída acumulada: %s tokens", formatTokenCount(int64(stats.OutputTokens))))
