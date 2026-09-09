@@ -9,7 +9,9 @@ func (r *telegramRenderer) renderTable(w util.BufWriter, source []byte, node ast
 	if entering {
 		_, _ = w.WriteString("<pre>")
 	} else {
-		_, _ = w.WriteString("</pre>\n")
+		// Blank line after the monospaced table so it does not run into the
+		// next paragraph on mobile clients.
+		_, _ = w.WriteString("</pre>\n\n")
 	}
 	return ast.WalkContinue, nil
 }

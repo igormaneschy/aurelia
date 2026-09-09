@@ -6,6 +6,7 @@ import {
   formatLogLine,
   healthDecisionFor,
   measuredElapsed,
+  sanitizeBridgeText,
   serializeOutEvent,
   StdoutEmissionBudget,
   stallTelemetryFor,
@@ -427,5 +428,21 @@ describe("healthDecisionFor", () => {
     });
     assert.strictEqual(decision.toolSlow, undefined);
     assert.ok(decision.toolRunning);
+  });
+});
+
+describe("sanitizeBridgeText", () => {
+  it("preserves whitespace controls but strips other control chars", () => {
+    // Newlines and tabs are essential to a readable long reply; C0/C1 controls
+    // and DEL are injection risk and must be removed.
+    const out = sanitizeBridgeText("a\x00b\nc\td\x1f", 100);
+    assert.strictEqual(out, "ab\nc\td");
+  });
+
+  it("keeps the newline that a cleaned secret spans intact", () => {
+    // Regression: redaction must run before control cleanup, and the cleanup
+    // must not drop the CR/LF sequence around a redacted secret.
+    const out = sanitizeBridgeText("sk-12345678901234567890\nline2", 100);
+    assert.match(out, /\[API_KEY_REDACTED\]\nline2/);
   });
 });

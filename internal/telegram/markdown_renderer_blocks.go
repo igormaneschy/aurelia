@@ -21,7 +21,9 @@ func (r *telegramRenderer) renderHeading(w util.BufWriter, source []byte, n ast.
 	if entering {
 		_, _ = w.WriteString("<b>")
 	} else {
-		_, _ = w.WriteString("</b>\n")
+		// Blank line after the heading: Telegram collapses a single newline,
+		// so long replies need explicit paragraph separation to stay scannable.
+		_, _ = w.WriteString("</b>\n\n")
 	}
 	return ast.WalkContinue, nil
 }
@@ -30,10 +32,9 @@ func (r *telegramRenderer) renderBlockquote(w util.BufWriter, source []byte, n a
 	if entering {
 		_, _ = w.WriteString("<blockquote>")
 	} else {
-		_, _ = w.WriteString("</blockquote>")
-		if n.NextSibling() != nil {
-			_ = w.WriteByte('\n')
-		}
+		// Telegram collapses a single newline: keep a blank line after the
+		// quote so the next block is visually separate.
+		_, _ = w.WriteString("</blockquote>\n\n")
 	}
 	return ast.WalkContinue, nil
 }
@@ -66,17 +67,25 @@ func (r *telegramRenderer) renderList(w util.BufWriter, source []byte, node ast.
 }
 
 func (r *telegramRenderer) renderListItem(w util.BufWriter, source []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
-	if entering {
-		indent := strings.Repeat("  ", r.listDepth-1)
-		_, _ = w.WriteString(indent)
-		if r.orderedCount > 0 {
-			_, _ = fmt.Fprintf(w, "%d. ", r.orderedCount)
-			r.orderedCount++
-		} else {
-			_, _ = w.WriteString("\u2022 ")
-		}
-	} else {
+	if !entering {
+		return ast.WalkContinue, nil
+	}
+
+	// Start every item on its own line, EXCEPT the very first top-level item
+	// (which follows the preceding block's own separator already). Without this
+	// prefix, goldmark emits the parent item's newline only after the whole
+	// nested list, so the first child would join the parent's line and the
+	// whole reply collapses into a run-on block in Telegram.
+	if r.listDepth != 1 || n.PreviousSibling() != nil {
 		_ = w.WriteByte('\n')
+	}
+	indent := strings.Repeat("  ", r.listDepth-1)
+	_, _ = w.WriteString(indent)
+	if r.orderedCount > 0 {
+		_, _ = fmt.Fprintf(w, "%d. ", r.orderedCount)
+		r.orderedCount++
+	} else {
+		_, _ = w.WriteString("\u2022 ")
 	}
 	return ast.WalkContinue, nil
 }
@@ -104,7 +113,7 @@ func (r *telegramRenderer) renderThematicBreak(w util.BufWriter, source []byte, 
 	if !entering {
 		return ast.WalkContinue, nil
 	}
-	_, _ = w.WriteString("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n")
+	_, _ = w.WriteString("\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n\n")
 	return ast.WalkContinue, nil
 }
 
@@ -121,7 +130,7 @@ func (r *telegramRenderer) renderCodeBlock(w util.BufWriter, source []byte, n as
 		_, _ = w.WriteString("<pre><code>")
 		r.writeLines(w, source, n)
 	} else {
-		_, _ = w.WriteString("</code></pre>\n")
+		_, _ = w.WriteString("</code></pre>\n\n")
 	}
 	return ast.WalkContinue, nil
 }
@@ -139,7 +148,7 @@ func (r *telegramRenderer) renderFencedCodeBlock(w util.BufWriter, source []byte
 		_, _ = w.WriteString(">")
 		r.writeLines(w, source, block)
 	} else {
-		_, _ = w.WriteString("</code></pre>\n")
+		_, _ = w.WriteString("</code></pre>\n\n")
 	}
 	return ast.WalkContinue, nil
 }
