@@ -67,17 +67,25 @@ func (r *telegramRenderer) renderList(w util.BufWriter, source []byte, node ast.
 }
 
 func (r *telegramRenderer) renderListItem(w util.BufWriter, source []byte, n ast.Node, entering bool) (ast.WalkStatus, error) {
-	if entering {
-		indent := strings.Repeat("  ", r.listDepth-1)
-		_, _ = w.WriteString(indent)
-		if r.orderedCount > 0 {
-			_, _ = fmt.Fprintf(w, "%d. ", r.orderedCount)
-			r.orderedCount++
-		} else {
-			_, _ = w.WriteString("\u2022 ")
-		}
-	} else {
+	if !entering {
+		return ast.WalkContinue, nil
+	}
+
+	// Start every item on its own line, EXCEPT the very first top-level item
+	// (which follows the preceding block's own separator already). Without this
+	// prefix, goldmark emits the parent item's newline only after the whole
+	// nested list, so the first child would join the parent's line and the
+	// whole reply collapses into a run-on block in Telegram.
+	if !(r.listDepth == 1 && n.PreviousSibling() == nil) {
 		_ = w.WriteByte('\n')
+	}
+	indent := strings.Repeat("  ", r.listDepth-1)
+	_, _ = w.WriteString(indent)
+	if r.orderedCount > 0 {
+		_, _ = fmt.Fprintf(w, "%d. ", r.orderedCount)
+		r.orderedCount++
+	} else {
+		_, _ = w.WriteString("\u2022 ")
 	}
 	return ast.WalkContinue, nil
 }
