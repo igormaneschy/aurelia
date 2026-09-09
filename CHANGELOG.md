@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.44.0] - 2026-09-09
+
+### Added
+- Long-session: o Bridge emite `tool_running` a cada 15s enquanto uma ferramenta
+  executa e `tool_slow` uma vez por ferramenta após 10min; `stall`/`steer` deixam
+  de ser emitidos com ferramenta em voo — fim dos avisos falsos de "estou com
+  dificuldade" durante um `bash` longo (evidência: `run 79f69a1e`, Bash de 180s
+  gerava 2 stalls + 2 steers).
+- Watchdog de liveness trata ferramenta em execução como atividade: um comando
+  legítimo não é mais cancelado por idle.
+- Uso da sessão visível: `input_tokens`/`output_tokens`/`cost_usd`/`tool_count`
+  persistidos na transação terminal do run; `/usage` real no Telegram; painel de
+  projeto da TUI com contexto/custo; `aurelia debug metrics` deixa de reportar
+  custo zero.
+- Aviso único de sessão longa com opção `/new` (claim atômico por sessão).
+
+### Fixed
+- Quebras de linha do conteúdo do assistente eram removidas pela sanitização de
+  caracteres de controle (regressão de `0a99422`), colapsando respostas longas do
+  Telegram em um bloco corrido. `boundedEventText` (Go) e `removeBridgeControls`
+  (TS) agora preservam `\t`/`\n`/`\r` e seguem removendo os demais C0/C1.
+- `splitHTML` cortava entre tags de abertura/fechamento, fazendo o Telegram
+  rejeitar o chunk e o sender cair silenciosamente para texto puro em respostas
+  longas. Agora fecha/reabre tags preservando atributos.
+- Listas aninhadas colavam o primeiro sub-item na linha do item pai.
+- CI: `golangci-lint` pinado em v2.13.2 (compilado com Go >= 1.27); o pin anterior
+  (v2.10.1, go1.26) quebrava o check desde o bump para Go 1.27.
+
 ## [0.43.3] - 2026-09-03
 
 ### Fixed
