@@ -168,6 +168,7 @@ function truncateBridgeRunes(value, maxRunes) {
 function removeBridgeControls(value) {
   return Array.from(value).filter((r) => {
     const code = r.codePointAt(0) ?? 0;
+    if (code === 9 || code === 10 || code === 13) return true;
     return code >= 32 && code !== 127 && (code < 128 || code > 159);
   }).join("");
 }

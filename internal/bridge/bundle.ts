@@ -366,6 +366,9 @@ function removeBridgeControls(value: string): string {
   return Array.from(value)
     .filter((r) => {
       const code = r.codePointAt(0) ?? 0;
+      // Preserve whitespace controls (\t=0x09, \n=0x0a, \r=0x0d): removing
+      // them collapses a long reply into a run-on block in Telegram.
+      if (code === 0x09 || code === 0x0a || code === 0x0d) return true;
       return code >= 0x20 && code !== 0x7f && (code < 0x80 || code > 0x9f);
     })
     .join("");

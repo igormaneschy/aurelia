@@ -238,3 +238,24 @@ func TestNormalizeEvent_KeepsToolRunningTelemetry(t *testing.T) {
 		t.Fatalf("elapsed_ms = %d, want 0 for out-of-range input", bogus.ElapsedMs)
 	}
 }
+
+// TestNormalizeEvent_PreservesNewlinesInContent pins the long-reply regression
+// (introduced by 0a99422, fixed here): control-char sanitization must keep the
+// whitespace controls that make a reply readable — stripping LF/CR/TAB collapsed
+// a long assistant reply into an unformatted run-on block in Telegram.
+func TestNormalizeEvent_PreservesNewlinesInContent(t *testing.T) {
+	got := normalizeEvent(Event{
+		Type:    "result",
+		Content: "linha1\nlinha2\r\n\n\tcode\n**bold**\n",
+	})
+	want := "linha1\nlinha2\r\n\n\tcode\n**bold**\n"
+	if got.Content != want {
+		t.Fatalf("content newlines/whitespace dropped:\n got=%q\nwant=%q", got.Content, want)
+	}
+	// Non-whitespace control chars are still stripped (injection safety),
+	// while the newline is preserved.
+	got = normalizeEvent(Event{Type: "assistant", Text: "a\x00b\x1f\nkeep"})
+	if got.Text != "ab\nkeep" {
+		t.Fatalf("assistant text = %q, want %q (newline kept, \x00/\x1f stripped)", got.Text, "ab\nkeep")
+	}
+}

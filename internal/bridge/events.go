@@ -61,6 +61,13 @@ func redactBridgeText(s string) string {
 func boundedEventText(s string, maxBytes int) string {
 	s = redactBridgeText(strings.ToValidUTF8(s, "\uFFFD"))
 	clean := strings.Map(func(r rune) rune {
+		// Preserve whitespace control chars (tab/LF/CR): they are legitimate in
+		// assistant content and removing them collapses long replies into an
+		// unformatted run-on block. Strip the remaining C0/C1 controls (injection
+		// risk) and DEL.
+		if r == '\t' || r == '\n' || r == '\r' {
+			return r
+		}
 		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
 			return -1
 		}
