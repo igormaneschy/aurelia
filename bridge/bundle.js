@@ -4,7 +4,7 @@ import { createRequire as __piCreateRequire } from 'module';const require = __pi
 import { createInterface } from "node:readline";
 import { appendFileSync, existsSync, mkdirSync, renameSync, statSync, truncateSync } from "node:fs";
 import { homedir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
 import {
@@ -1218,57 +1218,6 @@ function logAudit(entry) {
   process.stderr.write(line);
   writeAuditFile(line);
 }
-var AI_MEMORY_SERVER = "ai-memory";
-var MEMORY_TOOL_PREFIX = "memory_";
-function deriveProjectName(cwd) {
-  if (!cwd) return void 0;
-  let dir = resolve(cwd);
-  for (; ; ) {
-    if (existsSync(join(dir, ".git"))) {
-      return basename(dir);
-    }
-    const parent = dirname(dir);
-    if (parent === dir) return void 0;
-    dir = parent;
-  }
-}
-function injectMcpProjectScope(toolName, args, cwd) {
-  if (typeof args !== "object" || args === null) return false;
-  const a = args;
-  let targetTool;
-  let container;
-  if (toolName === "mcp") {
-    if (a.server !== AI_MEMORY_SERVER) return false;
-    const t = a.tool;
-    targetTool = typeof t === "string" ? t : void 0;
-    container = a.args;
-  } else if (toolName.startsWith(MEMORY_TOOL_PREFIX)) {
-    targetTool = toolName;
-    container = a;
-  }
-  if (!targetTool || !targetTool.startsWith(MEMORY_TOOL_PREFIX)) return false;
-  let wasString = false;
-  if (typeof container === "string") {
-    wasString = true;
-    try {
-      container = JSON.parse(container);
-    } catch {
-      return false;
-    }
-  }
-  if (typeof container !== "object" || container === null) return false;
-  const target = container;
-  if (target.project !== void 0 || target.workspace !== void 0 || target.scopes !== void 0 || target.global !== void 0) {
-    return false;
-  }
-  const project = deriveProjectName(cwd);
-  if (!project) return false;
-  target.project = project;
-  if (toolName === "mcp") {
-    a.args = wasString ? JSON.stringify(target) : target;
-  }
-  return true;
-}
 function installSecurityHook(agent, security, audit = logAudit) {
   const origBeforeToolCall = agent.beforeToolCall;
   if (typeof origBeforeToolCall !== "function") {
@@ -1276,16 +1225,6 @@ function installSecurityHook(agent, security, audit = logAudit) {
   }
   const { chat_id, agent_name, profile, cwd } = security;
   agent.beforeToolCall = async (ctx, signal) => {
-    if (cwd) {
-      try {
-        const injected = injectMcpProjectScope(ctx.toolCall.name, ctx.args, cwd);
-        if (injected) {
-          redactedLog("mcp scope: injected project=".concat(deriveProjectName(cwd), " for tool=").concat(ctx.toolCall.name));
-        }
-      } catch (injectError) {
-        redactedLog("mcp scope: injection failed, continuing: ".concat(injectError instanceof Error ? injectError.message : String(injectError)));
-      }
-    }
     const decision = evaluateToolPolicy(
       ctx.toolCall.name,
       ctx.args,
@@ -2589,13 +2528,11 @@ export {
   compactionEndPayload,
   compactionReason,
   createBridgeSessionRequestLifecycle,
-  deriveProjectName,
   disposeBridgeSession,
   evaluateToolPolicy,
   formatLogLine,
   gitHasSensitiveArgs,
   healthDecisionFor,
-  injectMcpProjectScope,
   installSecurityHook,
   isDestructiveCommand,
   isExfiltrationCommand,

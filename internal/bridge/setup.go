@@ -22,8 +22,8 @@ import (
 // web_search) fails to load with "Cannot find module". Externalizing keeps
 // the SDK in node_modules, so the loader runs from
 // node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/ and its
-// aliases resolve correctly. Without this, the model never sees the `mcp`
-// tool and ai-memory MCP scope injection can never fire.
+// aliases resolve correctly. Without this, the model never sees any
+// extension-registered tool (`mcp`, the ai-memory wiki tools, `mcpScript`).
 const bridgePackageJSON = `{
   "name": "aurelia-bridge",
   "version": "1.0.0",
