@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/igormaneschy/aurelia/internal/security"
 )
 
 func TestEmbeddedBridgeSourcePresent(t *testing.T) {
@@ -237,4 +239,130 @@ func readyBridgeTarget(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return targetDir
+}
+
+// TestEnsureBridge_SymlinksExtensionsFromPICLI verifies the daemon PI agent dir
+// shares the interactive CLI's extensions/ directory. Without it the daemon
+// runs a PI with no ai-memory integration: the wiki tools are never
+// registered, so protocol files referencing memory_query point at nothing.
+func TestEnsureBridge_SymlinksExtensionsFromPICLI(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	piExtensions := filepath.Join(homeDir, ".pi", "agent", "extensions")
+	if err := os.MkdirAll(piExtensions, 0700); err != nil {
+		t.Fatal(err)
+	}
+	extension := filepath.Join(piExtensions, "ai-memory.ts")
+	if err := os.WriteFile(extension, []byte("export default function () {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := EnsureBridge(readyBridgeTarget(t), nil); err != nil {
+		t.Fatalf("EnsureBridge failed: %v", err)
+	}
+
+	aureliaExtensions := filepath.Join(homeDir, ".aurelia", "pi-agent", "extensions")
+	linkTarget, err := os.Readlink(aureliaExtensions)
+	if err != nil {
+		t.Fatalf("extensions/ should be a symlink: %v", err)
+	}
+	if linkTarget != piExtensions {
+		t.Fatalf("extensions/ symlink target = %q, want %q", linkTarget, piExtensions)
+	}
+	if _, err := os.Stat(filepath.Join(aureliaExtensions, "ai-memory.ts")); err != nil {
+		t.Fatalf("extension must be reachable through the symlink: %v", err)
+	}
+}
+
+// TestEnsureBridge_KeepsLocalExtensionsDirectory verifies a real (non-symlink)
+// extensions directory inside the daemon agent dir is never deleted — a daemon
+// specific install must survive every start.
+func TestEnsureBridge_KeepsLocalExtensionsDirectory(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	piExtensions := filepath.Join(homeDir, ".pi", "agent", "extensions")
+	if err := os.MkdirAll(piExtensions, 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	localExtensions := filepath.Join(homeDir, ".aurelia", "pi-agent", "extensions")
+	if err := os.MkdirAll(localExtensions, 0700); err != nil {
+		t.Fatal(err)
+	}
+	localFile := filepath.Join(localExtensions, "daemon-only.ts")
+	if err := os.WriteFile(localFile, []byte("export default function () {}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := EnsureBridge(readyBridgeTarget(t), nil); err != nil {
+		t.Fatalf("EnsureBridge failed: %v", err)
+	}
+
+	if _, err := os.Lstat(filepath.Join(homeDir, ".aurelia", "pi-agent", "extensions")); err != nil {
+		t.Fatalf("local extensions directory must remain: %v", err)
+	}
+	if _, err := os.Stat(localFile); err != nil {
+		t.Fatalf("daemon-specific extension must survive EnsureBridge: %v", err)
+	}
+}
+
+// TestBuildSecurityContext_GrantsExtensionTools verifies the resolved allowlist
+// carries the extension-registered tools the PI SDK would otherwise filter out,
+// while destructive memory operations stay out of execute_safe.
+func TestBuildSecurityContext_GrantsExtensionTools(t *testing.T) {
+	secCfg := security.DefaultConfig()
+	_, tools, _ := BuildSecurityContext(
+		security.ProfileExecuteSafe,
+		nil,
+		nil,
+		true,
+		&secCfg,
+		"/tmp/project",
+		1, 2, 3,
+		"general",
+		"req-1",
+	)
+
+	for _, want := range []string{"Read", "Bash", "memory_query", "memory_write_page", "mcpScript"} {
+		found := false
+		for _, tool := range tools {
+			if tool == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("effective tools missing %q: %v", want, tools)
+		}
+	}
+	for _, banned := range []string{"memory_delete_page", "memory_forget_sweep", "memory_install_self_routing"} {
+		for _, tool := range tools {
+			if tool == banned {
+				t.Errorf("execute_safe must not grant %q: %v", banned, tools)
+			}
+		}
+	}
+}
+
+// An agent denylist must still be able to remove an extension tool.
+func TestBuildSecurityContext_RespectsExtensionToolDenylist(t *testing.T) {
+	secCfg := security.DefaultConfig()
+	_, tools, _ := BuildSecurityContext(
+		security.ProfileExecuteSafe,
+		nil,
+		[]string{"memory_write_page"},
+		true,
+		&secCfg,
+		"/tmp/project",
+		1, 2, 3,
+		"general",
+		"req-1",
+	)
+	for _, tool := range tools {
+		if tool == "memory_write_page" {
+			t.Fatalf("disallowed extension tool must not be granted: %v", tools)
+		}
+	}
 }

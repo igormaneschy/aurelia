@@ -126,21 +126,56 @@ This uses `make install` (build → `.new` → `mv` — never corrupts a running
 
 ## PI SDK Configuration
 
-O Aurelia isola seu ambiente PI em `~/.aurelia/pi-agent/` (via `PI_CODING_AGENT_DIR`). O PI CLI global usa `~/.pi/agent/`. São diretórios **separados**.
+O Aurelia isola seu ambiente PI em `~/.aurelia/pi-agent/` (via `PI_CODING_AGENT_DIR`). O PI CLI global usa `~/.pi/agent/`. São diretórios **separados**, com recursos compartilhados por
+symlink (`setup.go` → `EnsureBridge`):
 
-- **Symlinks gerenciados pelo `setup.go` (EnsureBridge)**: 5 recursos são sincronizados do PI global → Aurelia PI:
-  - `auth.json` — credenciais de API
-  - `npm/` — extensions: `pi-mcp-adapter`, `pi-web-access`, `pi-hermes-memory`
-  - `mcp.json` — servidores MCP configurados
-  - `mcp-cache.json` — cache de manifests
-  - `mcp-npx-cache.json` — cache de resolução npx
-- **Sem o symlink `npm/`**, as extensions não carregam e o modelo não consegue usar `web_search`, `mcp`, `memory_search` etc.
-- **Sem os symlinks `mcp*.json`**, o `pi-mcp-adapter` não descobre servidores MCP.
-- **Diagnóstico "ferramenta não funciona"**:
-  1. Verificar se a tool está no `allowed_tools` → `translateAllowedTools`
-  2. Verificar se a extension está carregada → `ls ~/.aurelia/pi-agent/npm/`
-  3. Verificar se o MCP server está configurado → `cat ~/.aurelia/pi-agent/mcp.json`
-  4. **Não confiar em `getActiveToolNames()`** — bug de timing no PI SDK; usar `translateAllowedTools()` para o report.
+| Recurso | O que é |
+|---|---|
+| `auth.json` | credenciais de API |
+| `models.json` | catálogo de providers/modelos |
+| `mcp.json` | servidores MCP configurados |
+| `AGENTS.md`, `settings.json`, `context/`, `prompts/`, `skills/`, `extensions/` | regras, config e recursos do PI |
+| `npm/node_modules/{pi-mcp-adapter,pi-web-access}` | extensions de pacote (symlink por pacote) |
+
+**Nunca copiar `auth.json`/`models.json`** — cópia velha causa hang silencioso e
+`/model` divergente do `pi --list-models`. Ver `lessons/learned/`.
+
+`mcp-cache.json` e `mcp-npx-cache.json` **não** são symlinks em regime: o
+`pi-mcp-adapter` regrava-os com `writeFileSync(tmp)+renameSync`, o que substitui
+o symlink por arquivo regular. O daemon e o CLI passam a manter caches
+separados — esperado, não é bug de setup.
+
+### Extension tools e a allowlist (importante)
+
+O PI SDK trata `RequestOptions.tools` como uma **lista fechada**: toda tool
+registrada por extension é filtrada por ela
+(`AgentSession._refreshToolRegistry` → `isAllowedTool`). Ou seja, instalar uma
+extension **não basta** — o nome de cada tool precisa estar na lista, e nomes
+como `memory_query` são dinâmicos (vêm de `tools/list` do servidor MCP).
+
+- `internal/security/extension_tools.go` é a fonte de verdade: mapeia perfil de
+  capacidade → tools de extension concedidas (ai-memory read/write, `mcpScript`).
+  Operações destrutivas/de bulk (`memory_delete_page`, `memory_forget_sweep`,
+  `memory_consolidate`, …) ficam só no perfil `privileged`.
+- O `bridge/index.ts` (`EXTENSION_UTILITY_TOOLS`) cobre apenas as tools dos
+  pacotes pi-* (`mcp`, `code_search`, `fetch_content`, `get_search_content`).
+- A extensão do ai-memory é instalada **uma vez, no agent dir do PI CLI**
+  (`ai-memory install-hooks --agent pi --apply`) e compartilhada — o daemon é só
+  mais uma instalação PI. Não reimplementar captura/scope no Go.
+
+### Diagnóstico "ferramenta não funciona"
+
+1. A tool está em `internal/security/extension_tools.go` (tools de extension) ou
+   em `EXTENSION_UTILITY_TOOLS` (pacotes pi-*)?
+2. A extension está carregada? `ls ~/.aurelia/pi-agent/extensions/` e
+   `ls ~/.aurelia/pi-agent/npm/node_modules/`.
+3. O servidor MCP está configurado? `cat ~/.aurelia/pi-agent/mcp.json`.
+4. MCP via proxy: nomes são `<server>_<tool>` (default `toolPrefix: "server"`).
+   Com metadata vencida (TTL 7 dias) o primeiro call precisa de
+   `mcp({ connect: "<server>" })`; `mcp({ search })` só vê o cache, não conecta.
+5. **Não confiar em `getActiveToolNames()`** — bug de timing no PI SDK (a
+   extension registra tools de forma assíncrona). O report do bridge usa
+   `translateAllowedTools()`; para a superfície real use `session.getAllTools()`.
 
 ## Key Packages
 

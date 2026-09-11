@@ -383,12 +383,12 @@ func deriveProjectNameFromCwd(cwd string) string {
 	}
 }
 
-// buildAiMemoryScopeSection returns a system prompt block instructing the
-// model to always pass an explicit `project` scope to ai-memory MCP tools,
-// derived from the conversation cwd. The ai-memory server auto-resolves the
-// active project from recent hook activity, which is stale in parallel
-// multi-project sessions; an explicit project argument is the only reliable
-// scope. Returns "" when no project can be derived (chat mode, no cwd).
+// buildAiMemoryScopeSection returns a system prompt block telling the model
+// which project this conversation is bound to. The ai-memory tools themselves
+// are registered by the ai-memory PI extension (shared via extensions/) and
+// gated by the per-profile extension allowlist — this block only supplies the
+// chat→project mapping, which belongs to the daemon (it owns the binding).
+// Returns "" when no project can be derived (chat mode, no cwd).
 func (bc *Service) buildAiMemoryScopeSection(profile *profiles.PromptProfile, chatID int64, threadID int, userID int64, isPrivateChat bool) string {
 	cwd := bc.effectiveCwdForContext(profile, chatID, threadID, userID, isPrivateChat)
 	if cwd == "" {
@@ -398,11 +398,11 @@ func (bc *Service) buildAiMemoryScopeSection(profile *profiles.PromptProfile, ch
 	if project == "" {
 		return ""
 	}
-	return fmt.Sprintf(`## ai-memory MCP scope
+	return fmt.Sprintf(`## ai-memory scope
 
-The ai-memory MCP server is available through the `+"`mcp`"+` tool (server: "ai-memory"; tools: memory_query, memory_read_page, memory_write_page, memory_explore, memory_status, ...). Prefer it over the ai-memory CLI or raw file exploration for wiki/handoff lookups.
+The ai-memory wiki tools (memory_query, memory_read_page, memory_write_page, memory_explore, ...) are available directly. Prefer them over the ai-memory CLI or raw file exploration for wiki, decision and handoff lookups.
 
-The active project for this conversation is %s (cwd: %s). When calling ANY ai-memory tool, ALWAYS pass `+"`project: \"%s\"`"+` explicitly in the arguments — do NOT rely on the server's auto-resolved project, which can be stale in parallel multi-project sessions.
+The active project for this conversation is %s (cwd: %s). Pass `+"`project: \"%s\"`"+` explicitly on project-scoped calls — do NOT rely on the server's auto-resolved project, which can be stale in parallel multi-project sessions.
 
 - Cross-project searches: pass `+"`global: true`"+` instead.
 - If the user asks about another project, pass that project's name explicitly.`, project, cwd, project)

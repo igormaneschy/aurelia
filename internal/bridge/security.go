@@ -55,5 +55,12 @@ func BuildSecurityContext(
 		sec.Profile = string(profile)
 	}
 
+	// Extension-registered tools (ai-memory wiki, mcpScript) are filtered out
+	// of the PI SDK tool registry unless their names appear in this allowlist,
+	// because the SDK treats it as a closed set (see
+	// security.ProfileExtensionTools). Grant them last, after the profile has
+	// settled, so a privileged downgrade cannot leak admin tools.
+	tools = security.GrantExtensionTools(profile, tools, disallowedTools)
+
 	return profile, tools, sec
 }

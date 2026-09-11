@@ -273,6 +273,48 @@ func EnsureBridge(targetDir string, bundleJS []byte) (string, error) {
 					}
 				}
 			}
+
+			// Share extensions/ so PI extensions register their tools and
+			// lifecycle hooks inside the daemon too. Without this the daemon runs
+			// a PI with no ai-memory integration: the wiki tools the protocol
+			// files reference (memory_query, memory_write_page, …) are never
+			// registered, adjacent guidance points at tools that do not exist,
+			// and agent sessions are not captured for the project wiki. The
+			// per-profile allowlist in internal/security gates which of those
+			// tools a chat may actually call.
+			//
+			// Policy: the daemon loads every extension the interactive PI CLI
+			// loads (same source, no drift). A regular directory installed here
+			// on purpose (for example by `ai-memory install-hooks --agent pi
+			// --apply` with PI_CODING_AGENT_DIR pointing at the daemon dir) is
+			// left untouched.
+			piExtensionsDir := filepath.Join(home, ".pi", "agent", "extensions")
+			aureliaExtensionsDir := filepath.Join(aureliaPiAgentDir, "extensions")
+			if _, statErr := os.Stat(piExtensionsDir); statErr == nil {
+				existing, lstatErr := os.Lstat(aureliaExtensionsDir)
+				switch {
+				case os.IsNotExist(lstatErr):
+					if err := os.Symlink(piExtensionsDir, aureliaExtensionsDir); err != nil {
+						slog.Warn("failed to symlink extensions/ from PI CLI", "error", err)
+					} else {
+						slog.Info("Linked extensions/ from PI CLI")
+					}
+				case lstatErr != nil:
+					slog.Warn("failed to inspect extensions/ in PI agent dir", "error", lstatErr)
+				case existing.Mode()&os.ModeSymlink == 0:
+					slog.Info("extensions/ is a local directory; keeping daemon-specific extensions", "path", aureliaExtensionsDir)
+				default:
+					linkTarget, linkErr := os.Readlink(aureliaExtensionsDir)
+					if linkErr != nil || linkTarget != piExtensionsDir {
+						_ = os.Remove(aureliaExtensionsDir)
+						if err := os.Symlink(piExtensionsDir, aureliaExtensionsDir); err != nil {
+							slog.Warn("failed to symlink extensions/ from PI CLI", "error", err)
+						} else {
+							slog.Info("Linked extensions/ from PI CLI")
+						}
+					}
+				}
+			}
 		}
 	}
 
