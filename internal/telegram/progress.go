@@ -169,6 +169,10 @@ func (p *progressReporter) ReportState(state pipelinepkg.ProgressState, detail s
 	case pipelinepkg.ProgressStateToolSlow:
 		// Honest long-command notice — never the "model struggling" copy.
 		p.statusLine = "⏳ " + detail
+	case pipelinepkg.ProgressStateProviderWait:
+		// The provider is prefilling the prompt. Factual copy: the model is
+		// not struggling, it has not been asked anything yet.
+		p.statusLine = "⏳ " + detail
 	case pipelinepkg.ProgressStateWaiting:
 		p.statusLine = "⏳ Ainda estou processando."
 	case pipelinepkg.ProgressStateWorking:

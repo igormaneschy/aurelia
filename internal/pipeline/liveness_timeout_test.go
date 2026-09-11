@@ -500,6 +500,7 @@ func TestLivenessEventIsProductive_RequiresRealProgress(t *testing.T) {
 		{"tool_running empty label", bridge.Event{Type: "tool_running"}, false},
 		{"tool_slow with label", bridge.Event{Type: "tool_slow", Name: "Bash"}, true},
 		{"tool_slow empty label", bridge.Event{Type: "tool_slow"}, false},
+		{"provider_wait", bridge.Event{Type: "provider_wait", ElapsedMs: 185_000}, true},
 		{"telemetry", bridge.Event{Type: "stall", Severity: "warning"}, false},
 	}
 	for _, tc := range cases {

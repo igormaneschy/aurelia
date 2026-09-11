@@ -319,6 +319,13 @@ func livenessEventIsProductive(ev bridge.Event) bool {
 		// output is expected, so the idle window must not escalate while a
 		// real command runs. The 30min hard execution cap remains the ceiling.
 		return ev.Name != ""
+	case "provider_wait":
+		// The provider is prefilling the prompt for the current turn. Silence
+		// is expected for as long as that takes (observed: ~4min on a
+		// 366k-token session with a local model), so it must not escalate as
+		// idle. A dead or wedged Bridge is still caught by the probe, and the
+		// 30min hard execution cap remains the ceiling.
+		return true
 	case "assistant":
 		return ev.ContentText() != ""
 	default:
@@ -348,9 +355,10 @@ func (s *stallPriorityReporter) ReportState(state ProgressState, detail string) 
 	switch state {
 	case ProgressStateStallWarning, ProgressStateStallUrgent, ProgressStateToolSlow:
 		s.stallSeen = time.Now()
-	case ProgressStateToolRunning:
-		// A tool in flight is productive: it clears a stale stall line and
-		// must not be clobbered by the heartbeat Waiting re-beat.
+	case ProgressStateToolRunning, ProgressStateProviderWait:
+		// A tool in flight — or a provider still prefilling — is productive
+		// activity: it clears a stale stall line and must not be clobbered by
+		// the heartbeat Waiting re-beat.
 		s.stallSeen = time.Now()
 	case ProgressStateWaiting:
 		if time.Since(s.stallSeen) < stallHoldWindow {

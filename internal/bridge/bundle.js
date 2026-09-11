@@ -556,6 +556,7 @@ function measuredElapsed(startedAt, now = Date.now()) {
 }
 var TOOL_SLOW_WARN_MS = 10 * 60 * 1e3;
 var HEALTH_TICK_MS = 15e3;
+var PROVIDER_WAIT_TICK_MS = 15e3;
 function healthDecisionFor(input) {
   const out = {};
   const { inflight, silentMs } = input;
@@ -563,6 +564,12 @@ function healthDecisionFor(input) {
     out.toolRunning = inflight;
     if (inflight.elapsedMs >= TOOL_SLOW_WARN_MS && !input.toolSlowWarned) {
       out.toolSlow = true;
+    }
+    return out;
+  }
+  if (input.awaitingFirstChunk) {
+    if (silentMs >= PROVIDER_WAIT_TICK_MS) {
+      out.providerWaitMs = silentMs;
     }
     return out;
   }
@@ -580,6 +587,7 @@ function stallTelemetryFor(silentMs, warningSent, urgentSent) {
   const decision = healthDecisionFor({
     silentMs,
     inflight: null,
+    awaitingFirstChunk: false,
     stallWarningSent: warningSent,
     stallUrgentSent: urgentSent,
     toolSlowWarned: true
@@ -1598,6 +1606,18 @@ async function handleQuery(req) {
       model: liveSession.model ? "".concat(liveSession.model.provider, "/").concat(liveSession.model.id) : ""
     });
     let lastEventTime = Date.now();
+    let turnStartedAt = Date.now();
+    let turnFirstChunkSeen = false;
+    const markFirstChunk = () => {
+      if (turnFirstChunkSeen) return;
+      turnFirstChunkSeen = true;
+      if (turnStartedAt !== void 0) {
+        const waited = measuredElapsed(turnStartedAt, Date.now());
+        if (waited !== void 0 && waited >= 1e3) {
+          redactedLog("provider first chunk after ".concat(Math.round(waited / 1e3), "s (rid=").concat(reqId, ")"));
+        }
+      }
+    };
     const rawUnsubPersistent = liveSession.subscribe((event) => {
       try {
         if (terminalEmitted) return;
@@ -1609,6 +1629,7 @@ async function handleQuery(req) {
           // events (turn_start/end, compactions, retries) don't mask real stalls.
           case "message_update": {
             lastEventTime = Date.now();
+            markFirstChunk();
             const update = sdkEvent.assistantMessageEvent;
             if (update?.type === "text_delta" && typeof update.delta === "string") {
               eReq({ event: "assistant", text: sanitizeBridgeText(update.delta, MAX_EVENT_TEXT_RUNES) });
@@ -1617,6 +1638,7 @@ async function handleQuery(req) {
           }
           case "tool_execution_start": {
             lastEventTime = Date.now();
+            markFirstChunk();
             const safeName = safeLabel(sdkEvent.toolName, "tool");
             const safeID = toolDurations.start(sdkEvent.toolCallId, Date.now(), safeName);
             redactedLog("tool: ".concat(safeName, " id=").concat(safeID, " rid=").concat(rid));
@@ -1633,6 +1655,7 @@ async function handleQuery(req) {
           }
           case "tool_execution_end": {
             lastEventTime = Date.now();
+            markFirstChunk();
             const pair = toolDurations.endWithID(sdkEvent.toolCallId);
             const safeID = pair?.toolCallID ?? safeToolCallID(sdkEvent.toolCallId);
             eReq({
@@ -1650,6 +1673,8 @@ async function handleQuery(req) {
             eReq({ event: "agent_end" });
             break;
           case "turn_start":
+            turnStartedAt = Date.now();
+            turnFirstChunkSeen = false;
             eReq({ event: "turn_start" });
             break;
           case "turn_end":
@@ -1722,21 +1747,23 @@ async function handleQuery(req) {
       const silent = now - lastEventTime;
       const inflight = toolDurations.inflight(now);
       const inflightID = inflight?.toolCallID ?? null;
+      const awaitingFirstChunk = turnStartedAt !== void 0 && !turnFirstChunkSeen;
       if (toolSlowWarnedFor !== null && toolSlowWarnedFor !== inflightID) {
         toolSlowWarnedFor = null;
       }
-      if (silent < 3e4 || inflight) {
+      if (silent < 3e4 || inflight || awaitingFirstChunk) {
         stallSteerSent = false;
         stallUrgentSent = false;
       }
       if (silent >= 3e4 && !inflight) {
         redactedLog(
-          "streaming stall: no PI SDK events for ".concat(Math.round(silent / 1e3), "s (rid=").concat(reqId, ")")
+          awaitingFirstChunk ? "provider wait: no first chunk yet after ".concat(Math.round(silent / 1e3), "s (rid=").concat(reqId, ")") : "streaming stall: no PI SDK events for ".concat(Math.round(silent / 1e3), "s (rid=").concat(reqId, ")")
         );
       }
       const decision = healthDecisionFor({
         silentMs: silent,
         inflight,
+        awaitingFirstChunk,
         stallWarningSent: stallSteerSent,
         stallUrgentSent,
         toolSlowWarned: toolSlowWarnedFor !== null
@@ -1747,6 +1774,13 @@ async function handleQuery(req) {
           tool_call_id: decision.toolRunning.toolCallID,
           name: decision.toolRunning.name,
           elapsed_ms: boundedElapsedMs(decision.toolRunning.elapsedMs),
+          source: "bridge_health"
+        });
+      }
+      if (decision.providerWaitMs !== void 0) {
+        emitReq({
+          event: "provider_wait",
+          elapsed_ms: boundedElapsedMs(decision.providerWaitMs),
           source: "bridge_health"
         });
       }
