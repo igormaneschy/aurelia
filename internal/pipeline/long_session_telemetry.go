@@ -13,6 +13,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/runlog"
+	"github.com/igormaneschy/aurelia/internal/security"
 )
 
 // runLogState is the per-run runlog accumulator. It tracks the run identity,
@@ -745,8 +746,17 @@ func normalizeSeverity(s string) string {
 // than becoming arbitrary runlog text. The same safe label is also used by the
 // live progress and loop-monitoring paths so raw provider names do not cross
 // the telemetry boundary through an adjacent field.
+//
+// Extension tools granted by internal/security (ai-memory wiki tools,
+// mcpScript) are known names with a fixed vocabulary, so they keep their own
+// label instead of degrading to "tool" — otherwise a receipt for a wiki lookup
+// would read "⚙️ tool" and the runlog would lose which surface was used.
 func normalizeToolLabel(name string) string {
-	switch strings.ToLower(strings.TrimSpace(name)) {
+	trimmed := strings.ToLower(strings.TrimSpace(name))
+	if label, ok := security.ExtensionToolLabel(trimmed); ok {
+		return label
+	}
+	switch trimmed {
 	case "read":
 		return "Read"
 	case "write":

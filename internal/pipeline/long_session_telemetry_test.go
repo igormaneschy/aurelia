@@ -884,3 +884,23 @@ func TestTerminalFinalization_ErrorThenGenericOutcomeCompletesOnce(t *testing.T)
 		t.Fatalf("completions = %d, want exactly one after first terminal claim", len(got))
 	}
 }
+
+// Extension tools keep their own label: degrading them to "tool" would hide
+// which surface a run used (the ai-memory receipt read "⚙️ tool" before this).
+func TestNormalizeToolLabel_ExtensionToolsKeepTheirName(t *testing.T) {
+	cases := map[string]string{
+		"memory_status": "memory_status",
+		"memory_query":  "memory_query",
+		"MEMORY_QUERY":  "memory_query",
+		" mcpScript ":   "mcpScript", // canonical casing is preserved
+		"read":          "Read",
+		"bash":          "Bash",
+		"UnknownTool":   "tool",
+		"memory_nope":   "tool",
+	}
+	for input, want := range cases {
+		if got := normalizeToolLabel(input); got != want {
+			t.Errorf("normalizeToolLabel(%q) = %q, want %q", input, got, want)
+		}
+	}
+}

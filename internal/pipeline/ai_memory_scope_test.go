@@ -105,11 +105,17 @@ func TestBuildSystemPrompt_IncludesAiMemoryScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(prompt, "## ai-memory MCP scope") {
+	if !strings.Contains(prompt, "## ai-memory scope") {
 		t.Fatalf("system prompt should contain ai-memory MCP scope section")
 	}
 	if !strings.Contains(prompt, `project: "repo-x"`) {
 		t.Fatalf("system prompt should inject explicit project, got: %s", prompt)
+	}
+	// The ai-memory tools are registered directly by the PI extension; the
+	// prompt must not teach the MCP proxy path (wrong tool names, and the
+	// proxy needs a lazy connect first).
+	if strings.Contains(prompt, "through the `mcp` tool") {
+		t.Fatalf("system prompt must not route ai-memory through the mcp proxy, got: %s", prompt)
 	}
 }
 
@@ -119,7 +125,7 @@ func TestBuildSystemPrompt_NoScopeInChatMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(prompt, "## ai-memory MCP scope") {
+	if strings.Contains(prompt, "## ai-memory scope") {
 		t.Fatalf("chat mode (no cwd) should NOT include ai-memory scope section")
 	}
 }
