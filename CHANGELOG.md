@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.47.0] - 2026-09-11
+
+### Added
+- Prefill do provider deixou de ser confundido com stall do modelo: o Bridge
+  acompanha o turno (`turn_start` → primeiro chunk) e emite `provider_wait`
+  (progresso live-only, a cada 15s) enquanto o provider não devolveu o primeiro
+  chunk — nunca stall/steer. Evidência: num modelo local a ~500 tok/s, prefill de
+  28k levava 52s, 92k levava 185s e uma sessão de 366k ~4min; cada janela dessas
+  disparava stall + steer, e o steer urgente do run do Telegram de 11/09 19:49
+  chegou depois da escrita da memória já concluída, comprando um turno duplicado
+  (a mesma resposta duas vezes, cada uma pagando prefill completo).
+- `provider first chunk after Xs` mede a latência do provider por request; os
+  logs passam a distinguir "provider wait" de "streaming stall".
+
+### Changed
+- Telegram e TUI mostram "⏳ Aguardando o modelo há 2m10s" durante o prefill em vez
+  de copy de dificuldade; o stall priority reporter segura essa linha contra os
+  re-beats do heartbeat.
+- `provider_wait` conta como atividade para o watchdog de idle (probe do Bridge,
+  timeout HTTP idle de 5min do SDK e cap duro de 30min seguem como tetos).
+- Depois do primeiro chunk a escada histórica 60s/120s permanece intacta.
+
+### Fixed
+- Validação live do caso que falhava: um prefill de **123s** (acima dos dois
+  degraus antigos) produziu zero `stall`, zero `steer`, zero turnos sintéticos no
+  histórico — antes gerava 2 stalls + 2 steers + "Continue please…" e "Stop your
+  current activity…" injetados como mensagens de usuário.
+
 ## [0.46.0] - 2026-09-11
 
 ### Added
