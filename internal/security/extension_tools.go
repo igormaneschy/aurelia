@@ -1,5 +1,7 @@
 package security
 
+import "strings"
+
 // Extension-registered tools are registered at runtime by PI extensions
 // (the ai-memory lifecycle extension bridges the wiki tools; pi-mcp-adapter
 // registers `mcpScript`). The PI SDK treats RequestOptions.tools as a **closed
@@ -103,4 +105,25 @@ func joinToolNames(groups ...[]string) []string {
 		out = append(out, group...)
 	}
 	return out
+}
+
+// extensionToolLabels maps a case-folded tool name to its canonical label.
+// Built once: the groups above are package-level and never mutated.
+var extensionToolLabels = func() map[string]string {
+	labels := make(map[string]string)
+	for _, group := range [][]string{memoryReadTools, memoryWriteTools, memoryAdminTools, mcpScriptTools} {
+		for _, tool := range group {
+			labels[strings.ToLower(tool)] = tool
+		}
+	}
+	return labels
+}()
+
+// ExtensionToolLabel returns the canonical label for a known extension tool.
+// The lookup is case-insensitive; the returned name keeps its canonical casing
+// (mcpScript). Callers that must reduce untrusted SDK names to a bounded label
+// set use this instead of degrading to a generic placeholder.
+func ExtensionToolLabel(name string) (string, bool) {
+	label, ok := extensionToolLabels[strings.ToLower(strings.TrimSpace(name))]
+	return label, ok
 }
