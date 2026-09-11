@@ -4,6 +4,48 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.46.0] - 2026-09-11
+
+### Added
+- O daemon carrega as **extensions do PI** (`~/.aurelia/pi-agent/extensions/`
+  passa a ser symlink do agent dir do CLI, como `skills/` e `context/`). Sem
+  isso o daemon rodava um PI sem a integração do ai-memory: as tools de wiki que
+  os arquivos de protocolo citavam (`memory_query`, `memory_write_page`, …) não
+  existiam, o modelo gastava turnos com "Tool memory_explore not found" até cair
+  no proxy `mcp` com nomes errados, e nenhuma sessão do daemon era capturada para
+  a wiki (0 de 724 arquivos de sessão; o CLI tinha 41 sessões capturadas).
+- Tools de extension passam por **allowlist por perfil de capacidade**
+  (`internal/security/extension_tools.go`): o PI SDK trata a lista de tools como
+  conjunto fechado e filtra tudo que uma extension registra
+  (`AgentSession._refreshToolRegistry`), então instalar a extension não bastava.
+  Leitura do wiki segue perfis de leitura; escrita de página e handoffs seguem
+  perfis com escrita; operações destrutivas/de bulk (`memory_delete_page`,
+  `memory_forget_sweep`, `memory_lint`, `memory_consolidate`,
+  `memory_auto_improve`, `memory_install_self_routing`) ficam só no perfil
+  `privileged`. `mcpScript` acompanha o perfil que já concede Bash (permite
+  orquestrar várias chamadas MCP em um único turno, reduzindo prefill).
+
+### Changed
+- O prompt de sistema deixa de ensinar o caminho do proxy `mcp` para o
+  ai-memory (nomes errados: o correto seria `ai-memory_<tool>`, e o servidor
+  lazy exigia connect antes). O bloco agora só entrega o mapeamento
+  conversa→projeto, que é informação do daemon.
+- Removida a injeção automática do argumento `project` nas chamadas ao
+  ai-memory no Bridge (`injectMcpProjectScope`): com a extension carregada o
+  servidor resolve o escopo por sessão de ator
+  (`X-Memory-Actor-Session-Id`) — reescrever argumentos duplicava uma
+  responsabilidade da extension.
+
+### Fixed
+- Nome da tool de extension era degradado para o rótulo genérico na timeline:
+  uma consulta à wiki aparecia como `⚙️ tool` no recibo e `tool=tool` no runlog.
+  `normalizeToolLabel` agora mapeia o vocabulário fixo das tools de extension
+  (`memory_*`, `mcpScript`) preservando a caixa canônica.
+
+### Removed
+- Entrada `notebooklm` do `mcp.json` compartilhado: o binário `notebooklm-mcp`
+  não existe em nenhum PATH (falhava com ENOENT no CLI e no daemon).
+
 ## [0.45.0] - 2026-09-09
 
 ### Changed
