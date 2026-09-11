@@ -54,6 +54,84 @@ func TestProcessBridgeEvents_ToolRunningIsProgressNotStall(t *testing.T) {
 	}
 }
 
+// TestProcessBridgeEvents_ProviderWaitIsProgressNotStall covers the prefill
+// case: while the provider owes the first chunk of the turn, the silence is
+// prefill (evidence: 52s for a 28k context, 185s for 92k, ~4min on a
+// 366k-token session with a local model) and must never read as a model stall.
+func TestProcessBridgeEvents_ProviderWaitIsProgressNotStall(t *testing.T) {
+	s := &Service{output: &fakeOutput{}}
+	progress := &recordingProgress{}
+
+	ch := make(chan bridge.Event, 3)
+	ch <- bridge.Event{Type: "provider_wait", ElapsedMs: 185_000}
+	ch <- bridge.Event{Type: "provider_wait", ElapsedMs: 240_000}
+	ch <- bridge.Event{Type: "result", Content: "done"}
+	close(ch)
+
+	if outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil); outcome != OutcomeSuccess {
+		t.Fatalf("outcome = %v, want OutcomeSuccess", outcome)
+	}
+
+	want := []ProgressState{
+		ProgressStateProviderWait,
+		ProgressStateProviderWait,
+		ProgressStateDone,
+	}
+	states := progress.recorded()
+	if len(states) != len(want) {
+		t.Fatalf("states = %v, want %v", states, want)
+	}
+	for i := range want {
+		if states[i] != want[i] {
+			t.Fatalf("states[%d] = %s, want %s", i, states[i], want[i])
+		}
+		if states[i] == ProgressStateStallWarning || states[i] == ProgressStateStallUrgent {
+			t.Fatalf("provider wait produced a model-stall state: %v", states)
+		}
+	}
+
+	details := progress.recordedDetails()
+	if !strings.Contains(details[0], "3m5s") {
+		t.Fatalf("provider_wait detail = %q, want the measured elapsed time", details[0])
+	}
+	for _, detail := range details[:2] {
+		if strings.Contains(detail, "dificuldade") || strings.Contains(detail, "demorando") {
+			t.Fatalf("provider wait reused the model-stall copy: %q", detail)
+		}
+	}
+}
+
+// TestProviderWaitDetail_FormatsElapsed pins the detail contract, including
+// the sub-second clamp so a clock artifact never renders "0s".
+func TestProviderWaitDetail_FormatsElapsed(t *testing.T) {
+	if got := providerWaitDetail(185_000); got != "Aguardando o modelo há 3m5s" {
+		t.Fatalf("providerWaitDetail(185000) = %q", got)
+	}
+	if got := providerWaitDetail(0); got != "Aguardando o modelo há 1s" {
+		t.Fatalf("providerWaitDetail(0) = %q, want the 1s clamp", got)
+	}
+}
+
+// TestStallPriorityReporter_ProviderWaitHoldsWaiting proves the provider-wait
+// line survives the heartbeat Waiting re-beat: a long prefill must keep showing
+// "aguardando o modelo" instead of collapsing back to generic waiting copy.
+func TestStallPriorityReporter_ProviderWaitHoldsWaiting(t *testing.T) {
+	inner := &recordingProgress{}
+	r := &stallPriorityReporter{inner: inner}
+
+	r.ReportState(ProgressStateProviderWait, "Aguardando o modelo há 2m10s")
+	r.ReportState(ProgressStateWaiting, "") // heartbeat re-beat: suppressed
+
+	states := inner.recorded()
+	want := []ProgressState{ProgressStateProviderWait}
+	if len(states) != len(want) {
+		t.Fatalf("states = %v, want %v", states, want)
+	}
+	if states[0] != want[0] {
+		t.Fatalf("states[0] = %s, want %s", states[0], want[0])
+	}
+}
+
 // TestToolProgressDetail_BoundsAndLabels fixes the detail contract: bounded
 // safe label, formatted elapsed, and a fallback label when the bridge label is
 // missing or unknown.

@@ -821,6 +821,18 @@ func toolProgressDetail(toolName string, elapsedMs int64, slow bool) string {
 	return fmt.Sprintf("%s em execução há %s", label, d.Round(time.Second))
 }
 
+// providerWaitDetail formats the honest progress line for a provider that has
+// not returned the first chunk of the turn yet. The model is not struggling —
+// the provider is computing (prefill of a large context, slow/local model) —
+// and the copy says exactly that so the receipt never reads like a failure.
+func providerWaitDetail(elapsedMs int64) string {
+	d := time.Duration(elapsedMs) * time.Millisecond
+	if d < time.Second {
+		d = time.Second
+	}
+	return fmt.Sprintf("Aguardando o modelo há %s", d.Round(time.Second))
+}
+
 // buildHeartbeatMessage formats the human detail for the waiting state.
 // Per Long Flow UX v2: human progress language, no technical terms like
 // "chamadas de ferramenta" or tool counts. Milestones escalate with elapsed
@@ -1073,6 +1085,15 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 				default:
 					progress.ReportState(ProgressStateWorking, fmt.Sprintf("contexto compactado (tokens: %d → %d)", ev.TokensBefore, *ev.TokensAfter))
 				}
+			}
+		case "provider_wait":
+			// The provider has not returned the first chunk of this turn yet:
+			// the prompt is being prefilled. Live-only progress, exactly like
+			// tool_running — it proves the request is in flight, not that the
+			// model produced anything, so it never consumes the telemetry
+			// budget, is never persisted, and never becomes stall copy.
+			if progress != nil {
+				progress.ReportState(ProgressStateProviderWait, providerWaitDetail(ev.ElapsedMs))
 			}
 		case "tool_running", "tool_slow":
 			// Tool-aware progress. The tool is executing, so this silence is

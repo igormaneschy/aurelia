@@ -1568,6 +1568,9 @@ func (m Model) handleProgressEvent(event ipc.IPCEvent) (tea.Model, tea.Cmd) {
 	case "tool_slow":
 		// Honest long-command notice — never the "model struggling" copy.
 		m.stallLine = "⏳ " + payload.Detail
+	case "provider_wait":
+		// Provider prefilling the prompt — not a model stall.
+		m.stallLine = "⏳ " + payload.Detail
 	case "waiting":
 		// Model thinking without tools — the spinner already covers this.
 		m.stallLine = ""

@@ -405,6 +405,7 @@ describe("healthDecisionFor", () => {
     const base = {
       silentMs: 10_000,
       inflight: slow,
+      awaitingFirstChunk: false,
       stallWarningSent: false,
       stallUrgentSent: false,
     };
@@ -422,6 +423,7 @@ describe("healthDecisionFor", () => {
     const decision = healthDecisionFor({
       silentMs: 10_000,
       inflight: { toolCallID: "tool-1", name: "Bash", elapsedMs: 60_000 },
+      awaitingFirstChunk: false,
       stallWarningSent: false,
       stallUrgentSent: false,
       toolSlowWarned: false,
@@ -444,5 +446,50 @@ describe("sanitizeBridgeText", () => {
     // must not drop the CR/LF sequence around a redacted secret.
     const out = sanitizeBridgeText("sk-12345678901234567890\nline2", 100);
     assert.match(out, /\[API_KEY_REDACTED\]\nline2/);
+  });
+});
+
+// ── provider wait vs model stall ───────────────────────────────────────────
+//
+// Evidence (2026-09-11, local llamacpp model): a 28k-token prefill took 52s,
+// 92k took 185s, and a 366k-token session took ~4min before the first chunk.
+// Every one of those windows used to fire stall+steer against a model that was
+// simply being prefilled; the urgent steer even bought a duplicate turn.
+describe("healthDecisionFor provider wait", () => {
+  const base = {
+    inflight: null,
+    stallWarningSent: false,
+    stallUrgentSent: false,
+    toolSlowWarned: false,
+  };
+
+  it("replaces stall/steer with provider_wait while the first chunk is pending", () => {
+    for (const silentMs of [60_000, 120_000, 600_000]) {
+      const decision = healthDecisionFor({ ...base, silentMs, awaitingFirstChunk: true });
+      assert.strictEqual(decision.stall, undefined, `stall at ${silentMs}ms`);
+      assert.strictEqual(decision.steer, undefined, `steer at ${silentMs}ms`);
+      assert.strictEqual(decision.providerWaitMs, silentMs);
+    }
+  });
+
+  it("stays quiet until the first provider-wait tick", () => {
+    const decision = healthDecisionFor({ ...base, silentMs: 14_999, awaitingFirstChunk: true });
+    assert.strictEqual(decision.providerWaitMs, undefined);
+    assert.deepStrictEqual(decision, {});
+  });
+
+  it("keeps the historical ladder once the provider produced its first chunk", () => {
+    const warning = healthDecisionFor({ ...base, silentMs: 60_000, awaitingFirstChunk: false });
+    assert.deepStrictEqual(warning, { stall: "warning", steer: "warning" });
+    const urgent = healthDecisionFor({ ...base, silentMs: 120_000, awaitingFirstChunk: false });
+    assert.deepStrictEqual(urgent, { stall: "urgent", steer: "urgent" });
+  });
+
+  it("prefers tool_running over provider_wait when a tool is in flight", () => {
+    const inflight = { toolCallID: "tool-1", name: "bash", elapsedMs: 5000 };
+    const decision = healthDecisionFor({ ...base, silentMs: 300_000, inflight, awaitingFirstChunk: true });
+    assert.strictEqual(decision.toolRunning, inflight);
+    assert.strictEqual(decision.providerWaitMs, undefined);
+    assert.strictEqual(decision.stall, undefined);
   });
 });

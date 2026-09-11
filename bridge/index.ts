@@ -916,8 +916,15 @@ export function measuredElapsed(
 // that genuinely runs long.
 const TOOL_SLOW_WARN_MS = 10 * 60 * 1000;
 // HEALTH_TICK_MS is the health-monitor cadence: stall/steer thresholds are
-// evaluated and tool_running is emitted (while a tool executes) at this rate.
+// evaluated, tool_running and provider_wait are emitted, at this rate.
 const HEALTH_TICK_MS = 15_000;
+// Provider wait: the window between a turn starting and its first streamed
+// chunk. The provider is prefilling the prompt, which is legitimate work — on
+// a local model it dominates latency (observed at ~500 tok/s: 52s for a 28k
+// context, 185s for 92k, ~4min on a 366k-token session). Silence in this
+// window is the provider's, never the model's, so it is reported as progress
+// and can never escalate to stall/steer.
+const PROVIDER_WAIT_TICK_MS = 15_000;
 
 /** Oldest still-open tool, as reported by ToolDurationTracker.inflight(). */
 export interface InflightTool {
@@ -929,6 +936,12 @@ export interface InflightTool {
 export interface HealthDecisionInput {
   silentMs: number;
   inflight: InflightTool | null;
+  /**
+   * True while the current turn has not produced its first streamed chunk yet
+   * (no assistant delta, no tool call). The request is in flight at the
+   * provider; the silence is prefill, not a stalled model.
+   */
+  awaitingFirstChunk: boolean;
   stallWarningSent: boolean;
   stallUrgentSent: boolean;
   toolSlowWarned: boolean;
@@ -937,18 +950,29 @@ export interface HealthDecisionInput {
 export interface HealthDecision {
   toolRunning?: InflightTool;
   toolSlow?: boolean;
+  /** Milliseconds spent waiting for the provider's first chunk of this turn. */
+  providerWaitMs?: number;
   stall?: "warning" | "urgent";
   steer?: "warning" | "urgent";
 }
 
 /**
- * Pure tool-aware health decision for the streaming monitor.
+ * Pure tool- and provider-aware health decision for the streaming monitor.
  *
  * While a tool is executing, the absence of SDK events is expected: emit
  * `toolRunning` (progress) and never `stall`/`steer`, which would tell the
  * model to stop a legitimate command. `toolSlow` fires once per tool beyond
- * TOOL_SLOW_WARN_MS. With no tool in flight the historical stall/steer ladder
- * is preserved unchanged.
+ * TOOL_SLOW_WARN_MS.
+ *
+ * While the provider owes us the first chunk of the current turn, the silence
+ * is prefill: emit `providerWaitMs` (progress) and never `stall`/`steer`.
+ * Steering cannot help there — the SDK only drains steering messages at the
+ * next turn, so the steer would arrive *after* the answer (observed live on
+ * 2026-09-11: an urgent "stop your current activity" steer landed right after
+ * a successful memory write and bought a duplicate assistant turn).
+ *
+ * Before the provider's first chunk the historical stall/steer ladder is
+ * preserved.
  */
 export function healthDecisionFor(input: HealthDecisionInput): HealthDecision {
   const out: HealthDecision = {};
@@ -957,6 +981,12 @@ export function healthDecisionFor(input: HealthDecisionInput): HealthDecision {
     out.toolRunning = inflight;
     if (inflight.elapsedMs >= TOOL_SLOW_WARN_MS && !input.toolSlowWarned) {
       out.toolSlow = true;
+    }
+    return out;
+  }
+  if (input.awaitingFirstChunk) {
+    if (silentMs >= PROVIDER_WAIT_TICK_MS) {
+      out.providerWaitMs = silentMs;
     }
     return out;
   }
@@ -973,8 +1003,9 @@ export function healthDecisionFor(input: HealthDecisionInput): HealthDecision {
 
 /**
  * Pure stall-detection decision for the health monitor when no tool is in
- * flight. Kept as the narrow projection for callers/tests that do not track
- * tool state; delegates to healthDecisionFor so thresholds have one source.
+ * flight and the provider already produced its first chunk. Kept as the narrow
+ * projection for callers/tests that do not track tool or provider state;
+ * delegates to healthDecisionFor so thresholds have one source.
  */
 export function stallTelemetryFor(
   silentMs: number,
@@ -984,6 +1015,7 @@ export function stallTelemetryFor(
   const decision = healthDecisionFor({
     silentMs,
     inflight: null,
+    awaitingFirstChunk: false,
     stallWarningSent: warningSent,
     stallUrgentSent: urgentSent,
     toolSlowWarned: true,
@@ -2468,6 +2500,22 @@ async function handleQuery(req: Request): Promise<void> {
     // Set up persistent subscription for this session
     // Counts events for health diagnostics (logged after 30s of silence).
     let lastEventTime = Date.now();
+    // Provider-wait tracking: when the current turn started and whether its
+    // first chunk already arrived. Silence before that chunk is prefill, not a
+    // stalled model (see healthDecisionFor). Seeded now so the initial window
+    // is covered even if the first turn_start is missed.
+    let turnStartedAt: number | undefined = Date.now();
+    let turnFirstChunkSeen = false;
+    const markFirstChunk = (): void => {
+      if (turnFirstChunkSeen) return;
+      turnFirstChunkSeen = true;
+      if (turnStartedAt !== undefined) {
+        const waited = measuredElapsed(turnStartedAt, Date.now());
+        if (waited !== undefined && waited >= 1_000) {
+          redactedLog(`provider first chunk after ${Math.round(waited / 1000)}s (rid=${reqId})`);
+        }
+      }
+    };
     const rawUnsubPersistent = liveSession.subscribe((event) => {
       try {
         if (terminalEmitted) return;
@@ -2480,6 +2528,7 @@ async function handleQuery(req: Request): Promise<void> {
           // events (turn_start/end, compactions, retries) don't mask real stalls.
           case "message_update": {
             lastEventTime = Date.now();
+            markFirstChunk();
             const update = sdkEvent.assistantMessageEvent;
             if (update?.type === "text_delta" && typeof update.delta === "string") {
               eReq({ event: "assistant", text: sanitizeBridgeText(update.delta, MAX_EVENT_TEXT_RUNES) });
@@ -2488,6 +2537,7 @@ async function handleQuery(req: Request): Promise<void> {
           }
           case "tool_execution_start": {
             lastEventTime = Date.now();
+            markFirstChunk();
             const safeName = safeLabel(sdkEvent.toolName, "tool");
             const safeID = toolDurations.start(sdkEvent.toolCallId, Date.now(), safeName);
             redactedLog(`tool: ${safeName} id=${safeID} rid=${rid}`);
@@ -2504,6 +2554,7 @@ async function handleQuery(req: Request): Promise<void> {
           }
           case "tool_execution_end": {
             lastEventTime = Date.now();
+            markFirstChunk();
             const pair = toolDurations.endWithID(sdkEvent.toolCallId);
             const safeID = pair?.toolCallID ?? safeToolCallID(sdkEvent.toolCallId);
             // duration_ms is telemetry only: never add command, args/raw result.
@@ -2526,6 +2577,10 @@ async function handleQuery(req: Request): Promise<void> {
             eReq({ event: "agent_end" });
             break;
           case "turn_start":
+            // A new turn means a new provider request: from here until the
+            // first chunk the silence is prefill (provider_wait), not a stall.
+            turnStartedAt = Date.now();
+            turnFirstChunkSeen = false;
             eReq({ event: "turn_start" });
             break;
           case "turn_end":
@@ -2612,27 +2667,35 @@ async function handleQuery(req: Request): Promise<void> {
       const silent = now - lastEventTime;
       const inflight = toolDurations.inflight(now);
       const inflightID = inflight?.toolCallID ?? null;
+      // True while the provider still owes us the first chunk of this turn.
+      const awaitingFirstChunk = turnStartedAt !== undefined && !turnFirstChunkSeen;
 
       // A different (or finished) tool resets the once-per-tool slow warning.
       if (toolSlowWarnedFor !== null && toolSlowWarnedFor !== inflightID) {
         toolSlowWarnedFor = null;
       }
 
-      // Resumed activity — or an in-flight tool, whose silence belongs to the
-      // command and not the model — clears the stall escalation flags.
-      if (silent < 30_000 || inflight) {
+      // Resumed activity — an in-flight tool (silence belongs to the command)
+      // or a provider still prefilling (silence belongs to the request) —
+      // clears the stall escalation flags.
+      if (silent < 30_000 || inflight || awaitingFirstChunk) {
         stallSteerSent = false;
         stallUrgentSent = false;
       }
       if (silent >= 30_000 && !inflight) {
+        // Prefill and model silence look identical on the wire but mean
+        // different things: keep the log honest about which one this is.
         redactedLog(
-          `streaming stall: no PI SDK events for ${Math.round(silent / 1000)}s (rid=${reqId})`,
+          awaitingFirstChunk
+            ? `provider wait: no first chunk yet after ${Math.round(silent / 1000)}s (rid=${reqId})`
+            : `streaming stall: no PI SDK events for ${Math.round(silent / 1000)}s (rid=${reqId})`,
         );
       }
 
       const decision = healthDecisionFor({
         silentMs: silent,
         inflight,
+        awaitingFirstChunk,
         stallWarningSent: stallSteerSent,
         stallUrgentSent: stallUrgentSent,
         toolSlowWarned: toolSlowWarnedFor !== null,
@@ -2644,6 +2707,15 @@ async function handleQuery(req: Request): Promise<void> {
           tool_call_id: decision.toolRunning.toolCallID,
           name: decision.toolRunning.name,
           elapsed_ms: boundedElapsedMs(decision.toolRunning.elapsedMs),
+          source: "bridge_health",
+        });
+      }
+      if (decision.providerWaitMs !== undefined) {
+        // Live-only progress: the provider is computing (prefill / slow
+        // model). Never persisted, never a stall, never a steer.
+        emitReq({
+          event: "provider_wait",
+          elapsed_ms: boundedElapsedMs(decision.providerWaitMs),
           source: "bridge_health",
         });
       }

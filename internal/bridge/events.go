@@ -177,7 +177,7 @@ func normalizeEventType(s string) string {
 	switch s {
 	case "system", "tool_use", "tool_result", "assistant", "result", "error",
 		"pong", "compaction_start", "compaction_end", "stall", "steer",
-		"tool_running", "tool_slow",
+		"tool_running", "tool_slow", "provider_wait",
 		"turn_start", "turn_end", "agent_start", "agent_end", "auto_retry_start", "auto_retry_end":
 		return s
 	default:

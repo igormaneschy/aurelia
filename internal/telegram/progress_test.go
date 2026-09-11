@@ -77,6 +77,17 @@ func TestProgressReporter_ReportState_ToolAndCompactionDetail(t *testing.T) {
 		t.Fatalf("tool_slow reused the model-stall copy: %q", slow)
 	}
 
+	p.ReportState(pipelinepkg.ProgressStateProviderWait, "Aguardando o modelo há 4m10s")
+	p.mu.Lock()
+	waiting := p.statusLine
+	p.mu.Unlock()
+	if !strings.Contains(waiting, "⏳") || !strings.Contains(waiting, "Aguardando o modelo há 4m10s") {
+		t.Fatalf("provider_wait statusLine = %q", waiting)
+	}
+	if strings.Contains(waiting, "dificuldade") || strings.Contains(waiting, "demorando") {
+		t.Fatalf("provider_wait reused the model-stall copy: %q", waiting)
+	}
+
 	p.ReportState(pipelinepkg.ProgressStateWorking, "contexto compactado (tokens: 146528 → 90400)")
 	p.mu.Lock()
 	compacted := p.statusLine

@@ -52,6 +52,11 @@ const (
 	// slow-warning threshold. Honest long-command notice — never the
 	// "model struggling" copy.
 	ProgressStateToolSlow ProgressState = "tool_slow"
+	// ProgressStateProviderWait means the provider has not returned the first
+	// chunk of the current turn yet: the prompt is being prefilled (a large
+	// context on a slow/local model dominates latency). The silence belongs to
+	// the provider, so this is progress — never stall/steer copy.
+	ProgressStateProviderWait ProgressState = "provider_wait"
 	// ProgressStateDone means the run completed with a result.
 	ProgressStateDone ProgressState = "done"
 	// ProgressStateCanceled means the run was canceled before completion.
