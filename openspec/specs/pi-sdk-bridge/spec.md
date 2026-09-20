@@ -8,27 +8,36 @@ segurança, e entrega operacional com bundle sincronizado à fonte.
 
 ## Requirements
 
-### Requirement: A1 — Reproducible PI 0.82.1 runtime
+### Requirement: A1 — Reproducible pinned PI SDK runtime
 
 O sistema MUST instalar e executar `@earendil-works/pi-ai` e
-`@earendil-works/pi-coding-agent` em `0.82.1`, com lockfile e template do
-daemon coerentes. O runtime Node efetivo MUST satisfazer o engine publicado
+`@earendil-works/pi-coding-agent` na mesma versão pinada (`piSDKVersion`),
+declarada em dois lugares que MUST permanecer idênticos — `bridge/package.json`
+(manifest do repo) e `internal/bridge/pi_sdk.go` (pin do daemon) —, com
+lockfile coerente. O runtime Node efetivo MUST satisfazer o engine publicado
 pelo pacote.
 
 #### Scenario: clean dependency installation
 
 - **GIVEN** um checkout da change sem `node_modules` do bridge
 - **WHEN** as dependências são instaladas usando o `package.json` e o lockfile
-- **THEN** ambos os pacotes PI resolvem para `0.82.1`
+- **THEN** ambos os pacotes PI resolvem para `piSDKVersion`
 - **AND** `protobufjs` resolve para versão corrigida `>=7.6.5`
 - **AND** o typecheck do bridge passa
 
 #### Scenario: daemon installation uses the same contract
 
-- **GIVEN** o daemon precisa preparar um bridge novo
+- **GIVEN** o daemon precisa preparar ou reparar o bridge
 - **WHEN** `EnsureBridge` grava o package template e instala as dependências
-- **THEN** o template declara as mesmas versões PI `0.82.1`
+- **THEN** o template declara as mesmas versões PI de `piSDKVersion`
 - **AND** o bundle pode ser construído com o Node suportado
+
+#### Scenario: the two declarations cannot drift
+
+- **GIVEN** um bump que altera apenas uma das duas declarações de versão
+- **WHEN** os testes Go de `internal/bridge` rodam
+- **THEN** `TestPiSDKVersionMatchesSourceManifest` falha
+- **AND** a mensagem aponta `make sync-pi-sdk` como correção
 
 ### Requirement: A2 — Unified model/auth runtime
 
@@ -66,7 +75,7 @@ steer, follow-up, stats e histórico para arquivos criados na versão anterior.
 #### Scenario: resume a 0.79.2 session
 
 - **GIVEN** um fixture JSONL válido criado pelo PI `0.79.2`
-- **WHEN** o bridge `0.82.1` abre a sessão pelo caminho salvo
+- **WHEN** o bridge pinado abre a sessão pelo caminho salvo
 - **THEN** o session ID e o arquivo original são preservados
 - **AND** mensagens, timestamps, modelo e thinking level continuam disponíveis
 
@@ -141,3 +150,39 @@ caminho Telegram/TUI → Go → bridge → PI sem alteração do protocolo NDJSO
 - **WHEN** `list-models` executa refresh explícito
 - **THEN** o catálogo é atualizado de forma observável
 - **AND** falha de rede não apaga silenciosamente um catálogo utilizável
+
+### Requirement: A6 — PI SDK follows the PI CLI with automated drift detection
+
+O projeto MUST ter um caminho único e automatizado para acompanhar a evolução
+do PI CLI, e o daemon MUST convergir para o pin instalado em `node_modules`
+sem passo manual por release.
+
+#### Scenario: one command moves the pin and proves it
+
+- **GIVEN** o PI CLI instalado está em uma versão diferente do pin do bridge
+- **WHEN** `make sync-pi-sdk` (ou `scripts/sync-pi-sdk.sh --version X.Y.Z`) roda
+- **THEN** `bridge/package.json` e `internal/bridge/pi_sdk.go` ficam na nova versão
+- **AND** o lockfile, `node_modules`, o typecheck, os testes do bridge, o bundle
+  sincronizado e os testes Go do bridge refletem essa versão
+- **AND** o script não commita nem altera `CHANGELOG.md`/`internal/version`
+
+#### Scenario: drift is observable without writing anything
+
+- **GIVEN** o pin do bridge difere do PI CLI instalado
+- **WHEN** `make check-pi-sdk` roda
+- **THEN** o comando reporta a diferença e a versão do tree do daemon
+- **AND** sai com código 1 sem modificar arquivos
+
+#### Scenario: daemon converges to the pin at startup
+
+- **GIVEN** `node_modules` do daemon está em uma versão diferente do pin
+- **WHEN** `EnsureBridge` executa no start do daemon
+- **THEN** ele detecta a divergência e reinstala as dependências na versão pinada
+- **AND** registra log com versão instalada, versão pinada e pacote
+
+#### Scenario: removed SDK API fails before deploy
+
+- **GIVEN** uma versão nova do PI SDK remove ou move uma API usada pelo bridge
+- **WHEN** `npm test` do bridge roda
+- **THEN** `sdk-surface.test.ts` falha apontando o símbolo ausente
+- **AND** a falha acontece antes do deploy, não no daemon em produção

@@ -48,7 +48,7 @@ describe("waitForPendingMessageCount", () => {
   });
 });
 
-describe("PI 0.82.1 model runtime boundary", () => {
+describe("PI model runtime boundary", () => {
   it("uses qualified lookup first, then only an exact ID fallback", () => {
     const direct = { provider: "kimi-coding", id: "kimi-for-coding" };
     const fallback = { provider: "other", id: "kimi-for-coding" };

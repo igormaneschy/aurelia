@@ -3,6 +3,7 @@ package bridge
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -46,9 +47,14 @@ func TestBridgePackageJSONCanBuildBundle(t *testing.T) {
 	if pkg.Dependencies["@earendil-works/pi-coding-agent"] == "" {
 		t.Fatal("missing PI SDK dependency")
 	}
-	if pkg.Dependencies["@earendil-works/pi-ai"] != "0.82.1" || pkg.Dependencies["@earendil-works/pi-coding-agent"] != "0.82.1" {
-		t.Fatalf("PI SDK dependency versions must be 0.82.1, got ai=%q coding-agent=%q",
-			pkg.Dependencies["@earendil-works/pi-ai"], pkg.Dependencies["@earendil-works/pi-coding-agent"])
+	for _, dep := range piSDKPackages {
+		if pkg.Dependencies[dep] != piSDKVersion {
+			t.Fatalf("bridgePackageJSON must pin %s to piSDKVersion %q, got %q (run make sync-pi-sdk)",
+				dep, piSDKVersion, pkg.Dependencies[dep])
+		}
+	}
+	if strings.Contains(bridgePackageJSON, piSDKVersionPlaceholder) {
+		t.Fatalf("bridgePackageJSON still contains the unresolved placeholder %q", piSDKVersionPlaceholder)
 	}
 	if pkg.Engines["node"] != ">=22.19.0" {
 		t.Fatalf("Node engine must require >=22.19.0, got %q", pkg.Engines["node"])
@@ -62,6 +68,107 @@ func TestBridgePackageJSONCanBuildBundle(t *testing.T) {
 	if pkg.Dependencies["esbuild"] != "0.28.1" {
 		t.Fatalf("esbuild dependency must be 0.28.1, got %q", pkg.Dependencies["esbuild"])
 	}
+}
+
+// TestPiSDKVersionMatchesSourceManifest keeps piSDKVersion (what the daemon
+// installs) and bridge/package.json (what the repo builds and typechecks
+// against) from drifting apart. A bump that edits only one of them silently
+// reintroduces the 0.82.1-in-Go / 0.84.4-in-repo split this test exists to
+// prevent; `make sync-pi-sdk` updates both.
+func TestPiSDKVersionMatchesSourceManifest(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "bridge", "package.json"))
+	if err != nil {
+		t.Fatalf("read bridge/package.json: %v", err)
+	}
+	var manifest struct {
+		Dependencies map[string]string `json:"dependencies"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatalf("bridge/package.json is invalid JSON: %v", err)
+	}
+	for _, pkg := range piSDKPackages {
+		if got := manifest.Dependencies[pkg]; got != piSDKVersion {
+			t.Fatalf("bridge/package.json pins %s to %q but piSDKVersion is %q; run make sync-pi-sdk",
+				pkg, got, piSDKVersion)
+		}
+	}
+
+	var installed struct {
+		Dependencies map[string]string `json:"dependencies"`
+	}
+	if err := json.Unmarshal([]byte(bridgePackageJSON), &installed); err != nil {
+		t.Fatalf("bridgePackageJSON is invalid JSON: %v", err)
+	}
+	for _, pkg := range piSDKPackages {
+		if got := installed.Dependencies[pkg]; got != piSDKVersion {
+			t.Fatalf("bridgePackageJSON pins %s to %q but piSDKVersion is %q", pkg, got, piSDKVersion)
+		}
+	}
+}
+
+// TestSdkVersionDrift covers the daemon's reinstall trigger: a tree whose
+// installed SDK is stale (or absent) must be flagged, and a tree at the pin
+// must be left alone.
+func TestSdkVersionDrift(t *testing.T) {
+	writeManifest := func(t *testing.T, dir, pkg, version string) {
+		t.Helper()
+		pkgDir := filepath.Join(dir, "node_modules", pkg)
+		if err := os.MkdirAll(pkgDir, 0700); err != nil {
+			t.Fatalf("mkdir %s: %v", pkgDir, err)
+		}
+		body := fmt.Sprintf(`{"name":%q,"version":%q}`, pkg, version)
+		if err := os.WriteFile(filepath.Join(pkgDir, "package.json"), []byte(body), 0600); err != nil {
+			t.Fatalf("write manifest: %v", err)
+		}
+	}
+
+	t.Run("missing tree is flagged for every package", func(t *testing.T) {
+		drift := sdkVersionDrift(t.TempDir())
+		if len(drift) != len(piSDKPackages) {
+			t.Fatalf("expected %d drifts, got %d: %+v", len(piSDKPackages), len(drift), drift)
+		}
+		for _, d := range drift {
+			if d.Installed != "" {
+				t.Fatalf("absent package must report an empty version, got %q", d.Installed)
+			}
+		}
+	})
+
+	t.Run("tree at the pin has no drift", func(t *testing.T) {
+		dir := t.TempDir()
+		for _, pkg := range piSDKPackages {
+			writeManifest(t, dir, pkg, piSDKVersion)
+		}
+		if drift := sdkVersionDrift(dir); len(drift) != 0 {
+			t.Fatalf("pinned tree must not drift, got %+v", drift)
+		}
+	})
+
+	t.Run("stale version is flagged with the installed version", func(t *testing.T) {
+		dir := t.TempDir()
+		for _, pkg := range piSDKPackages {
+			writeManifest(t, dir, pkg, piSDKVersion)
+		}
+		writeManifest(t, dir, piSDKPackages[1], "0.82.1")
+		drift := sdkVersionDrift(dir)
+		if len(drift) != 1 || drift[0].Package != piSDKPackages[1] || drift[0].Installed != "0.82.1" {
+			t.Fatalf("expected one drift on %s at 0.82.1, got %+v", piSDKPackages[1], drift)
+		}
+	})
+
+	t.Run("unreadable manifest is not treated as installed", func(t *testing.T) {
+		dir := t.TempDir()
+		pkgDir := filepath.Join(dir, "node_modules", piSDKPackages[0])
+		if err := os.MkdirAll(pkgDir, 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(pkgDir, "package.json"), []byte("not json"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if got := installedSDKVersion(dir, piSDKPackages[0]); got != "" {
+			t.Fatalf("malformed manifest must report an empty version, got %q", got)
+		}
+	})
 }
 
 // TestAuthSymlink verifies the daemon ensures auth.json is a symlink to PI CLI.
@@ -364,5 +471,65 @@ func TestBuildSecurityContext_RespectsExtensionToolDenylist(t *testing.T) {
 		if tool == "memory_write_page" {
 			t.Fatalf("disallowed extension tool must not be granted: %v", tools)
 		}
+	}
+}
+
+// TestEnsureBridgeInstallProbe exercises the daemon-side bridge install path
+// against the real npm registry: fresh install, drift repair, and the stale
+// source-hash rebuild that a pinned-version bump triggers.
+//
+// WHY opt-in: it downloads the PI SDK and its tree (~30s, hundreds of MB) into
+// a temp dir, which is unacceptable in the default suite. Run it before
+// promoting a PI SDK bump, or after changing the package template:
+//
+//	AURELIA_BRIDGE_INSTALL_PROBE=1 go test ./internal/bridge/ -run TestEnsureBridgeInstallProbe -v -timeout 15m
+//
+// Without it, the install path is only ever proven on the daemon, where a
+// failure means the bridge dies at request time.
+func TestEnsureBridgeInstallProbe(t *testing.T) {
+	if os.Getenv("AURELIA_BRIDGE_INSTALL_PROBE") != "1" {
+		t.Skip("set AURELIA_BRIDGE_INSTALL_PROBE=1 to run the npm install probe")
+	}
+	if testing.Short() {
+		t.Skip("install probe skipped in short mode")
+	}
+
+	targetDir := t.TempDir()
+	if _, err := EnsureBridge(targetDir, nil); err != nil {
+		t.Fatalf("fresh EnsureBridge: %v", err)
+	}
+	for _, pkg := range piSDKPackages {
+		if got := installedSDKVersion(targetDir, pkg); got != piSDKVersion {
+			t.Fatalf("fresh install left %s at %q, want %q", pkg, got, piSDKVersion)
+		}
+	}
+
+	// A tree left on an older pin must converge. Rewriting one manifest behind
+	// npm's back also reproduces the realistic failure mode: real files older
+	// than the hidden lockfile claims, which plain `npm install` trusts.
+	staleManifest := filepath.Join(targetDir, "node_modules", piSDKPackages[1], "package.json")
+	if err := os.WriteFile(staleManifest, []byte(`{"name":"stale","version":"0.82.1"}`), 0600); err != nil {
+		t.Fatalf("write stale manifest: %v", err)
+	}
+	if drift := sdkVersionDrift(targetDir); len(drift) == 0 {
+		t.Fatal("expected drift to be detected after rewriting the manifest")
+	}
+	if _, err := EnsureBridge(targetDir, nil); err != nil {
+		t.Fatalf("drift-repair EnsureBridge: %v", err)
+	}
+	if drift := sdkVersionDrift(targetDir); len(drift) != 0 {
+		t.Fatalf("drift not repaired: %+v", drift)
+	}
+
+	// A version bump changes the package template, which invalidates the source
+	// hash; EnsureBridge must then rebuild the bundle from source.
+	if err := os.Remove(sourceHashPath(targetDir)); err != nil {
+		t.Fatalf("remove source hash: %v", err)
+	}
+	if _, err := EnsureBridge(targetDir, nil); err != nil {
+		t.Fatalf("stale-hash EnsureBridge: %v", err)
+	}
+	if !isSourceHashCurrent(targetDir) {
+		t.Fatal("source hash was not refreshed by the rebuild")
 	}
 }

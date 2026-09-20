@@ -14,7 +14,7 @@ TUI_BINARY    := $(HOME)/.aurelia/bin/aurelia-tui
 TUI_PKG       := ./cmd/aurelia-tui
 TUI_TMP       := $(TUI_BINARY).new
 
-.PHONY: help build test race vet lint sec cover check bridge install tui tui-all install-tui install-path install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
+.PHONY: help build test race vet lint sec cover check bridge sync-pi-sdk check-pi-sdk install tui tui-all install-tui install-path install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
 
 help:
 	@echo "Common targets:"
@@ -27,6 +27,8 @@ help:
 	@echo "  make sec              Run gosec and govulncheck"
 	@echo "  make check            Run lint, security, tests, and vet"
 	@echo "  make bridge           Rebuild the TS bridge bundle"
+	@echo "  make sync-pi-sdk      Move the pinned PI SDK to the installed PI CLI version"
+	@echo "  make check-pi-sdk     Report PI SDK pin vs PI CLI drift (exit 1 if stale)"
 	@echo "  make tui              Compile the TUI binary to $(TUI_BINARY)"
 	@echo "  make tui-all          Cross-compile TUI for linux/darwin amd64+arm64"
 	@echo ""
@@ -116,6 +118,18 @@ bridge:
 	cd bridge && npm run build
 	cp bridge/index.ts internal/bridge/bundle.ts
 	cp bridge/bundle.js internal/bridge/bundle.js
+
+# --- PI SDK ---
+
+# Move both PI SDK pins (bridge/package.json + internal/bridge/pi_sdk.go) to
+# the installed PI CLI version, then reinstall, typecheck, test and rebuild.
+# Never commits: review the diff and validate live before promoting.
+sync-pi-sdk:
+	./scripts/sync-pi-sdk.sh
+
+# Drift report only. Safe for cron/pre-deploy checks: no writes, no npm.
+check-pi-sdk:
+	./scripts/sync-pi-sdk.sh --check
 
 # --- Service (launchd) ---
 
