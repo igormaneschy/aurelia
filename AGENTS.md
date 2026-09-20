@@ -86,8 +86,12 @@ edit internal/version/version.go
 edit CHANGELOG.md
 git commit -m "chore(release): bump to vX.Y.Z"
 
-# Push
+# Annotated tag per release (practice stopped at v0.4.1, resumed at v0.48.0)
+git tag -a vX.Y.Z -m "vX.Y.Z — <one-line summary>"
+
+# Push (tags need an explicit push; `git push origin main` does not send them)
 git push origin main
+git push origin vX.Y.Z
 git push origin stable/<name>
 ```
 
