@@ -8,11 +8,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
 
-// bridgePackageJSON is the package.json written into the bridge target dir.
+// piSDKVersionPlaceholder marks where piSDKVersion is substituted into the
+// bridge package template. A distinct token (rather than a fmt verb) keeps the
+// template safe to edit: esbuild flags and banner snippets may contain `%`.
+const piSDKVersionPlaceholder = "__PI_SDK_VERSION__"
+
+// bridgePackageJSONTemplate is the package.json written into the bridge target
+// dir, with piSDKVersionPlaceholder standing in for the PI SDK version.
 //
 // The build script must keep `--external:@earendil-works/*`: the PI SDK's
 // extension loader computes import aliases relative to its own
@@ -24,7 +31,7 @@ import (
 // node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/ and its
 // aliases resolve correctly. Without this, the model never sees any
 // extension-registered tool (`mcp`, the ai-memory wiki tools, `mcpScript`).
-const bridgePackageJSON = `{
+const bridgePackageJSONTemplate = `{
   "name": "aurelia-bridge",
   "version": "1.0.0",
   "private": true,
@@ -40,12 +47,18 @@ const bridgePackageJSON = `{
     "esbuild": "0.28.1"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.82.1",
-    "@earendil-works/pi-coding-agent": "0.82.1",
+    "@earendil-works/pi-ai": "__PI_SDK_VERSION__",
+    "@earendil-works/pi-coding-agent": "__PI_SDK_VERSION__",
     "esbuild": "0.28.1"
   }
 }
 `
+
+// bridgePackageJSON is the installed manifest: the template with the pinned PI
+// SDK version substituted. It is a package-level value so the version is
+// resolved once, and so computeSourceHash tracks version bumps together with
+// source and build-script changes.
+var bridgePackageJSON = strings.ReplaceAll(bridgePackageJSONTemplate, piSDKVersionPlaceholder, piSDKVersion)
 
 // EnsureBridge checks if the bridge is set up at targetDir. If not,
 // creates it with package.json, runs npm install, and builds bundle.js
@@ -55,9 +68,41 @@ func EnsureBridge(targetDir string, bundleJS []byte) (string, error) {
 	bundlePath := filepath.Join(targetDir, "bundle.js")
 	nodeModules := filepath.Join(targetDir, "node_modules")
 
-	needsNpmInstall := false
+	nodeModulesMissing := false
 	if _, err := os.Stat(nodeModules); os.IsNotExist(err) {
+		nodeModulesMissing = true
+	}
+	needsNpmInstall := nodeModulesMissing
+	driftDetected := false
+
+	// Version drift: a pinned PI SDK bump must reach the daemon's installed
+	// tree, not just the repo manifest. Without this check a tree installed at
+	// an older pin keeps running that older SDK — exactly how the daemon ended
+	// up on 0.82.1 while the repo pinned 0.84.4. The hash check below also
+	// catches this (the template embeds the version), but only for trees whose
+	// hash was written by an older template; this catches any divergence.
+	if !nodeModulesMissing {
+		for _, d := range sdkVersionDrift(targetDir) {
+			installed := d.Installed
+			if installed == "" {
+				installed = "(absent)"
+			}
+			slog.Info("bridge: PI SDK version drift — reinstalling",
+				"package", d.Package, "installed", installed, "pinned", piSDKVersion)
+			driftDetected = true
+		}
+	}
+	if driftDetected {
 		needsNpmInstall = true
+		// npm trusts node_modules/.package-lock.json (the "hidden lockfile") and
+		// will report a tree as already correct without re-reading it. That
+		// trust is exactly what drift disproves — a half-finished install
+		// leaves the real files older than the lockfile says. Dropping it makes
+		// npm re-verify the tree against package.json instead of the cache.
+		hiddenLock := filepath.Join(nodeModules, ".package-lock.json")
+		if err := os.Remove(hiddenLock); err != nil && !os.IsNotExist(err) {
+			slog.Warn("bridge: could not drop hidden npm lockfile", "path", hiddenLock, "error", err)
+		}
 	}
 
 	// Check if bundle.js exists and matches embedded (if provided).
@@ -333,7 +378,11 @@ func EnsureBridge(targetDir string, bundleJS []byte) (string, error) {
 	}
 
 	if needsNpmInstall {
-		slog.Info("Setting up Bridge for first time...")
+		if nodeModulesMissing {
+			slog.Info("Setting up Bridge for first time...")
+		} else {
+			slog.Info("Updating Bridge PI SDK dependencies...", "version", piSDKVersion)
+		}
 	} else if !bundleExists {
 		slog.Info("Building Bridge bundle...")
 	}

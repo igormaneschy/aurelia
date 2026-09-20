@@ -24,7 +24,8 @@
 ## Bridge (TypeScript)
 
 - Runtime: Node.js `>=22.19.0` with `tsx` or `--experimental-strip-types`
-- SDK: `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` v0.82.1 (`ModelRuntime`, Node >=22.19.0)
+- SDK: `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` v0.86.0 (`ModelRuntime`, Node >=22.19.0)
+  - Pin bumped from the installed PI CLI with `make sync-pi-sdk`; drift report with `make check-pi-sdk`
 - TypeScript: ^5.7.0
 - Target: Node 22, ESNext modules
 
