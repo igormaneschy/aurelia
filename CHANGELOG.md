@@ -4,6 +4,43 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.48.0] - 2026-09-20
+
+### Added
+- PI SDK pinado em **0.86.0** (`@earendil-works/pi-ai` e
+  `@earendil-works/pi-coding-agent`), acompanhando o PI CLI instalado. O pin é um
+  valor único (`piSDKVersion` em `internal/bridge/pi_sdk.go`) do qual o template
+  do daemon é montado; `TestPiSDKVersionMatchesSourceManifest` falha se
+  `bridge/package.json` e o Go divergirem.
+- `make sync-pi-sdk` move os dois pins para a versão do PI CLI e roda
+  `npm install`, typecheck, testes do bridge, rebuild do bundle e testes Go —
+  pronto para revisão, sem commit e sem bump de release. `make check-pi-sdk`
+  reporta drift sem escrever nada (exit 1).
+- `bridge/sdk-surface.test.ts` afirma os entry points do SDK que o bridge
+  importa, o `ModelRuntime.create()` offline e o caminho
+  `dist/core/http-dispatcher.js`: um bump que remova ou mova API falha em
+  `npm test`, não no import do daemon em produção.
+- `TestEnsureBridgeInstallProbe` (opt-in) exercita o caminho real de instalação
+  do daemon: instalação limpa, reparo de drift e rebuild por hash stale.
+
+### Fixed
+- O daemon rodava PI SDK **0.82.1** enquanto o repo pinava 0.84.4: o pin existia
+  só em `bridge/package.json` e `EnsureBridge` rodava `npm install` apenas
+  quando `node_modules` não existia, então nenhum bump de versão chegava ao
+  daemon. Agora ele compara a versão instalada com o pin, loga o drift, remove
+  `node_modules/.package-lock.json` (que faz o npm considerar uma árvore antiga
+  como correta sem relê-la) e reinstala no start.
+- Validação live: no primeiro start após o deploy o daemon logou
+  `PI SDK version drift — reinstalling … installed=0.82.1 pinned=0.86.0`,
+  reinstalou e rebuildou o bundle em ~6s; o restart seguinte não alterou nada
+  (convergência idempotente). No Telegram passaram uma mensagem normal, um resume
+  de sessão (64.365 tokens de input, histórico restaurado), chamadas de
+  ferramenta (`mcp` e `memory_status`, com `decision=allow` na auditoria de
+  security) e `/model` — cujo refresh de rede reescreveu `models-store.json` com
+  645 modelos em 11 providers e ETag por provider. Paridade de catálogo
+  247/247 contra `pi --list-models`. Sem import error, panic ou modelo não
+  resolvido. Detalhes em `docs/pi-sdk-api-validation.md`.
+
 ## [0.47.0] - 2026-09-11
 
 ### Added
