@@ -1,5 +1,8 @@
 # Lessons Index
 
+## Change pi-sdk-0-86-sync (2026-09-20)
+- [anti-pattern] pi-sdk-pin-drift
+
 ## Change fix-tui-message-timestamps (2026-06-21)
 - [pattern] pi-session-message-timestamps
 - [anti-pattern] no-current-time-for-restored-history
