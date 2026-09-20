@@ -122,10 +122,12 @@ the repair converges and is idempotent.
 | Tool calls + security audit | `mcp` and `memory_status` executed; `[security] decision=allow` logged for both |
 | Extensions/MCP + ai-memory | ai-memory answered 221 latest pages / 1717 versions / 422 sessions / 186 804 observations |
 | Model catalog | bridge `list-models` = 247 models, `pi --list-models` = 247 (parity) |
-| Errors | `aurelia debug errors` → none; no import failure, panic or "model not found in PI registry" after the deploy |
+| Telegram `/model` (network refresh) | `models-store.json` rewritten at 12:08:41 local (the moment of the command) — 645 models across 11 providers, per-provider `checkedAt`/`etag`, `muse-spark` present on `opencode-go`. Proves `ModelRuntime.refresh({allowNetwork: true, force: true})` completed under Node 26 with the HTTP dispatcher aligned |
+| Errors | `aurelia debug errors` → none; no import failure, panic, "model not found in PI registry", `list-models` refresh error or empty-catalog warning after the deploy |
 | Prefill telemetry | `provider wait … after 30s` then `provider first chunk after 40s` — no false stall/steer on the local model |
 | Daemon SDK version | `~/.aurelia/bridge/node_modules/@earendil-works/pi-coding-agent/package.json` = `0.86.0` |
 
-Not exercised live: the Telegram `/model` command itself — today's logs contain
-no `list-models` request. The bridge's `list-models` path was exercised directly
-against the deployed bundle instead (row above).
+All checklist items were exercised on the deployed daemon. The catalog refresh
+row is the strongest single signal: it requires the SDK import, auth resolution,
+network fetch with compressed responses, the model store overlay, and the
+extension/MCP surface to all work together.
