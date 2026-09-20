@@ -95,7 +95,8 @@ Provider failures remain terminal `error` events, never a successful empty
 
 ## Upgrade notes: 0.84.4 → 0.86.0
 
-Breaking changes published for 0.85.0/0.86.0 do not cross the bridge boundary:
+0.85.x carried no breaking changes. The three published for 0.86.0 do not cross
+the bridge boundary:
 
 - custom-provider stream inputs (`Context` → `TranscriptContext`) — Aurelia
   registers no custom providers;
