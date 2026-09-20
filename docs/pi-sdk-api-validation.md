@@ -107,10 +107,25 @@ the bridge boundary:
 The HTTP dispatcher path (`dist/core/http-dispatcher.js`,
 `configureHttpDispatcher`) still resolves; `sdk-surface.test.ts` asserts it.
 
-## Live validation checklist (after `make deploy`)
+## Live validation: 2026-09-20
 
-- Telegram message → reply, `/model` list matches `pi --list-models`;
-- a tool call (Bash/read) executes and is audited;
-- a session resume keeps history and model;
-- `~/.aurelia/bridge/node_modules/@earendil-works/pi-coding-agent/package.json`
-  reads the pinned version after daemon restart.
+Daemon `v0.47.0` + `feature/pi-sdk-0-86-sync`, deployed by the post-commit hook.
+On the first start `EnsureBridge` logged the drift for both packages
+(`installed=0.82.1 pinned=0.86.0`), dropped npm's hidden lockfile, reinstalled
+and rebuilt the bundle from source in ~6s. The next restart changed nothing, so
+the repair converges and is idempotent.
+
+| Check | Evidence |
+|---|---|
+| Telegram query → reply | run `18829387`, `status=completed`, `entrypoint=telegram` |
+| Session resume | run `a7e81ceb` resumed `01a0be7a-…jsonl`, `session_lifecycle state=healthy action=continue`, 64 365 input tokens (history restored) |
+| Tool calls + security audit | `mcp` and `memory_status` executed; `[security] decision=allow` logged for both |
+| Extensions/MCP + ai-memory | ai-memory answered 221 latest pages / 1717 versions / 422 sessions / 186 804 observations |
+| Model catalog | bridge `list-models` = 247 models, `pi --list-models` = 247 (parity) |
+| Errors | `aurelia debug errors` → none; no import failure, panic or "model not found in PI registry" after the deploy |
+| Prefill telemetry | `provider wait … after 30s` then `provider first chunk after 40s` — no false stall/steer on the local model |
+| Daemon SDK version | `~/.aurelia/bridge/node_modules/@earendil-works/pi-coding-agent/package.json` = `0.86.0` |
+
+Not exercised live: the Telegram `/model` command itself — today's logs contain
+no `list-models` request. The bridge's `list-models` path was exercised directly
+against the deployed bundle instead (row above).
