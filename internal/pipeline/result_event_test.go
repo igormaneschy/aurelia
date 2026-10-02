@@ -65,7 +65,7 @@ func newOwnedResultService(t *testing.T, sessionFile string) (*Service, *spyRunL
 func TestHandleResultEvent_LiveOwnerCompletesAndReplies(t *testing.T) {
 	s, spy, ownership, _ := newOwnedResultService(t, "")
 	var assistant strings.Builder
-	outcome := s.handleResultEvent(1, 0, 7, bridge.Event{Type: "result", Content: "live answer"}, &assistant, "hello", 100, false, ownership)
+	outcome := s.handleResultEvent(1, 0, 7, bridge.Event{Type: "result", Content: "live answer"}, &assistant, "hello", 100, false, nil, ownership)
 	if outcome != OutcomeSuccess {
 		t.Fatalf("outcome = %v, want success", outcome)
 	}
@@ -95,7 +95,7 @@ func TestHandleResultEvent_LiveOwnerSessionFileCompletes(t *testing.T) {
 	s, spy, ownership, _ := newOwnedResultService(t, "")
 	const sessionFile = "/tmp/live-session.jsonl"
 	var assistant strings.Builder
-	outcome := s.handleResultEvent(1, 0, 7, bridge.Event{Type: "result", Content: "answer", SessionFile: sessionFile}, &assistant, "hello", 100, false, ownership)
+	outcome := s.handleResultEvent(1, 0, 7, bridge.Event{Type: "result", Content: "answer", SessionFile: sessionFile}, &assistant, "hello", 100, false, nil, ownership)
 	if outcome != OutcomeSuccess {
 		t.Fatalf("outcome = %v, want success", outcome)
 	}
@@ -157,7 +157,7 @@ func TestHandleResultEvent_EmptyContent_ReturnsLLMError(t *testing.T) {
 	ev := bridge.Event{Type: "result", Content: ""}
 	var assistantText strings.Builder
 
-	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
+	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false, nil)
 
 	if outcome != OutcomeLLMError {
 		t.Fatalf("expected OutcomeLLMError, got %v", outcome)
@@ -178,7 +178,7 @@ func TestHandleResultEvent_AssistantText_EmptyResult_ReturnsSuccess(t *testing.T
 	var assistantText strings.Builder
 	assistantText.WriteString("Resposta acumulada.")
 
-	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
+	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false, nil)
 
 	if outcome != OutcomeSuccess {
 		t.Fatalf("expected OutcomeSuccess, got %v", outcome)
@@ -198,7 +198,7 @@ func TestHandleResultEvent_ResultContent_ReturnsSuccess(t *testing.T) {
 	ev := bridge.Event{Type: "result", Content: "Resposta direta do modelo."}
 	var assistantText strings.Builder
 
-	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
+	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false, nil)
 
 	if outcome != OutcomeSuccess {
 		t.Fatalf("expected OutcomeSuccess, got %v", outcome)
@@ -240,7 +240,7 @@ func TestHandleResultEvent_TextContent_ReturnsSuccess(t *testing.T) {
 	ev := bridge.Event{Type: "result", Text: "Resposta via campo Text."}
 	var assistantText strings.Builder
 
-	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
+	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false, nil)
 
 	if outcome != OutcomeSuccess {
 		t.Fatalf("expected OutcomeSuccess, got %v", outcome)
@@ -258,7 +258,7 @@ func TestHandleResultEvent_DeliversResultTextAsIs(t *testing.T) {
 	ev := bridge.Event{Type: "result", Content: content}
 	var assistantText strings.Builder
 
-	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
+	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false, nil)
 
 	if outcome != OutcomeSuccess {
 		t.Fatalf("expected OutcomeSuccess, got %v", outcome)

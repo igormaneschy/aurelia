@@ -374,6 +374,7 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 				ChatID:   chatID,
 				ThreadID: threadID,
 				UserID:   userID,
+				Images:   images,
 			},
 		})
 		steerCancel()
@@ -408,6 +409,7 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 				ChatID:   chatID,
 				ThreadID: threadID,
 				UserID:   userID,
+				Images:   images,
 			},
 		})
 		if err != nil {
@@ -908,7 +910,7 @@ func heartbeatMonitorWithIntervals(doneCh <-chan struct{}, toolUseSignal <-chan 
 // toolUseSignal, if non-nil, receives a signal on every tool_use event so a
 // caller can monitor thinking gaps (heartbeat).
 // toolTracker, if non-nil, is used to count tool calls and warn on explosion.
-func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int, ch <-chan bridge.Event, progress ProgressReporter, userText string, toolUseSignal chan<- struct{}, userID int64, isPrivateChat bool, toolTracker *toolCallTracker, loopDetect *loopDetector, owners ...runOwnership) Outcome {
+func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int, ch <-chan bridge.Event, progress ProgressReporter, userText string, toolUseSignal chan<- struct{}, userID int64, isPrivateChat bool, toolTracker *toolCallTracker, loopDetect *loopDetector, vision *visionAttempt, owners ...runOwnership) Outcome {
 	ownership := firstRunOwnership(owners)
 	var (
 		assistantText       strings.Builder
@@ -1037,7 +1039,7 @@ func (s *Service) ProcessBridgeEvents(chatID int64, threadID int, messageID int,
 			if progress != nil {
 				progress.ReportState(ProgressStateDone, "")
 			}
-			return s.handleResultEvent(chatID, threadID, messageID, ev, &assistantText, userText, userID, isPrivateChat, ownership)
+			return s.handleResultEvent(chatID, threadID, messageID, ev, &assistantText, userText, userID, isPrivateChat, vision, ownership)
 		case "error":
 			if progress != nil {
 				progress.ReportState(ProgressStateFailed, "")
@@ -1190,7 +1192,7 @@ func eventContent(ev bridge.Event) string {
 	return ev.ContentText()
 }
 
-func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, ev bridge.Event, assistantText *strings.Builder, userText string, userID int64, isPrivateChat bool, owners ...runOwnership) Outcome {
+func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, ev bridge.Event, assistantText *strings.Builder, userText string, userID int64, isPrivateChat bool, vision *visionAttempt, owners ...runOwnership) Outcome {
 	ownership := firstRunOwnership(owners)
 	if ownership.finalizer == nil {
 		var claimed bool
@@ -1261,6 +1263,18 @@ func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, e
 	if finalText == "" {
 		toolSummary := s.getRunToolSummary(chatID, threadID, userID, ownership)
 		return s.handleEmptyResult(chatID, threadID, messageID, ev, userText, toolSummary, userID, isPrivateChat, ownership)
+	}
+
+	// Reactive vision fallback: images were sent but the model answered with
+	// a vision refusal ("a imagem veio vazia", "I can't see images", ...).
+	// Suppress the refusal and signal the caller to transparently retry with
+	// the configured fallback model in the same run. Single-shot (retried
+	// flag) and only when a *different* fallback is configured.
+	if vision != nil && !vision.retried && vision.canRetry && len(vision.images) > 0 && isVisionRefusal(finalText) {
+		vision.retried = true
+		vision.refusalText = finalText
+		log.Printf("vision: refusal detected chat=%d thread=%d, requesting transparent fallback retry", chatID, threadID)
+		return OutcomeVisionRetry
 	}
 
 	// Capture runID before completeRunLog cleans up runLogStates.

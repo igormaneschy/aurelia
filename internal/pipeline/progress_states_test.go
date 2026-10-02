@@ -80,7 +80,7 @@ func TestProcessBridgeEvents_ProgressTextRedactsBeforeForwarding(t *testing.T) {
 	ch <- bridge.Event{Type: "tool_use", Name: "Read"}
 	close(ch)
 
-	if outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil); outcome != OutcomeProcessDeath {
+	if outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil, nil); outcome != OutcomeProcessDeath {
 		t.Fatalf("outcome = %v, want process-death after closed channel without result", outcome)
 	}
 
@@ -112,7 +112,7 @@ func TestProcessBridgeEvents_ProgressStates(t *testing.T) {
 	ch <- bridge.Event{Type: "result", Content: "final answer"}
 	close(ch)
 
-	outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil)
+	outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil, nil)
 	if outcome != OutcomeSuccess {
 		t.Fatalf("outcome = %v, want OutcomeSuccess", outcome)
 	}
@@ -152,7 +152,7 @@ func TestProcessBridgeEvents_CompactionReceipt(t *testing.T) {
 	ch <- bridge.Event{Type: "result", Content: "final answer"}
 	close(ch)
 
-	outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil)
+	outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil, nil)
 	if outcome != OutcomeSuccess {
 		t.Fatalf("outcome = %v, want OutcomeSuccess", outcome)
 	}
@@ -183,7 +183,7 @@ func TestProcessBridgeEvents_CompactionRegressiveEscalates(t *testing.T) {
 	ch <- bridge.Event{Type: "result", Content: "final answer"}
 	close(ch)
 
-	outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil)
+	outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil, nil)
 	if outcome != OutcomeSuccess {
 		t.Fatalf("outcome = %v, want OutcomeSuccess", outcome)
 	}
@@ -208,7 +208,7 @@ func TestProcessBridgeEvents_CompactionMalformedDoesNotPanic(t *testing.T) {
 	ch <- bridge.Event{Type: "result", Content: "final answer"}
 	close(ch)
 
-	outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil)
+	outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil, nil)
 	if outcome != OutcomeSuccess {
 		t.Fatalf("outcome = %v, want OutcomeSuccess", outcome)
 	}
@@ -269,7 +269,7 @@ func TestProcessBridgeEvents_UnknownSeverityFallsBackToWarning(t *testing.T) {
 	ch <- bridge.Event{Type: "result", Content: "ok"}
 	close(ch)
 
-	outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil)
+	outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil, nil)
 	if outcome != OutcomeSuccess {
 		t.Fatalf("outcome = %v, want OutcomeSuccess", outcome)
 	}
@@ -288,7 +288,7 @@ func TestProcessBridgeEvents_ErrorEmitsFailedState(t *testing.T) {
 	ch <- bridge.Event{Type: "error", Message: "query timeout"}
 	close(ch)
 
-	outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil)
+	outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil, nil)
 	if outcome != OutcomeLLMError {
 		t.Fatalf("outcome = %v, want OutcomeLLMError", outcome)
 	}
@@ -311,7 +311,7 @@ func TestProcessBridgeEvents_StaleOwnerEmitsCanceledState(t *testing.T) {
 	ch <- bridge.Event{Type: "result", Content: "stale result"}
 	close(ch)
 
-	outcome := s.ProcessBridgeEvents(10, 0, 99, ch, progress, "hello", nil, 1000, false, nil, nil,
+	outcome := s.ProcessBridgeEvents(10, 0, 99, ch, progress, "hello", nil, 1000, false, nil, nil, nil,
 		runOwnership{owner: stale})
 	if outcome != OutcomeCanceled {
 		t.Fatalf("outcome = %v, want OutcomeCanceled for superseded owner", outcome)

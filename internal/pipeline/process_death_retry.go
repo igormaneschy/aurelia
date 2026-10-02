@@ -188,7 +188,11 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 	} else {
 		toolUseSignal := make(chan struct{}, 16)
 		go heartbeatMonitor(ctx.Done(), toolUseSignal, toolTracker, progress)
-		outcome = s.ProcessBridgeEvents(chatID, threadID, messageID, ch, progress, userText, toolUseSignal, userID, isPrivateChat, toolTracker, loopDetect, ownership)
+		vision := newVisionAttempt(req, s.config)
+		outcome = s.ProcessBridgeEvents(chatID, threadID, messageID, ch, progress, userText, toolUseSignal, userID, isPrivateChat, toolTracker, loopDetect, vision, ownership)
+		if outcome == OutcomeVisionRetry && vision != nil {
+			outcome = s.retryVisionFallback(ctx, cancel, chatID, threadID, messageID, req, userText, userID, isPrivateChat, progress, toolUseSignal, toolTracker, loopDetect, timeoutTracker, runLogStarted, ownership, steerDuringExecution, vision)
+		}
 		if handled := s.handleContextOutcome(parentCtx, ctx, chatID, threadID, userID, isPrivateChat, timeoutTracker, ownership); handled {
 			s.output.ConfirmMessage(chatID, messageID)
 			return
@@ -393,7 +397,10 @@ func (s *Service) retryAfterProcessDeath(
 
 	toolUseSignal := make(chan struct{}, 16)
 	go heartbeatMonitor(ctx.Done(), toolUseSignal, toolTracker, progress)
-	outcome := s.ProcessBridgeEvents(chatID, threadID, messageID, ch, progress, userText, toolUseSignal, userID, isPrivateChat, toolTracker, loopDetect, ownership)
+	// No reactive vision retry on the process-death recovery path: it
+	// re-drives an already-fragile run, and a refusal there is delivered
+	// as-is rather than opening a nested retry.
+	outcome := s.ProcessBridgeEvents(chatID, threadID, messageID, ch, progress, userText, toolUseSignal, userID, isPrivateChat, toolTracker, loopDetect, nil, ownership)
 	if handled := s.handleContextOutcome(parentCtx, ctx, chatID, threadID, userID, isPrivateChat, timeoutTracker, ownership); handled {
 		s.output.ConfirmMessage(chatID, messageID)
 		return

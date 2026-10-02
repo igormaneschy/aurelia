@@ -14,6 +14,7 @@ const (
 	OutcomeProcessDeath                // channel closed without terminal event
 	OutcomeCanceled                    // user canceled the active run
 	OutcomeTimeout                     // run exceeded its deadline
+	OutcomeVisionRetry                 // primary model refused image input; caller must retry with vision fallback
 )
 
 const (

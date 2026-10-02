@@ -4,6 +4,21 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.48.1] - 2026-10-02
+
+### Fixed
+- Imagens do Telegram enviadas com sessão ocupada eram enfileiradas como
+  texto puro (`follow-up`/`steer` sem anexos) e o modelo respondia "a imagem
+  veio vazia". Anexos agora trafegam em todos os caminhos concorrentes até o
+  PI SDK (`session.steer/followUp` com blocos de imagem).
+- Retry transparente de visão: se o modelo principal recusar a imagem em
+  runtime ("não consigo ver", "I can't see images", ...), o turno é
+  reemitido uma vez com `vision_model`/`vision_provider`, sem mensagem
+  visível; a recusa original só aparece se o fallback também falhar.
+- Timeout do sumário progressivo de 10s para 60s: contra modelos locais
+  lentos (first chunk em 6-9s) todo sumário falhava deterministicamente
+  ("no result from bridge").
+
 ## [0.48.0] - 2026-09-20
 
 ### Added

@@ -45,6 +45,15 @@ func (c *summaryCounter) reset(key continuity.ConversationKey) {
 // generateProgressiveSummary calls the LLM to merge the previous summary
 // with the latest exchange. Returns an updated summary string, or empty
 // string if summarization failed (caller falls back to raw text).
+// progressiveSummaryTimeout bounds the background summarization LLM call.
+// It must comfortably exceed the slowest configured model's time-to-full-
+// response (local GGUF models need 6-9s just for the first chunk), but it
+// also holds the session slot while running — afterSuccessfulTurn is
+// synchronous — so it stays far below the 30min execution timeout. A too
+// short timeout fails every summary deterministically ("no result from
+// bridge") without ever surfacing an error.
+const progressiveSummaryTimeout = 60 * time.Second
+
 func (s *Service) generateProgressiveSummary(ctx context.Context, previousSummary, userText, assistantText string) string {
 	if s.bridge == nil || s.config == nil {
 		return ""
@@ -64,7 +73,7 @@ Latest assistant response: %s
 Updated summary (max 900 chars, no preamble):`,
 		cappedPrev, cappedUser, cappedAssistant)
 
-	sumCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	sumCtx, cancel := context.WithTimeout(ctx, progressiveSummaryTimeout)
 	defer cancel()
 
 	req := bridge.Request{
@@ -98,7 +107,11 @@ Updated summary (max 900 chars, no preamble):`,
 		}
 	}
 	if content == "" {
-		log.Printf("summary: no result from bridge")
+		if sumCtx.Err() == context.DeadlineExceeded {
+			log.Printf("summary: timed out after %s waiting for bridge result", progressiveSummaryTimeout)
+		} else {
+			log.Printf("summary: no result from bridge")
+		}
 		return ""
 	}
 
