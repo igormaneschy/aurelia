@@ -374,6 +374,7 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 				ChatID:   chatID,
 				ThreadID: threadID,
 				UserID:   userID,
+				Images:   images,
 			},
 		})
 		steerCancel()
@@ -408,6 +409,7 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 				ChatID:   chatID,
 				ThreadID: threadID,
 				UserID:   userID,
+				Images:   images,
 			},
 		})
 		if err != nil {

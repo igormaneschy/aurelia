@@ -2833,20 +2833,15 @@ async function handleQuery(req: Request): Promise<void> {
 
     try {
       const images = opts?.images;
-      if (images && images.length > 0) {
+      const imageBlocks = buildImageContents(images, reqId, "query");
+      if (images && images.length > 0 && imageBlocks.length > 0) {
         const contentBlocks: Array<TextContent | ImageContent> = [{ type: "text", text: req.prompt }];
-        for (const img of images) {
-          if (!img.data || !img.media_type) {
-            redactedLog(`query image skipped: missing inline data or media type rid=${reqId}`);
-            continue;
-          }
-          contentBlocks.push({
-            type: "image",
-            data: img.data,
-            mimeType: img.media_type,
-          });
-        }
+        contentBlocks.push(...imageBlocks);
         await liveSession.sendUserMessage(contentBlocks);
+      } else if (images && images.length > 0) {
+        // All attachments were skipped (logged above) — send text only so
+        // the turn still progresses instead of stalling.
+        await liveSession.sendUserMessage([{ type: "text", text: req.prompt }]);
       } else {
         await liveSession.prompt(req.prompt, { source: "rpc" });
       }
@@ -2958,6 +2953,30 @@ async function handleQuery(req: Request): Promise<void> {
   }
 }
 
+// ── Image attachments ─────────────────────────────────────────────────
+// Converts Go-side image attachments to PI SDK image blocks, skipping
+// entries without inline data. Shared by query, steer and follow-up so a
+// concurrent image message (steer/follow-up) carries the same bytes as an
+// idle one instead of degrading to text-only.
+function buildImageContents(images: ImageAttachment[] | undefined, reqId: string, context: string): ImageContent[] {
+  const blocks: ImageContent[] = [];
+  if (!images) {
+    return blocks;
+  }
+  for (const img of images) {
+    if (!img.data || !img.media_type) {
+      redactedLog(`${context} image skipped: missing inline data or media type rid=${reqId}`);
+      continue;
+    }
+    blocks.push({
+      type: "image",
+      data: img.data,
+      mimeType: img.media_type,
+    });
+  }
+  return blocks;
+}
+
 // ── Handle steer command ────────────────────────────────────
 async function handleSteer(req: Request): Promise<void> {
   const reqId = req.request_id || "";
@@ -2977,7 +2996,12 @@ async function handleSteer(req: Request): Promise<void> {
   redactedLog(`steer — rid=${reqId} chat=${chatID} thread=${threadID} user=${userID}`);
 
   try {
-    await cs.session.steer(req.prompt);
+    const imageBlocks = buildImageContents(req.options?.images, reqId, "steer");
+    if (imageBlocks.length > 0) {
+      await cs.session.steer(req.prompt, imageBlocks);
+    } else {
+      await cs.session.steer(req.prompt);
+    }
     emitReq({ event: "result", content: "steer queued" });
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
@@ -3007,7 +3031,12 @@ async function handleFollowUp(req: Request): Promise<void> {
   redactedLog(`followUp — rid=${reqId} chat=${chatID} thread=${threadID} user=${userID}`);
 
   try {
-    await cs.session.followUp(req.prompt);
+    const imageBlocks = buildImageContents(req.options?.images, reqId, "followUp");
+    if (imageBlocks.length > 0) {
+      await cs.session.followUp(req.prompt, imageBlocks);
+    } else {
+      await cs.session.followUp(req.prompt);
+    }
     emitReq({ event: "result", content: "follow-up queued" });
   } catch (err: unknown) {
     const errMsg = err instanceof Error ? err.message : String(err);
