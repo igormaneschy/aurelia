@@ -20,7 +20,7 @@ func TestProcessBridgeEvents_ToolRunningIsProgressNotStall(t *testing.T) {
 	ch <- bridge.Event{Type: "result", Content: "done"}
 	close(ch)
 
-	if outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil); outcome != OutcomeSuccess {
+	if outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil, nil); outcome != OutcomeSuccess {
 		t.Fatalf("outcome = %v, want OutcomeSuccess", outcome)
 	}
 
@@ -68,7 +68,7 @@ func TestProcessBridgeEvents_ProviderWaitIsProgressNotStall(t *testing.T) {
 	ch <- bridge.Event{Type: "result", Content: "done"}
 	close(ch)
 
-	if outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil); outcome != OutcomeSuccess {
+	if outcome := s.ProcessBridgeEvents(1, 0, 100, ch, progress, "hello", nil, 100, false, nil, nil, nil); outcome != OutcomeSuccess {
 		t.Fatalf("outcome = %v, want OutcomeSuccess", outcome)
 	}
 

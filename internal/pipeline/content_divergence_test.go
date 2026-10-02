@@ -93,7 +93,7 @@ func TestHandleResultEvent_SignificantDivergence_RecordsWarn(t *testing.T) {
 	var assistantText strings.Builder
 	assistantText.WriteString(streamed)
 
-	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false)
+	outcome := s.handleResultEvent(1, 0, 100, ev, &assistantText, "hello", 100, false, nil)
 	if outcome != OutcomeSuccess {
 		t.Fatalf("expected OutcomeSuccess, got %v", outcome)
 	}
@@ -134,7 +134,7 @@ func TestHandleResultEvent_SmallDivergence_NoWarnEvent(t *testing.T) {
 	var assistantText strings.Builder
 	assistantText.WriteString("stream-partial")
 
-	outcome := s.handleResultEvent(2, 0, 100, ev, &assistantText, "hello", 100, false)
+	outcome := s.handleResultEvent(2, 0, 100, ev, &assistantText, "hello", 100, false, nil)
 	if outcome != OutcomeSuccess {
 		t.Fatalf("expected OutcomeSuccess, got %v", outcome)
 	}

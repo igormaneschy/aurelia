@@ -48,7 +48,7 @@ func TestProcessBridgeEvents_TelemetryNotFeedback(t *testing.T) {
 	ch <- bridge.Event{Type: "result", Content: "final answer", RequestID: "req-1"}
 	close(ch)
 
-	outcome := s.ProcessBridgeEvents(1, 0, 100, ch, &fakeProgress{}, "hello", nil, 100, false, nil, nil)
+	outcome := s.ProcessBridgeEvents(1, 0, 100, ch, &fakeProgress{}, "hello", nil, 100, false, nil, nil, nil)
 	if outcome != OutcomeSuccess {
 		t.Fatalf("outcome = %v, want OutcomeSuccess", outcome)
 	}
@@ -131,7 +131,7 @@ func TestProcessBridgeEvents_StaleOwnerCannotMutateOrReply(t *testing.T) {
 	ch <- bridge.Event{Type: "result", Content: "stale result"}
 	close(ch)
 
-	outcome := s.ProcessBridgeEvents(10, 0, 99, ch, &fakeProgress{}, "hello", nil, 1000, false, nil, nil,
+	outcome := s.ProcessBridgeEvents(10, 0, 99, ch, &fakeProgress{}, "hello", nil, 1000, false, nil, nil, nil,
 		runOwnership{owner: stale})
 	if outcome != OutcomeCanceled {
 		t.Fatalf("outcome = %v, want OutcomeCanceled for superseded owner", outcome)
@@ -410,7 +410,7 @@ func TestProcessBridgeEvents_CompactionTelemetry(t *testing.T) {
 	ch <- bridge.Event{Type: "result", Content: "done"}
 	close(ch)
 
-	outcome := s.ProcessBridgeEvents(7, 0, 700, ch, &fakeProgress{}, "hi", nil, 700, false, nil, nil)
+	outcome := s.ProcessBridgeEvents(7, 0, 700, ch, &fakeProgress{}, "hi", nil, 700, false, nil, nil, nil)
 	if outcome != OutcomeSuccess {
 		t.Fatalf("outcome = %v, want OutcomeSuccess", outcome)
 	}
@@ -485,7 +485,7 @@ func TestProcessBridgeEvents_SeverityBounded(t *testing.T) {
 	ch <- bridge.Event{Type: "result", Content: "done"}
 	close(ch)
 
-	outcome := s.ProcessBridgeEvents(8, 0, 800, ch, &fakeProgress{}, "hi", nil, 800, false, nil, nil)
+	outcome := s.ProcessBridgeEvents(8, 0, 800, ch, &fakeProgress{}, "hi", nil, 800, false, nil, nil, nil)
 	if outcome != OutcomeSuccess {
 		t.Fatalf("outcome = %v, want OutcomeSuccess", outcome)
 	}
@@ -588,7 +588,7 @@ func TestProcessBridgeEvents_ErrorClassAllowlist(t *testing.T) {
 	ch <- bridge.Event{Type: "result", Content: "done"}
 	close(ch)
 
-	outcome := s.ProcessBridgeEvents(12, 0, 1200, ch, &fakeProgress{}, "hi", nil, 1200, false, nil, nil)
+	outcome := s.ProcessBridgeEvents(12, 0, 1200, ch, &fakeProgress{}, "hi", nil, 1200, false, nil, nil, nil)
 	if outcome != OutcomeSuccess {
 		t.Fatalf("outcome = %v, want OutcomeSuccess", outcome)
 	}

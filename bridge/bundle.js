@@ -1883,20 +1883,13 @@ async function handleQuery(req) {
     }
     try {
       const images = opts?.images;
-      if (images && images.length > 0) {
+      const imageBlocks = buildImageContents(images, reqId, "query");
+      if (images && images.length > 0 && imageBlocks.length > 0) {
         const contentBlocks = [{ type: "text", text: req.prompt }];
-        for (const img of images) {
-          if (!img.data || !img.media_type) {
-            redactedLog("query image skipped: missing inline data or media type rid=".concat(reqId));
-            continue;
-          }
-          contentBlocks.push({
-            type: "image",
-            data: img.data,
-            mimeType: img.media_type
-          });
-        }
+        contentBlocks.push(...imageBlocks);
         await liveSession.sendUserMessage(contentBlocks);
+      } else if (images && images.length > 0) {
+        await liveSession.sendUserMessage([{ type: "text", text: req.prompt }]);
       } else {
         await liveSession.prompt(req.prompt, { source: "rpc" });
       }
@@ -1973,6 +1966,24 @@ async function handleQuery(req) {
     }
   }
 }
+function buildImageContents(images, reqId, context) {
+  const blocks = [];
+  if (!images) {
+    return blocks;
+  }
+  for (const img of images) {
+    if (!img.data || !img.media_type) {
+      redactedLog("".concat(context, " image skipped: missing inline data or media type rid=").concat(reqId));
+      continue;
+    }
+    blocks.push({
+      type: "image",
+      data: img.data,
+      mimeType: img.media_type
+    });
+  }
+  return blocks;
+}
 async function handleSteer(req) {
   const reqId = req.request_id || "";
   const chatID = req.options?.chat_id || req.options?.security?.chat_id || 0;
@@ -1988,7 +1999,12 @@ async function handleSteer(req) {
   clearTimeout(cs.idleTimer);
   redactedLog("steer \u2014 rid=".concat(reqId, " chat=").concat(chatID, " thread=").concat(threadID, " user=").concat(userID));
   try {
-    await cs.session.steer(req.prompt);
+    const imageBlocks = buildImageContents(req.options?.images, reqId, "steer");
+    if (imageBlocks.length > 0) {
+      await cs.session.steer(req.prompt, imageBlocks);
+    } else {
+      await cs.session.steer(req.prompt);
+    }
     emitReq({ event: "result", content: "steer queued" });
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);
@@ -2013,7 +2029,12 @@ async function handleFollowUp(req) {
   clearTimeout(cs.idleTimer);
   redactedLog("followUp \u2014 rid=".concat(reqId, " chat=").concat(chatID, " thread=").concat(threadID, " user=").concat(userID));
   try {
-    await cs.session.followUp(req.prompt);
+    const imageBlocks = buildImageContents(req.options?.images, reqId, "followUp");
+    if (imageBlocks.length > 0) {
+      await cs.session.followUp(req.prompt, imageBlocks);
+    } else {
+      await cs.session.followUp(req.prompt);
+    }
     emitReq({ event: "result", content: "follow-up queued" });
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err);

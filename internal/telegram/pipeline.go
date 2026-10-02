@@ -98,7 +98,7 @@ func (bc *BotController) processBridgeEventsAsyncWithThread(chat *telebot.Chat, 
 	if len(userID) > 0 {
 		uid = userID[0]
 	}
-	return bridgeOutcome(bc.ensurePipeline().ProcessBridgeEvents(chat.ID, threadID, messageID, ch, progress, userText, nil, uid, chat.Type == telebot.ChatPrivate, nil, nil))
+	return bridgeOutcome(bc.ensurePipeline().ProcessBridgeEvents(chat.ID, threadID, messageID, ch, progress, userText, nil, uid, chat.Type == telebot.ChatPrivate, nil, nil, nil))
 }
 
 // InvalidateMemoryOverlay clears cached CWD overlay memory after a project binding change.
