@@ -17,8 +17,8 @@
     "esbuild": "0.28.1"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "0.86.0",
-    "@earendil-works/pi-coding-agent": "0.86.0"
+    "@earendil-works/pi-ai": "1.0.4",
+    "@earendil-works/pi-coding-agent": "1.0.4"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
