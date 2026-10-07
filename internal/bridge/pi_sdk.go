@@ -16,7 +16,7 @@ import (
 // package template embeds it, so the template hash changes and EnsureBridge
 // reinstalls node_modules and rebuilds the bundle on the next start. That is
 // the mechanism that keeps a deployed daemon on the pinned SDK.
-const piSDKVersion = "0.86.0"
+const piSDKVersion = "1.0.4"
 
 // piSDKPackages are the PI SDK packages installed together at piSDKVersion.
 // They are versioned in lockstep upstream, so running them apart is a
