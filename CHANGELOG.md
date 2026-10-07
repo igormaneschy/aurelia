@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.49.0] - 2026-10-07
+
+### Upgraded
+- **PI SDK 0.86.0 → 1.0.4** (`@earendil-works/pi-ai` e
+  `@earendil-works/pi-coding-agent`), alinhando o bridge com a versão mais
+  recente do PI CLI. Novos recursos incluídos:
+  - `pi-ai` 1.0.4: types `ImageContent`/`TextContent`, provider APIs atualizadas
+  - `pi-coding-agent` 1.0.4: `createAgentSession`, `SessionManager`, `ModelRuntime`
+- 169 testes do bridge passando, todos os testes Go passando
+- Bundle.js rebuildado (95.4kb)
+- `pi_sdk.go` pin sincronizado
+- E2E test validado: run `bb51ef59` completed em 2m16s
+
 ## [0.48.1] - 2026-10-02
 
 ### Fixed
