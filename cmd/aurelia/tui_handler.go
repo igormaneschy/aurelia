@@ -245,9 +245,9 @@ func makeTUIHandler(a *app) func(context.Context, ipc.IPCMessage, func(ipc.IPCEv
 			return handleTUIModels(ctx, a, msg, emit)
 		case ipc.MsgTypeSubscribe:
 			// Terminal error: subscribe not supported.
-			return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "subscribe not supported", RequestID: msg.RequestID})
+			return emitSessionError(emit, msg.RequestID, "subscribe not supported")
 		default:
-			return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: fmt.Sprintf("unknown message type: %s", msg.Type), RequestID: msg.RequestID})
+			return emitSessionError(emit, msg.RequestID, fmt.Sprintf("unknown message type: %s", msg.Type))
 		}
 	}
 }
@@ -379,21 +379,13 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 		chatKey := projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID}
 		resolved, err := a.bindings.Resolve(ctx, chatKey)
 		if err != nil || resolved == nil || resolved.Binding == nil || resolved.Binding.CWD == "" {
-			return emit(ipc.IPCEvent{
-				Type:      ipc.EventTypeError,
-				Error:     "Set a project with /cwd first to attach documents",
-				RequestID: msg.RequestID,
-			})
+			return emitSessionError(emit, msg.RequestID, "Set a project with /cwd first to attach documents")
 		}
 
 		copied, err := copyAttachmentsToCWD(ctx, resolved.Binding.CWD, msg.Attachments)
 		if err != nil {
 			log.Printf("tui: attachment copy error: %s", err)
-			return emit(ipc.IPCEvent{
-				Type:      ipc.EventTypeError,
-				Error:     fmt.Sprintf("Failed to copy attachment: %s", err),
-				RequestID: msg.RequestID,
-			})
+			return emitSessionError(emit, msg.RequestID, fmt.Sprintf("Failed to copy attachment: %s", err))
 		}
 
 		attachmentNote = buildAttachmentNote(copied)
@@ -407,11 +399,7 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 
 	// Concurrency guard: only one TUI pipeline run at a time.
 	if a.tuiRunGuard != nil && !a.tuiRunGuard.tryAcquire() {
-		return emit(ipc.IPCEvent{
-			Type:      ipc.EventTypeError,
-			Error:     "TUI request already in progress",
-			RequestID: msg.RequestID,
-		})
+		return emitSessionError(emit, msg.RequestID, "TUI request already in progress")
 	}
 	if a.tuiRunGuard != nil {
 		defer a.tuiRunGuard.release()
@@ -460,11 +448,7 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 			log.Printf("tui: image conversion error: %s", images.SanitizedError(err))
 			// Use SanitizedError to avoid leaking full local paths in
 			// user-visible error messages.
-			return emit(ipc.IPCEvent{
-				Type:      ipc.EventTypeError,
-				Error:     fmt.Sprintf("Failed to process image: %s", images.SanitizedError(err)),
-				RequestID: msg.RequestID,
-			})
+			return emitSessionError(emit, msg.RequestID, fmt.Sprintf("Failed to process image: %s", images.SanitizedError(err)))
 		}
 	}
 

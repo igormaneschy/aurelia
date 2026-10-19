@@ -15,6 +15,20 @@ import (
 // maxSessionNameLength is the maximum length of a sanitized session name.
 const maxSessionNameLength = 64
 
+// emitSessionError emits an error event followed by the terminal event.
+//
+// The IPC protocol requires every request to end with a terminal event
+// (stream_end). A handler that returned after only the error event left the
+// client waiting forever: the desktop client blocked on "A carregar
+// histórico…" when opening a session that no longer existed, because the
+// error event alone never closed the request.
+func emitSessionError(emit func(ipc.IPCEvent) error, requestID string, message string) error {
+	if err := emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: message, RequestID: requestID}); err != nil {
+		return err
+	}
+	return emit(ipc.IPCEvent{Type: ipc.EventTypeStreamEnd, Done: true, RequestID: requestID})
+}
+
 // sanitizeSessionName removes terminal-control characters and limits length.
 // Strips ANSI escape sequences (ESC), OSC sequences, and all C0 control
 // characters (NUL..US, DEL). The result is trimmed and truncated to
@@ -115,12 +129,12 @@ type sessionJSON struct {
 // handleTUISessions lists all TUI local sessions.
 func handleTUISessions(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
 	if a.tuiSessions == nil {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "tui sessions store not available", RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, "tui sessions store not available")
 	}
 
 	sessions, err := a.tuiSessions.List(ctx)
 	if err != nil {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: fmt.Sprintf("list sessions: %s", err), RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, fmt.Sprintf("list sessions: %s", err))
 	}
 
 	userID := int64(os.Getuid())
@@ -139,7 +153,7 @@ func handleTUISessions(ctx context.Context, a *app, msg ipc.IPCMessage, emit fun
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: fmt.Sprintf("marshal sessions: %s", err), RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, fmt.Sprintf("marshal sessions: %s", err))
 	}
 
 	if err := emit(ipc.IPCEvent{Type: ipc.EventTypeSessions, Body: string(body), RequestID: msg.RequestID}); err != nil {
@@ -153,17 +167,17 @@ func handleTUISessions(ctx context.Context, a *app, msg ipc.IPCMessage, emit fun
 // so that deleted session IDs are never reused.
 func handleTUISessionCreate(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
 	if a.tuiSessions == nil {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "tui sessions store not available", RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, "tui sessions store not available")
 	}
 
 	rawName := strings.TrimSpace(msg.Text)
 	if rawName == "" {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "session name is required", RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, "session name is required")
 	}
 
 	name := sanitizeSessionName(rawName)
 	if name == "" {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "session name is empty after sanitization", RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, "session name is empty after sanitization")
 	}
 
 	// Query the current minimum ChatID from the database so we allocate
@@ -172,7 +186,7 @@ func handleTUISessionCreate(ctx context.Context, a *app, msg ipc.IPCMessage, emi
 	// the same nextID (ErrSessionExists → try the next one below).
 	nextID, err := a.tuiSessions.NextChatID(ctx)
 	if err != nil {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: fmt.Sprintf("next chat id: %s", err), RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, fmt.Sprintf("next chat id: %s", err))
 	}
 	if nextID == -1 {
 		nextID = ipc.ReservedTUIChatID - 1 // first free slot below DM
@@ -180,7 +194,7 @@ func handleTUISessionCreate(ctx context.Context, a *app, msg ipc.IPCMessage, emi
 
 	for {
 		if nextID < ipc.ReservedTUIChatIDFloor {
-			return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "no free TUI session slots", RequestID: msg.RequestID})
+			return emitSessionError(emit, msg.RequestID, "no free TUI session slots")
 		}
 
 		sess, err := a.tuiSessions.Create(ctx, nextID, name)
@@ -196,7 +210,7 @@ func handleTUISessionCreate(ctx context.Context, a *app, msg ipc.IPCMessage, emi
 			nextID--
 			continue
 		}
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: fmt.Sprintf("create session: %s", err), RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, fmt.Sprintf("create session: %s", err))
 	}
 }
 
@@ -206,12 +220,12 @@ func handleTUISessionCreate(ctx context.Context, a *app, msg ipc.IPCMessage, emi
 // never created via session_create and may not have a row in the store.
 func handleTUISessionOpen(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
 	if a.tuiSessions == nil {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "tui sessions store not available", RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, "tui sessions store not available")
 	}
 
 	chatID := msg.ChatID
 	if !ipc.IsReservedTUIID(chatID) {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "invalid session chat_id", RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, "invalid session chat_id")
 	}
 
 	// The default DM exists implicitly — don't require a store row.
@@ -228,14 +242,14 @@ func handleTUISessionOpen(ctx context.Context, a *app, msg ipc.IPCMessage, emit 
 
 	sess, err := a.tuiSessions.Get(ctx, chatID)
 	if err == tuisessions.ErrSessionNotFound {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "session not found", RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, "session not found")
 	}
 	if err != nil {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: fmt.Sprintf("get session: %s", err), RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, fmt.Sprintf("get session: %s", err))
 	}
 
 	if err := a.tuiSessions.Touch(ctx, chatID); err != nil {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: fmt.Sprintf("touch session: %s", err), RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, fmt.Sprintf("touch session: %s", err))
 	}
 
 	body, _ := json.Marshal(sessionJSON{ChatID: sess.ChatID, Name: sess.Name})
@@ -248,27 +262,27 @@ func handleTUISessionOpen(ctx context.Context, a *app, msg ipc.IPCMessage, emit 
 // handleTUISessionRename renames an existing TUI local session.
 func handleTUISessionRename(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
 	if a.tuiSessions == nil {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "tui sessions store not available", RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, "tui sessions store not available")
 	}
 
 	chatID := msg.ChatID
 	if !ipc.IsReservedTUIID(chatID) {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "invalid session chat_id", RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, "invalid session chat_id")
 	}
 	if ipc.IsDefaultTUISession(chatID) {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "cannot rename the default DM session", RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, "cannot rename the default DM session")
 	}
 
 	name := sanitizeSessionName(strings.TrimSpace(msg.Text))
 	if name == "" {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "session name is required", RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, "session name is required")
 	}
 
 	if err := a.tuiSessions.Rename(ctx, chatID, name); err != nil {
 		if err == tuisessions.ErrSessionNotFound {
-			return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "session not found", RequestID: msg.RequestID})
+			return emitSessionError(emit, msg.RequestID, "session not found")
 		}
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: fmt.Sprintf("rename session: %s", err), RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, fmt.Sprintf("rename session: %s", err))
 	}
 
 	body, _ := json.Marshal(sessionJSON{ChatID: chatID, Name: name})
@@ -281,21 +295,21 @@ func handleTUISessionRename(ctx context.Context, a *app, msg ipc.IPCMessage, emi
 // handleTUISessionDelete removes a TUI local session.
 func handleTUISessionDelete(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
 	if a.tuiSessions == nil {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "tui sessions store not available", RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, "tui sessions store not available")
 	}
 
 	chatID := msg.ChatID
 	if !ipc.IsReservedTUIID(chatID) {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "invalid session chat_id", RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, "invalid session chat_id")
 	}
 
 	// Prevent deleting the default DM session.
 	if ipc.IsDefaultTUISession(chatID) {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "cannot delete the default DM session", RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, "cannot delete the default DM session")
 	}
 
 	if err := a.tuiSessions.Delete(ctx, chatID); err != nil {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: fmt.Sprintf("delete session: %s", err), RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, fmt.Sprintf("delete session: %s", err))
 	}
 
 	// Also clean up session state and project binding for this ChatID.

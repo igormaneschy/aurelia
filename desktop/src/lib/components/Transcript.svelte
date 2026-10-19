@@ -20,13 +20,21 @@
     // combined kept the microtask queue permanently drained (WebContent at
     // ~100% CPU and the UI never painted).
     //
+    // The element is copied into a local before the write on purpose:
+    // `bind:this` creates a reactive source, and assigning a property on it
+    // compiles to `mutate(source, …)`, which re-schedules the component —
+    // afterUpdate then ran again, mutated again, and the loop never ended
+    // (the window froze on "A carregar histórico…"). Writing through the
+    // local copy touches the DOM without touching the reactive graph.
+    //
     // Reading scrollHeight forces a synchronous layout, so it only runs when
     // the content actually grew. During streaming the transcript changes on
     // every chunk; measuring each time made the UI feel stuck.
-    if (!stickToBottom || !viewport) return;
-    const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    const node = viewport;
+    if (!stickToBottom || !node) return;
+    const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
     if (distance > 2) return;
-    viewport.scrollTop = viewport.scrollHeight;
+    node.scrollTop = node.scrollHeight;
   });
 
   function onScroll() {

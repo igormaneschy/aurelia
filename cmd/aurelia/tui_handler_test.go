@@ -528,17 +528,22 @@ func TestTUIHandler_SubscribeReturnsTerminalError(t *testing.T) {
 		t.Fatalf("handler error: %v", err)
 	}
 
-	if te.count() < 2 {
-		t.Fatalf("expected at least 2 events (ack + error), got %d", te.count())
+	if te.count() < 3 {
+		t.Fatalf("expected at least 3 events (ack + error + stream_end), got %d", te.count())
 	}
 	// First event is always ack
 	if te.events[0].Type != "ack" {
 		t.Errorf("event[0] = %q, want ack", te.events[0].Type)
 	}
-	// Second event should be terminal error (not message)
+	// The error event carries the reason.
+	if te.events[1].Type != "error" {
+		t.Errorf("event[1] = %q, want error", te.events[1].Type)
+	}
+	// Every request must end with a terminal event, so the client never
+	// waits forever for the end of a failed request.
 	last := te.events[te.count()-1]
-	if last.Type != "error" {
-		t.Errorf("last event = %q, want error (terminal)", last.Type)
+	if last.Type != "stream_end" {
+		t.Errorf("last event = %q, want stream_end (terminal)", last.Type)
 	}
 }
 
@@ -614,11 +619,11 @@ func TestTUIHandler_ConcurrencyGuardRejectsSecondRun(t *testing.T) {
 		t.Fatalf("handler should not return error for guard rejection, got: %v", err)
 	}
 
-	if te2.count() < 2 {
-		t.Fatalf("expected at least 2 events, got %d", te2.count())
+	if te2.count() < 3 {
+		t.Fatalf("expected at least 3 events, got %d", te2.count())
 	}
 
-	// Events: ack, error (terminal).
+	// Events: ack, error (concurrency), stream_end (terminal).
 	if te2.events[0].Type != "ack" {
 		t.Errorf("event[0] = %q, want ack", te2.events[0].Type)
 	}
@@ -628,9 +633,10 @@ func TestTUIHandler_ConcurrencyGuardRejectsSecondRun(t *testing.T) {
 	if !strings.Contains(te2.events[1].Error, "already in progress") {
 		t.Errorf("expected concurrency error, got %q", te2.events[1].Error)
 	}
-	// No stream_end after error.
-	if te2.count() > 2 {
-		t.Errorf("expected exactly 2 events (ack + error), got %d", te2.count())
+	// The request still ends with a terminal event so the client stops waiting.
+	last := te2.events[te2.count()-1]
+	if last.Type != "stream_end" {
+		t.Errorf("last event = %q, want stream_end (terminal)", last.Type)
 	}
 }
 

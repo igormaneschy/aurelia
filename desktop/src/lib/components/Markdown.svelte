@@ -57,65 +57,90 @@
    */
   export let streaming = false;
 
-  // Non-reactive bookkeeping: a plain object is not proxied in legacy mode, so
-  // mutating it does not schedule another update cycle.
-  const state = {
-    rendered: "",
-    pending: text,
-    lastRenderAt: 0,
-    timer: undefined as ReturnType<typeof setTimeout> | undefined,
-  };
+  // Rendering markdown is expensive (marked + highlight.js + DOMPurify).
+  // While a message streams in, `text` changes on every chunk, so parsing on
+  // every change re-does the whole work over the whole (growing) text: O(n²)
+  // work that blocks the main thread, freezing the window and making the
+  // response render sluggishly. Throttle the parsing to a fixed interval.
+  const RENDER_INTERVAL_MS = 100;
 
-  let html = "";
-
-  function render(value: string): string {
+  function parseMarkdown(value: string): string {
     return DOMPurify.sanitize(marked.parse(value) as string);
   }
 
-  function flush() {
-    state.timer = undefined;
-    if (state.pending === state.rendered) return;
-    state.rendered = state.pending;
-    html = render(state.rendered);
-    state.lastRenderAt = Date.now();
-  }
+  /**
+   * The throttled-render bookkeeping lives in a closure on purpose.
+   *
+   * In Svelte 5 legacy mode any object assigned to a component variable
+   * (object literal or class instance) becomes a reactive source, and every
+   * property write then compiles to `mutate(source, …)` — which
+   * re-schedules the component and re-runs the reactive statement that
+   * called it, in an endless loop that froze the window on "A carregar
+   * histórico…". Locals of a nested function are plain JavaScript variables
+   * and stay outside the reactive graph.
+   */
+  function createRenderer(initial: string) {
+    let rendered = "";
+    let pending = initial;
+    let lastRenderAt = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
 
-  function schedule(value: string) {
-    state.pending = value;
-    if (state.pending === state.rendered) return;
-
-    const elapsed = Date.now() - state.lastRenderAt;
-    if (elapsed >= RENDER_INTERVAL_MS) {
-      if (state.timer) {
-        clearTimeout(state.timer);
-        state.timer = undefined;
-      }
-      flush();
-      return;
+    function flush(apply: (html: string) => void) {
+      timer = undefined;
+      if (pending === rendered) return;
+      rendered = pending;
+      apply(parseMarkdown(rendered));
+      lastRenderAt = Date.now();
     }
 
-    // Too soon after the last render: coalesce the remaining work.
-    if (state.timer) return;
-    state.timer = setTimeout(flush, RENDER_INTERVAL_MS - elapsed);
+    return {
+      /** Renders `value` as markdown, throttled to one parse per interval. */
+      schedule(value: string, apply: (html: string) => void) {
+        pending = value;
+        if (pending === rendered) return;
+
+        const elapsed = Date.now() - lastRenderAt;
+        if (elapsed >= RENDER_INTERVAL_MS) {
+          if (timer) {
+            clearTimeout(timer);
+            timer = undefined;
+          }
+          flush(apply);
+          return;
+        }
+
+        // Too soon after the last render: coalesce the remaining work.
+        if (timer) return;
+        timer = setTimeout(() => flush(apply), RENDER_INTERVAL_MS - elapsed);
+      },
+      /** Streaming state: the text is shown raw, so drop any pending parse. */
+      reset(value: string) {
+        if (timer) {
+          clearTimeout(timer);
+          timer = undefined;
+        }
+        rendered = value;
+        pending = value;
+      },
+      dispose() {
+        if (timer) clearTimeout(timer);
+      },
+    };
   }
 
-  const RENDER_INTERVAL_MS = 100;
+  const renderer = createRenderer(text);
+  let html = "";
 
   $: if (streaming) {
-    // Streaming: show the raw text, no markdown parsing.
-    if (state.timer) {
-      clearTimeout(state.timer);
-      state.timer = undefined;
-    }
-    state.rendered = text;
-    state.pending = text;
-    html = "";
+    renderer.reset(text);
   } else {
-    schedule(text);
+    renderer.schedule(text, (value) => {
+      html = value;
+    });
   }
 
   onDestroy(() => {
-    if (state.timer) clearTimeout(state.timer);
+    renderer.dispose();
   });
 </script>
 

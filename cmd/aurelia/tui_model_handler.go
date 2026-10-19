@@ -17,15 +17,15 @@ import (
 
 func handleTUIModels(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
 	if a == nil || a.bridge == nil {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: "bridge unavailable", RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, "bridge unavailable")
 	}
 	models, err := listTUIModels(ctx, a)
 	if err != nil {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: err.Error(), RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, err.Error())
 	}
 	body, err := json.Marshal(supplementModelsFromRegistry(bridgeModelsToIPCEntries(models)))
 	if err != nil {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: fmt.Sprintf("marshal models: %s", err), RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, fmt.Sprintf("marshal models: %s", err))
 	}
 	if err := emit(ipc.IPCEvent{Type: ipc.EventTypeModels, Body: string(body), RequestID: msg.RequestID}); err != nil {
 		return err
