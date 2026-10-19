@@ -46,6 +46,12 @@
   let unlistenStream: UnlistenFn | undefined;
   let unlistenDrag: UnlistenFn | undefined;
 
+  // Streaming chunks are coalesced before they reach the store: painting
+  // every chunk froze the window while a response was streaming in.
+  const CHUNK_FLUSH_MS = 60;
+  let pendingChunk = "";
+  let chunkFlushTimer: ReturnType<typeof setTimeout> | undefined;
+
   function newId(): string {
     if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
       return crypto.randomUUID();
@@ -201,6 +207,21 @@
   function appendChunk(text: string) {
     if (isToolChunk(text)) return;
 
+    // Coalesce streaming chunks: the daemon emits them far faster than the
+    // screen can paint, and every chunk used to trigger a full re-render of
+    // the transcript (and a markdown re-parse of the growing message), which
+    // left the window unresponsive while a response streamed in.
+    pendingChunk += text;
+    if (chunkFlushTimer) return;
+    chunkFlushTimer = setTimeout(flushChunk, CHUNK_FLUSH_MS);
+  }
+
+  function flushChunk() {
+    chunkFlushTimer = undefined;
+    if (!pendingChunk) return;
+    const chunk = pendingChunk;
+    pendingChunk = "";
+
     messages.update((current) => {
       const next = [...current];
       const index = lastStreamingAssistantIndex(next);
@@ -208,17 +229,24 @@
         next.push({
           id: newId(),
           role: "assistant",
-          text,
+          text: chunk,
           streaming: true,
         });
       } else {
-        next[index] = { ...next[index], text: next[index].text + text };
+        next[index] = { ...next[index], text: next[index].text + chunk };
       }
       return next;
     });
   }
 
   function replaceAssistant(text: string) {
+    // The final message replaces the streamed text: drop any chunk still
+    // pending so it is not appended on top of the final text.
+    pendingChunk = "";
+    if (chunkFlushTimer) {
+      clearTimeout(chunkFlushTimer);
+      chunkFlushTimer = undefined;
+    }
     messages.update((current) => {
       const next = [...current];
       const index = lastStreamingAssistantIndex(next);
@@ -272,12 +300,14 @@
         runStatus.set(formatProgress(payload.progress));
         break;
       case "done":
+        flushChunk();
         running.set(false);
         runStatus.set("");
         finishStreamingAssistant();
         void afterTurn(payload.chat_id);
         break;
       case "cancelled":
+        flushChunk();
         running.set(false);
         runStatus.set("");
         finishStreamingAssistant();
@@ -292,6 +322,7 @@
         void afterTurn(payload.chat_id);
         break;
       case "error":
+        flushChunk();
         running.set(false);
         runStatus.set("");
         finishStreamingAssistant();

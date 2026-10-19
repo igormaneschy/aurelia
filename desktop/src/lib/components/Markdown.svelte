@@ -17,6 +17,7 @@
   import yaml from "highlight.js/lib/languages/yaml";
   import { marked } from "marked";
   import { markedHighlight } from "marked-highlight";
+  import { onDestroy } from "svelte";
   import "highlight.js/styles/github-dark.css";
 
   hljs.registerLanguage("bash", bash);
@@ -47,8 +48,79 @@
   marked.setOptions({ gfm: true, breaks: true });
 
   export let text = "";
+  /**
+   * While the message is still streaming the text is incomplete: parsing it
+   * as markdown renders half-open constructs literally (`**` with no closing
+   * pair) and re-parses the whole growing text on every chunk, which is
+   * O(n²) work on the main thread. During streaming the raw text is shown
+   * instead; the markdown is rendered once, when the message is complete.
+   */
+  export let streaming = false;
 
-  $: html = DOMPurify.sanitize(marked.parse(text) as string);
+  // Non-reactive bookkeeping: a plain object is not proxied in legacy mode, so
+  // mutating it does not schedule another update cycle.
+  const state = {
+    rendered: "",
+    pending: text,
+    lastRenderAt: 0,
+    timer: undefined as ReturnType<typeof setTimeout> | undefined,
+  };
+
+  let html = "";
+
+  function render(value: string): string {
+    return DOMPurify.sanitize(marked.parse(value) as string);
+  }
+
+  function flush() {
+    state.timer = undefined;
+    if (state.pending === state.rendered) return;
+    state.rendered = state.pending;
+    html = render(state.rendered);
+    state.lastRenderAt = Date.now();
+  }
+
+  function schedule(value: string) {
+    state.pending = value;
+    if (state.pending === state.rendered) return;
+
+    const elapsed = Date.now() - state.lastRenderAt;
+    if (elapsed >= RENDER_INTERVAL_MS) {
+      if (state.timer) {
+        clearTimeout(state.timer);
+        state.timer = undefined;
+      }
+      flush();
+      return;
+    }
+
+    // Too soon after the last render: coalesce the remaining work.
+    if (state.timer) return;
+    state.timer = setTimeout(flush, RENDER_INTERVAL_MS - elapsed);
+  }
+
+  const RENDER_INTERVAL_MS = 100;
+
+  $: if (streaming) {
+    // Streaming: show the raw text, no markdown parsing.
+    if (state.timer) {
+      clearTimeout(state.timer);
+      state.timer = undefined;
+    }
+    state.rendered = text;
+    state.pending = text;
+    html = "";
+  } else {
+    schedule(text);
+  }
+
+  onDestroy(() => {
+    if (state.timer) clearTimeout(state.timer);
+  });
 </script>
 
-<div class="markdown">{@html html}</div>
+{#if streaming}
+  <div class="markdown markdown-raw">{text}</div>
+{:else}
+  <div class="markdown">{@html html}</div>
+{/if}

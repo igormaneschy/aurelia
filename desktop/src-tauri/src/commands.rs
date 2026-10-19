@@ -327,11 +327,37 @@ async fn stream_turn(
     let message = IpcMessage::send(chat_id, user_id, text, images, attachments, request_id);
     let mut stream = client.send(&message).await.map_err(|error| error.to_string())?;
 
+    // Streaming chunks are coalesced before crossing into the webview. The
+    // daemon emits them far faster than a human can read, and one Tauri
+    // event per chunk floods the frontend: every chunk triggered a re-render
+    // of the transcript and a markdown re-parse of the growing message,
+    // which made the window unresponsive during a response.
+    const CHUNK_FLUSH_MS: u64 = 40;
+    let mut pending_chunk = String::new();
+    let mut chunk_timer: Option<std::pin::Pin<Box<tokio::time::Sleep>>> = None;
+
     loop {
         tokio::select! {
             _ = token.cancelled() => {
                 let _ = app.emit(STREAM_EVENT, StreamPayload::Cancelled { chat_id });
                 return Ok(());
+            }
+            // Flush the coalesced chunk on the interval.
+            _ = async {
+                match chunk_timer.as_mut() {
+                    Some(timer) => timer.await,
+                    // No pending timer: park forever until a chunk arms one.
+                    None => std::future::pending().await,
+                }
+            } => {
+                chunk_timer = None;
+                if !pending_chunk.is_empty() {
+                    let text = std::mem::take(&mut pending_chunk);
+                    let _ = app.emit(
+                        STREAM_EVENT,
+                        StreamPayload::Chunk { chat_id, text },
+                    );
+                }
             }
             next = stream.next() => {
                 let event = match next.map_err(|error| error.to_string())? {
@@ -351,15 +377,18 @@ async fn stream_turn(
                 match event.msg_type.as_str() {
                     EVENT_ACK => {}
                     EVENT_STREAM_CHUNK => {
-                        let _ = app.emit(
-                            STREAM_EVENT,
-                            StreamPayload::Chunk {
-                                chat_id,
-                                text: event.body,
-                            },
-                        );
+                        pending_chunk.push_str(&event.body);
+                        if chunk_timer.is_none() {
+                            chunk_timer = Some(Box::pin(tokio::time::sleep(
+                                tokio::time::Duration::from_millis(CHUNK_FLUSH_MS),
+                            )));
+                        }
                     }
                     EVENT_MESSAGE => {
+                        // The final message replaces the streamed text: drop
+                        // the pending chunk so it is not appended on top.
+                        pending_chunk.clear();
+                        chunk_timer = None;
                         let _ = app.emit(
                             STREAM_EVENT,
                             StreamPayload::Message {
@@ -377,10 +406,26 @@ async fn stream_turn(
                         }
                     }
                     EVENT_STREAM_END => {
+                        // Flush whatever is still pending before signalling the
+                        // end of the turn, so no text is lost.
+                        if !pending_chunk.is_empty() {
+                            let text = std::mem::take(&mut pending_chunk);
+                            let _ = app.emit(
+                                STREAM_EVENT,
+                                StreamPayload::Chunk { chat_id, text },
+                            );
+                        }
                         let _ = app.emit(STREAM_EVENT, StreamPayload::Done { chat_id });
                         return Ok(());
                     }
                     EVENT_ERROR => {
+                        if !pending_chunk.is_empty() {
+                            let text = std::mem::take(&mut pending_chunk);
+                            let _ = app.emit(
+                                STREAM_EVENT,
+                                StreamPayload::Chunk { chat_id, text },
+                            );
+                        }
                         let message = if event.error.is_empty() {
                             "Erro desconhecido do daemon.".to_owned()
                         } else {

@@ -19,15 +19,25 @@
     // completes, and writing the bound element re-invalidates it — the two
     // combined kept the microtask queue permanently drained (WebContent at
     // ~100% CPU and the UI never painted).
-    if (stickToBottom && viewport) {
-      viewport.scrollTop = viewport.scrollHeight;
-    }
+    //
+    // Reading scrollHeight forces a synchronous layout, so it only runs when
+    // the content actually grew. During streaming the transcript changes on
+    // every chunk; measuring each time made the UI feel stuck.
+    if (!stickToBottom || !viewport) return;
+    const distance = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight;
+    if (distance > 2) return;
+    viewport.scrollTop = viewport.scrollHeight;
   });
 
   function onScroll() {
     if (!viewport) return;
-    stickToBottom =
+    const atBottom =
       viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 80;
+    // Only write when the value actually changes: assigning the same boolean
+    // still invalidates the component and re-runs the update cycle.
+    if (atBottom !== stickToBottom) {
+      stickToBottom = atBottom;
+    }
   }
 
   function formatTime(timestamp?: string): string {
@@ -69,7 +79,7 @@
           </div>
           <div class="bubble">
             {#if message.role === "assistant"}
-              <Markdown text={message.text} />
+              <Markdown text={message.text} streaming={message.streaming} />
               {#if message.streaming}<span class="cursor"></span>{/if}
             {:else}
               <p>{message.text}</p>

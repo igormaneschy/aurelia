@@ -1062,6 +1062,13 @@ textarea::placeholder {
   line-height: 1.6;
 }
 
+/* Streaming state: the text is still incomplete, so it is shown as plain
+   text (no markdown parsing) until the message is complete. */
+.markdown-raw {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .markdown > *:first-child {
   margin-top: 0;
 }
