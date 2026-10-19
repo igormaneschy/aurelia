@@ -47,6 +47,16 @@ npm install
 npm run tauri dev
 ```
 
+## Verificação estática
+
+```bash
+make desktop-check      # ou: cd desktop && npm run check
+```
+
+` svelte-check` type-checka os componentes Svelte. Um store usado sem o
+respectivo `import` compila sem erro e só falha em runtime (o `send()` atirava
+`ReferenceError` e o Enter não fazia nada) — o check apanha isso antes.
+
 ## Build
 
 ```bash

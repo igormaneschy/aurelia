@@ -3,6 +3,7 @@
   import { open } from "@tauri-apps/plugin-dialog";
   import {
     addPendingPaths,
+    notify,
     pendingAttachments,
     removePending,
   } from "../stores";
@@ -37,7 +38,15 @@
   function onKeydown(event: KeyboardEvent) {
     if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
     event.preventDefault();
-    void submit();
+    sendNow();
+  }
+
+  // `submit()` can reject (IPC failure, runtime error). Without this the
+  // rejection is swallowed by `void` and the composer looks frozen.
+  function sendNow() {
+    void submit().catch((error) => {
+      notify("error", error instanceof Error ? error.message : String(error));
+    });
   }
 
   async function attach() {
@@ -84,7 +93,7 @@
       {#if running}
         <button class="danger" on:click={onCancel}>Cancelar</button>
       {:else}
-        <button class="primary" on:click={submit} disabled={disabled || !text.trim()}>
+        <button class="primary" on:click={sendNow} disabled={disabled || !text.trim()}>
           Enviar
         </button>
       {/if}

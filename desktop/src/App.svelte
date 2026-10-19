@@ -25,6 +25,7 @@
     models,
     notice,
     notify,
+    pendingAttachments,
     projectState,
     running,
     runStatus,

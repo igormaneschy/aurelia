@@ -33,6 +33,7 @@ help:
 	@echo "  make tui-all          Cross-compile TUI for linux/darwin amd64+arm64"
 	@echo "  make desktop-dev      Run the Tauri desktop client in dev mode"
 	@echo "  make desktop-build    Build the macOS desktop app bundle"
+	@echo "  make desktop-check    Type-check the desktop client (svelte-check)"
 	@echo ""
 	@echo "Service targets:"
 	@echo "  make install-service     Auto-detect OS and install service"
@@ -94,6 +95,9 @@ desktop-dev:
 
 desktop-build:
 	cd desktop && npm run tauri build
+
+desktop-check:
+	cd desktop && npm run check
 
 install-path:
 	@chmod +x scripts/install-path.sh
