@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/aurelia-ipc", "src-tauri"]
+resolver = "2"

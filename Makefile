@@ -14,7 +14,7 @@ TUI_BINARY    := $(HOME)/.aurelia/bin/aurelia-tui
 TUI_PKG       := ./cmd/aurelia-tui
 TUI_TMP       := $(TUI_BINARY).new
 
-.PHONY: help build test race vet lint sec cover check bridge sync-pi-sdk check-pi-sdk install tui tui-all install-tui install-path install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
+.PHONY: help build test race vet lint sec cover check bridge sync-pi-sdk check-pi-sdk install tui tui-all install-tui desktop-dev desktop-build install-path install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
 
 help:
 	@echo "Common targets:"
@@ -31,6 +31,8 @@ help:
 	@echo "  make check-pi-sdk     Report PI SDK pin vs PI CLI drift (exit 1 if stale)"
 	@echo "  make tui              Compile the TUI binary to $(TUI_BINARY)"
 	@echo "  make tui-all          Cross-compile TUI for linux/darwin amd64+arm64"
+	@echo "  make desktop-dev      Run the Tauri desktop client in dev mode"
+	@echo "  make desktop-build    Build the macOS desktop app bundle"
 	@echo ""
 	@echo "Service targets:"
 	@echo "  make install-service     Auto-detect OS and install service"
@@ -84,6 +86,14 @@ install-tui: install-path
 	mkdir -p $(dir $(TUI_BINARY))
 	go build -o $(TUI_TMP) $(TUI_PKG)
 	mv $(TUI_TMP) $(TUI_BINARY)
+
+# --- Desktop (Tauri) ---
+
+desktop-dev:
+	cd desktop && npm run tauri dev
+
+desktop-build:
+	cd desktop && npm run tauri build
 
 install-path:
 	@chmod +x scripts/install-path.sh
