@@ -1,5 +1,8 @@
 # Lessons Index
 
+## Change desktop-app-render-unblock (2026-10-19)
+- [anti-pattern] autoscroll-hook-update-pipeline-reentry
+
 ## Change pi-sdk-0-86-sync (2026-09-20)
 - [anti-pattern] pi-sdk-pin-drift
 
