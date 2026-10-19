@@ -464,18 +464,27 @@ describe("boundSessionHistoryPayload", () => {
     ];
     const bounded = boundSessionHistoryPayload(history);
     assert.strictEqual(bounded.length, 2, "both messages must survive (each truncated)");
-    assert.ok(bounded[0].text.length <= 400, "oversized text must be truncated per message");
+    assert.ok(bounded[0].text.length <= 6_000, "oversized text must be truncated per message");
     assert.strictEqual(bounded[1].text, "recent reply");
     // Round-trip must succeed: the whole point of the bound is valid JSON.
     const serialized = JSON.stringify(bounded);
     assert.doesNotThrow(() => JSON.parse(serialized));
-    assert.ok(Buffer.byteLength(serialized, "utf8") < 16 * 1024);
+    assert.ok(Buffer.byteLength(serialized, "utf8") < 256 * 1024);
+  });
+
+  it("keeps a full-length answer intact instead of cutting it mid-sentence", () => {
+    // Regression: at 400 runes per message every long reply was truncated in
+    // the transcript (visible in the TUI and the desktop client).
+    const answer = "linha de resposta. ".repeat(300); // ~5K runes
+    const history = [{ sender: "Aurelia" as const, text: answer }];
+    const bounded = boundSessionHistoryPayload(history);
+    assert.strictEqual(bounded[0].text, answer, "a normal answer must survive intact");
   });
 
   it("drops oldest messages when the payload budget is exhausted", () => {
     const history = Array.from({ length: 200 }, (_, i) => ({
       sender: ("Igor" as const),
-      text: `message ${i} ` + "y".repeat(300),
+      text: `message ${i} ` + "y".repeat(3_000),
     }));
     const bounded = boundSessionHistoryPayload(history);
     assert.ok(bounded.length < 200, "budget must drop old messages");
@@ -484,7 +493,7 @@ describe("boundSessionHistoryPayload", () => {
     assert.ok(bounded[bounded.length - 1].text.startsWith("message 199"));
     const serialized = JSON.stringify(bounded);
     assert.doesNotThrow(() => JSON.parse(serialized));
-    assert.ok(Buffer.byteLength(serialized, "utf8") < 16 * 1024);
+    assert.ok(Buffer.byteLength(serialized, "utf8") < 256 * 1024);
   });
 
   it("always emits valid JSON even for a single oversized message", () => {
@@ -493,7 +502,7 @@ describe("boundSessionHistoryPayload", () => {
     ];
     const bounded = boundSessionHistoryPayload(history);
     assert.strictEqual(bounded.length, 1);
-    assert.ok(bounded[0].text.length <= 400);
+    assert.ok(bounded[0].text.length <= 6_000);
     assert.doesNotThrow(() => JSON.parse(JSON.stringify(bounded)));
   });
 });

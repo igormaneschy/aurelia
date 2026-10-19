@@ -962,13 +962,6 @@ func (bc *Service) buildContinuitySection(chatID int64, threadID int, userText s
 		return ""
 	}
 
-	// When /cwd is active, use Project Work State instead of chat continuity
-	cwd := bc.effectiveCwdForContext(profile, chatID, threadID, userID, isPrivateChat)
-	if cwd != "" {
-		return bc.buildProjectWorkSection(chatID, threadID, cwd, userText, userID, bc.entryPoint)
-	}
-
-	// Chat mode: existing Conversation Continuity logic
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
@@ -977,6 +970,26 @@ func (bc *Service) buildContinuitySection(chatID int64, threadID int, userText s
 		log.Printf("continuity: failed to get state chat=%d thread=%d: %v", chatID, threadID, err)
 		return ""
 	}
+
+	// A reset (user /reset or /new) cleared the conversation context and
+	// recorded the reason. Until the conversation produces fresh state, no
+	// carried context may be injected: the next message starts a fresh
+	// conversation, so the previous intent/summary must not leak into it.
+	// This also covers the shared Project Work State, which is consulted
+	// below — the reset conversation starts clean even though other
+	// surfaces keep their project context.
+	if state != nil && state.ResetReason == continuity.UserResetReason &&
+		state.LastUserIntent == "" && state.LastAssistantSummary == "" {
+		return ""
+	}
+
+	// When /cwd is active, use Project Work State instead of chat continuity
+	cwd := bc.effectiveCwdForContext(profile, chatID, threadID, userID, isPrivateChat)
+	if cwd != "" {
+		return bc.buildProjectWorkSection(chatID, threadID, cwd, userText, userID, bc.entryPoint)
+	}
+
+	// Chat mode: existing Conversation Continuity logic
 	if state == nil {
 		return ""
 	}

@@ -164,6 +164,10 @@ func (s *blockingContinuityStore) Patch(context.Context, continuity.Conversation
 
 func (s *blockingContinuityStore) MarkColdForSessions(context.Context, string) error { return nil }
 
+func (s *blockingContinuityStore) ResetConversation(context.Context, int64, int, int64, string) error {
+	return nil
+}
+
 func (s *blockingContinuityStore) GetProjectWork(context.Context, int64, string) (*continuity.ProjectWorkState, error) {
 	return nil, nil
 }

@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
+	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/internal/memoryux"
 	"github.com/igormaneschy/aurelia/internal/observability"
@@ -563,8 +564,19 @@ func handleTUIReset(a *app, chatID int64, threadID int, userID int64) string {
 		if a.bot.ResetSession(chatID, threadID, userID, true, true) {
 			canceled = true
 		}
-	} else if a.sessions != nil {
-		a.sessions.ClearSessionForUser(chatID, threadID, userID)
+	} else {
+		if a.sessions != nil {
+			a.sessions.ClearSessionForUser(chatID, threadID, userID)
+		}
+		// Without a bot there is no ResetSession to clear the continuity
+		// context; do it here so the next message still starts fresh.
+		if a.continuity != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			if err := a.continuity.ResetConversation(ctx, chatID, threadID, userID, continuity.UserResetReason); err != nil {
+				log.Printf("tui: continuity reset failed chat=%d thread=%d: %v", chatID, threadID, err)
+			}
+			cancel()
+		}
 	}
 	msg := "🗑️ Session reset. Next message starts a fresh conversation."
 	if canceled {

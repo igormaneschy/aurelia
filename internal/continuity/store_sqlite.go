@@ -354,6 +354,36 @@ func (s *SQLiteStore) Patch(ctx context.Context, key ConversationKey, patch Stat
 	return nil
 }
 
+// ResetConversation clears everything a conversation would carry over to its
+// next turn and records the reason. The row is kept (not deleted) so the
+// reset stays visible to callers that decide whether context may be
+// injected, until the conversation produces fresh state again.
+func (s *SQLiteStore) ResetConversation(ctx context.Context, chatID int64, threadID int, userID int64, reason string) error {
+	now := time.Now().Unix()
+	reason = sanitize(reason, 300)
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO conversation_state
+			(chat_id, thread_id, user_id, reset_reason, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+		ON CONFLICT(chat_id, thread_id, user_id) DO UPDATE SET
+			active_goal = '',
+			last_user_intent = '',
+			last_assistant_summary = '',
+			last_checkpoint = '',
+			last_run_id = '',
+			last_run_status = '',
+			last_tools = '',
+			session_id = '',
+			session_cold = 0,
+			reset_reason = excluded.reset_reason,
+			updated_at = excluded.updated_at`,
+		chatID, threadID, userID, reason, now)
+	if err != nil {
+		return fmt.Errorf("continuity reset chat=%d thread=%d: %w", chatID, threadID, err)
+	}
+	return nil
+}
+
 // MarkColdForSessions sets session_cold=1 and reset_reason for all rows
 // that have a non-empty session_id. Used when the bridge process dies.
 func (s *SQLiteStore) MarkColdForSessions(ctx context.Context, reason string) error {

@@ -15,6 +15,12 @@ type Store interface {
 	// Patch applies partial updates without overwriting unset fields.
 	Patch(ctx context.Context, key ConversationKey, patch StatePatch) error
 
+	// ResetConversation clears the context a conversation carries over to its
+	// next turn (last intent, last summary, checkpoint, tools, session id) and
+	// records why. The row is kept so the reset stays visible until the
+	// conversation produces fresh state.
+	ResetConversation(ctx context.Context, chatID int64, threadID int, userID int64, reason string) error
+
 	// MarkColdForSessions sets session_cold=1 and reset_reason for all rows
 	// with a non-empty session_id. Used when the bridge process dies.
 	MarkColdForSessions(ctx context.Context, reason string) error
