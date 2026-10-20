@@ -39,8 +39,11 @@
     function flush(apply: (html: string) => void) {
       timer = undefined;
       if (pending === rendered) return;
+      // Render first and only then mark it as rendered: a failed render must
+      // stay retryable instead of leaving the bubble permanently empty.
+      const html = renderMarkdown(pending);
       rendered = pending;
-      apply(renderMarkdown(rendered));
+      apply(html);
       lastRenderAt = Date.now();
     }
 
@@ -64,13 +67,22 @@
         if (timer) return;
         timer = setTimeout(() => flush(apply), RENDER_INTERVAL_MS - elapsed);
       },
-      /** Streaming state: the text is shown raw, so drop any pending parse. */
+      /**
+       * Streaming state: the text is shown raw, so drop any pending parse.
+       *
+       * `rendered` tracks the last text rendered *as markdown* and is
+       * deliberately not updated here: the streamed text is displayed as
+       * plain text, and when the message completes the markdown render must
+       * still happen. Marking the streamed text as rendered made the final
+       * render a no-op whenever the final text equalled the last streamed
+       * chunk — which is the case for every short reply ("Bom dia!") — and
+       * the bubble came out empty.
+       */
       reset(value: string) {
         if (timer) {
           clearTimeout(timer);
           timer = undefined;
         }
-        rendered = value;
         pending = value;
       },
       dispose() {
