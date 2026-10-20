@@ -97,6 +97,11 @@ desktop-dev:
 desktop-build:
 	cd desktop && npm run tauri build
 
+# Standalone debug build (assets embedded, no .app bundle): fast enough for
+# the daily loop and usable as a standalone app.
+desktop-build-debug:
+	cd desktop && npm run tauri build -- --debug --no-bundle
+
 desktop-check:
 	cd desktop && npm run check
 
@@ -104,6 +109,25 @@ desktop-check:
 # debug symbols). The next build is a full rebuild.
 desktop-clean:
 	cd desktop && cargo clean --profile dev --manifest-path Cargo.toml
+
+# Install the desktop client: the terminal shortcut
+# (~/.aurelia/bin/aurelia-desktop) and, when a release bundle exists, the
+# macOS app in ~/Applications (Dock, Launchpad, Cmd+Tab).
+install-desktop:
+	@mkdir -p "$(HOME)/.aurelia/bin"
+	@if [ ! -x desktop/target/debug/aurelia-desktop ]; then \
+		echo "Aurelia Desktop: a construir (primeira vez pode demorar ~1 min)..."; \
+		$(MAKE) desktop-build-debug; \
+	fi
+	install -m 755 desktop/target/debug/aurelia-desktop "$(HOME)/.aurelia/bin/aurelia-desktop"
+	@if [ -d desktop/src-tauri/target/release/bundle/macos/Aurelia.app ]; then \
+		rm -rf "$(HOME)/Applications/Aurelia.app"; \
+		cp -R desktop/src-tauri/target/release/bundle/macos/Aurelia.app "$(HOME)/Applications/"; \
+		echo "Aurelia.app instalado em ~/Applications"; \
+	else \
+		echo "(bundle release ausente: corra 'make desktop-build' para ter o .app em ~/Applications)"; \
+	fi
+	@echo "Atalho pronto: aurelia-desktop"
 
 install-path:
 	@chmod +x scripts/install-path.sh

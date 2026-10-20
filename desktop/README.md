@@ -47,6 +47,23 @@ npm install
 npm run tauri dev
 ```
 
+## Atalho de execução
+
+```bash
+make install-desktop   # instala o binário e o atalho de terminal
+aurelia-desktop        # abre o cliente (terminal liberta-se de imediato)
+```
+
+O atalho é escrito em `~/.aurelia/env` ( sourced pelo shell rc, tal como o
+`aurelia-tui`): na primeira execução constrói o cliente se ainda não existir
+e depois lança-o. A saída da app vai para
+`~/.aurelia/logs/aurelia-desktop.log`, por isso o prompt do terminal volta
+imediatamente.
+
+`make install-desktop` também copia o bundle `.app` (de um `make desktop-build`
+anterior) para `~/Applications`, para o cliente aparecer no Dock, no Launchpad
+e no ⌘Tab.
+
 ## Verificação estática
 
 ```bash
