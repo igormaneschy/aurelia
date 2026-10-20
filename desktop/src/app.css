@@ -257,6 +257,87 @@ textarea::placeholder {
   padding: 0 4px;
 }
 
+/* Session row + its actions. The actions only appear on hover (or when the
+   row is active) so the list stays clean. */
+.session-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: 8px;
+}
+
+.session-item:hover {
+  background: var(--bg-hover);
+}
+
+.session-item.active {
+  background: rgba(91, 124, 250, 0.14);
+}
+
+.session-item .session-row {
+  background: transparent;
+  border-color: transparent;
+}
+
+.session-item:hover .session-row {
+  background: transparent;
+}
+
+.session-item.active .session-row {
+  background: transparent;
+  border-color: transparent;
+}
+
+.session-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 2px;
+  padding-right: 6px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.session-item:hover .session-actions,
+.session-item:focus-within .session-actions {
+  opacity: 1;
+}
+
+.session-actions .icon-button {
+  width: 22px;
+  height: 22px;
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.session-actions .icon-button:hover:not(:disabled) {
+  color: var(--text);
+  background: var(--bg-elevated);
+}
+
+.session-actions .icon-button:disabled {
+  opacity: 0.4;
+}
+
+.session-rename {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.session-rename input {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 8px;
+  font-size: 12.5px;
+  color: var(--text);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
 .session-row {
   display: flex;
   align-items: center;

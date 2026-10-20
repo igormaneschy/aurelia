@@ -27,13 +27,12 @@
     // (the window froze on "A carregar histórico…"). Writing through the
     // local copy touches the DOM without touching the reactive graph.
     //
-    // Reading scrollHeight forces a synchronous layout, so it only runs when
-    // the content actually grew. During streaming the transcript changes on
-    // every chunk; measuring each time made the UI feel stuck.
+    // `stickToBottom` is the user's intent: it is false only after the user
+    // scrolls up. It must not be derived from the current distance — after a
+    // session switch the transcript is empty and then fills up, so the
+    // distance is large and the view stayed at the top of the conversation.
     const node = viewport;
     if (!stickToBottom || !node) return;
-    const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
-    if (distance > 2) return;
     node.scrollTop = node.scrollHeight;
   });
 

@@ -9,6 +9,8 @@
 
   export let onSelect: (session: SessionInfo) => void = () => {};
   export let onCreate: (name: string) => void | Promise<void> = () => {};
+  export let onDelete: (session: SessionInfo) => void | Promise<void> = () => {};
+  export let onRename: (session: SessionInfo, name: string) => void | Promise<void> = () => {};
   export let onRefresh: () => void = () => {};
   export let onShowProject: () => void = () => {};
   export let onShowStatus: () => void = () => {};
@@ -18,6 +20,8 @@
 
   let creating = false;
   let newName = "";
+  let renamingId: number | null = null;
+  let renameValue = "";
 
   function basename(path: string): string {
     return path.split("/").filter(Boolean).pop() || path;
@@ -33,6 +37,23 @@
     creating = false;
     newName = "";
     await onCreate(name);
+  }
+
+  function startRename(session: SessionInfo) {
+    renamingId = session.chat_id;
+    renameValue = session.name;
+  }
+
+  function cancelRename() {
+    renamingId = null;
+    renameValue = "";
+  }
+
+  async function submitRename(session: SessionInfo) {
+    const name = renameValue.trim();
+    renamingId = null;
+    renameValue = "";
+    await onRename(session, name);
   }
 
   $: projectLabel = project?.cwd ? basename(project.cwd) : "Sem projeto";
@@ -71,19 +92,57 @@
 
   <nav class="session-list" aria-label="Sessões">
     {#each sessions as session (session.chat_id)}
-      <button
-        class="session-row"
-        class:active={session.chat_id === activeSession?.chat_id}
-        disabled={running && session.chat_id !== activeSession?.chat_id}
-        title={label(session)}
-        on:click={() => onSelect(session)}
-      >
-        <span class="session-dot"></span>
-        <span class="session-name">{label(session)}</span>
-        {#if session.message_count > 0}
-          <span class="session-count">{session.message_count}</span>
-        {/if}
-      </button>
+      {#if renamingId === session.chat_id}
+        <form class="session-rename" on:submit|preventDefault={() => submitRename(session)}>
+          <input
+            bind:value={renameValue}
+            maxlength="64"
+            autocomplete="off"
+            spellcheck="false"
+            on:keydown={(event) => {
+              if (event.key === "Escape") cancelRename();
+            }}
+          />
+          <button class="primary small" type="submit" disabled={!renameValue.trim()}>OK</button>
+          <button class="ghost small" type="button" on:click={cancelRename}>✕</button>
+        </form>
+      {:else}
+        <div class="session-item" class:active={session.chat_id === activeSession?.chat_id}>
+          <button
+            class="session-row"
+            class:active={session.chat_id === activeSession?.chat_id}
+            disabled={running && session.chat_id !== activeSession?.chat_id}
+            title={label(session)}
+            on:click={() => onSelect(session)}
+          >
+            <span class="session-dot"></span>
+            <span class="session-name">{label(session)}</span>
+            {#if session.message_count > 0}
+              <span class="session-count">{session.message_count}</span>
+            {/if}
+          </button>
+          {#if session.chat_id !== DM_CHAT_ID}
+            <div class="session-actions">
+              <button
+                class="icon-button"
+                title="Renomear sessão"
+                disabled={running}
+                on:click|stopPropagation={() => startRename(session)}
+              >
+                ✎
+              </button>
+              <button
+                class="icon-button"
+                title="Eliminar sessão"
+                disabled={running}
+                on:click|stopPropagation={() => onDelete(session)}
+              >
+                🗑
+              </button>
+            </div>
+          {/if}
+        </div>
+      {/if}
     {/each}
   </nav>
 

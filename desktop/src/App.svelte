@@ -421,6 +421,50 @@
     }
   }
 
+  async function deleteSession(session: SessionInfo) {
+    const accepted = await confirmDialog(
+      `Eliminar a sessão "${session.name}"? O histórico desta sessão deixa de estar disponível.`,
+      { title: "Eliminar sessão", kind: "warning" },
+    );
+    if (!accepted) return;
+
+    const wasActive = get(activeSession)?.chat_id === session.chat_id;
+    try {
+      await api.deleteSession(session.chat_id);
+      const list = await refreshSessions();
+      if (wasActive) {
+        // Move to another session (the DM by preference) so the transcript
+        // never points at a session that no longer exists.
+        const target =
+          list.find((entry) => entry.chat_id === DM_CHAT_ID) ?? list[0] ?? null;
+        if (target) {
+          await selectSession(target);
+        } else {
+          activeSession.set(null);
+          messages.set([]);
+        }
+      }
+      notify("info", `Sessão "${session.name}" eliminada.`);
+    } catch (error) {
+      notify("error", friendlyError(error));
+    }
+  }
+
+  async function renameSession(session: SessionInfo, name: string) {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === session.name) return;
+    try {
+      await api.renameSession(session.chat_id, trimmed);
+      await refreshSessions();
+      const current = get(activeSession);
+      if (current && current.chat_id === session.chat_id) {
+        activeSession.set({ ...current, name: trimmed });
+      }
+    } catch (error) {
+      notify("error", friendlyError(error));
+    }
+  }
+
   async function openProjectPanel() {
     showProject = true;
     const session = get(activeSession);
@@ -596,6 +640,8 @@
     running={$running}
     onSelect={selectSession}
     onCreate={createSession}
+    onDelete={deleteSession}
+    onRename={renameSession}
     onRefresh={refreshAll}
     onShowProject={openProjectPanel}
     onShowStatus={showStatus}

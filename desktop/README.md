@@ -89,7 +89,8 @@ catálogo de modelos, `/status` e histórico.
 > Validado visualmente no macOS 27 (dev e bundle de debug) em 2026-10-19. A
 > investigação do bloqueio anterior está em [BLOCKED.md](BLOCKED.md).
 
-- listar, criar e abrir sessões locais compartilhadas com a TUI;
+- listar, criar, abrir, renomear e eliminar sessões locais compartilhadas
+  com a TUI;
 - histórico da sessão PI;
 - envio de mensagens com streaming em tempo real;
 - markdown e blocos de código;
@@ -110,8 +111,6 @@ catálogo de modelos, `/status` e histórico.
 - **Sem notificações** e sem sincronização ao vivo com a TUI/Telegram.
 - **Limite de sessões:** 8 sessões nomeadas + DM no namespace reservado. O app
   mostra uma mensagem clara quando o limite é atingido.
-- **Renomear/apagar sessão:** os comandos Rust existem, mas a UI ainda não
-  expõe essas ações.
 - **Comandos de texto:** `/status`, `/cwd`, `/agents`, `/mode` e `/help` são
   markdown, não JSON. O app exibe o texto; uma evolução do protocolo pode
   estruturar esses payloads.
