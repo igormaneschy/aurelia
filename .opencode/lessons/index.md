@@ -5,6 +5,7 @@
 - [anti-pattern] svelte-undefined-identifier-silent-runtime-failure
 - [anti-pattern] streaming-ui-coalesce-and-parse-once
 - [anti-pattern] svelte-legacy-mutate-update-loop
+- [anti-pattern] global-singleton-configured-per-component
 
 ## Change pi-sdk-0-86-sync (2026-09-20)
 - [anti-pattern] pi-sdk-pin-drift
