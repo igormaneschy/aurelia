@@ -1,3 +1,11 @@
 [workspace]
 members = ["crates/aurelia-ipc", "src-tauri"]
 resolver = "2"
+
+# The dev profile of the desktop client compiles the whole Tauri/wry tree with
+# full debug symbols, which grows the target directory by several GB per
+# iteration (9.4 GB after a few days of rebuilding). Line tables keep the
+# stack traces readable (file and line) while dropping the bulk of the DWARF
+# data, cutting the artifacts to roughly a third.
+[profile.dev]
+debug = "line-tables-only"
