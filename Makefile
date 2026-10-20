@@ -34,6 +34,7 @@ help:
 	@echo "  make desktop-dev      Run the Tauri desktop client in dev mode"
 	@echo "  make desktop-build    Build the macOS desktop app bundle"
 	@echo "  make desktop-check    Type-check the desktop client (svelte-check)"
+	@echo "  make desktop-clean    Remove the desktop build artifacts (~9GB)"
 	@echo ""
 	@echo "Service targets:"
 	@echo "  make install-service     Auto-detect OS and install service"
@@ -98,6 +99,11 @@ desktop-build:
 
 desktop-check:
 	cd desktop && npm run check
+
+# Remove the desktop build artifacts (the dev profile alone reaches ~9GB with
+# debug symbols). The next build is a full rebuild.
+desktop-clean:
+	cd desktop && cargo clean --profile dev --manifest-path Cargo.toml
 
 install-path:
 	@chmod +x scripts/install-path.sh
