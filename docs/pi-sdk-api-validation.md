@@ -1,7 +1,7 @@
 # PI SDK API Validation
 
-**Date:** 2026-09-20
-**PI SDK Version:** `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` v0.86.0
+**Date:** 2026-11-06
+**PI SDK Version:** `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent` v1.5.0
 **Validated by:** installed `dist/*.d.ts` + `tsc --noEmit`, `bridge/sdk-surface.test.ts`
 (entry-points, offline `ModelRuntime.create()`, HTTP dispatcher), the bridge test
 suite, and the Go boundary tests.
@@ -66,7 +66,7 @@ const modelRuntime = await ModelRuntime.create({
 });
 ```
 
-The installed v0.86.0 declarations confirm:
+The installed v1.5.0 declarations confirm:
 
 - `ModelRuntime.create()` is asynchronous;
 - `getModel(providerId, modelId)` is the qualified lookup;
@@ -82,8 +82,8 @@ Catalog refresh is network-enabled only for an explicit `list-models` request wi
 `session_id`, `session_file`, message timestamps, selected model and thinking
 level across sessions written by earlier SDK versions (the 0.79.2 fixture still
 opens). NDJSON event names and fields remain a Go ↔ bridge protocol contract;
-session files are forward-compatible, and the 0.86.0 changelog lists no session
-format break.
+session files are forward-compatible, and the 1.0.4 → 1.5.0 changelogs list no
+session format break.
 
 Provider failures remain terminal `error` events, never a successful empty
 `result`: the bridge checks `state.errorMessage`, the final assistant
@@ -93,21 +93,58 @@ Provider failures remain terminal `error` events, never a successful empty
 
 `beforeToolCall` is still not a `createAgentSession` option. After session creation, the bridge wraps `session.agent.beforeToolCall`, evaluates Aurelia policy first, forwards allowed or rewritten calls to PI's original extension hook, and restores that original hook on cleanup. `session.on("tool_call")` is not a PI SDK API and must not be used.
 
-## Upgrade notes: 0.84.4 → 0.86.0
+## Upgrade notes: 1.0.4 → 1.5.0
 
-0.85.x carried no breaking changes. The three published for 0.86.0 do not cross
-the bridge boundary:
+1.1.0, 1.3.0 and 1.4.0 carried no breaking changes. The three published for
+1.2.0 and the one for 1.5.0 do not cross the bridge boundary:
 
-- custom-provider stream inputs (`Context` → `TranscriptContext`) — Aurelia
-  registers no custom providers;
-- `ToolCall.arguments` / `ToolResultMessage.details` restricted to JSON values —
-  the bridge already serializes tool input/output as JSON strings;
-- `user_bash` failing closed — the bridge installs no `user_bash` handler.
+- theme schema moved to `https://pi.dev/schemas/theme.schema.json` and is
+  validated at startup — the bridge manages no themes;
+- `before_agent_start` became a union on `messageType`, and a session now
+  counts as busy while a run starts — the bridge installs no
+  `before_agent_start` handler and serializes runs with its own guard;
+- the experimental server/client/plugin stack and the `@earendil-works/chord`
+  dependency were removed — the bridge imports neither;
+- tool argument validation moved to `@earendil-works/pi-schema` (TypeBox
+  features outside JSON Schema no longer apply) — the bridge defines no custom
+  tools, and MCP tools provide plain JSON Schema;
+- provider attribution headers moved to pi-ai's client identity (1.4.0) — the
+  bridge installs no `before_provider_headers` handler;
+- the native OS `sandbox/` extension example was removed (1.5.0) — unused.
 
 The HTTP dispatcher path (`dist/core/http-dispatcher.js`,
 `configureHttpDispatcher`) still resolves; `sdk-surface.test.ts` asserts it.
 
-## Live validation: 2026-09-20
+## Static validation: 2026-11-06
+
+`make sync-pi-sdk` moved both pins from 1.0.4 to 1.5.0 and ran the full gate:
+
+| Check | Evidence |
+|---|---|
+| Dependency install | `bridge/node_modules` on 1.0.4 → 1.5.0 (`pi-ai`, `pi-coding-agent`, `pi-agent-core`, `pi-schema`) |
+| Typecheck | `tsc --noEmit` clean against the 1.5.0 declarations |
+| Bridge suite | 170/170 (`sdk-surface`, policy, session, telemetry) |
+| Bundle | rebuilt from source (95.4kb); `bridge/bundle.js` and `internal/bridge/bundle.js` identical |
+| Go boundary | `go build ./...`, `go vet ./...`, `go test ./... -short` clean |
+| Daemon install probe | `AURELIA_BRIDGE_INSTALL_PROBE=1` → `PASS` (fresh install, drift repair, stale-hash rebuild) |
+
+## Live validation: 1.5.0 (2026-11-06)
+
+Daemon `v0.50.0` + `feature/pi-sdk-1.5.0`, deployed by the post-commit hook.
+On the first start `EnsureBridge` reinstalled the bridge tree (`added 5
+packages, removed 3 packages, changed 7 packages`), rebuilt the bundle from
+source (95.4kb) and logged `Bridge setup complete` with no import error.
+
+| Check | Evidence |
+|---|---|
+| TUI/IPC pipeline | two turns in a fresh TUI session: `ok` in 4s and `4` in 1s |
+| Session reuse | the second turn ran in the same session, no cold start or reinstall |
+| Model catalog | `/model` returned `deepseek-v4.1-flash` (opencode-go) plus the available catalog |
+| Tool call | `mcp` tool executed (progress `tool_name=mcp`); bash was correctly unavailable without `/cwd` |
+| Cleanup | the probe session was created and deleted via IPC; no row remains in `tui_sessions.db` |
+| Errors | no import failure, panic or bridge error during the run |
+
+## Live validation: 0.86.0 (2026-09-20, historical)
 
 Daemon `v0.47.0` + `feature/pi-sdk-0-86-sync`, deployed by the post-commit hook.
 On the first start `EnsureBridge` logged the drift for both packages
