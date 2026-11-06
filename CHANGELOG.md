@@ -4,6 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.51.0] - 2026-11-06
+
+### Upgraded
+- **PI SDK 1.0.4 → 1.5.0** (`@earendil-works/pi-ai` e
+  `@earendil-works/pi-coding-agent`), alinhando o bridge ao PI CLI instalado
+  (1.5.0) e ao `latest` do npm. O pin duplo (`bridge/package.json` +
+  `internal/bridge/pi_sdk.go`) foi movido pelo `make sync-pi-sdk`; o daemon
+  reinstalou a árvore e rebuildou o bundle no primeiro start.
+- Nenhum breaking change cruza o bridge: ele não define tools próprias, não
+  instala handlers `before_agent_start`/`before_provider_headers` e não gerencia
+  themes. As mudanças de 1.2.0 (schema de themes, união de `before_agent_start`,
+  remoção do stack experimental e da dependência `chord`) e de 1.5.0 (validação
+  de tool args em `pi-schema`, remoção do exemplo sandbox) ficam fora do
+  caminho usado pelo daemon.
+- Validação: typecheck, 170 testes do bridge, probe de instalação do daemon,
+  `go build`/`go vet`/`go test ./... -short` e validação live no daemon
+  (dois turnos, `/model` e tool call `mcp`). Evidências em
+  `docs/pi-sdk-api-validation.md`.
+
 ## [0.50.0] - 2026-11-06
 
 ### Added
