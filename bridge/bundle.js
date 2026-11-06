@@ -1322,7 +1322,7 @@ function sessionHistoryFromMessages(messages, limit = 100) {
   if (history.length <= limit) return history;
   return history.slice(history.length - limit);
 }
-function boundSessionHistoryPayload(history, maxTextRunes = 400, maxPayloadRunes = 12e3) {
+function boundSessionHistoryPayload(history, maxTextRunes = 6e3, maxPayloadRunes = 192e3) {
   const bounded = [];
   let budget = maxPayloadRunes;
   for (let i = history.length - 1; i >= 0; i--) {

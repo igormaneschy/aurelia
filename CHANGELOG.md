@@ -4,6 +4,53 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.50.0] - 2026-11-06
+
+### Added
+- **Aurelia Desktop** (`desktop/`): cliente local em **Tauri 2 + Svelte 5**
+  que fala com o daemon existente pelo socket Unix `~/.aurelia/aurelia.sock`.
+  Compartilha as sessões da TUI (`tui_sessions.db`) — uma conversa começada no
+  terminal continua no app e vice-versa — com histórico da sessão PI, streaming
+  em tempo real, markdown/blocos de código, anexos (seletor e drag-and-drop),
+  `/cwd` e painel de estado do projeto, catálogo e troca de modelo, `/status`,
+  `/agents`, `/help`, `/reset`, cancelamento da resposta e
+  criar/renomear/eliminar sessões. Não há segundo agente nem segunda base de
+  sessões.
+- `desktop/crates/aurelia-ipc`: cliente Rust independente do Tauri (tipos do
+  protocolo, conexão Unix, leitura de eventos, cancelamento) com testes contra
+  um socket falso e um `probe` contra o daemon real.
+- `make desktop-dev|desktop-build|desktop-build-debug|desktop-check|desktop-clean`
+  e `make install-desktop`; o atalho `aurelia-desktop` (escrito em
+  `~/.aurelia/env`) constrói o cliente na primeira execução, lança-o destacado
+  do terminal e grava a saída em `~/.aurelia/logs/aurelia-desktop.log`.
+
+### Fixed
+- Respostas longas apareciam cortadas na TUI e no desktop: o histórico do
+  bridge limitava cada mensagem a 400 runes. O limite subiu para 6.000 runes
+  por mensagem e 192K por payload, mantendo-se abaixo do cap de 256K do lado Go
+  (e do teto de 10 MB da linha NDJSON), com o JSON sempre válido.
+- Um erro de IPC não fechava o request: os handlers da TUI emitiam
+  `event_error` sem `stream_end`, e o cliente desktop ficava preso em
+  "A carregar histórico…" ao abrir uma sessão que já não existia. Agora todo
+  erro é seguido do evento terminal.
+- `/reset` (Telegram, TUI e desktop) limpava a sessão PI mas não o contexto de
+  continuidade (último intent, último sumário, checkpoint, project work state);
+  a primeira mensagem depois do reset herdava a conversa anterior. O reset
+  agora zera esse estado e não injeta contexto até a conversa produzir estado
+  novo.
+- Desktop: loop infinito de microtasks no autoscroll que prendia o `WebContent`
+  a 100% de CPU e impedia a UI de montar; troca de sessão travada no loading;
+  expansão de markdown congelando a janela; bolha do assistant vazia em
+  respostas curtas; Enter sem efeito por store usado sem `import`; sessão
+  aberta no topo em vez da última mensagem.
+- `make install-desktop` procurava o bundle release em
+  `desktop/src-tauri/target/`, mas o workspace Cargo usa `desktop/target/`; a
+  cópia do `.app` para `~/Applications` nunca acontecia.
+
+### Changed
+- Perfil `dev` do desktop com `debug = "line-tables-only"`: mantém stack traces
+  com ficheiro/linha e reduz os artefactos de build a ~1/3 do tamanho.
+
 ## [0.49.0] - 2026-10-07
 
 ### Upgraded

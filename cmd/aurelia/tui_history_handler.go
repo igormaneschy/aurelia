@@ -14,11 +14,11 @@ import (
 func handleTUIHistory(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
 	history, err := loadTUIHistory(ctx, a, msg.ChatID, int(msg.ThreadID), msg.UserID)
 	if err != nil {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: err.Error(), RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, err.Error())
 	}
 	body, err := json.Marshal(history)
 	if err != nil {
-		return emit(ipc.IPCEvent{Type: ipc.EventTypeError, Error: fmt.Sprintf("marshal history: %s", err), RequestID: msg.RequestID})
+		return emitSessionError(emit, msg.RequestID, fmt.Sprintf("marshal history: %s", err))
 	}
 	if err := emit(ipc.IPCEvent{Type: ipc.EventTypeHistory, Body: string(body), RequestID: msg.RequestID}); err != nil {
 		return err

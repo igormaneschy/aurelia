@@ -18,6 +18,7 @@ ${MARKER_END}"
 
 mkdir -p "${BIN_DIR}"
 WRAPPER_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/aurelia-tui"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 USER_BIN="${HOME}/bin"
 if [[ -f "${WRAPPER_SRC}" ]]; then
 	mkdir -p "${USER_BIN}"
@@ -26,50 +27,76 @@ fi
 
 case "$(basename "${SHELL:-}")" in
 	zsh)
-		cat >"${ENV_FILE}" <<'EOF'
+		cat >"${ENV_FILE}" <<EOF
 # Aurelia CLI — added by scripts/install-path.sh (make install-path)
-export PATH="$HOME/.aurelia/bin:$PATH"
+export PATH="\$HOME/.aurelia/bin:\$PATH"
 
 # Fixed TUI shortcuts (shadow the binary when this file is sourced).
-_aurelia_tui_bin="${HOME}/.aurelia/bin/aurelia-tui"
+_aurelia_tui_bin="\${HOME}/.aurelia/bin/aurelia-tui"
 aurelia-tui() {
-	case "${1:-}" in
+	case "\${1:-}" in
 		configure)
 			shift
-			command "${_aurelia_tui_bin}" --session configure "$@"
+			command "\${_aurelia_tui_bin}" --session configure "\$@"
 			;;
 		aurelia)
 			shift
-			command "${_aurelia_tui_bin}" "$@"
+			command "\${_aurelia_tui_bin}" "\$@"
 			;;
 		*)
-			command "${_aurelia_tui_bin}" "$@"
+			command "\${_aurelia_tui_bin}" "\$@"
 			;;
 	esac
+}
+
+# Desktop client shortcut: builds it on first use, then launches it.
+_aurelia_desktop_bin="\${HOME}/.aurelia/bin/aurelia-desktop"
+aurelia-desktop() {
+	if [ ! -x "\${_aurelia_desktop_bin}" ]; then
+		echo "Aurelia Desktop: primeira execucao, a construir (pode demorar ~1 min)..." >&2
+		(cd "${REPO_ROOT}" && make install-desktop) || return 1
+	fi
+	mkdir -p "\${HOME}/.aurelia/logs"
+	# Detach from the terminal: this is a GUI client, its output goes to the
+	# log file and the shell prompt comes back immediately.
+	"\${_aurelia_desktop_bin}" "\$@" >>"\${HOME}/.aurelia/logs/aurelia-desktop.log" 2>&1 &
 }
 EOF
 		;;
 	bash)
-		cat >"${ENV_FILE}" <<'EOF'
+		cat >"${ENV_FILE}" <<EOF
 # Aurelia CLI — added by scripts/install-path.sh (make install-path)
-export PATH="$HOME/.aurelia/bin:$PATH"
+export PATH="\$HOME/.aurelia/bin:\$PATH"
 
 # Fixed TUI shortcuts (shadow the binary when this file is sourced).
-_aurelia_tui_bin="${HOME}/.aurelia/bin/aurelia-tui"
+_aurelia_tui_bin="\${HOME}/.aurelia/bin/aurelia-tui"
 aurelia-tui() {
-	case "${1:-}" in
+	case "\${1:-}" in
 		configure)
 			shift
-			command "${_aurelia_tui_bin}" --session configure "$@"
+			command "\${_aurelia_tui_bin}" --session configure "\$@"
 			;;
 		aurelia)
 			shift
-			command "${_aurelia_tui_bin}" "$@"
+			command "\${_aurelia_tui_bin}" "\$@"
 			;;
 		*)
-			command "${_aurelia_tui_bin}" "$@"
+			command "\${_aurelia_tui_bin}" "\$@"
 			;;
 	esac
+}
+
+# Desktop client shortcut: builds it on first use, then launches it.
+_aurelia_desktop_bin="\${HOME}/.aurelia/bin/aurelia-desktop"
+aurelia-desktop() {
+	if [ ! -x "\${_aurelia_desktop_bin}" ]; then
+		echo "Aurelia Desktop: primeira execucao, a construir (pode demorar ~1 min)..." >&2
+		(cd "${REPO_ROOT}" && make install-desktop) || return 1
+	fi
+	mkdir -p "\${HOME}/.aurelia/logs"
+	# Detach from the terminal: this is a GUI client, its output goes to the
+	# log file and the shell prompt comes back immediately.
+	"\${_aurelia_desktop_bin}" "\$@" >>"\${HOME}/.aurelia/logs/aurelia-desktop.log" 2>&1 &
 }
 EOF
 		;;
@@ -129,6 +156,20 @@ function aurelia-tui --wraps aurelia-tui
 		case '*'
 			command $bin $argv
 	end
+end
+
+# Desktop client shortcut: builds it on first use, then launches it.
+function aurelia-desktop
+	set -l bin $HOME/.aurelia/bin/aurelia-desktop
+	if not test -x $bin
+		echo "Aurelia Desktop: primeira execucao, a construir (pode demorar ~1 min)..." >&2
+		cd "${REPO_ROOT}"; and make install-desktop
+		or return 1
+	end
+	mkdir -p $HOME/.aurelia/logs
+	# Detach from the terminal: this is a GUI client, its output goes to the
+	# log file and the shell prompt comes back immediately.
+	$bin $argv >>$HOME/.aurelia/logs/aurelia-desktop.log 2>&1 &
 end
 EOF
 		echo "updated ${fish_conf}"

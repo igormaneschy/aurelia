@@ -15,6 +15,7 @@ import (
 	"gopkg.in/telebot.v3"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
+	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/cron"
 	memoryuxpkg "github.com/igormaneschy/aurelia/internal/memoryux"
 	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
@@ -393,6 +394,17 @@ func (bc *BotController) ResetSession(chatID int64, threadID int, userID int64, 
 	}
 	if bc.sessions != nil {
 		bc.sessions.ClearSessionForUser(chatID, threadID, userID)
+	}
+	// Drop the continuity context too: it is injected into the next prompt
+	// (last intent / last summary / project work state), so a reset that only
+	// clears the PI session still leaks the previous conversation into the
+	// first message after the reset.
+	if bc.continuity != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if err := bc.continuity.ResetConversation(ctx, chatID, threadID, userID, continuity.UserResetReason); err != nil {
+			log.Printf("session: continuity reset failed chat=%d thread=%d: %v", chatID, threadID, err)
+		}
+		cancel()
 	}
 	log.Printf("session: reset for chat=%d thread=%d user=%d", chatID, threadID, userID)
 	return canceledActive

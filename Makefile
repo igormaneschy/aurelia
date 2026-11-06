@@ -14,7 +14,7 @@ TUI_BINARY    := $(HOME)/.aurelia/bin/aurelia-tui
 TUI_PKG       := ./cmd/aurelia-tui
 TUI_TMP       := $(TUI_BINARY).new
 
-.PHONY: help build test race vet lint sec cover check bridge sync-pi-sdk check-pi-sdk install tui tui-all install-tui install-path install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
+.PHONY: help build test race vet lint sec cover check bridge sync-pi-sdk check-pi-sdk install tui tui-all install-tui desktop-dev desktop-build desktop-build-debug desktop-check desktop-clean install-desktop install-path install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
 
 help:
 	@echo "Common targets:"
@@ -31,6 +31,10 @@ help:
 	@echo "  make check-pi-sdk     Report PI SDK pin vs PI CLI drift (exit 1 if stale)"
 	@echo "  make tui              Compile the TUI binary to $(TUI_BINARY)"
 	@echo "  make tui-all          Cross-compile TUI for linux/darwin amd64+arm64"
+	@echo "  make desktop-dev      Run the Tauri desktop client in dev mode"
+	@echo "  make desktop-build    Build the macOS desktop app bundle"
+	@echo "  make desktop-check    Type-check the desktop client (svelte-check)"
+	@echo "  make desktop-clean    Remove the desktop build artifacts (~9GB)"
 	@echo ""
 	@echo "Service targets:"
 	@echo "  make install-service     Auto-detect OS and install service"
@@ -84,6 +88,46 @@ install-tui: install-path
 	mkdir -p $(dir $(TUI_BINARY))
 	go build -o $(TUI_TMP) $(TUI_PKG)
 	mv $(TUI_TMP) $(TUI_BINARY)
+
+# --- Desktop (Tauri) ---
+
+desktop-dev:
+	cd desktop && npm run tauri dev
+
+desktop-build:
+	cd desktop && npm run tauri build
+
+# Standalone debug build (assets embedded, no .app bundle): fast enough for
+# the daily loop and usable as a standalone app.
+desktop-build-debug:
+	cd desktop && npm run tauri build -- --debug --no-bundle
+
+desktop-check:
+	cd desktop && npm run check
+
+# Remove the desktop build artifacts (the dev profile alone reaches ~9GB with
+# debug symbols). The next build is a full rebuild.
+desktop-clean:
+	cd desktop && cargo clean --profile dev --manifest-path Cargo.toml
+
+# Install the desktop client: the terminal shortcut
+# (~/.aurelia/bin/aurelia-desktop) and, when a release bundle exists, the
+# macOS app in ~/Applications (Dock, Launchpad, Cmd+Tab).
+install-desktop:
+	@mkdir -p "$(HOME)/.aurelia/bin"
+	@if [ ! -x desktop/target/debug/aurelia-desktop ]; then \
+		echo "Aurelia Desktop: a construir (primeira vez pode demorar ~1 min)..."; \
+		$(MAKE) desktop-build-debug; \
+	fi
+	install -m 755 desktop/target/debug/aurelia-desktop "$(HOME)/.aurelia/bin/aurelia-desktop"
+	@if [ -d desktop/target/release/bundle/macos/Aurelia.app ]; then \
+		rm -rf "$(HOME)/Applications/Aurelia.app"; \
+		cp -R desktop/target/release/bundle/macos/Aurelia.app "$(HOME)/Applications/"; \
+		echo "Aurelia.app instalado em ~/Applications"; \
+	else \
+		echo "(bundle release ausente: corra 'make desktop-build' para ter o .app em ~/Applications)"; \
+	fi
+	@echo "Atalho pronto: aurelia-desktop"
 
 install-path:
 	@chmod +x scripts/install-path.sh

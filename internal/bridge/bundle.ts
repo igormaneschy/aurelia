@@ -2074,16 +2074,23 @@ function sessionHistoryFromMessages(messages: unknown[], limit = 100): SessionHi
 }
 
 // Bound the serialized get-session-history payload so it always stays below
-// MAX_EVENT_TEXT_RUNES (16K) — sanitizeOutEvent truncates `content` by runes
-// and a history JSON cut mid-string would fail the Go side's json.Unmarshal
-// with "unexpected end of JSON input" (observed with long sessions whose
-// history JSON exceeded the cap). Each message text is truncated to
-// maxTextRunes and the list is trimmed newest-first until the serialized
-// payload fits maxPayloadRunes, keeping the emitted JSON always valid.
+// the Go side's result-content cap (MAX_RESULT_CONTENT_RUNES /
+// maxEventResultContentBytes = 256K) and the NDJSON line ceiling (10MB) —
+// sanitizeOutEvent truncates `content` by runes and a history JSON cut
+// mid-string would fail the Go side's json.Unmarshal with "unexpected end of
+// JSON input" (observed with long sessions whose history JSON exceeded the
+// cap). Each message text is truncated to maxTextRunes and the list is
+// trimmed newest-first until the serialized payload fits maxPayloadRunes,
+// keeping the emitted JSON always valid.
+//
+// The per-message limit must be large enough for a real answer: at 400 runes
+// every long reply was cut mid-sentence in the transcript (the TUI and the
+// desktop client both render this history). 8K runes covers a full response
+// while the 192K payload budget still leaves headroom below the 256K cap.
 export function boundSessionHistoryPayload(
   history: SessionHistoryMessage[],
-  maxTextRunes = 400,
-  maxPayloadRunes = 12_000,
+  maxTextRunes = 6_000,
+  maxPayloadRunes = 192_000,
 ): SessionHistoryMessage[] {
   const bounded: SessionHistoryMessage[] = [];
   let budget = maxPayloadRunes;

@@ -82,6 +82,12 @@ func ConversationKeyFor(chatID int64, threadID int, userID int64) ConversationKe
 // warm and continuity can be skipped to save tokens.
 const FreshThreshold = 5 * time.Minute
 
+// UserResetReason is the reset_reason recorded when the user explicitly
+// resets a conversation (/reset, /new). It marks the conversation as
+// deliberately emptied: until it produces fresh state, no carried context may
+// be injected into its next prompt.
+const UserResetReason = "user reset"
+
 // --- ProjectWork types ---
 
 // ProjectWorkKey identifies project-scoped work state by user and project.
