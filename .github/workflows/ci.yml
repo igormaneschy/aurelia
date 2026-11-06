@@ -17,7 +17,10 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.27'
+          # golangci-lint 2.13.x supports export data up to version 4; Go
+          # 1.27.3 emits version 5 and every stdlib import fails typecheck.
+          # Keep lint on 1.27.0 until a golangci-lint release catches up.
+          go-version: '1.27.0'
 
       - name: Lint
         uses: golangci/golangci-lint-action@v7
