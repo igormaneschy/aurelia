@@ -163,7 +163,7 @@ function aurelia-desktop
 	set -l bin $HOME/.aurelia/bin/aurelia-desktop
 	if not test -x $bin
 		echo "Aurelia Desktop: primeira execucao, a construir (pode demorar ~1 min)..." >&2
-		cd ${REPO_ROOT}; and make install-desktop
+		cd "${REPO_ROOT}"; and make install-desktop
 		or return 1
 	end
 	mkdir -p $HOME/.aurelia/logs

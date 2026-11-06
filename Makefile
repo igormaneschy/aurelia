@@ -14,7 +14,7 @@ TUI_BINARY    := $(HOME)/.aurelia/bin/aurelia-tui
 TUI_PKG       := ./cmd/aurelia-tui
 TUI_TMP       := $(TUI_BINARY).new
 
-.PHONY: help build test race vet lint sec cover check bridge sync-pi-sdk check-pi-sdk install tui tui-all install-tui desktop-dev desktop-build install-path install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
+.PHONY: help build test race vet lint sec cover check bridge sync-pi-sdk check-pi-sdk install tui tui-all install-tui desktop-dev desktop-build desktop-build-debug desktop-check desktop-clean install-desktop install-path install-service install-service-macos install-service-linux deploy restart sign stop status logs stdout uninstall-service
 
 help:
 	@echo "Common targets:"
@@ -120,9 +120,9 @@ install-desktop:
 		$(MAKE) desktop-build-debug; \
 	fi
 	install -m 755 desktop/target/debug/aurelia-desktop "$(HOME)/.aurelia/bin/aurelia-desktop"
-	@if [ -d desktop/src-tauri/target/release/bundle/macos/Aurelia.app ]; then \
+	@if [ -d desktop/target/release/bundle/macos/Aurelia.app ]; then \
 		rm -rf "$(HOME)/Applications/Aurelia.app"; \
-		cp -R desktop/src-tauri/target/release/bundle/macos/Aurelia.app "$(HOME)/Applications/"; \
+		cp -R desktop/target/release/bundle/macos/Aurelia.app "$(HOME)/Applications/"; \
 		echo "Aurelia.app instalado em ~/Applications"; \
 	else \
 		echo "(bundle release ausente: corra 'make desktop-build' para ter o .app em ~/Applications)"; \

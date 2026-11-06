@@ -81,7 +81,8 @@ cd desktop
 npm run tauri build
 ```
 
-O bundle fica em `desktop/src-tauri/target/release/bundle/`. Para validar apenas
+O bundle fica em `desktop/target/release/bundle/` (o workspace Cargo na raiz de
+`desktop/` define o target dir). Para validar apenas
 o binário sem gerar DMG:
 
 ```bash
