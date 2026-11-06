@@ -25,7 +25,9 @@ jobs:
       - name: Lint
         uses: golangci/golangci-lint-action@v7
         with:
-          version: latest
+          # Keep the version aligned with .github/workflows/golangci-lint.yml.
+          # v2.15.0 adds errcheck findings on intentional channel receives.
+          version: v2.13.2
           args: --timeout=5m ./...
 
   security:
