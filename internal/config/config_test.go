@@ -25,7 +25,58 @@ func TestMain(m *testing.M) {
 	if err := os.Unsetenv("TELEGRAM_BOT_TOKEN"); err != nil {
 		panic("config test: unsetenv TELEGRAM_BOT_TOKEN: " + err.Error())
 	}
+	if err := os.Unsetenv("AURELIA_MEMORY_PROVIDER"); err != nil {
+		panic("config test: unsetenv AURELIA_MEMORY_PROVIDER: " + err.Error())
+	}
 	os.Exit(m.Run())
+}
+
+func TestNormalizeMemoryProvider(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"":            MemoryProviderLegacy,
+		"legacy":      MemoryProviderLegacy,
+		" AI-MEMORY ": MemoryProviderAIMemory,
+		"shadow":      MemoryProviderShadow,
+		"unknown":     MemoryProviderLegacy,
+	}
+	for input, want := range cases {
+		if got := NormalizeMemoryProvider(input); got != want {
+			t.Fatalf("NormalizeMemoryProvider(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestLoad_MemoryProviderDefaultAndEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	t.Setenv("AURELIA_HOME", tmpDir)
+
+	r, err := runtime.New()
+	if err != nil {
+		t.Fatalf("runtime.New() unexpected error: %v", err)
+	}
+	cfg, err := Load(r)
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if cfg.MemoryProviderMode() != MemoryProviderLegacy {
+		t.Fatalf("default MemoryProvider = %q, want %q", cfg.MemoryProviderMode(), MemoryProviderLegacy)
+	}
+
+	for input, want := range map[string]string{
+		"ai-memory": MemoryProviderAIMemory,
+		"shadow":    MemoryProviderShadow,
+		"bogus":     MemoryProviderLegacy,
+	} {
+		t.Setenv("AURELIA_MEMORY_PROVIDER", input)
+		cfg, err := Load(r)
+		if err != nil {
+			t.Fatalf("Load() with %q: %v", input, err)
+		}
+		if got := cfg.MemoryProviderMode(); got != want {
+			t.Fatalf("MemoryProviderMode() with %q = %q, want %q", input, got, want)
+		}
+	}
 }
 
 func TestLoad_CreatesDefaultAppConfigWhenMissing(t *testing.T) {

@@ -606,6 +606,21 @@ Practical consequences:
   overlay; future writes are shared by both sides. The private mapping is in
   `~/.aurelia/config/app.json` and `project_bindings.db`.
 
+### 15.7 ai-memory Pi extension handoff
+
+The shared Pi extension `ai-memory-pi.ts` injects the pending handoff at
+`before_agent_start` and posts session-start, prompt, tool, stop, pre-compact
+and session-end events with the PI session id. Handoff creation/consumption is
+therefore automatic and project-scoped; do not reimplement it in the daemon.
+
+The Pi extension does **not** inject a project briefing/pinned digest. In the
+feature-flagged `ai-memory` mode, the thin `internal/memorycontext` adapter
+reads `memory_briefing`/`memory_read_page` through the loopback MCP endpoint,
+formats a bounded working set (counts, rules, recent page excerpts and pending
+handoff count), and never duplicates the handoff. The default remains
+`legacy` until the migration/shadow acceptance; `AURELIA_MEMORY_PROVIDER` can
+select `legacy`, `ai-memory` or `shadow`.
+
 ## 16. Daily operations
 
 ### 16.1 NAS services

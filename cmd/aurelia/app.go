@@ -22,6 +22,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/deps"
 	"github.com/igormaneschy/aurelia/internal/dream"
 	"github.com/igormaneschy/aurelia/internal/ipc"
+	"github.com/igormaneschy/aurelia/internal/memorycontext"
 	"github.com/igormaneschy/aurelia/internal/persona"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
@@ -35,22 +36,23 @@ import (
 )
 
 type app struct {
-	config      *config.AppConfig
-	resolver    *runtime.PathResolver
-	bridge      *bridge.Bridge
-	agents      *agents.Registry
-	cronStore   *cron.SQLiteCronStore
-	bindings    projectbinding.Store
-	runLog      runlog.Store
-	continuity  continuity.Store
-	bot         *telegram.BotController
-	sessions    *session.Store
-	scheduler   *cron.Scheduler
-	cronCtx     context.Context
-	cronCancel  context.CancelFunc
-	ipcServer   *ipc.Server
-	tuiRunGuard *tuiRunGuard
-	tuiSessions tuisessions.Store
+	config         *config.AppConfig
+	resolver       *runtime.PathResolver
+	bridge         *bridge.Bridge
+	agents         *agents.Registry
+	cronStore      *cron.SQLiteCronStore
+	bindings       projectbinding.Store
+	runLog         runlog.Store
+	continuity     continuity.Store
+	memoryProvider memorycontext.Provider
+	bot            *telegram.BotController
+	sessions       *session.Store
+	scheduler      *cron.Scheduler
+	cronCtx        context.Context
+	cronCancel     context.CancelFunc
+	ipcServer      *ipc.Server
+	tuiRunGuard    *tuiRunGuard
+	tuiSessions    tuisessions.Store
 
 	onboardingStore *users.OnboardingStore
 }
@@ -91,6 +93,15 @@ func bootstrapApp() (*app, error) {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 	setProviderEnv(cfg)
+
+	var memProvider memorycontext.Provider
+	if cfg.MemoryProviderMode() == config.MemoryProviderAIMemory {
+		baseProvider := memorycontext.NewAIMemoryProvider(memorycontext.AIMemoryOptions{})
+		memProvider = memorycontext.NewCachedProvider(baseProvider, memorycontext.NewCache(memorycontext.DefaultCacheTTL))
+		log.Printf("memory provider: ai-memory (MCP read-only working set)")
+	} else {
+		log.Printf("memory provider: %s", cfg.MemoryProviderMode())
+	}
 
 	// Check runtime dependencies before touching the bridge.
 	checkResult := deps.CheckAll()
@@ -280,6 +291,7 @@ func bootstrapApp() (*app, error) {
 	}
 	bot.SetRunLog(runLogStore)
 	bot.SetContinuity(continuityStore)
+	bot.SetMemoryProvider(memProvider)
 	bot.SetOnboardingStore(onboardingStore)
 
 	// When the user changes the default model via /model, the live cfg has been
@@ -401,6 +413,7 @@ func bootstrapApp() (*app, error) {
 		bindings:        bindings,
 		runLog:          runLogStore,
 		continuity:      continuityStore,
+		memoryProvider:  memProvider,
 		bot:             bot,
 		sessions:        sessions,
 		scheduler:       scheduler,

@@ -410,19 +410,20 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 
 	// Build pipeline config sharing the daemon's services.
 	pipeCfg := pipeline.Config{
-		AppConfig:  a.config,
-		Bridge:     a.bridge,
-		Agents:     a.agents,
-		Sessions:   a.sessions,
-		Resolver:   a.resolver,
-		MemoryDir:  a.resolver.Memory(),
-		ExePath:    a.resolver.Root(),
-		BotCwd:     a.resolver.Root(),
-		Output:     output,
-		Bindings:   a.bindings,
-		RunLog:     a.runLog,
-		Continuity: a.continuity,
-		EntryPoint: observability.EntryPointTUI,
+		AppConfig:      a.config,
+		Bridge:         a.bridge,
+		Agents:         a.agents,
+		Sessions:       a.sessions,
+		Resolver:       a.resolver,
+		MemoryDir:      a.resolver.Memory(),
+		ExePath:        a.resolver.Root(),
+		BotCwd:         a.resolver.Root(),
+		Output:         output,
+		Bindings:       a.bindings,
+		RunLog:         a.runLog,
+		Continuity:     a.continuity,
+		MemoryProvider: a.memoryProvider,
+		EntryPoint:     observability.EntryPointTUI,
 	}
 	if a.bot != nil {
 		pipeCfg.Profiles = a.bot.ProfileResolver()

@@ -14,6 +14,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/continuity"
+	"github.com/igormaneschy/aurelia/internal/memorycontext"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/persona"
 	"github.com/igormaneschy/aurelia/internal/profiles"
@@ -96,24 +97,25 @@ type Dreamer interface {
 
 // Config contains dependencies needed by the business pipeline.
 type Config struct {
-	AppConfig    *config.AppConfig
-	Bridge       *bridge.Bridge
-	Agents       *agents.Registry
-	Profiles     *profiles.Resolver // Phase 1: canonical profile resolver
-	Persona      *persona.CanonicalIdentityService
-	Sessions     *session.Store
-	Resolver     *runtime.PathResolver
-	MemoryDir    string
-	ExePath      string
-	BotCwd       string
-	Output       Output
-	Dreamer      Dreamer
-	ProjectIndex *runtime.ProjectIndex
-	Bindings     projectbinding.Store
-	RunLog       runlog.Store
-	Continuity   continuity.Store
-	UsersStore   *users.Store
-	UserResolver *users.Resolver
+	AppConfig      *config.AppConfig
+	Bridge         *bridge.Bridge
+	Agents         *agents.Registry
+	Profiles       *profiles.Resolver // Phase 1: canonical profile resolver
+	Persona        *persona.CanonicalIdentityService
+	Sessions       *session.Store
+	Resolver       *runtime.PathResolver
+	MemoryDir      string
+	ExePath        string
+	BotCwd         string
+	Output         Output
+	Dreamer        Dreamer
+	ProjectIndex   *runtime.ProjectIndex
+	Bindings       projectbinding.Store
+	RunLog         runlog.Store
+	Continuity     continuity.Store
+	MemoryProvider memorycontext.Provider
+	UsersStore     *users.Store
+	UserResolver   *users.Resolver
 	// NudgeBuffer, when set, is shared across pipeline instances (e.g. TUI
 	// creates a pipeline per send). When nil, NewService creates a fresh one.
 	NudgeBuffer *session.NudgeBuffer
@@ -168,6 +170,7 @@ type Service struct {
 	runLogMu           sync.Mutex
 	runLogStates       map[string]*runLogState
 	continuity         continuity.Store
+	memoryProvider     memorycontext.Provider
 	summaryCounter     *summaryCounter
 	summaryInterval    int
 	tokenGuard         *session.TokenGuard
@@ -213,6 +216,7 @@ func NewService(cfg Config) *Service {
 		runLog:           cfg.RunLog,
 		runLogStates:     make(map[string]*runLogState),
 		continuity:       cfg.Continuity,
+		memoryProvider:   cfg.MemoryProvider,
 		summaryCounter:   &summaryCounter{counts: make(map[continuity.ConversationKey]int)},
 		summaryInterval:  defaultSummaryInterval,
 		tokenGuard:       cfg.TokenGuard,
@@ -467,6 +471,11 @@ func (s *Service) SetRunLog(rl runlog.Store) {
 // SetContinuity injects the continuity store after construction (optional).
 func (s *Service) SetContinuity(cs continuity.Store) {
 	s.continuity = cs
+}
+
+// SetMemoryProvider swaps the ai-memory working-set provider after construction.
+func (s *Service) SetMemoryProvider(provider memorycontext.Provider) {
+	s.memoryProvider = provider
 }
 
 // NudgeBuffer returns the per-service nudge buffer for command-triggered flushes.

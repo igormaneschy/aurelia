@@ -22,6 +22,25 @@ func NormalizeProvider(provider string) string {
 	return normalized
 }
 
+const (
+	MemoryProviderLegacy   = "legacy"
+	MemoryProviderAIMemory = "ai-memory"
+	MemoryProviderShadow   = "shadow"
+)
+
+// NormalizeMemoryProvider canonicalizes the memory provider selector.
+// Unknown or empty values fall back to the safe legacy behavior.
+func NormalizeMemoryProvider(provider string) string {
+	switch strings.TrimSpace(strings.ToLower(provider)) {
+	case MemoryProviderAIMemory:
+		return MemoryProviderAIMemory
+	case MemoryProviderShadow:
+		return MemoryProviderShadow
+	default:
+		return MemoryProviderLegacy
+	}
+}
+
 // defaultModelForProvider returns the default model for the given provider.
 func defaultModelForProvider(provider string) string {
 	switch NormalizeProvider(provider) {
@@ -191,7 +210,7 @@ type AppConfig struct {
 	DreamModel   string `json:"dream_model,omitempty"`
 	ExtractModel string `json:"extract_model,omitempty"`
 
-	NudgeEnabled       *bool  `json:"nudge_enabled,omitempty"`        // nil = default true
+	NudgeEnabled       *bool  `json:"nudge_enabled,omitempty"` // nil = default true
 	NudgeTurns         int    `json:"nudge_turns,omitempty"`
 	NudgeModel         string `json:"nudge_model,omitempty"`
 	NudgeMinTranscript int    `json:"nudge_min_transcript_len,omitempty"`
@@ -229,6 +248,18 @@ type AppConfig struct {
 
 	// Observability controls runlog retention and related settings.
 	Observability ObservabilityConfig `json:"observability,omitempty"`
+
+	// MemoryProvider selects the durable memory backend:
+	// legacy, ai-memory or shadow. Empty defaults to legacy.
+	MemoryProvider string `json:"memory_provider,omitempty"`
+}
+
+// MemoryProviderMode returns the canonical memory provider selector.
+func (c *AppConfig) MemoryProviderMode() string {
+	if c == nil {
+		return MemoryProviderLegacy
+	}
+	return NormalizeMemoryProvider(c.MemoryProvider)
 }
 
 // RunlogRetentionDays returns the configured runlog retention window in days.
@@ -356,6 +387,9 @@ type fileConfig struct {
 	SessionLifecycle SessionLifecycleConfig `json:"session_lifecycle,omitempty"`
 
 	Observability ObservabilityConfig `json:"observability,omitempty"`
+
+	// MemoryProvider selects the durable memory backend.
+	MemoryProvider string `json:"memory_provider,omitempty"`
 }
 
 // ValidateConfig checks the full fileConfig for consistency.
@@ -431,6 +465,7 @@ func defaultFileConfig(r *runtime.PathResolver) fileConfig {
 		MCPConfigPath:           filepath.Join(r.Config(), "mcp_servers.json"),
 		SecurityConfig:          security.DefaultConfig(),
 		SessionLifecycle:        DefaultSessionLifecycleConfig(),
+		MemoryProvider:          MemoryProviderLegacy,
 	}
 }
 
@@ -462,6 +497,7 @@ func normalizeFileConfig(cfg fileConfig, r *runtime.PathResolver, preserveAutoMo
 	if cfg.STTProvider == "" {
 		cfg.STTProvider = defaults.STTProvider
 	}
+	cfg.MemoryProvider = NormalizeMemoryProvider(cfg.MemoryProvider)
 	if cfg.MaxIterations <= 0 {
 		cfg.MaxIterations = defaults.MaxIterations
 	}
@@ -620,6 +656,7 @@ func toAppConfig(cfg fileConfig) *AppConfig {
 		DefaultOwnerUserID:      cfg.DefaultOwnerUserID,
 		SessionLifecycle:        cfg.SessionLifecycle,
 		Observability:           cfg.Observability,
+		MemoryProvider:          cfg.MemoryProvider,
 	}
 	applyEnvOverrides(app)
 	return app
@@ -631,6 +668,9 @@ func applyEnvOverrides(cfg *AppConfig) {
 	}
 	if token := secretEnv("TELEGRAM_BOT_TOKEN"); token != "" {
 		cfg.TelegramBotToken = token
+	}
+	if mode := strings.TrimSpace(os.Getenv("AURELIA_MEMORY_PROVIDER")); mode != "" {
+		cfg.MemoryProvider = NormalizeMemoryProvider(mode)
 	}
 	if cfg.Providers == nil {
 		cfg.Providers = map[string]ProviderConfig{}

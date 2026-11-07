@@ -24,6 +24,7 @@ type EditableConfig struct {
 	AnthropicAuthMode       string
 	GroqAPIKey              string
 	MaxIterations           int
+	MemoryProvider          string
 
 	VisionModel    string
 	VisionProvider string
@@ -85,6 +86,7 @@ func DefaultEditableConfig() EditableConfig {
 		STTProvider:            defaultSTTProvider,
 		TelegramAllowedUserIDs: []int64{},
 		MaxIterations:          defaultMaxIterations,
+		MemoryProvider:         MemoryProviderLegacy,
 	}
 }
 
@@ -121,6 +123,7 @@ func appConfigToEditable(cfg *AppConfig) *EditableConfig {
 		AlibabaAPIKey:           cfg.ProviderAPIKey("alibaba"),
 		GroqAPIKey:              cfg.ProviderAPIKey("groq"),
 		MaxIterations:           cfg.MaxIterations,
+		MemoryProvider:          cfg.MemoryProviderMode(),
 		VisionModel:             cfg.VisionModel,
 		VisionProvider:          cfg.VisionProvider,
 	}
@@ -167,6 +170,7 @@ func editableToFileConfig(editable EditableConfig) fileConfig {
 		TelegramAllowedUserIDs:  append([]int64(nil), editable.TelegramAllowedUserIDs...),
 		TelegramAllowedGroupIDs: append([]int64(nil), editable.TelegramAllowedGroupIDs...),
 		MaxIterations:           editable.MaxIterations,
+		MemoryProvider:          NormalizeMemoryProvider(editable.MemoryProvider),
 		VisionModel:             editable.VisionModel,
 		VisionProvider:          editable.VisionProvider,
 	}
@@ -183,6 +187,7 @@ func sameFileConfig(a, b fileConfig) bool {
 		a.SessionTTLHours != b.SessionTTLHours ||
 		a.DBPath != b.DBPath ||
 		a.MCPConfigPath != b.MCPConfigPath ||
+		a.MemoryProvider != b.MemoryProvider ||
 		a.VisionModel != b.VisionModel ||
 		a.VisionProvider != b.VisionProvider {
 		return false

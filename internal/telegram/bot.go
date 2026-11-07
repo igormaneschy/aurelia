@@ -15,6 +15,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/config"
 	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/cron"
+	"github.com/igormaneschy/aurelia/internal/memorycontext"
 	"github.com/igormaneschy/aurelia/internal/persona"
 	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
 	"github.com/igormaneschy/aurelia/internal/profiles"
@@ -64,6 +65,7 @@ type BotController struct {
 	projectIndex       *runtime.ProjectIndex
 	bindings           projectbinding.Store
 	continuity         continuity.Store
+	memoryProvider     memorycontext.Provider
 	runLog             runlog.Store
 	pipeline           *pipelinepkg.Service
 	memoryCache        *pipelinepkg.MemoryCache // shared across Telegram + TUI pipeline instances
@@ -224,6 +226,12 @@ func (bc *BotController) SetRunLog(rl runlog.Store) {
 func (bc *BotController) SetContinuity(cs continuity.Store) {
 	bc.continuity = cs
 	bc.ensurePipeline().SetContinuity(cs)
+}
+
+// SetMemoryProvider injects the ai-memory working-set provider after construction.
+func (bc *BotController) SetMemoryProvider(provider memorycontext.Provider) {
+	bc.memoryProvider = provider
+	bc.ensurePipeline().SetMemoryProvider(provider)
 }
 
 // SetOnboardingStore injects the onboarding store and creates the user gate.
