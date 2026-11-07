@@ -16,7 +16,6 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/memorycontext"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runtime"
@@ -495,7 +494,7 @@ func scanContinuity(ctx context.Context, resolver *runtime.PathResolver, binding
 			continue
 		}
 		body := fmt.Sprintf("# Legacy continuity %d/%d\n\nUpdated: %d\nCWD: %s\nActive goal: %s\nLast user intent: %s\nLast assistant summary: %s\nLast checkpoint: %s\nLast run: %s (%s)\nLast tools: %s\nSession: %s\nCold: %d\nReset reason: %s\n",
-			chatID, threadID, updatedAt, cwd, continuity.EscapeUntrusted(activeGoal), continuity.EscapeUntrusted(lastIntent), continuity.EscapeUntrusted(lastSummary), continuity.EscapeUntrusted(lastCheckpoint), lastRunID, lastRunStatus, continuity.EscapeUntrusted(lastTools), sessionID, sessionCold, continuity.EscapeUntrusted(resetReason))
+			chatID, threadID, updatedAt, cwd, escapeUntrusted(activeGoal), escapeUntrusted(lastIntent), escapeUntrusted(lastSummary), escapeUntrusted(lastCheckpoint), lastRunID, lastRunStatus, escapeUntrusted(lastTools), sessionID, sessionCold, escapeUntrusted(resetReason))
 		plan.Pages = append(plan.Pages, migrationPage{
 			Source:    "data/continuity.db",
 			Workspace: scope.Workspace,
@@ -546,7 +545,7 @@ func scanProjectWorkState(ctx context.Context, db *sql.DB, bindings projectbindi
 			continue
 		}
 		body := fmt.Sprintf("# Legacy project work\n\nProject: %s\nUpdated: %d\nActive goal: %s\nLast user intent: %s\nLast assistant summary: %s\nLast checkpoint: %s\nLast run: %s (%s)\nLast tools: %s\nLast entrypoint: %s\n",
-			cwd, updatedAt, continuity.EscapeUntrusted(activeGoal), continuity.EscapeUntrusted(lastIntent), continuity.EscapeUntrusted(lastSummary), continuity.EscapeUntrusted(lastCheckpoint), lastRunID, lastRunStatus, continuity.EscapeUntrusted(lastTools), continuity.EscapeUntrusted(lastEntrypoint))
+			cwd, updatedAt, escapeUntrusted(activeGoal), escapeUntrusted(lastIntent), escapeUntrusted(lastSummary), escapeUntrusted(lastCheckpoint), lastRunID, lastRunStatus, escapeUntrusted(lastTools), escapeUntrusted(lastEntrypoint))
 		plan.Pages = append(plan.Pages, migrationPage{
 			Source:    "data/continuity.db",
 			Workspace: scope.Workspace,
@@ -564,7 +563,7 @@ func scanProjectWorkState(ctx context.Context, db *sql.DB, bindings projectbindi
 func scanMemoryuxReceipts(resolver *runtime.PathResolver, plan *memoryMigrationPlan) {
 	path := filepath.Join(resolver.Memory(), "memory_receipts.jsonl")
 	if _, err := os.Stat(path); err == nil {
-		plan.Warnings = append(plan.Warnings, "memoryux receipts exist; import them manually as session feedback (not copied by this command)")
+		plan.Warnings = append(plan.Warnings, "legacy memory receipts exist; import them manually as session feedback (not copied by this command)")
 	}
 }
 
@@ -705,6 +704,13 @@ func sanitizePageSegment(value string) string {
 		result = strings.TrimRight(result[:80], "-")
 	}
 	return result
+}
+
+func escapeUntrusted(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	return s
 }
 
 func shortHash(value string) string {

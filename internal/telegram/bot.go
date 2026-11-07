@@ -13,7 +13,6 @@ import (
 	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
-	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/cron"
 	"github.com/igormaneschy/aurelia/internal/memorycontext"
 	"github.com/igormaneschy/aurelia/internal/persona"
@@ -44,7 +43,6 @@ type BotController struct {
 	sessions           *session.Store
 	resolver           *runtime.PathResolver
 	personasDir        string
-	memoryDir          string // path to ~/.aurelia/memory for SDK auto-memory
 	exePath            string // path to aurelia binary for CLI instructions in system prompt
 	bootstrapMu        sync.Mutex
 	pendingBootstrap   map[int64]bootstrapState
@@ -58,12 +56,10 @@ type BotController struct {
 	allowedGroups      map[int64]struct{}
 	projectIndex       *runtime.ProjectIndex
 	bindings           projectbinding.Store
-	continuity         continuity.Store
 	memoryProvider     memorycontext.Provider
 	runLog             runlog.Store
 	pipeline           *pipelinepkg.Service
-	memoryCache        *pipelinepkg.MemoryCache // shared across Telegram + TUI pipeline instances
-	tokenGuard         *session.TokenGuard      // shared across Telegram + TUI pipeline instances
+	tokenGuard         *session.TokenGuard // shared across Telegram + TUI pipeline instances
 
 	onboardingStore *users.OnboardingStore
 	userGate        *UserGate
@@ -110,7 +106,6 @@ func NewBotController(
 	s stt.Transcriber,
 	cronHandler *CronCommandHandler,
 	personasDir string,
-	memoryDir string,
 	exePath string,
 	sessions *session.Store,
 	resolver *runtime.PathResolver,
@@ -158,7 +153,6 @@ func NewBotController(
 		sessions:         sessions,
 		resolver:         resolver,
 		personasDir:      personasDir,
-		memoryDir:        memoryDir,
 		exePath:          exePath,
 		botCwd:           botCwd,
 		pendingBootstrap: make(map[int64]bootstrapState),
@@ -181,16 +175,13 @@ func NewBotController(
 		Persona:      bc.persona,
 		Sessions:     bc.sessions,
 		Resolver:     bc.resolver,
-		MemoryDir:    bc.memoryDir,
 		ExePath:      bc.exePath,
 		BotCwd:       bc.botCwd,
 		Output:       telegramPipelineOutput{bc: bc, tg: NewTelegramTransport(b)},
 		Bindings:     bc.bindings,
 		RunLog:       bc.runLog,
-		Continuity:   bc.continuity,
 		UsersStore:   userStore,
 		UserResolver: userResolver,
-		MemoryCache:  bc.MemoryCache(),
 		TokenGuard:   bc.TokenGuard(),
 	})
 	bc.setupRoutes()
@@ -210,12 +201,6 @@ func (bc *BotController) SetProviderEnvRefresher(f func()) {
 func (bc *BotController) SetRunLog(rl runlog.Store) {
 	bc.runLog = rl
 	bc.ensurePipeline().SetRunLog(rl)
-}
-
-// SetContinuity injects the continuity store after construction.
-func (bc *BotController) SetContinuity(cs continuity.Store) {
-	bc.continuity = cs
-	bc.ensurePipeline().SetContinuity(cs)
 }
 
 // SetMemoryProvider injects the ai-memory working-set provider after construction.
@@ -433,16 +418,6 @@ func (bc *BotController) UserResolver() *users.Resolver {
 // Pipeline returns the pipeline service for shared use (e.g. TUI).
 func (bc *BotController) Pipeline() *pipelinepkg.Service {
 	return bc.pipeline
-}
-
-// MemoryCache returns the shared memory directory cache, creating it lazily
-// on first access. Shared across Telegram and TUI so the mtime cache
-// survives across TUI sends (TUI creates a pipeline per send).
-func (bc *BotController) MemoryCache() *pipelinepkg.MemoryCache {
-	if bc.memoryCache == nil {
-		bc.memoryCache = pipelinepkg.NewMemoryCache()
-	}
-	return bc.memoryCache
 }
 
 // TokenGuard returns the shared session token guard, creating it lazily on

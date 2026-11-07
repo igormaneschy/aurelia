@@ -14,7 +14,6 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
-	"github.com/igormaneschy/aurelia/internal/runtime"
 )
 
 func (bc *BotController) whitelistMiddleware() telebot.MiddlewareFunc {
@@ -275,14 +274,6 @@ func (bc *BotController) handleCwdCommand(c telebot.Context) error {
 		return SendTextWithThread(bc.bot, c.Chat(), msg, threadID)
 	}
 	bc.resetSessionOnProjectChange(chatID, target.ThreadID, userID, oldCwd, cwd)
-	if bc.resolver != nil {
-		if err := runtime.BootstrapConversationProjectMemory(bc.resolver, cwd, chatID, target.ThreadID); err != nil {
-			log.Printf("cwd: failed to bootstrap project memory for %s: %v", cwd, err)
-		}
-	}
-	// Invalidate overlay cache — project changed; user/topic layers are unchanged.
-	bc.InvalidateMemoryOverlay(cwd)
-
 	var msg string
 	switch target.Scope {
 	case "group":

@@ -13,7 +13,6 @@ import (
 	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
-	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/memorycontext"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/persona"
@@ -97,21 +96,15 @@ type Config struct {
 	Persona        *persona.CanonicalIdentityService
 	Sessions       *session.Store
 	Resolver       *runtime.PathResolver
-	MemoryDir      string
 	ExePath        string
 	BotCwd         string
 	Output         Output
 	ProjectIndex   *runtime.ProjectIndex
 	Bindings       projectbinding.Store
 	RunLog         runlog.Store
-	Continuity     continuity.Store
 	MemoryProvider memorycontext.Provider
 	UsersStore     *users.Store
 	UserResolver   *users.Resolver
-	// MemoryCache, when set, is shared across pipeline instances so the TUI
-	// (which creates a pipeline per send) reuses the mtime cache between turns.
-	// When nil, NewService creates a fresh one.
-	MemoryCache *MemoryCache
 	// TokenGuard, when set, is shared across pipeline instances so the TUI
 	// (which creates a pipeline per send) retains stall-turn compaction state.
 	// When nil, NewService creates a fresh one.
@@ -144,11 +137,9 @@ type Service struct {
 	persona            *persona.CanonicalIdentityService
 	sessions           *session.Store
 	resolver           *runtime.PathResolver
-	memoryDir          string
 	exePath            string
 	botCwd             string
 	output             Output
-	memoryCache        *MemoryCache
 	projectIndex       *runtime.ProjectIndex
 	bindings           projectbinding.Store
 	bridgeFailures     FailureTracker
@@ -156,10 +147,7 @@ type Service struct {
 	runLog             runlog.Store
 	runLogMu           sync.Mutex
 	runLogStates       map[string]*runLogState
-	continuity         continuity.Store
 	memoryProvider     memorycontext.Provider
-	summaryCounter     *summaryCounter
-	summaryInterval    int
 	tokenGuard         *session.TokenGuard
 	usersStore         *users.Store
 	userResolver       *users.Resolver
@@ -178,8 +166,6 @@ type activeToolState struct {
 	detector *loopDetector
 }
 
-const defaultSummaryInterval = 5
-
 // NewService builds a pipeline service with explicit dependencies.
 func NewService(cfg Config) *Service {
 	s := &Service{
@@ -191,19 +177,14 @@ func NewService(cfg Config) *Service {
 		persona:          cfg.Persona,
 		sessions:         cfg.Sessions,
 		resolver:         cfg.Resolver,
-		memoryDir:        cfg.MemoryDir,
 		exePath:          cfg.ExePath,
 		botCwd:           cfg.BotCwd,
 		output:           cfg.Output,
-		memoryCache:      cfg.MemoryCache,
 		projectIndex:     cfg.ProjectIndex,
 		bindings:         cfg.Bindings,
 		runLog:           cfg.RunLog,
 		runLogStates:     make(map[string]*runLogState),
-		continuity:       cfg.Continuity,
 		memoryProvider:   cfg.MemoryProvider,
-		summaryCounter:   &summaryCounter{counts: make(map[continuity.ConversationKey]int)},
-		summaryInterval:  defaultSummaryInterval,
 		tokenGuard:       cfg.TokenGuard,
 		usersStore:       cfg.UsersStore,
 		userResolver:     cfg.UserResolver,
@@ -211,9 +192,6 @@ func NewService(cfg Config) *Service {
 	}
 
 	// Backward compat: create fresh instances when not injected by the caller.
-	if s.memoryCache == nil {
-		s.memoryCache = NewMemoryCache()
-	}
 	if s.tokenGuard == nil {
 		s.tokenGuard = session.NewTokenGuard()
 	}
@@ -234,10 +212,6 @@ func NewService(cfg Config) *Service {
 				Message: message,
 			})
 		}
-	}
-
-	if s.config != nil && s.config.SummaryInterval > 0 {
-		s.summaryInterval = s.config.SummaryInterval
 	}
 
 	return s
@@ -445,21 +419,9 @@ func (s *Service) SetRunLog(rl runlog.Store) {
 	s.runLog = rl
 }
 
-// SetContinuity injects the continuity store after construction (optional).
-func (s *Service) SetContinuity(cs continuity.Store) {
-	s.continuity = cs
-}
-
 // SetMemoryProvider swaps the ai-memory working-set provider after construction.
 func (s *Service) SetMemoryProvider(provider memorycontext.Provider) {
 	s.memoryProvider = provider
-}
-
-// MemoryCache returns the memory directory cache. Exposed so callers can
-// verify sharing across pipeline instances (e.g. Telegram singleton vs TUI
-// per-send pipelines should hold the same cache pointer).
-func (s *Service) MemoryCache() *MemoryCache {
-	return s.memoryCache
 }
 
 // TokenGuard returns the session token guard. Exposed so callers can share one

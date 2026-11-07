@@ -2,13 +2,15 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/igormaneschy/aurelia/internal/continuity"
+	_ "modernc.org/sqlite"
+
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 )
@@ -117,28 +119,41 @@ func TestCheckMigrationTargetsReportsExistingPage(t *testing.T) {
 
 func TestBuildMemoryMigrationPlanFromContinuity(t *testing.T) {
 	resolver, bindings, cwd := migrationTestEnv(t)
-	store, err := continuity.NewSQLiteStore(resolver.DBPath("continuity.db"))
+	dbPath := resolver.DBPath("continuity.db")
+	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = store.Close() }()
-	ctx := context.Background()
-	if err := store.Upsert(ctx, continuity.ConversationState{
-		ChatID:               42,
-		ThreadID:             0,
-		UserID:               42,
-		CWD:                  cwd,
-		ActiveGoal:           "finish migration",
-		LastUserIntent:       "continue",
-		LastAssistantSummary: "work in progress",
-		LastCheckpoint:       "phase 1",
-		SessionID:            "session-42",
-		UpdatedAt:            time.Unix(100, 0),
-	}); err != nil {
+	defer func() { _ = db.Close() }()
+	if _, err := db.Exec(`CREATE TABLE conversation_state (
+		chat_id INTEGER NOT NULL,
+		thread_id INTEGER NOT NULL,
+		user_id INTEGER NOT NULL DEFAULT 0,
+		cwd TEXT DEFAULT '',
+		active_goal TEXT DEFAULT '',
+		last_user_intent TEXT DEFAULT '',
+		last_assistant_summary TEXT DEFAULT '',
+		last_checkpoint TEXT DEFAULT '',
+		last_run_id TEXT DEFAULT '',
+		last_run_status TEXT DEFAULT '',
+		last_tools TEXT DEFAULT '',
+		session_id TEXT DEFAULT '',
+		session_cold INTEGER NOT NULL DEFAULT 0,
+		reset_reason TEXT DEFAULT '',
+		updated_at INTEGER NOT NULL,
+		PRIMARY KEY (chat_id, thread_id, user_id)
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO conversation_state
+		(chat_id, thread_id, user_id, cwd, active_goal, last_user_intent,
+		 last_assistant_summary, last_checkpoint, session_id, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		42, 0, 42, cwd, "finish migration", "continue", "work in progress", "phase 1", "session-42", time.Unix(100, 0).Unix()); err != nil {
 		t.Fatal(err)
 	}
 
-	plan, err := buildMemoryMigrationPlan(ctx, resolver, bindings, 42)
+	plan, err := buildMemoryMigrationPlan(context.Background(), resolver, bindings, 42)
 	if err != nil {
 		t.Fatalf("buildMemoryMigrationPlan: %v", err)
 	}

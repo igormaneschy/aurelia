@@ -786,7 +786,6 @@ func (s *Service) handleContextOutcome(parentCtx context.Context, ctx context.Co
 		log.Printf("pipeline: run canceled chat=%d thread=%d user=%d", chatID, threadID, userID)
 		runID := s.getRunID(chatID, threadID, userID, ownership)
 		const reason = "user_cancel"
-		s.patchContinuityFailure(chatID, threadID, "canceled", reason, userID, isPrivateChat, ownership)
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent(runID,
 			observability.PhaseRunCanceled, reason), ownership)
 		s.completeRunLog(chatID, threadID, userID, runlog.RunCanceled, "", reason, ownership)
@@ -805,7 +804,6 @@ func (s *Service) handleContextOutcome(parentCtx context.Context, ctx context.Co
 		origin, elapsed := timeoutDetails(tracker)
 		log.Printf("pipeline: run timeout origin=%s elapsed=%s chat=%d thread=%d user=%d", origin, elapsed.Round(time.Second), chatID, threadID, userID)
 		runID := s.getRunID(chatID, threadID, userID, ownership)
-		s.patchContinuityFailure(chatID, threadID, "timed_out", origin, userID, isPrivateChat, ownership)
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent(runID,
 			observability.PhaseRunTimedOut,
 			fmt.Sprintf("origin=%s elapsed=%s", origin, elapsed.Round(time.Second))), ownership)
@@ -1210,7 +1208,6 @@ func (s *Service) handleSystemEvent(chatID int64, threadID int, ev bridge.Event,
 	}) {
 		return
 	}
-	s.patchContinuitySessionID(chatID, threadID, ev.SessionFile, userID, owners...)
 }
 
 func eventContent(ev bridge.Event) string {
@@ -1265,7 +1262,6 @@ func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, e
 				s.cancelClaimedRunLog(pipelineInput{chatID: chatID, threadID: threadID, userID: userID}, ownership)
 				return OutcomeCanceled
 			}
-			s.patchContinuitySessionID(chatID, threadID, ev.SessionFile, userID, ownership)
 		}
 		// Also persist session_file to runlog as fallback in case the system
 		// event was missed or arrived before the runlog entry existed. This is
@@ -1343,7 +1339,6 @@ func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, e
 		}
 
 		emptyWorkRunID := s.getRunID(chatID, threadID, userID, ownership)
-		s.patchContinuityFailure(chatID, threadID, "failed", "empty_result", userID, isPrivateChat, owners...)
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent(emptyWorkRunID,
 			observability.PhaseRunFailed, "empty_result"), ownership)
 		s.completeRunLog(chatID, threadID, userID, runlog.RunFailed, "", "empty_result", ownership)
@@ -1358,7 +1353,6 @@ func (s *Service) handleEmptyResult(chatID int64, threadID int, messageID int, e
 		log.Printf("bridge: empty result (no work) chat=%d thread=%d request=%s",
 			chatID, threadID, ev.RequestID)
 		emptyNoWorkRunID := s.getRunID(chatID, threadID, userID, ownership)
-		s.patchContinuityFailure(chatID, threadID, "failed", "empty_result", userID, isPrivateChat, owners...)
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent(emptyNoWorkRunID,
 			observability.PhaseRunFailed, "empty_result"), ownership)
 		s.completeRunLog(chatID, threadID, userID, runlog.RunFailed, "", "empty_result", ownership)

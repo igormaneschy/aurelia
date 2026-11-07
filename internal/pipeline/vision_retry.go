@@ -196,7 +196,6 @@ func (s *Service) deliverStashedRefusal(chatID int64, threadID int, messageID in
 	if runLogStarted {
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent("",
 			observability.PhaseRunFailed, "vision_fallback_failed"), ownership)
-		s.patchContinuityFailure(chatID, threadID, "failed", "vision_fallback_failed", userID, false, ownership)
 		s.completeRunLog(chatID, threadID, userID, runlog.RunFailed, "", "vision_fallback_failed", ownership)
 	}
 	if _, err := s.output.SendReply(chatID, threadID, text); err != nil {

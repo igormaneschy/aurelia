@@ -17,7 +17,6 @@ import (
 	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
-	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/cron"
 	"github.com/igormaneschy/aurelia/internal/deps"
 	"github.com/igormaneschy/aurelia/internal/ipc"
@@ -42,7 +41,6 @@ type app struct {
 	cronStore      *cron.SQLiteCronStore
 	bindings       projectbinding.Store
 	runLog         runlog.Store
-	continuity     continuity.Store
 	memoryProvider memorycontext.Provider
 	bot            *telegram.BotController
 	sessions       *session.Store
@@ -161,25 +159,8 @@ func bootstrapApp() (*app, error) {
 		return nil, fmt.Errorf("initialize runlog store: %w", err)
 	}
 
-	continuityStore, err := continuity.NewSQLiteStore(resolver.DBPath("continuity.db"))
-	if err != nil {
-		if closeErr := runLogStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close runlog store: %v", closeErr)
-		}
-		if closeErr := bindings.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close project binding store: %v", closeErr)
-		}
-		if closeErr := cronStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close cron store: %v", closeErr)
-		}
-		return nil, fmt.Errorf("initialize continuity store: %w", err)
-	}
-
 	onboardingStore, err := users.NewOnboardingStoreFromFile(resolver.DBPath("onboarding.db"))
 	if err != nil {
-		if closeErr := continuityStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close continuity store: %v", closeErr)
-		}
 		if closeErr := runLogStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close runlog store: %v", closeErr)
 		}
@@ -196,9 +177,6 @@ func bootstrapApp() (*app, error) {
 	if err != nil {
 		if closeErr := onboardingStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close onboarding store: %v", closeErr)
-		}
-		if closeErr := continuityStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close continuity store: %v", closeErr)
 		}
 		if closeErr := runLogStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close runlog store: %v", closeErr)
@@ -224,9 +202,6 @@ func bootstrapApp() (*app, error) {
 	if err != nil {
 		if closeErr := onboardingStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close onboarding store: %v", closeErr)
-		}
-		if closeErr := continuityStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close continuity store: %v", closeErr)
 		}
 		if closeErr := runLogStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close runlog store: %v", closeErr)
@@ -255,27 +230,17 @@ func bootstrapApp() (*app, error) {
 	br.SetOnDeath(func() {
 		log.Printf("bridge: process died, deactivating all sessions")
 		sessions.DeactivateAll()
-		if continuityStore != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			if err := continuityStore.MarkColdForSessions(ctx, "bridge process died"); err != nil {
-				log.Printf("Warning: failed to mark continuity cold after bridge death: %v", err)
-			}
-		}
 	})
 
 	telegramEnabled := envFlag("AURELIA_ENABLE_TELEGRAM", true)
 	bot, err := telegram.NewBotController(
 		cfg, br, agentReg, personaSvc, transcriber,
-		cronHandler, resolver.MemoryPersonas(), resolver.Memory(), exePath, sessions, resolver, bindings,
+		cronHandler, resolver.MemoryPersonas(), exePath, sessions, resolver, bindings,
 		!telegramEnabled,
 	)
 	if err != nil {
 		if closeErr := onboardingStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close onboarding store: %v", closeErr)
-		}
-		if closeErr := continuityStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close continuity store: %v", closeErr)
 		}
 		if closeErr := runLogStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close runlog store: %v", closeErr)
@@ -289,7 +254,6 @@ func bootstrapApp() (*app, error) {
 		return nil, fmt.Errorf("initialize telegram bot: %w", err)
 	}
 	bot.SetRunLog(runLogStore)
-	bot.SetContinuity(continuityStore)
 	bot.SetMemoryProvider(memProvider)
 	bot.SetOnboardingStore(onboardingStore)
 
@@ -331,9 +295,6 @@ func bootstrapApp() (*app, error) {
 		if closeErr := onboardingStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close onboarding store: %v", closeErr)
 		}
-		if closeErr := continuityStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close continuity store: %v", closeErr)
-		}
 		if closeErr := runLogStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close runlog store: %v", closeErr)
 		}
@@ -372,7 +333,6 @@ func bootstrapApp() (*app, error) {
 		cronStore:       cronStore,
 		bindings:        bindings,
 		runLog:          runLogStore,
-		continuity:      continuityStore,
 		memoryProvider:  memProvider,
 		bot:             bot,
 		sessions:        sessions,
@@ -584,13 +544,6 @@ func (a *app) reconcileStaleRuns() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Mark continuity sessions as cold with deploy reason
-	if a.continuity != nil {
-		if err := a.continuity.MarkColdForSessions(ctx, "daemon restarted/deployed"); err != nil {
-			log.Printf("Warning: failed to mark continuity cold on startup: %v", err)
-		}
-	}
-
 	// Mark stale run_journal rows as interrupted: any row still running
 	// after a restart belonged to the previous process. This keeps the
 	// timeline honest (A5/T5) — a run cut off by deploy/shutdown is
@@ -708,11 +661,6 @@ func (a *app) close() {
 	if a.runLog != nil {
 		if err := a.runLog.Close(); err != nil {
 			log.Printf("Warning: failed to close runlog store: %v", err)
-		}
-	}
-	if a.continuity != nil {
-		if err := a.continuity.Close(); err != nil {
-			log.Printf("Warning: failed to close continuity store: %v", err)
 		}
 	}
 	if a.onboardingStore != nil {

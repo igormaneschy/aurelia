@@ -15,10 +15,8 @@ import (
 	"gopkg.in/telebot.v3"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
-	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/cron"
 	"github.com/igormaneschy/aurelia/internal/memorycontext"
-	memoryuxpkg "github.com/igormaneschy/aurelia/internal/memoryux"
 	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
 	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/runlog"
@@ -387,25 +385,12 @@ func (bc *BotController) ResetSession(chatID int64, threadID int, userID int64, 
 	if bc.sessions != nil {
 		bc.sessions.ClearSessionForUser(chatID, threadID, userID)
 	}
-	// Drop the continuity context too: it is injected into the next prompt
-	// (last intent / last summary / project work state), so a reset that only
-	// clears the PI session still leaks the previous conversation into the
-	// first message after the reset.
-	if bc.continuity != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		if err := bc.continuity.ResetConversation(ctx, chatID, threadID, userID, continuity.UserResetReason); err != nil {
-			log.Printf("session: continuity reset failed chat=%d thread=%d: %v", chatID, threadID, err)
-		}
-		cancel()
-	}
 	log.Printf("session: reset for chat=%d thread=%d user=%d", chatID, threadID, userID)
 	return canceledActive
 }
 
-// ResetSessionForProjectChange clears the PI session and continuity context
-// after a /cwd change moves the conversation to another ai-memory project. It
-// intentionally skips the Dream/Nudge flush: the old project's buffer must not
-// be written into the new project's legacy memory.
+// ResetSessionForProjectChange clears the PI session after a /cwd change moves
+// the conversation to another ai-memory project.
 func (bc *BotController) ResetSessionForProjectChange(chatID int64, threadID int, userID int64) {
 	if bc == nil {
 		return
@@ -413,13 +398,6 @@ func (bc *BotController) ResetSessionForProjectChange(chatID int64, threadID int
 	bc.cancelActiveRun(chatID, threadID, userID)
 	if bc.sessions != nil {
 		bc.sessions.ClearSessionForUser(chatID, threadID, userID)
-	}
-	if bc.continuity != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		if err := bc.continuity.ResetConversation(ctx, chatID, threadID, userID, continuity.UserResetReason); err != nil {
-			log.Printf("session: continuity reset after project change failed chat=%d thread=%d: %v", chatID, threadID, err)
-		}
-		cancel()
 	}
 	log.Printf("session: project change reset chat=%d thread=%d user=%d", chatID, threadID, userID)
 }
@@ -1233,64 +1211,24 @@ func (bc *BotController) invalidateModelCache() {
 }
 
 func (bc *BotController) cmdMemoryStatus(chatID int64, threadID int, userID int64, isPrivateChat bool) (string, error) {
+	if bc.memoryProvider == nil {
+		return "🧠 **Memory — ai-memory**\n\nMemory provider is not configured.", nil
+	}
 	cwd := bc.currentCwdForContext(chatID, threadID, userID, isPrivateChat)
-	if bc.memoryProvider != nil {
-		scope, err := memorycontext.ResolveScope(cwd, userID, chatID, threadID, "")
-		if err != nil || !scope.HasProject() {
-			return "🧠 **Memory — ai-memory**\n\nNo ai-memory project is bound for this conversation. Use `/cwd` to bind a project.", nil
-		}
-		status, err := bc.memoryProvider.Status(context.Background(), scope)
-		if err != nil {
-			return "", fmt.Errorf("ai-memory status: %w", err)
-		}
-		return fmt.Sprintf("🧠 **Memory — ai-memory**\n\nProject: `%s`\nPages: %d\nObservations: %d\nSessions: %d\nPending handoffs: %d\nDegraded: %t",
-			scope.ProjectRef(), status.Pages, status.Observations, status.Sessions, status.PendingHandoffs, status.Degraded), nil
+	scope, err := memorycontext.ResolveScope(cwd, userID, chatID, threadID, "")
+	if err != nil || !scope.HasProject() {
+		return "🧠 **Memory — ai-memory**\n\nNo ai-memory project is bound for this conversation. Use `/cwd` to bind a project.", nil
 	}
-	svc := memoryuxpkg.New(bc.memoryDir, bc.resolver)
-	log.Printf("memory command: action=status chat=%d thread=%d cwd_set=%t", chatID, threadID, cwd != "")
-	status, err := svc.Status(chatID, threadID, cwd)
+	status, err := bc.memoryProvider.Status(context.Background(), scope)
 	if err != nil {
-		return "", fmt.Errorf("memory status: %w", err)
+		return "", fmt.Errorf("ai-memory status: %w", err)
 	}
-	log.Printf("memory command: status complete chat=%d layers=%d", chatID, len(status.Layers))
-	return memoryuxpkg.FormatStatus(status), nil
+	return fmt.Sprintf("🧠 **Memory — ai-memory**\n\nProject: `%s`\nPages: %d\nObservations: %d\nSessions: %d\nPending handoffs: %d\nDegraded: %t",
+		scope.ProjectRef(), status.Pages, status.Observations, status.Sessions, status.PendingHandoffs, status.Degraded), nil
 }
 
 func (bc *BotController) cmdMemoryCheckpoint(chatID int64, threadID int, userID int64, isPrivateChat bool, text string) (string, error) {
-	if bc.memoryProvider != nil {
-		return "🧠 ai-memory mode: local checkpoints are replaced by ai-memory handoff/session pages. Ask the assistant to save a durable page or use the memory tools.", nil
-	}
-	// Extract note after the command phrase
-	trimmed := strings.TrimSpace(text)
-	lower := strings.ToLower(trimmed)
-
-	prefixes := []string{
-		"memory checkpoint",
-		"checkpoint memoria",
-		"checkpoint de memoria",
-	}
-	note := ""
-	for _, prefix := range prefixes {
-		if strings.HasPrefix(lower, prefix) {
-			note = strings.TrimSpace(trimmed[len(prefix):])
-			break
-		}
-	}
-
-	// Append active mode tag to the checkpoint note.
-	note = appendModeTag(note, bc.userActiveMode(userID))
-
-	svc := memoryuxpkg.New(bc.memoryDir, bc.resolver)
-	cwd := bc.currentCwdForContext(chatID, threadID, userID, isPrivateChat)
-	log.Printf("memory command: action=checkpoint chat=%d thread=%d cwd_set=%t", chatID, threadID, cwd != "")
-	result, err := svc.WriteCheckpoint(chatID, threadID, cwd, note)
-	if err != nil {
-		return "", fmt.Errorf("memory checkpoint: %w", err)
-	}
-	if result.Path != "" {
-		log.Printf("memory command: checkpoint written chat=%d layer=%s path=%s", chatID, result.Layer, result.Path)
-	}
-	return memoryuxpkg.FormatCheckpoint(result), nil
+	return "🧠 ai-memory mode: local checkpoints are replaced by ai-memory handoff/session pages. Ask the assistant to save a durable page or use the memory tools.", nil
 }
 
 // --- Mode helpers and handler ---
