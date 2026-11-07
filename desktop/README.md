@@ -94,21 +94,22 @@ configurações locais específicas.
 
 Uma sessão nova do desktop apontada para o cwd de um tópico do Telegram é uma
 **conversa nova no mesmo projeto**, não uma continuação do thread. Ela
-compartilha cwd, arquivos, `cwd_overlay` (`~/.aurelia/projects/<slug>/cwd_overlay/`)
-e o projeto ai-memory definido pelo `.ai-memory.toml`. Não compartilha o
-session file/transcript, a continuidade, a camada `topic` do Telegram, o
-binding de `/cwd`, a lista de sessões nem o modelo. Novas sessões não herdam o
-cwd do DM; use `/cwd` em cada uma. No Telegram,
-`/memory checkpoint <resumo>` grava no `cwd_overlay` compartilhado e o desktop
-carrega no turno seguinte. Evite editar os mesmos arquivos nos dois lados ao
-mesmo tempo; não há lock entre superfícies.
+compartilha cwd, arquivos e o projeto ai-memory definido pelo
+`.ai-memory.toml`. Não compartilha o session file/transcript, o binding de
+`/cwd`, a lista de sessões nem o modelo. Novas sessões não herdam o cwd do DM;
+use `/cwd` em cada uma. Em `ai-memory` mode, `/memory` mostra o projeto, páginas,
+observações, sessões e handoffs pendentes; `/memory checkpoint` fica desativado
+e as notas duráveis passam por páginas/handoff do ai-memory. Evite editar os
+mesmos arquivos nos dois lados ao mesmo tempo; não há lock entre superfícies.
 
-> **Memory consolidation rollout:** o daemon live ainda usa
-> `memory_provider=legacy`. Com a flag `ai-memory`, o painel do projeto mostra
-> o projeto/páginas/handoffs do ai-memory em vez das camadas de ficheiro, e o
-> prompt recebe um working set ai-memory limitado. As 23 páginas legadas
-> importadas têm a tag `legacy-import`; `shadow` está reservado para a
-> comparação pendente e, até ser implementado, mantém o prompt legacy.
+> **Memory consolidation rollout:** o daemon live usa
+> `memory_provider=ai-memory` desde 2026-11-07. O painel do projeto mostra o
+> projeto/páginas/handoffs do ai-memory em vez das camadas de ficheiro, e o
+> prompt recebe um working set ai-memory limitado (3.126 caracteres no primeiro
+> turno live). As 23 páginas legadas importadas têm a tag `legacy-import`.
+> `cwd_overlay`/`topic`/`user_global` e continuity só são usados em
+> `memory_provider=legacy` (rollback). `shadow` está reservado para a comparação
+> pendente e, até ser implementado, mantém o prompt legacy.
 
 ## Desenvolvimento
 

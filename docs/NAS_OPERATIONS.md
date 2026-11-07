@@ -578,12 +578,12 @@ each session.
 | Layer | Shared? | Detail |
 |---|---|---|
 | cwd and files | **Yes** | Both surfaces read/write the same project directory. |
-| `cwd_overlay` | **Yes** | `~/.aurelia/projects/<slug>/cwd_overlay/`; project-scoped and loaded by every frontend with the same cwd. The desktop `/cwd` bootstraps it if missing. |
-| ai-memory project | **Yes** | The topic `.ai-memory.toml` marker selects the project (for example `personal/aurelia-<topic>`). Pages/observations written there are available to both sides. |
-| `user_global` memory | **Yes** | Both surfaces use the same persona user ID. |
+| ai-memory project | **Yes** | The topic `.ai-memory.toml` marker selects the project (for example `personal/aurelia-<topic>`). Pages/observations/handoffs written there are available to both sides. This is the active memory path. |
+| `cwd_overlay` | **Legacy** | `~/.aurelia/projects/<slug>/cwd_overlay/` is only read in `memory_provider=legacy` (rollback). It is not written or injected in `ai-memory` mode. |
+| `user_global` memory | **Legacy** | Only read in `legacy` mode. In `ai-memory` mode use the profile/global ai-memory scopes. |
 | PI session/transcript | **No** | The desktop session has its own `chat_id` and session file; it does not load the Telegram topic history. |
-| Continuity | **No** | Continuity is keyed by chat/thread/user; the desktop starts without the Telegram topic's last goal/summary. |
-| Telegram `topic` layer | **No** | `~/.aurelia/topics/chat_<id>/thread_<id>/` exists only for forum threads (thread > 0). The desktop session has thread 0, so it never loads the Telegram topic's `topic` layer. Use `cwd_overlay`/ai-memory for cross-surface notes. |
+| Continuity | **Legacy** | Continuity is only written/read in `legacy` mode. In `ai-memory` mode the project handoff and session observations replace it. |
+| Telegram `topic` layer | **Legacy** | `~/.aurelia/topics/chat_<id>/thread_<id>/` is only used in `legacy` mode. Use ai-memory pages/handoffs for cross-surface notes. |
 | `/cwd` binding | **No** | Each chat/session has its own binding. Setting the desktop cwd does not change the Telegram topic, and vice versa. |
 | Session list | **No** | The desktop lists TUI-namespace sessions; the Telegram topic is not a desktop session. |
 | Model | **No** | Model is per session/config; use `/model` in the desktop to align with the Telegram profile. |
@@ -591,20 +591,21 @@ each session.
 Practical consequences:
 
 - To continue the **project**, run `/cwd` in the desktop session and rely on
-  the shared `cwd_overlay`/ai-memory. To continue the **exact Telegram
+  the shared ai-memory project. To continue the **exact Telegram
   conversation**, use the Telegram topic; its PI session file is not
   transferred.
-- In Telegram, `/memory checkpoint <summary>` writes to the shared
-  `cwd_overlay` (the checkpoint target prefers `cwd_overlay` over `topic`), so
-  the desktop loads that context on its next turn.
+- In `ai-memory` mode, `/memory checkpoint` is disabled: the durable note path
+  is a page write/handoff in ai-memory, and the desktop reads the bounded
+  project working set on its next turn. `/memory` reports project pages,
+  observations, sessions, pending handoffs and degraded state.
 - The desktop and the Telegram topic can run concurrently. There is no
-  cross-surface lock over the shared files/overlay; avoid simultaneous edits to
-  the same file.
+  cross-surface lock over the shared files; avoid simultaneous edits to the
+  same file.
 - Current project-topic state (2026-11-07): one existing topic has a PI session
-  file, but its `cwd_overlay` and `topics/.../thread_...` directory do not exist
-  yet, and its ai-memory project has no pages. A desktop `/cwd` creates an empty
-  overlay; future writes are shared by both sides. The private mapping is in
-  `~/.aurelia/config/app.json` and `project_bindings.db`.
+  file and an ai-memory project; its legacy `cwd_overlay` and
+  `topics/.../thread_...` directories are not used in `ai-memory` mode. The
+  private mapping is in `~/.aurelia/config/app.json` and
+  `project_bindings.db`.
 
 ### 15.7 ai-memory Pi extension handoff
 
@@ -617,9 +618,10 @@ The Pi extension does **not** inject a project briefing/pinned digest. In the
 feature-flagged `ai-memory` mode, the thin `internal/memorycontext` adapter
 reads `memory_briefing`/`memory_read_page` through the loopback MCP endpoint,
 formats a bounded working set (counts, rules, recent page excerpts and pending
-handoff count), and never duplicates the handoff. The default remains
-`legacy` until the migration/shadow acceptance; `AURELIA_MEMORY_PROVIDER` can
-select `legacy`, `ai-memory` or `shadow`.
+handoff count), and never duplicates the handoff. The code default remains
+`legacy` for a fresh install; the live NAS config sets
+`memory_provider=ai-memory`. `AURELIA_MEMORY_PROVIDER` can select `legacy`,
+`ai-memory` or `shadow`.
 
 ### 15.8 Memory consolidation rollout (2026-11-07)
 
@@ -629,13 +631,23 @@ in the personal ai-memory, tagged `legacy-import`. The pre-import backup is
 (SHA-256 `c51be982b22bced158d8f5ae2217c8759d8e47d54c3466d047a2fa4a8d91d07a`).
 The original files/continuity DB were only read.
 
-The live daemon remains on `memory_provider=legacy`; the imported pages are not
-automatically injected in legacy mode. In the feature-flagged `ai-memory` mode,
-the daemon injects a bounded project working set from `memory_briefing`/
-`memory_read_page`, while the Pi extension continues to inject the handoff and
-register the MCP tools. `shadow` is reserved for the pending comparison task:
-until it is implemented, the mode logs the selection and keeps the legacy
-prompt. `legacy` remains the rollback path.
+The live NAS daemon was switched to `memory_provider=ai-memory` on 2026-11-07.
+The first live turn logged
+`memory: ai-memory working set project=personal/aurelia chars=3126 sources=3
+degraded=false pending_handoffs=1`, a TUI smoke turn replied `OK`, and the
+desktop showed `bridge online` with the `personal/aurelia` scope. In this mode
+the daemon injects a bounded project working set from
+`memory_briefing`/`memory_read_page`, while the Pi extension continues to
+inject the handoff and register the MCP tools. `shadow` is reserved for the
+pending comparison task: until it is implemented, the mode logs the selection
+and keeps the legacy prompt.
+
+Rollback before the legacy removal: set `memory_provider=legacy` in
+`~/.aurelia/config/app.json` and restart `aurelia.service`. The pre-switch
+config and binary are kept at
+`~/.aurelia/config/app.json.pre-memory-switch-20261107230812` and
+`~/.aurelia/bin/aurelia.prev-memory-switch-20261107230812`. The legacy files and
+continuity DB are untouched.
 
 The `/memory` command reports ai-memory project/page/handoff state in
 `ai-memory` mode; the local checkpoint command is disabled there and is
