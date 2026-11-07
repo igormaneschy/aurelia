@@ -127,6 +127,8 @@ type activeRun struct {
 	finalized   bool
 	finalizer   *terminalFinalization
 	runLogState *runLogState
+	cwd         string // Actual bridge project; protects attachment follow-ups after /cwd changes.
+	requestID   string
 }
 
 func newActiveRun() *activeRun {
@@ -168,6 +170,7 @@ type pipelineInput struct {
 	text          string
 	images        []bridge.ImageAttachment
 	isPrivateChat bool
+	documentCWD   string
 }
 
 const (
@@ -263,6 +266,10 @@ func bridgeCooldownMessage(remaining time.Duration) string {
 
 // Process handles a user message after transport-level bootstrap and command checks.
 func (s *Service) Process(chatID int64, threadID int, messageID int, text string, images []bridge.ImageAttachment, userID int64, isPrivateChat bool) error {
+	return s.process(chatID, threadID, messageID, text, images, userID, isPrivateChat, "")
+}
+
+func (s *Service) process(chatID int64, threadID int, messageID int, text string, images []bridge.ImageAttachment, userID int64, isPrivateChat bool, documentCWD string) error {
 	if s == nil {
 		return errors.New("pipeline service is nil")
 	}
@@ -274,7 +281,7 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 	}
 
 	key := sessionKey(chatID, threadID, userID)
-	input := pipelineInput{chatID: chatID, threadID: threadID, messageID: messageID, userID: userID, text: text, images: images, isPrivateChat: isPrivateChat}
+	input := pipelineInput{chatID: chatID, threadID: threadID, messageID: messageID, userID: userID, text: text, images: images, isPrivateChat: isPrivateChat, documentCWD: documentCWD}
 
 	// Create a real cancelable context BEFORE atomic reservation so cancel/supersede
 	// arriving during the reservation window actually cancel the run, not a no-op sentinel.
@@ -307,7 +314,17 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 	// Active session — classify and send appropriate bridge command.
 	// Only concurrentCancel and concurrentSupersede cancel/delete the stored run;
 	// concurrentEnqueue and concurrentStatus must leave it intact.
-	switch classifyConcurrentMessage(text) {
+	messageKind := concurrentEnqueue
+	documentTarget := ""
+	if documentCWD == "" {
+		messageKind = classifyConcurrentMessage(text)
+	} else {
+		documentTarget = s.documentRunTarget(key, documentCWD)
+		if documentTarget == "" {
+			return ErrDocumentProjectChanged
+		}
+	}
+	switch messageKind {
 	case concurrentCancel:
 		// Stop the old goroutine so it doesn't retry after abort
 		activeRunSlotMu.Lock()
@@ -402,18 +419,26 @@ func (s *Service) Process(chatID int64, threadID int, messageID int, text string
 	case concurrentEnqueue:
 		ctx, cancel := context.WithTimeout(context.Background(), bridgeCommandTimeout)
 		defer cancel()
-		_, err := s.bridge.ExecuteSync(ctx, bridge.Request{
-			Command: "follow-up",
-			Prompt:  text,
+		response, err := s.bridge.ExecuteSync(ctx, bridge.Request{
+			Command:         "follow-up",
+			Prompt:          text,
+			TargetRequestID: documentTarget,
 			Options: bridge.RequestOptions{
 				ChatID:   chatID,
 				ThreadID: threadID,
 				UserID:   userID,
 				Images:   images,
+				Cwd:      documentCWD,
 			},
 		})
+		if documentCWD != "" && err == nil && (response == nil || response.Type != "result" || response.Content != "follow-up queued") {
+			err = errors.New("bridge did not acknowledge document delivery")
+		}
 		if err != nil {
 			log.Printf("pipeline: follow-up failed for chat=%d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))
+			if documentCWD != "" {
+				return fmt.Errorf("document follow-up failed: %w", err)
+			}
 		}
 		if _, err := s.output.SendText(chatID, threadID, "📥 Adicionado à fila. Processo após concluir o atual."); err != nil {
 			log.Printf("pipeline: SendText(follow-up) failed for chat=%d: %s", chatID, sanitizeForPersistence(err.Error(), maxRunlogErrorRunes))

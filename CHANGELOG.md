@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.52.0] - 2026-11-07
+
+### Added
+- Telegram: documentos preservados no projeto e entregues ao agente por caminho,
+  sem extração automática. Word, Excel, PowerPoint, PDF e outros formatos são
+  guardados em `<projeto>/uploads/`; o agente recebe o caminho exato, nome
+  original, tamanho e legenda e decide como ler o arquivo com suas ferramentas.
+  Requer projeto ativo, respeita o limite de 25 MB e mantém o arquivo disponível
+  nos próximos turnos. A entrega concorrente valida execução/projeto no bridge
+  e só confirma sucesso quando o SDK realmente enfileira o documento.
+
 ## [0.51.0] - 2026-11-06
 
 ### Upgraded

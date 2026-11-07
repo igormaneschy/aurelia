@@ -21,6 +21,14 @@ func (bc *BotController) processInput(c telebot.Context, text string) error {
 }
 
 func (bc *BotController) processInputWithImages(c telebot.Context, text string, images []bridge.ImageAttachment) error {
+	return bc.processInputWithDocument(c, text, images, "")
+}
+
+func (bc *BotController) processDocumentInput(c telebot.Context, text, cwd string) error {
+	return bc.processInputWithDocument(c, text, nil, cwd)
+}
+
+func (bc *BotController) processInputWithDocument(c telebot.Context, text string, images []bridge.ImageAttachment, documentCWD string) error {
 	senderID := safeSenderID(c.Sender())
 	if state, ok := bc.popPendingBootstrap(senderID); ok {
 		defer bc.confirmMessage(c.Message())
@@ -60,7 +68,7 @@ func (bc *BotController) processInputWithImages(c telebot.Context, text string, 
 				if err := bc.userGate.Complete(senderID); err != nil {
 					log.Printf("user_gate: complete error for user %d: %v", senderID, err)
 				}
-				return bc.processInputWithImages(c, firstMsg, images)
+				return bc.processInputWithDocument(c, firstMsg, images, documentCWD)
 			}
 			return nil
 		}
@@ -69,7 +77,7 @@ func (bc *BotController) processInputWithImages(c telebot.Context, text string, 
 	chatID := c.Chat().ID
 	threadID := c.Message().ThreadID
 
-	if isContinueResumeText(text) && bc.sessions != nil {
+	if documentCWD == "" && isContinueResumeText(text) && bc.sessions != nil {
 		if sessionFile, active := bc.sessions.GetSessionWithState(chatID, threadID, senderID); sessionFile != "" && !active {
 			if err := SendContextText(c, interruptedResumeAck(sessionFile)); err != nil {
 				return err
@@ -78,8 +86,12 @@ func (bc *BotController) processInputWithImages(c telebot.Context, text string, 
 		}
 	}
 
-	if cmd := MatchCommand(text); cmd != nil {
-		return bc.handleCommand(c, cmd)
+	if documentCWD == "" {
+		if cmd := MatchCommand(text); cmd != nil {
+			return bc.handleCommand(c, cmd)
+		}
+	} else {
+		return bc.ensurePipeline().ProcessDocument(chatID, threadID, c.Message().ID, text, documentCWD, senderID, c.Chat().Type == telebot.ChatPrivate)
 	}
 
 	return bc.runPipeline(chatID, threadID, c.Message().ID, text, images, senderID, c.Chat().Type == telebot.ChatPrivate)

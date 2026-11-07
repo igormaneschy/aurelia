@@ -1,5 +1,9 @@
 # Lessons Index
 
+## Change telegram-document-uploads (2026-11-07)
+- [pattern] attachment-path-handoff
+- [anti-pattern] async-attachment-lifetime
+
 ## Change desktop-app-render-unblock (2026-10-19)
 - [anti-pattern] autoscroll-hook-update-pipeline-reentry
 - [anti-pattern] svelte-undefined-identifier-silent-runtime-failure

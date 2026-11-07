@@ -1864,6 +1864,7 @@ async function handleQuery(req) {
       sessionId: sessionID,
       sessionFile: liveSession.sessionFile,
       currentReqId: reqId,
+      cwd: opts?.cwd || process.cwd(),
       unsubPersistent,
       unsubHook,
       createdAt: Date.now()
@@ -2014,6 +2015,16 @@ async function handleSteer(req) {
     startIdleTimer(cs, cKey);
   }
 }
+async function queueTargetedFollowUp(sessions, key, targetRequestID, cwd, prompt) {
+  const target = sessions.get(key);
+  if (!target || !cwd || target.currentReqId !== targetRequestID || target.cwd !== cwd) {
+    throw new Error("document target session or project changed; resend the document");
+  }
+  const disposition = await target.session.followUp(prompt);
+  if (disposition !== "queued") {
+    throw new Error("document follow-up was not queued; resend the document");
+  }
+}
 async function handleFollowUp(req) {
   const reqId = req.request_id || "";
   const chatID = req.options?.chat_id || req.options?.security?.chat_id || 0;
@@ -2023,14 +2034,16 @@ async function handleFollowUp(req) {
   const emitReq = (obj) => emit({ ...obj, request_id: reqId });
   const cs = chatSessions.get(cKey);
   if (!cs) {
-    emitReq({ event: "result", content: "no active session" });
+    emitReq(req.target_request_id ? { event: "error", message: "document target session is no longer active; resend the document" } : { event: "result", content: "no active session" });
     return;
   }
   clearTimeout(cs.idleTimer);
   redactedLog("followUp \u2014 rid=".concat(reqId, " chat=").concat(chatID, " thread=").concat(threadID, " user=").concat(userID));
   try {
     const imageBlocks = buildImageContents(req.options?.images, reqId, "followUp");
-    if (imageBlocks.length > 0) {
+    if (req.target_request_id) {
+      await queueTargetedFollowUp(chatSessions, cKey, req.target_request_id, req.options?.cwd || "", req.prompt);
+    } else if (imageBlocks.length > 0) {
       await cs.session.followUp(req.prompt, imageBlocks);
     } else {
       await cs.session.followUp(req.prompt);
@@ -2597,6 +2610,7 @@ export {
   matchesEnvAccess,
   matchesSafeGit,
   measuredElapsed,
+  queueTargetedFollowUp,
   redactAuditPath,
   redactSDKError,
   redactedCommandExcerpt,
