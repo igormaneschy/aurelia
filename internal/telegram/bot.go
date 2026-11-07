@@ -33,6 +33,7 @@ type BotController struct {
 	config           *config.AppConfig
 	bridge           *bridge.Bridge
 	modelLister      modelLister
+	documentSource   documentSource
 	agents           *agents.Registry
 	profiles         *profiles.Resolver // Phase 1: canonical profile resolver
 	persona          *persona.CanonicalIdentityService
@@ -148,6 +149,7 @@ func NewBotController(
 		config:           cfg,
 		bridge:           br,
 		modelLister:      br,
+		documentSource:   newTelegramDocumentSource(b.URL, b.Token),
 		agents:           ag,
 		profiles:         profiles.NewResolverFromRegistry(ag, resolver.Profiles(), resolver.Root()),
 		persona:          p,

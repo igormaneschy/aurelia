@@ -1,14 +1,6 @@
 package telegram
 
 const (
-	msgUnsupportedDocument = "⚠️ **Formato não suportado**\n\n" +
-		"No momento eu consigo processar:\n" +
-		"- arquivos `.md`\n" +
-		"- arquivos `.pdf`\n" +
-		"- imagens em `.jpg`, `.png`, `.gif` ou `.webp`\n" +
-		"- áudio e voz\n\n" +
-		"💡 Dica: converta para `.pdf` ou copie o texto diretamente."
-
 	msgDownloadFailure = "❌ **Falha no download**\n\n" +
 		"Não consegui baixar o arquivo enviado pelo Telegram. Tente novamente."
 
@@ -49,14 +41,13 @@ const (
 		"para refinar nosso comportamento."
 )
 
-func unsupportedDocumentMessage() string     { return msgUnsupportedDocument }
-func downloadFailureMessage() string         { return msgDownloadFailure }
-func audioNotConfiguredMessage() string      { return msgAudioNotConfigured }
-func audioProcessingFailureMessage() string  { return msgAudioProcessingFailure }
-func emptyAudioMessage() string              { return msgEmptyAudio }
-func alreadyConfiguredMessage() string       { return msgAlreadyConfigured }
-func bootstrapWelcomeMessage() string      { return msgBootstrapWelcome }
+func downloadFailureMessage() string        { return msgDownloadFailure }
+func audioNotConfiguredMessage() string     { return msgAudioNotConfigured }
+func audioProcessingFailureMessage() string { return msgAudioProcessingFailure }
+func emptyAudioMessage() string             { return msgEmptyAudio }
+func alreadyConfiguredMessage() string      { return msgAlreadyConfigured }
+func bootstrapWelcomeMessage() string       { return msgBootstrapWelcome }
 func bootstrapFailureMessage() string       { return msgBootstrapFailure }
-func bootstrapAssistantMessage() string    { return msgBootstrapAssistant }
-func bootstrapProfileMessage() string      { return msgBootstrapProfile }
-func bootstrapSuccessMessage() string      { return msgBootstrapSuccess }
+func bootstrapAssistantMessage() string     { return msgBootstrapAssistant }
+func bootstrapProfileMessage() string       { return msgBootstrapProfile }
+func bootstrapSuccessMessage() string       { return msgBootstrapSuccess }

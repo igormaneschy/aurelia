@@ -8,12 +8,58 @@ import {
   createBridgeSessionRequestLifecycle,
   disposeBridgeSession,
   installSecurityHook,
+  queueTargetedFollowUp,
   removeSessionIfOwner,
   registerSessionIfOwner,
   resolveModel,
   SecurityContext,
   waitForPendingMessageCount,
 } from "./index.ts";
+
+class FollowUpSessionFake {
+  prompts: string[] = [];
+  constructor(private disposition: "queued" | "handled" = "queued") {}
+  async followUp(prompt: string): Promise<"queued" | "handled"> {
+    this.prompts.push(prompt);
+    return this.disposition;
+  }
+}
+
+describe("targeted document follow-up", () => {
+  it("delivers only to the exact query and project", async () => {
+    const session = new FollowUpSessionFake();
+    const sessions = new Map([["chat", { session, currentReqId: "run-1", cwd: "/project-a" }]]);
+    await queueTargetedFollowUp(sessions, "chat", "run-1", "/project-a", "attachment path");
+    assert.deepEqual(session.prompts, ["attachment path"]);
+  });
+
+  it("rejects a replacement published after the sender checked the old run", async () => {
+    const original = new FollowUpSessionFake();
+    const replacement = new FollowUpSessionFake();
+    const sessions = new Map([["chat", { session: original, currentReqId: "run-1", cwd: "/project-a" }]]);
+    sessions.set("chat", { session: replacement, currentReqId: "run-2", cwd: "/project-b" });
+    await assert.rejects(queueTargetedFollowUp(sessions, "chat", "run-1", "/project-a", "private path"), /changed/);
+    assert.deepEqual(original.prompts, []);
+    assert.deepEqual(replacement.prompts, []);
+    sessions.set("chat", { session: replacement, currentReqId: "run-2", cwd: "/project-a" });
+    await assert.rejects(queueTargetedFollowUp(sessions, "chat", "run-1", "/project-a", "private path"), /changed/);
+    assert.deepEqual(replacement.prompts, []);
+  });
+
+  it("rejects a missing session and a changed project without queueing", async () => {
+    const session = new FollowUpSessionFake();
+    const sessions = new Map([["chat", { session, currentReqId: "run-1", cwd: "/project-b" }]]);
+    await assert.rejects(queueTargetedFollowUp(sessions, "missing", "run-1", "/project-a", "private path"), /changed/);
+    await assert.rejects(queueTargetedFollowUp(sessions, "chat", "run-1", "/project-a", "private path"), /changed/);
+    assert.deepEqual(session.prompts, []);
+  });
+
+  it("does not acknowledge an input intercepted instead of queued by the SDK", async () => {
+    const session = new FollowUpSessionFake("handled");
+    const sessions = new Map([["chat", { session, currentReqId: "run-1", cwd: "/project-a" }]]);
+    await assert.rejects(queueTargetedFollowUp(sessions, "chat", "run-1", "/project-a", "attachment path"), /not queued/);
+  });
+});
 
 // ── waitForPendingMessageCount ──────────────────────────────────────────────
 

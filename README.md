@@ -104,6 +104,13 @@ Aurelia does **not** implement a separate planning mode, `aurelia-plan` blocks, 
 - **Photo analysis** — images downloaded and passed to PI for visual analysis
 - **TUI image input** — `/img`, clipboard paste, and drag-and-drop route screenshots/images to vision-capable models
 - **TUI document attachments** — `/attach` and drag-and-drop copy files safely into `<cwd>/uploads/` for the agent to inspect
+- **Telegram document attachments** — with an active project (`/cwd`), Word,
+  Excel, PowerPoint, PDF, Markdown, and other documents are saved unchanged in
+  `<cwd>/uploads/`. The agent receives the exact absolute path, original name,
+  size, and caption, then chooses how to read the file with its tools. Aurelia
+  does not extract content or convert formats. Uploads remain available for
+  later turns; delete them manually when no longer needed. The limit is 25 MB
+  per file (Telegram's Bot API may impose a smaller download limit).
 - **Voice transcription** — Groq STT converts voice messages to text (Whisper)
 - **Vision fallback** — configure a separate vision model for image inputs
   while keeping a faster text-only model as default

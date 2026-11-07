@@ -109,6 +109,7 @@ interface ChatSessionState {
   sessionId: string;
   sessionFile: string | undefined;
   currentReqId: string;
+  cwd: string;
   unsubPersistent: () => void;
   unsubHook?: () => void;
   idleTimer?: ReturnType<typeof setTimeout>;
@@ -2818,6 +2819,7 @@ async function handleQuery(req: Request): Promise<void> {
       sessionId: sessionID,
       sessionFile: liveSession.sessionFile,
       currentReqId: reqId,
+      cwd: opts?.cwd || process.cwd(),
       unsubPersistent,
       unsubHook,
       createdAt: Date.now(),
@@ -3020,6 +3022,23 @@ async function handleSteer(req: Request): Promise<void> {
 }
 
 // ── Handle follow-up command ────────────────────────────────
+// Validation and the SDK call have no await between them: replacing a session
+// after Go validated its owner must never redirect a document to another run.
+export async function queueTargetedFollowUp<T extends {
+  currentReqId: string;
+  cwd: string;
+  session: { followUp(prompt: string): ReturnType<PiAgentSession["followUp"]> };
+}>(sessions: ReadonlyMap<string, T>, key: string, targetRequestID: string, cwd: string, prompt: string): Promise<void> {
+  const target = sessions.get(key);
+  if (!target || !cwd || target.currentReqId !== targetRequestID || target.cwd !== cwd) {
+    throw new Error("document target session or project changed; resend the document");
+  }
+  const disposition = await target.session.followUp(prompt);
+  if (disposition !== "queued") {
+    throw new Error("document follow-up was not queued; resend the document");
+  }
+}
+
 async function handleFollowUp(req: Request): Promise<void> {
   const reqId = req.request_id || "";
   const chatID = req.options?.chat_id || req.options?.security?.chat_id || 0;
@@ -3030,7 +3049,9 @@ async function handleFollowUp(req: Request): Promise<void> {
 
   const cs = chatSessions.get(cKey);
   if (!cs) {
-    emitReq({ event: "result", content: "no active session" });
+    emitReq(req.target_request_id
+      ? { event: "error", message: "document target session is no longer active; resend the document" }
+      : { event: "result", content: "no active session" });
     return;
   }
 
@@ -3039,7 +3060,9 @@ async function handleFollowUp(req: Request): Promise<void> {
 
   try {
     const imageBlocks = buildImageContents(req.options?.images, reqId, "followUp");
-    if (imageBlocks.length > 0) {
+    if (req.target_request_id) {
+      await queueTargetedFollowUp(chatSessions, cKey, req.target_request_id, req.options?.cwd || "", req.prompt);
+    } else if (imageBlocks.length > 0) {
       await cs.session.followUp(req.prompt, imageBlocks);
     } else {
       await cs.session.followUp(req.prompt);

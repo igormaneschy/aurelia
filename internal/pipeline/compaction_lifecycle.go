@@ -71,7 +71,18 @@ func (s *Service) processRunWithCancel(input pipelineInput, run *activeRun, rese
 	}
 
 	req := s.buildBridgeRequest(userText, systemPrompt, profile, input.chatID, input.threadID, input.userID, input.isPrivateChat)
+	if input.documentCWD != "" && req.Options.Cwd != input.documentCWD {
+		if err := s.output.SendError(input.chatID, input.threadID, "O projeto mudou durante o envio. Reenvie o documento no projeto atual."); err != nil {
+			log.Printf("pipeline: SendError(document project) failed: %v", redactSecrets(err.Error()))
+		}
+		s.output.ConfirmMessage(input.chatID, input.messageID)
+		return
+	}
 	req.RequestID = fmt.Sprintf("run-%d", time.Now().UnixNano())
+	run.mu.Lock()
+	run.cwd = req.Options.Cwd
+	run.requestID = req.RequestID
+	run.mu.Unlock()
 	req.Options.Images = input.images
 	s.applyVisionFallback(reservedCtx, &req, input.images)
 
