@@ -652,7 +652,16 @@ Rollback before the legacy removal: set `memory_provider=legacy` in
 config and binary are kept at
 `~/.aurelia/config/app.json.pre-memory-switch-20261107230812` and
 `~/.aurelia/bin/aurelia.prev-memory-switch-20261107230812`. The legacy files and
-continuity DB are untouched.
+continuity DB are untouched. The `/cwd` project-change fix was deployed with a
+second binary backup at
+`~/.aurelia/bin/aurelia.pre-cwd-reset-20261107232917`.
+
+In `ai-memory` mode, `/cwd` now resets the PI session and continuity when the
+conversation moves to a different ai-memory project, so the session row,
+observations and handoff stay in the new project. A topic whose session started
+before its binding was set keeps the old attribution until `/reset` starts a
+new session; `/memory` reports `Sessions: 0` in that case even though the
+project pages/observations are correct.
 
 The `/memory` command reports ai-memory project/page/handoff state in
 `ai-memory` mode; the local checkpoint command is disabled there and is
