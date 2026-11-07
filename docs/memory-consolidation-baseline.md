@@ -4,8 +4,9 @@ Structural baseline for the `memory-consolidation` change. Collected read-only
 on the NAS personal instance (ai-memory 3.4.3, Aurelia v0.53.0). No note,
 prompt, session or page content is reproduced here.
 
-Status: **structural baseline complete; recall fixtures pending** (the recall
-run happens in the shadow phase before the provider switch).
+Status: **structural baseline complete; legacy migration applied; recall
+fixtures pending** (the recall run happens in the shadow phase before the
+provider switch).
 
 ## ai-memory instance
 
@@ -127,3 +128,37 @@ before the switch.
    state; no coding instance is touched and no write occurs.
 7. Capture exclusion: an excluded path produces no observation/page.
 8. Migration: dry-run, verified import and feature-flagged rollback.
+
+## Migration result (2026-11-07)
+
+A pre-import ai-memory backup was written to
+`~/.aurelia/backup-test/pre-memory-consolidation-20261107224526.tar.gz`
+(704,423 bytes; SHA-256
+`c51be982b22bced158d8f5ae2217c8759d8e47d54c3466d047a2fa4a8d91d07a`).
+
+The dry run reported 23 pages, 0 duplicate targets and no blocking warnings.
+The final `migrate-memory --apply --verify` wrote and verified **23/23 pages**,
+0 skipped. The finance project had a non-fatal `memory_resolve_write_target`
+warning because it had no pages yet; the write created/registered the project
+and the page verified.
+
+Project distribution after import:
+
+| Project | Pages | Delta |
+|---|---:|---:|
+| personal/aurelia | 42 | +12 |
+| personal/aurelia-brewpub | 1 | +1 |
+| personal/aurelia-finance | 1 | +1 (created) |
+| personal/aurelia-group | 7 | +5 |
+| personal/aurelia-homeassistant | 1 | +1 |
+| personal/aurelia-homebrewing | 3 | +3 |
+| **Total imported** | | **23** |
+
+ai-memory status after import: 57 pages (89 versions), 23 sessions, 600
+observations, 1.9 MiB storage. The observation increase may include unrelated
+live extension capture; it is not attributed solely to the migration.
+
+The legacy files, continuity database and memoryux files were only read; their
+originals remain untouched. The live daemon still runs `memory_provider=legacy`
+and was not restarted or switched. The imported pages are tagged
+`legacy-import` and remain available for the shadow/live recall phase.

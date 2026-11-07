@@ -47,6 +47,11 @@ func main() {
 				log.Fatalf("CWD overlay migration failed: %v", err)
 			}
 			return
+		case "migrate-memory":
+			if err := runMigrateMemory(os.Args[2:]); err != nil {
+				log.Fatalf("Memory migration failed: %v", err)
+			}
+			return
 		case "version":
 			fmt.Println(version.BuildInfo())
 			return
