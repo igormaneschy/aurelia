@@ -1,8 +1,34 @@
 # Operations Guide
 
-How to build, deploy, and manage the Aurelia daemon on macOS.
+How to build, deploy, and manage the Aurelia daemon on macOS for local
+development and fallback.
 
-## TL;DR
+> **Current personal deployment (2026-11-07):** Aurelia runs on the NAS as a
+> systemd user service; the Mac runs only the desktop client through an SSH
+> streamlocal tunnel over Tailscale. The TUI client is disabled. The macOS
+> commands below remain for local development/fallback; the Mac launchd agent
+> `com.aurelia.agent` is stopped and disabled in the personal deployment.
+> See [NAS_OPERATIONS.md](NAS_OPERATIONS.md) for the NAS runbook and
+> [../desktop/README.md](../desktop/README.md) for the desktop.
+
+## Current personal deployment (NAS + desktop)
+
+| Need | Where |
+|---|---|
+| NAS daemon | `systemctl --user status aurelia.service` on the NAS |
+| NAS memory | `systemctl --user status ai-memory.service` on the NAS |
+| NAS logs | `journalctl --user -u aurelia.service` |
+| Mac tunnel | `launchctl print gui/$(id -u)/com.aurelia.nas-tunnel` |
+| Mac tunnel logs | `~/.aurelia/logs/nas-tunnel.log` |
+| Desktop | `~/.aurelia/bin/aurelia-desktop` (NAS mode via `~/.aurelia/nas.sock`) |
+| Telegram | NAS is the sole consumer; topics use `/topic init` and `/cwd` |
+| TUI | disabled; do not delete `tui_sessions.db` (the desktop uses it) |
+
+The NAS binary is rebuilt/redeployed with the Linux artifact and a systemd
+restart; `make deploy` below is the macOS launchd path and is not used for the
+NAS. The release PR target is v0.53.0; see the runbook for the current state.
+
+## TL;DR (macOS local/fallback)
 
 ```bash
 make install-service   # one-time: install launchd plist
