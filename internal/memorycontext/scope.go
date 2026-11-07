@@ -35,6 +35,17 @@ func (s Scope) ProjectRef() string {
 	return s.Workspace + "/" + s.Project
 }
 
+// ProjectRefFor resolves the ai-memory project reference for a cwd without
+// requiring a conversation identity. It is used to detect project changes
+// before resetting a PI session.
+func ProjectRefFor(cwd string) string {
+	scope, err := ResolveScope(cwd, 0, 0, 0, "")
+	if err != nil {
+		return ""
+	}
+	return scope.ProjectRef()
+}
+
 // Key returns a cache key that includes the conversation identity.
 func (s Scope) Key() string {
 	return fmt.Sprintf("%s|%s|%d|%d|%d", s.ProjectRef(), s.CWD, s.UserID, s.ChatID, s.ThreadID)

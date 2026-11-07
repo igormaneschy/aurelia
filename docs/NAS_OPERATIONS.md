@@ -598,6 +598,11 @@ Practical consequences:
   is a page write/handoff in ai-memory, and the desktop reads the bounded
   project working set on its next turn. `/memory` reports project pages,
   observations, sessions, pending handoffs and degraded state.
+- In `ai-memory` mode, changing `/cwd` to a different ai-memory project resets
+  the PI session and continuity for that conversation, so the ai-memory session
+  row, observations and handoff belong to the new project. A session created
+  before the topic binding was set keeps the old project attribution until
+  `/reset` (or a later `/cwd` change) starts a new session.
 - The desktop and the Telegram topic can run concurrently. There is no
   cross-surface lock over the shared files; avoid simultaneous edits to the
   same file.

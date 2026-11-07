@@ -241,12 +241,18 @@ func (bc *BotController) handleCwdCommand(c telebot.Context) error {
 		return SendTextWithThread(bc.bot, c.Chat(), status, threadID)
 	}
 
+	userID := safeSenderID(c.Sender())
+	isPrivateChat := c.Chat().Type == telebot.ChatPrivate
+
 	if clearThreadID, clear, err := cwdClearThread(args, threadID); err != nil {
 		return SendTextWithThread(bc.bot, c.Chat(), "❌ "+err.Error(), threadID)
 	} else if clear {
+		oldCwd := bc.currentCwdForContext(chatID, clearThreadID, userID, isPrivateChat)
 		if err := bc.clearCurrentCwd(chatID, clearThreadID); err != nil {
 			return SendErrorWithThread(bc.bot, c.Chat(), err.Error(), threadID)
 		}
+		newCwd := bc.currentCwdForContext(chatID, clearThreadID, userID, isPrivateChat)
+		bc.resetSessionOnProjectChange(chatID, clearThreadID, userID, oldCwd, newCwd)
 		msg := "✅ Binding de projeto removido deste tópico."
 		if clearThreadID == 0 {
 			msg = "✅ Binding de projeto removido do grupo."
@@ -260,16 +266,14 @@ func (bc *BotController) handleCwdCommand(c telebot.Context) error {
 		return SendTextWithThread(bc.bot, c.Chat(), "❌ "+err.Error(), threadID)
 	}
 
-	userID := int64(0)
-	if c.Sender() != nil {
-		userID = c.Sender().ID
-	}
+	oldCwd := bc.currentCwdForContext(chatID, target.ThreadID, userID, isPrivateChat)
 	cwd, err := bc.setCurrentCwd(chatID, target.ThreadID, userID, target.Path)
 	if err != nil {
 		log.Printf("cwd: rejected binding chat=%d thread=%d err=%v", chatID, target.ThreadID, err)
 		msg := fmt.Sprintf("❌ Diretório inválido, inexistente ou não permitido. Detalhe: %s", err.Error())
 		return SendTextWithThread(bc.bot, c.Chat(), msg, threadID)
 	}
+	bc.resetSessionOnProjectChange(chatID, target.ThreadID, userID, oldCwd, cwd)
 	if bc.resolver != nil {
 		if err := runtime.BootstrapConversationProjectMemory(bc.resolver, cwd, chatID, target.ThreadID); err != nil {
 			log.Printf("cwd: failed to bootstrap project memory for %s: %v", cwd, err)

@@ -273,9 +273,11 @@ func (bc *BotController) handleTopicCommand(c telebot.Context) error {
 	if err != nil {
 		return SendTextWithThread(bc.bot, c.Chat(), "❌ "+err.Error(), threadID)
 	}
+	oldCwd := bc.currentCwdForContext(chatID, threadID, userID, c.Chat().Type == telebot.ChatPrivate)
 	if _, err := bc.setCurrentCwd(chatID, threadID, userID, cwd); err != nil {
 		return SendTextWithThread(bc.bot, c.Chat(), "❌ Diretório criado, mas o binding falhou: "+err.Error(), threadID)
 	}
+	bc.resetSessionOnProjectChange(chatID, threadID, userID, oldCwd, cwd)
 	if bc.resolver != nil {
 		if err := runtime.BootstrapConversationProjectMemory(bc.resolver, cwd, chatID, threadID); err != nil {
 			log.Printf("topic init: bootstrap memory for %s: %v", cwd, err)

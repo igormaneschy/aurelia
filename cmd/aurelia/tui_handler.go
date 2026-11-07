@@ -498,12 +498,15 @@ func handleTUICwd(ctx context.Context, a *app, chatID int64, threadID int, userI
 
 	if args == "clear" {
 		key := projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID}
+		oldCwd := tuiConversationCwd(ctx, a, chatID, threadID)
 		if err := a.bindings.Delete(ctx, key); err != nil {
 			return fmt.Sprintf("❌ Error clearing cwd: %s", err)
 		}
 		if a.sessions != nil {
 			a.sessions.ClearCwd(chatID, threadID)
 		}
+		newCwd := tuiConversationCwd(ctx, a, chatID, threadID)
+		resetTUISessionOnProjectChange(a, chatID, threadID, userID, oldCwd, newCwd)
 		return "✅ Project binding removed."
 	}
 
@@ -512,6 +515,8 @@ func handleTUICwd(ctx context.Context, a *app, chatID int64, threadID int, userI
 	if err != nil {
 		return fmt.Sprintf("❌ Invalid path: %s", err)
 	}
+
+	oldCwd := tuiConversationCwd(ctx, a, chatID, threadID)
 
 	// Set binding — under the active TUI session's ChatID.
 	binding := projectbinding.ProjectBinding{
@@ -537,7 +542,49 @@ func handleTUICwd(ctx context.Context, a *app, chatID int64, threadID int, userI
 	if a.bot != nil {
 		a.bot.InvalidateMemoryOverlay(cwd)
 	}
+	resetTUISessionOnProjectChange(a, chatID, threadID, userID, oldCwd, cwd)
 	return fmt.Sprintf("✅ Project set to: `%s`", cwd)
+}
+
+// tuiConversationCwd resolves the cwd from the binding or the session store.
+func tuiConversationCwd(ctx context.Context, a *app, chatID int64, threadID int) string {
+	if a.bindings != nil {
+		resolved, err := a.bindings.Resolve(ctx, projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID})
+		if err == nil && resolved != nil && resolved.Binding != nil {
+			return resolved.Binding.CWD
+		}
+	}
+	if a.sessions != nil {
+		return a.sessions.GetCwd(chatID, threadID)
+	}
+	return ""
+}
+
+// resetTUISessionOnProjectChange clears the PI session and continuity when
+// /cwd moves the desktop conversation to another ai-memory project. The
+// ai-memory session row is fixed at session start, so reusing it across
+// projects would attribute observations and handoffs to the old project.
+func resetTUISessionOnProjectChange(a *app, chatID int64, threadID int, userID int64, oldCwd, newCwd string) {
+	if a.memoryProvider == nil {
+		return
+	}
+	if memorycontext.ProjectRefFor(oldCwd) == memorycontext.ProjectRefFor(newCwd) {
+		return
+	}
+	if a.bot != nil {
+		a.bot.ResetSessionForProjectChange(chatID, threadID, userID)
+		return
+	}
+	if a.sessions != nil {
+		a.sessions.ClearSessionForUser(chatID, threadID, userID)
+	}
+	if a.continuity != nil {
+		resetCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		if err := a.continuity.ResetConversation(resetCtx, chatID, threadID, userID, continuity.UserResetReason); err != nil {
+			log.Printf("tui: continuity reset after project change failed chat=%d thread=%d: %v", chatID, threadID, err)
+		}
+	}
 }
 
 // handleTUIReset clears the PI session for the active TUI chat.

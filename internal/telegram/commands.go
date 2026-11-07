@@ -377,15 +377,17 @@ func (bc *BotController) resetCurrentSession(chatID int64, threadID int, invalid
 	return formatResetSummary(canceledActive), nil
 }
 
-// ResetSession cancels an active Telegram pipeline run, flushes the nudge buffer,
-// optionally invalidates memory session cache, and clears the PI session file.
-// Shared by Telegram /new and TUI /reset.
+// ResetSession cancels an active Telegram pipeline run, flushes the nudge buffer
+// (legacy mode only), optionally invalidates the memory session cache, and
+// clears the PI session file. Shared by Telegram /new and TUI /reset.
 func (bc *BotController) ResetSession(chatID int64, threadID int, userID int64, invalidateMemory bool, isPrivateChat bool) bool {
 	if bc == nil {
 		return false
 	}
 	canceledActive := bc.cancelActiveRun(chatID, threadID, userID)
-	if bc.dreamer != nil && bc.sessions != nil {
+	// In ai-memory mode the legacy Dream/Nudge flush must not write local
+	// memory: the ai-memory handoff/session pages own continuity.
+	if bc.dreamer != nil && bc.sessions != nil && bc.memoryProvider == nil {
 		cwd := bc.currentCwdForContext(chatID, threadID, userID, isPrivateChat)
 		sessionFile := bc.sessions.GetSession(chatID, threadID, userID)
 		bc.dreamer.FlushNudge(chatID, threadID, userID, cwd, sessionFile, bc.nudgeBuffer)
@@ -409,6 +411,31 @@ func (bc *BotController) ResetSession(chatID int64, threadID int, userID int64, 
 	}
 	log.Printf("session: reset for chat=%d thread=%d user=%d", chatID, threadID, userID)
 	return canceledActive
+}
+
+// ResetSessionForProjectChange clears the PI session and continuity context
+// after a /cwd change moves the conversation to another ai-memory project. It
+// intentionally skips the Dream/Nudge flush: the old project's buffer must not
+// be written into the new project's legacy memory.
+func (bc *BotController) ResetSessionForProjectChange(chatID int64, threadID int, userID int64) {
+	if bc == nil {
+		return
+	}
+	bc.cancelActiveRun(chatID, threadID, userID)
+	if bc.sessions != nil {
+		bc.sessions.ClearSessionForUser(chatID, threadID, userID)
+	}
+	if bc.nudgeBuffer != nil {
+		bc.nudgeBuffer.GetAndReset(chatID, threadID, userID)
+	}
+	if bc.continuity != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		if err := bc.continuity.ResetConversation(ctx, chatID, threadID, userID, continuity.UserResetReason); err != nil {
+			log.Printf("session: continuity reset after project change failed chat=%d thread=%d: %v", chatID, threadID, err)
+		}
+		cancel()
+	}
+	log.Printf("session: project change reset chat=%d thread=%d user=%d", chatID, threadID, userID)
 }
 
 func (bc *BotController) cancelActiveRun(chatID int64, threadID int, userID ...int64) bool {

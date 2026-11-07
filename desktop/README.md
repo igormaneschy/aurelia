@@ -109,7 +109,11 @@ mesmos arquivos nos dois lados ao mesmo tempo; não há lock entre superfícies.
 > turno live). As 23 páginas legadas importadas têm a tag `legacy-import`.
 > `cwd_overlay`/`topic`/`user_global` e continuity só são usados em
 > `memory_provider=legacy` (rollback). `shadow` está reservado para a comparação
-> pendente e, até ser implementado, mantém o prompt legacy.
+> pendente e, até ser implementado, mantém o prompt legacy. Em `ai-memory` mode,
+> mudar `/cwd` para outro projeto reinicia a sessão PI dessa conversa (a sessão
+> nomeada do desktop mantém-se) para que observações e handoff fiquem no projeto
+> novo; uma sessão criada antes do binding mantém o projeto original até
+> `/reset`.
 
 ## Desenvolvimento
 

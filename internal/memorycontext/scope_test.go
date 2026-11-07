@@ -108,3 +108,26 @@ func TestReadMarkerIgnoresCaptureSection(t *testing.T) {
 		t.Fatalf("marker = %q/%q", workspace, project)
 	}
 }
+
+func TestProjectRefForFindsMarker(t *testing.T) {
+	root := t.TempDir()
+	marker := `workspace = "personal"
+project = "aurelia-homebrewing"
+`
+	if err := os.WriteFile(filepath.Join(root, ".ai-memory.toml"), []byte(marker), 0600); err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(root, "topics", "homebrewing")
+	if err := os.MkdirAll(nested, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if got := ProjectRefFor(nested); got != "personal/aurelia-homebrewing" {
+		t.Fatalf("ProjectRefFor = %q, want personal/aurelia-homebrewing", got)
+	}
+}
+
+func TestProjectRefForEmptyCwd(t *testing.T) {
+	if got := ProjectRefFor(""); got != "" {
+		t.Fatalf("ProjectRefFor(empty) = %q, want empty", got)
+	}
+}
