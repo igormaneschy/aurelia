@@ -81,24 +81,15 @@ func bootstrapApp() (*app, error) {
 		return nil, fmt.Errorf("bootstrap instance directory: %w", err)
 	}
 
-	if err := checkMigrationLock(resolver); err != nil {
-		return nil, err
-	}
-
 	cfg, err := config.Load(resolver)
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 	setProviderEnv(cfg)
 
-	var memProvider memorycontext.Provider
-	if cfg.MemoryProviderMode() == config.MemoryProviderAIMemory {
-		baseProvider := memorycontext.NewAIMemoryProvider(memorycontext.AIMemoryOptions{})
-		memProvider = memorycontext.NewCachedProvider(baseProvider, memorycontext.NewCache(memorycontext.DefaultCacheTTL))
-		log.Printf("memory provider: ai-memory (MCP read-only working set)")
-	} else {
-		log.Printf("memory provider: %s", cfg.MemoryProviderMode())
-	}
+	baseProvider := memorycontext.NewAIMemoryProvider(memorycontext.AIMemoryOptions{})
+	memProvider := memorycontext.NewCachedProvider(baseProvider, memorycontext.NewCache(memorycontext.DefaultCacheTTL))
+	log.Printf("memory provider: ai-memory (MCP read-only working set)")
 
 	// Check runtime dependencies before touching the bridge.
 	checkResult := deps.CheckAll()

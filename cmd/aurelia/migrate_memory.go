@@ -652,7 +652,7 @@ func printMemoryMigrationPlan(plan memoryMigrationPlan, dryRun bool) {
 }
 
 func printMigrationRollbackNote() {
-	fmt.Println("rollback: keep the legacy originals untouched; set memory_provider=legacy (or unset AURELIA_MEMORY_PROVIDER) before removing the legacy fallback")
+	fmt.Println("rollback: keep the legacy originals untouched; restore the previous binary backup before relying on the legacy stack")
 }
 
 func relativeToRoot(root, path string) string {

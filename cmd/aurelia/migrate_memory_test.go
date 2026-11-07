@@ -52,7 +52,7 @@ func (f *fakeMigrationWriter) WritePage(_ context.Context, page migrationPage) e
 
 func TestBuildMemoryMigrationPlanFromCwdOverlay(t *testing.T) {
 	resolver, bindings, cwd := migrationTestEnv(t)
-	overlay := resolver.ProjectCwdOverlayDir(cwd)
+	overlay := filepath.Join(resolver.Root(), "projects", runtime.ProjectSlug(cwd), "cwd_overlay")
 	if err := os.MkdirAll(overlay, 0700); err != nil {
 		t.Fatal(err)
 	}

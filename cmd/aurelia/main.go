@@ -32,21 +32,6 @@ func main() {
 				log.Fatalf("Telegram command failed: %v", err)
 			}
 			return
-		case "migrate-multi-user":
-			if err := runMigrateMultiUser(os.Args[2:]); err != nil {
-				log.Fatalf("Migration failed: %v", err)
-			}
-			return
-		case "ensure-context-memory":
-			if err := runEnsureContextMemoryLayout(os.Args[2:]); err != nil {
-				log.Fatalf("Context-memory migration failed: %v", err)
-			}
-			return
-		case "migrate-cwd-overlay":
-			if err := runMigrateCwdOverlayPaths(os.Args[2:]); err != nil {
-				log.Fatalf("CWD overlay migration failed: %v", err)
-			}
-			return
 		case "migrate-memory":
 			if err := runMigrateMemory(os.Args[2:]); err != nil {
 				log.Fatalf("Memory migration failed: %v", err)

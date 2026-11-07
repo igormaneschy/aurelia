@@ -341,7 +341,7 @@ func (bc *Service) buildAIMemoryInstructions(cwd string, chatID int64, threadID 
 	var sb strings.Builder
 	sb.WriteString(`## Persistent Memory — ai-memory
 
-You have ai-memory as your durable memory and handoff source. The ai-memory PI extension injects the pending handoff at session start, records session observations, and exposes the memory tools. Do not create or update local MEMORY.md, cwd_overlay, topic or user_global files. Use memory_query, memory_read_page, memory_briefing, memory_explore and memory_read_session_observations for recall; write durable pages only when the user explicitly asks. Profile/global scopes are explicit, not project-private memory.`)
+You have ai-memory as your durable memory and handoff source. The ai-memory PI extension injects the pending handoff at session start, records session observations, and exposes the memory tools. Do not create or update local memory files: ai-memory is the only durable memory backend. Use memory_query, memory_read_page, memory_briefing, memory_explore and memory_read_session_observations for recall; write durable pages only when the user explicitly asks. Profile/global scopes are explicit, not project-private memory.`)
 
 	scope, err := memorycontext.ResolveScope(cwd, userID, chatID, threadID, "")
 	if err != nil {
