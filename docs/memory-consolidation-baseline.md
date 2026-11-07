@@ -197,3 +197,14 @@ Rollback before the legacy removal: set `memory_provider=legacy` in
 continuity DB are still present. After the user accepts the live behavior, the
 remaining OpenSpec tasks remove the legacy packages, paths, commands and prompt
 layers.
+
+### Project attribution check (2026-11-07)
+
+The homebrewing topic initially reported `Sessions: 0` because its PI session
+had started in the group-general cwd before the topic binding existed; the
+ai-memory session row stayed in `aurelia-group` while the observations moved to
+`aurelia-homebrewing`. The `/cwd` project-change reset fixed the cause. After
+`/reset` and one message, the topic reported `Sessions: 1`, `Pages: 3`,
+`Observations: 315`, `Degraded: false` and 0 pending handoffs; the new session
+cwd is the topic project and the working set is
+`personal/aurelia-homebrewing` (3,154 characters, 3 sources).
