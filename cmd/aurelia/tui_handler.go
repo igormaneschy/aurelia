@@ -645,7 +645,7 @@ func handleTUIStatus(ctx context.Context, a *app, chatID int64, threadID int, us
 func handleTUIProjectState(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
 	chatID, threadID, userID := msg.ChatID, int(msg.ThreadID), msg.UserID
 
-	payload := ipc.ProjectStatePayload{}
+	payload := ipc.ProjectStatePayload{MemoryLayers: make([]ipc.ProjectStateMemoryLayer, 0)}
 
 	// Resolve binding (CWD + source).
 	fillTUIProjectBinding(ctx, a, chatID, threadID, &payload)
@@ -707,6 +707,13 @@ func fillTUIProjectBinding(ctx context.Context, a *app, chatID int64, threadID i
 	}
 	resolved, err := a.bindings.Resolve(ctx, projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID})
 	if err != nil || resolved == nil || resolved.Binding == nil {
+		if a.sessions != nil {
+			if cwd := a.sessions.GetCwd(chatID, threadID); cwd != "" {
+				payload.CWD = cwd
+				payload.BindingSource = "session"
+				return
+			}
+		}
 		payload.CWD = ""
 		payload.BindingSource = "none"
 		return
