@@ -377,24 +377,13 @@ func (bc *BotController) resetCurrentSession(chatID int64, threadID int, invalid
 	return formatResetSummary(canceledActive), nil
 }
 
-// ResetSession cancels an active Telegram pipeline run, flushes the nudge buffer
-// (legacy mode only), optionally invalidates the memory session cache, and
-// clears the PI session file. Shared by Telegram /new and TUI /reset.
+// ResetSession cancels an active Telegram pipeline run and clears the PI
+// session file. Shared by Telegram /new and TUI /reset.
 func (bc *BotController) ResetSession(chatID int64, threadID int, userID int64, invalidateMemory bool, isPrivateChat bool) bool {
 	if bc == nil {
 		return false
 	}
 	canceledActive := bc.cancelActiveRun(chatID, threadID, userID)
-	// In ai-memory mode the legacy Dream/Nudge flush must not write local
-	// memory: the ai-memory handoff/session pages own continuity.
-	if bc.dreamer != nil && bc.sessions != nil && bc.memoryProvider == nil {
-		cwd := bc.currentCwdForContext(chatID, threadID, userID, isPrivateChat)
-		sessionFile := bc.sessions.GetSession(chatID, threadID, userID)
-		bc.dreamer.FlushNudge(chatID, threadID, userID, cwd, sessionFile, bc.nudgeBuffer)
-		if invalidateMemory {
-			bc.InvalidateMemorySession(chatID, threadID, userID)
-		}
-	}
 	if bc.sessions != nil {
 		bc.sessions.ClearSessionForUser(chatID, threadID, userID)
 	}
@@ -424,9 +413,6 @@ func (bc *BotController) ResetSessionForProjectChange(chatID int64, threadID int
 	bc.cancelActiveRun(chatID, threadID, userID)
 	if bc.sessions != nil {
 		bc.sessions.ClearSessionForUser(chatID, threadID, userID)
-	}
-	if bc.nudgeBuffer != nil {
-		bc.nudgeBuffer.GetAndReset(chatID, threadID, userID)
 	}
 	if bc.continuity != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)

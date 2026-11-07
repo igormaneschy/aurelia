@@ -30,32 +30,26 @@ import (
 
 // BotController wires Telegram I/O to the application services.
 type BotController struct {
-	bot              *telebot.Bot
-	offline          bool
-	config           *config.AppConfig
-	bridge           *bridge.Bridge
-	modelLister      modelLister
-	documentSource   documentSource
-	agents           *agents.Registry
-	profiles         *profiles.Resolver // Phase 1: canonical profile resolver
-	persona          *persona.CanonicalIdentityService
-	stt              stt.Transcriber
-	cronHandler      *CronCommandHandler
-	sessions         *session.Store
-	resolver         *runtime.PathResolver
-	personasDir      string
-	memoryDir        string // path to ~/.aurelia/memory for SDK auto-memory
-	exePath          string // path to aurelia binary for CLI instructions in system prompt
-	bootstrapMu      sync.Mutex
-	pendingBootstrap map[int64]bootstrapState
-	albums           *albumBuffer
-	nudgeBuffer      *session.NudgeBuffer
-	botCwd           string // working directory of the aurelia daemon
-	dreamer          interface {
-		AfterTurn(userID int64)
-		AfterTurnNudge(chatID int64, threadID int, userID int64, cwd string, sessionFile string, buffer *session.NudgeBuffer)
-		FlushNudge(chatID int64, threadID int, userID int64, cwd string, sessionFile string, buffer *session.NudgeBuffer)
-	}
+	bot                *telebot.Bot
+	offline            bool
+	config             *config.AppConfig
+	bridge             *bridge.Bridge
+	modelLister        modelLister
+	documentSource     documentSource
+	agents             *agents.Registry
+	profiles           *profiles.Resolver // Phase 1: canonical profile resolver
+	persona            *persona.CanonicalIdentityService
+	stt                stt.Transcriber
+	cronHandler        *CronCommandHandler
+	sessions           *session.Store
+	resolver           *runtime.PathResolver
+	personasDir        string
+	memoryDir          string // path to ~/.aurelia/memory for SDK auto-memory
+	exePath            string // path to aurelia binary for CLI instructions in system prompt
+	bootstrapMu        sync.Mutex
+	pendingBootstrap   map[int64]bootstrapState
+	albums             *albumBuffer
+	botCwd             string // working directory of the aurelia daemon
 	modelCache         []bridge.ModelInfo
 	modelCacheMu       sync.Mutex
 	modelCacheExpiry   time.Time
@@ -196,13 +190,9 @@ func NewBotController(
 		Continuity:   bc.continuity,
 		UsersStore:   userStore,
 		UserResolver: userResolver,
-		NudgeBuffer:  bc.NudgeBuffer(),
 		MemoryCache:  bc.MemoryCache(),
 		TokenGuard:   bc.TokenGuard(),
 	})
-	// nudgeBuffer is owned by the bot (shared with TUI); pipeline uses the same.
-	bc.nudgeBuffer = bc.pipeline.NudgeBuffer()
-
 	bc.setupRoutes()
 
 	return bc, nil
@@ -247,16 +237,6 @@ func (bc *BotController) SetOnboardingStore(os *users.OnboardingStore) {
 func (bc *BotController) SetProjectIndex(pi *runtime.ProjectIndex) {
 	bc.projectIndex = pi
 	bc.ensurePipeline().SetProjectIndex(pi)
-}
-
-// SetDreamer injects the dream system after construction.
-func (bc *BotController) SetDreamer(d interface {
-	AfterTurn(userID int64)
-	AfterTurnNudge(chatID int64, threadID int, userID int64, cwd string, sessionFile string, buffer *session.NudgeBuffer)
-	FlushNudge(chatID int64, threadID int, userID int64, cwd string, sessionFile string, buffer *session.NudgeBuffer)
-}) {
-	bc.dreamer = d
-	bc.ensurePipeline().SetDreamer(d)
 }
 
 // ChatSender returns a cron.ChatSender backed by this bot instance.
@@ -453,25 +433,6 @@ func (bc *BotController) UserResolver() *users.Resolver {
 // Pipeline returns the pipeline service for shared use (e.g. TUI).
 func (bc *BotController) Pipeline() *pipelinepkg.Service {
 	return bc.pipeline
-}
-
-// Dreamer returns the dream/nudge system for shared use (e.g. TUI).
-// Returns nil when no dreamer is configured (nudge disabled).
-func (bc *BotController) Dreamer() pipelinepkg.Dreamer {
-	if bc.dreamer == nil {
-		return nil
-	}
-	return bc.dreamer.(pipelinepkg.Dreamer)
-}
-
-// NudgeBuffer returns the shared nudge buffer, creating it lazily on first
-// access. Shared across Telegram and TUI so turn counts accumulate across
-// both frontends and trigger nudge review at the configured threshold.
-func (bc *BotController) NudgeBuffer() *session.NudgeBuffer {
-	if bc.nudgeBuffer == nil {
-		bc.nudgeBuffer = session.NewNudgeBuffer()
-	}
-	return bc.nudgeBuffer
 }
 
 // MemoryCache returns the shared memory directory cache, creating it lazily

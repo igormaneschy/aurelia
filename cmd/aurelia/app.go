@@ -20,7 +20,6 @@ import (
 	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/cron"
 	"github.com/igormaneschy/aurelia/internal/deps"
-	"github.com/igormaneschy/aurelia/internal/dream"
 	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/internal/memorycontext"
 	"github.com/igormaneschy/aurelia/internal/persona"
@@ -298,45 +297,6 @@ func bootstrapApp() (*app, error) {
 	// mutated already; re-export the provider env vars so the bridge picks up
 	// the right API key on its next query.
 	bot.SetProviderEnvRefresher(func() { setProviderEnv(cfg) })
-
-	// Wire dreamer — background memory consolidation + nudge review.
-	// Fall back to the user's default model so dream/nudge work on any provider
-	// (avoids 402 errors when the hardcoded Anthropic models aren't available).
-	dreamCfg := dream.DefaultConfig()
-	dreamCfg.Provider = cfg.DefaultProvider
-	userModel := cfg.DefaultModel
-	if userModel != "" {
-		dreamCfg.Model = userModel
-		dreamCfg.ExtractModel = userModel
-		dreamCfg.NudgeModel = userModel
-	}
-	if cfg.DreamModel != "" {
-		dreamCfg.Model = cfg.DreamModel
-	}
-	if cfg.ExtractModel != "" {
-		dreamCfg.ExtractModel = cfg.ExtractModel
-	}
-	if cfg.NudgeEnabled != nil {
-		dreamCfg.NudgeEnabled = *cfg.NudgeEnabled
-	}
-	if cfg.NudgeTurns > 0 {
-		dreamCfg.NudgeTurns = cfg.NudgeTurns
-	}
-	if cfg.NudgeModel != "" {
-		dreamCfg.NudgeModel = cfg.NudgeModel
-	}
-	if cfg.NudgeMinTranscript > 0 {
-		dreamCfg.NudgeMinTranscript = cfg.NudgeMinTranscript
-	}
-	if cfg.NudgeMaxTranscript > 0 {
-		dreamCfg.NudgeMaxTranscript = cfg.NudgeMaxTranscript
-	}
-	dreamCfg.RunLog = runLogStore
-	dreamCfg.NudgeSender = bot
-	dreamCfg.MemoryCache = bot.MemoryCache()
-	userResolver := users.NewResolver(resolver.Root())
-	dreamer := dream.New(userResolver, resolver, br, dreamCfg)
-	bot.SetDreamer(dreamer)
 
 	// Wire project index for fast project lookup.
 	if homeDir == "" {

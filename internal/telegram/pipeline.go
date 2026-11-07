@@ -153,7 +153,6 @@ func (bc *BotController) ensurePipeline() *pipelinepkg.Service {
 		ExePath:        bc.exePath,
 		BotCwd:         bc.botCwd,
 		Output:         telegramPipelineOutput{bc: bc, tg: NewTelegramTransport(bc.bot)},
-		Dreamer:        bc.dreamer,
 		ProjectIndex:   bc.projectIndex,
 		Bindings:       bc.bindings,
 		RunLog:         bc.runLog,
@@ -161,12 +160,10 @@ func (bc *BotController) ensurePipeline() *pipelinepkg.Service {
 		MemoryProvider: bc.memoryProvider,
 		UsersStore:     userStore,
 		UserResolver:   userResolver,
-		NudgeBuffer:    bc.NudgeBuffer(),
 		MemoryCache:    bc.MemoryCache(),
 		TokenGuard:     bc.TokenGuard(),
 		EntryPoint:     observability.EntryPointTelegram,
 	})
-	bc.nudgeBuffer = bc.pipeline.NudgeBuffer()
 	return bc.pipeline
 }
 

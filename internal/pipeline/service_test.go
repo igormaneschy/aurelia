@@ -635,23 +635,18 @@ func TestHandleContextOutcome_CancelledCapturesRunID(t *testing.T) {
 }
 
 // TestNewService_SharesInjectedSharedState verifies that when Config provides
-// NudgeBuffer, MemoryCache, and TokenGuard, NewService reuses them instead of
-// creating fresh instances. This is the wiring that lets Telegram (singleton
-// pipeline) and TUI (per-send pipeline) share state across frontends.
+// MemoryCache and TokenGuard, NewService reuses them instead of creating fresh
+// instances. This is the wiring that lets Telegram (singleton pipeline) and
+// TUI (per-send pipeline) share state across frontends.
 func TestNewService_SharesInjectedSharedState(t *testing.T) {
-	sharedBuffer := session.NewNudgeBuffer()
 	sharedCache := NewMemoryCache()
 	sharedGuard := session.NewTokenGuard()
 
 	svc := NewService(Config{
-		NudgeBuffer: sharedBuffer,
 		MemoryCache: sharedCache,
 		TokenGuard:  sharedGuard,
 	})
 
-	if svc.NudgeBuffer() != sharedBuffer {
-		t.Error("NudgeBuffer(): injected instance not retained (sharing broken)")
-	}
 	if svc.MemoryCache() != sharedCache {
 		t.Error("MemoryCache(): injected instance not retained (sharing broken)")
 	}
@@ -665,9 +660,6 @@ func TestNewService_SharesInjectedSharedState(t *testing.T) {
 func TestNewService_CreatesFreshWhenNotInjected(t *testing.T) {
 	svc := NewService(Config{})
 
-	if svc.NudgeBuffer() == nil {
-		t.Error("NudgeBuffer(): nil when not injected, expected fresh instance")
-	}
 	if svc.MemoryCache() == nil {
 		t.Error("MemoryCache(): nil when not injected, expected fresh instance")
 	}

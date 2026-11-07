@@ -88,13 +88,6 @@ type Output interface {
 	ConfirmMessage(chatID int64, messageID int)
 }
 
-// Dreamer receives turn lifecycle notifications for memory/nudge updates.
-type Dreamer interface {
-	AfterTurn(userID int64)
-	AfterTurnNudge(chatID int64, threadID int, userID int64, cwd string, sessionFile string, buffer *session.NudgeBuffer)
-	FlushNudge(chatID int64, threadID int, userID int64, cwd string, sessionFile string, buffer *session.NudgeBuffer)
-}
-
 // Config contains dependencies needed by the business pipeline.
 type Config struct {
 	AppConfig      *config.AppConfig
@@ -108,7 +101,6 @@ type Config struct {
 	ExePath        string
 	BotCwd         string
 	Output         Output
-	Dreamer        Dreamer
 	ProjectIndex   *runtime.ProjectIndex
 	Bindings       projectbinding.Store
 	RunLog         runlog.Store
@@ -116,9 +108,6 @@ type Config struct {
 	MemoryProvider memorycontext.Provider
 	UsersStore     *users.Store
 	UserResolver   *users.Resolver
-	// NudgeBuffer, when set, is shared across pipeline instances (e.g. TUI
-	// creates a pipeline per send). When nil, NewService creates a fresh one.
-	NudgeBuffer *session.NudgeBuffer
 	// MemoryCache, when set, is shared across pipeline instances so the TUI
 	// (which creates a pipeline per send) reuses the mtime cache between turns.
 	// When nil, NewService creates a fresh one.
@@ -159,8 +148,6 @@ type Service struct {
 	exePath            string
 	botCwd             string
 	output             Output
-	dreamer            Dreamer
-	nudgeBuffer        *session.NudgeBuffer
 	memoryCache        *MemoryCache
 	projectIndex       *runtime.ProjectIndex
 	bindings           projectbinding.Store
@@ -208,8 +195,6 @@ func NewService(cfg Config) *Service {
 		exePath:          cfg.ExePath,
 		botCwd:           cfg.BotCwd,
 		output:           cfg.Output,
-		dreamer:          cfg.Dreamer,
-		nudgeBuffer:      cfg.NudgeBuffer,
 		memoryCache:      cfg.MemoryCache,
 		projectIndex:     cfg.ProjectIndex,
 		bindings:         cfg.Bindings,
@@ -226,9 +211,6 @@ func NewService(cfg Config) *Service {
 	}
 
 	// Backward compat: create fresh instances when not injected by the caller.
-	if s.nudgeBuffer == nil {
-		s.nudgeBuffer = session.NewNudgeBuffer()
-	}
 	if s.memoryCache == nil {
 		s.memoryCache = NewMemoryCache()
 	}
@@ -458,11 +440,6 @@ func (s *Service) SetProjectIndex(pi *runtime.ProjectIndex) {
 	s.projectIndex = pi
 }
 
-// SetDreamer injects the dream system after construction.
-func (s *Service) SetDreamer(d Dreamer) {
-	s.dreamer = d
-}
-
 // SetRunLog injects the run log store after construction (optional).
 func (s *Service) SetRunLog(rl runlog.Store) {
 	s.runLog = rl
@@ -476,11 +453,6 @@ func (s *Service) SetContinuity(cs continuity.Store) {
 // SetMemoryProvider swaps the ai-memory working-set provider after construction.
 func (s *Service) SetMemoryProvider(provider memorycontext.Provider) {
 	s.memoryProvider = provider
-}
-
-// NudgeBuffer returns the per-service nudge buffer for command-triggered flushes.
-func (s *Service) NudgeBuffer() *session.NudgeBuffer {
-	return s.nudgeBuffer
 }
 
 // MemoryCache returns the memory directory cache. Exposed so callers can

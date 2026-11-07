@@ -175,29 +175,6 @@ func (s *Service) afterSuccessfulTurn(chatID int64, threadID int, userText strin
 
 	// Patch continuity with the (potentially summarized) assistant text
 	s.patchContinuityAfterSuccess(chatID, threadID, userText, finalSummary, runID, userID, isPrivateChat, owners...)
-
-	if s.dreamer == nil {
-		return
-	}
-	if len(owners) > 0 && !s.activeRunStillOwned(chatID, threadID, userID, firstRunOwnership(owners).owner) {
-		return
-	}
-	s.dreamer.AfterTurn(userID)
-	cwd := s.effectiveCwdForContext(nil, chatID, threadID, userID, isPrivateChat)
-	sessionFile := ""
-	if s.sessions != nil {
-		sessionFile = s.sessions.GetSession(chatID, threadID, userID)
-	}
-	s.nudgeBuffer.AddTurn(chatID, threadID, userID, userText, finalText)
-	if toolSummary := s.getRunToolSummary(chatID, threadID, userID, owners...); toolSummary != "" {
-		s.nudgeBuffer.AddToolEvent(chatID, threadID, userID, toolSummary)
-	}
-	s.dreamer.AfterTurnNudge(chatID, threadID, userID, cwd, sessionFile, s.nudgeBuffer)
-	// Invalidate only when the agent used Write/Edit this turn — background nudge/dream
-	// invalidate their own dirs after async writes; broad per-turn wipe defeated the cache.
-	if s.runUsedWriteTools(chatID, threadID, userID, owners...) {
-		s.InvalidateMemoryDirs(chatID, threadID, userID, cwd)
-	}
 }
 
 // --- Continuity lifecycle helpers ---

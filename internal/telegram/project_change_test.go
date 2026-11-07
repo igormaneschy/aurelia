@@ -21,34 +21,6 @@ func (fakeMemoryProvider) Status(context.Context, memorycontext.Scope) (memoryco
 	return memorycontext.Status{}, nil
 }
 
-type fakeDreamer struct {
-	flushed bool
-}
-
-func (f *fakeDreamer) AfterTurn(int64) {}
-
-func (f *fakeDreamer) AfterTurnNudge(int64, int, int64, string, string, *session.NudgeBuffer) {}
-
-func (f *fakeDreamer) FlushNudge(int64, int, int64, string, string, *session.NudgeBuffer) {
-	f.flushed = true
-}
-
-func TestResetSessionSkipsLegacyNudgeInAIMemoryMode(t *testing.T) {
-	sessions := session.NewStore()
-	sessions.SetSession(42, 7, 1, "pi-session-file")
-	dreamer := &fakeDreamer{}
-	bc := &BotController{sessions: sessions, dreamer: dreamer, memoryProvider: fakeMemoryProvider{}}
-
-	bc.ResetSession(42, 7, 1, true, false)
-
-	if dreamer.flushed {
-		t.Fatal("legacy nudge flush ran in ai-memory mode")
-	}
-	if got := sessions.GetSession(42, 7, 1); got != "" {
-		t.Fatalf("session = %q, want empty after reset", got)
-	}
-}
-
 func projectMarkerDir(t *testing.T, workspace, project string) string {
 	t.Helper()
 	dir := t.TempDir()

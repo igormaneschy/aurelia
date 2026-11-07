@@ -134,19 +134,17 @@ func (f *fakeOutput) ConfirmMessage(_ int64, _ int) {
 
 type fakeProgress struct{}
 
-func (fakeProgress) ReportTool(_, _ string)           {}
-func (fakeProgress) ReportToolResult(_ string)        {}
-func (fakeProgress) ReportText(_ string)              {}
+func (fakeProgress) ReportTool(_, _ string)            {}
+func (fakeProgress) ReportToolResult(_ string)         {}
+func (fakeProgress) ReportText(_ string)               {}
 func (fakeProgress) ReportState(ProgressState, string) {}
-func (fakeProgress) Delete()                          {}
+func (fakeProgress) Delete()                           {}
 
 func newTestService(output Output) *Service {
 	return &Service{
-		output:      output,
-		sessions:    nil,
-		nudgeBuffer: nil,
-		dreamer:     nil,
-		config:      nil,
+		output:   output,
+		sessions: nil,
+		config:   nil,
 	}
 }
 
