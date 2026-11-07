@@ -17,6 +17,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/cron"
+	"github.com/igormaneschy/aurelia/internal/memorycontext"
 	memoryuxpkg "github.com/igormaneschy/aurelia/internal/memoryux"
 	pipelinepkg "github.com/igormaneschy/aurelia/internal/pipeline"
 	"github.com/igormaneschy/aurelia/internal/profiles"
@@ -1219,8 +1220,20 @@ func (bc *BotController) invalidateModelCache() {
 }
 
 func (bc *BotController) cmdMemoryStatus(chatID int64, threadID int, userID int64, isPrivateChat bool) (string, error) {
-	svc := memoryuxpkg.New(bc.memoryDir, bc.resolver)
 	cwd := bc.currentCwdForContext(chatID, threadID, userID, isPrivateChat)
+	if bc.memoryProvider != nil {
+		scope, err := memorycontext.ResolveScope(cwd, userID, chatID, threadID, "")
+		if err != nil || !scope.HasProject() {
+			return "🧠 **Memory — ai-memory**\n\nNo ai-memory project is bound for this conversation. Use `/cwd` to bind a project.", nil
+		}
+		status, err := bc.memoryProvider.Status(context.Background(), scope)
+		if err != nil {
+			return "", fmt.Errorf("ai-memory status: %w", err)
+		}
+		return fmt.Sprintf("🧠 **Memory — ai-memory**\n\nProject: `%s`\nPages: %d\nObservations: %d\nSessions: %d\nPending handoffs: %d\nDegraded: %t",
+			scope.ProjectRef(), status.Pages, status.Observations, status.Sessions, status.PendingHandoffs, status.Degraded), nil
+	}
+	svc := memoryuxpkg.New(bc.memoryDir, bc.resolver)
 	log.Printf("memory command: action=status chat=%d thread=%d cwd_set=%t", chatID, threadID, cwd != "")
 	status, err := svc.Status(chatID, threadID, cwd)
 	if err != nil {
@@ -1231,6 +1244,9 @@ func (bc *BotController) cmdMemoryStatus(chatID int64, threadID int, userID int6
 }
 
 func (bc *BotController) cmdMemoryCheckpoint(chatID int64, threadID int, userID int64, isPrivateChat bool, text string) (string, error) {
+	if bc.memoryProvider != nil {
+		return "🧠 ai-memory mode: local checkpoints are replaced by ai-memory handoff/session pages. Ask the assistant to save a durable page or use the memory tools.", nil
+	}
 	// Extract note after the command phrase
 	trimmed := strings.TrimSpace(text)
 	lower := strings.ToLower(trimmed)

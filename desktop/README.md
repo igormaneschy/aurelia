@@ -103,6 +103,13 @@ cwd do DM; use `/cwd` em cada uma. No Telegram,
 carrega no turno seguinte. Evite editar os mesmos arquivos nos dois lados ao
 mesmo tempo; não há lock entre superfícies.
 
+> **Memory consolidation rollout:** o daemon live ainda usa
+> `memory_provider=legacy`. Com a flag `ai-memory`, o painel do projeto mostra
+> o projeto/páginas/handoffs do ai-memory em vez das camadas de ficheiro, e o
+> prompt recebe um working set ai-memory limitado. As 23 páginas legadas
+> importadas têm a tag `legacy-import`; `shadow` mantém o prompt legacy e
+> registra a comparação.
+
 ## Desenvolvimento
 
 ```bash

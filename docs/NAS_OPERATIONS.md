@@ -621,6 +621,25 @@ handoff count), and never duplicates the handoff. The default remains
 `legacy` until the migration/shadow acceptance; `AURELIA_MEMORY_PROVIDER` can
 select `legacy`, `ai-memory` or `shadow`.
 
+### 15.8 Memory consolidation rollout (2026-11-07)
+
+The legacy memory migration is complete: 23/23 pages were written and verified
+in the personal ai-memory, tagged `legacy-import`. The pre-import backup is
+`~/.aurelia/backup-test/pre-memory-consolidation-20261107224526.tar.gz`
+(SHA-256 `c51be982b22bced158d8f5ae2217c8759d8e47d54c3466d047a2fa4a8d91d07a`).
+The original files/continuity DB were only read.
+
+The live daemon remains on `memory_provider=legacy`; the imported pages are not
+automatically injected in legacy mode. In the feature-flagged `ai-memory` mode,
+the daemon injects a bounded project working set from `memory_briefing`/
+`memory_read_page`, while the Pi extension continues to inject the handoff and
+register the MCP tools. `shadow` keeps the legacy prompt and logs the
+ai-memory comparison; `legacy` remains the rollback path.
+
+The `/memory` command reports ai-memory project/page/handoff state in
+`ai-memory` mode; the local checkpoint command is disabled there and is
+replaced by ai-memory handoff/session pages.
+
 ## 16. Daily operations
 
 ### 16.1 NAS services

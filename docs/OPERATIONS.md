@@ -22,6 +22,7 @@ development and fallback.
 | Mac tunnel logs | `~/.aurelia/logs/nas-tunnel.log` |
 | Desktop | `~/.aurelia/bin/aurelia-desktop` (NAS mode via `~/.aurelia/nas.sock`) |
 | Telegram | NAS is the sole consumer; topics use `/topic init` and `/cwd` |
+| Memory | live `memory_provider=legacy`; `ai-memory`/`shadow` are opt-in; 23 imported legacy pages tagged `legacy-import` |
 | TUI | disabled; do not delete `tui_sessions.db` (the desktop uses it) |
 
 The NAS binary is rebuilt/redeployed with the Linux artifact and a systemd

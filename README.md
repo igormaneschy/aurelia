@@ -546,6 +546,7 @@ Aurelia supports local models via [Ollama](https://ollama.com/) or any OpenAI-co
 | [CLAUDE.md](CLAUDE.md) | Instructions for coding agents |
 | [CHANGELOG.md](CHANGELOG.md) | Release history and changes |
 | [docs/NAS_OPERATIONS.md](docs/NAS_OPERATIONS.md) | NAS personal assistant runbook (systemd, ai-jail, ai-memory, Telegram, desktop tunnel) |
+| [openspec/changes/memory-consolidation/](openspec/changes/memory-consolidation/) | ai-memory-native memory/context consolidation proposal |
 | [desktop/README.md](desktop/README.md) | Desktop client (local and NAS/Tailscale modes) |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | macOS local/fallback operations and current NAS pointers |
 | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) | Operational observability guide (debug, metrics, log config) |

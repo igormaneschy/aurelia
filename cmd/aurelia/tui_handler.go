@@ -14,6 +14,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/ipc"
+	"github.com/igormaneschy/aurelia/internal/memorycontext"
 	"github.com/igormaneschy/aurelia/internal/memoryux"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/pipeline"
@@ -750,6 +751,31 @@ func fillTUIProjectAgent(a *app, userID int64, payload *ipc.ProjectStatePayload)
 
 // fillTUIProjectMemory populates payload memory layers and checkpoint layer.
 func fillTUIProjectMemory(ctx context.Context, a *app, chatID int64, threadID int, cwd string, payload *ipc.ProjectStatePayload) {
+	if a.memoryProvider != nil {
+		if cwd == "" {
+			return
+		}
+		scope, err := memorycontext.ResolveScope(cwd, 0, chatID, threadID, "")
+		if err != nil || !scope.HasProject() {
+			return
+		}
+		status, err := a.memoryProvider.Status(ctx, scope)
+		if err != nil {
+			log.Printf("tui: project state ai-memory status error: %v", err)
+			return
+		}
+		payload.CheckpointLayer = "ai-memory"
+		payload.MemoryLayers = []ipc.ProjectStateMemoryLayer{
+			{Name: "ai-memory project", Scope: "project", Exists: status.Available, FileCount: status.Pages},
+			{Name: "pending handoffs", Scope: "handoff", Exists: status.PendingHandoffs > 0, FileCount: status.PendingHandoffs},
+		}
+		if status.Degraded {
+			payload.MemoryLayers = append(payload.MemoryLayers, ipc.ProjectStateMemoryLayer{
+				Name: "ai-memory degraded", Scope: "degraded", Exists: false,
+			})
+		}
+		return
+	}
 	if a.resolver == nil {
 		return
 	}

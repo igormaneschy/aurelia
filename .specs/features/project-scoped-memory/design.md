@@ -1,5 +1,9 @@
 # Project-Scoped CWD Overlay — Design
 
+> **Superseded (2026-11-07):** this design is retained as historical context.
+> The current contract is the `memory-consolidation` OpenSpec change, where
+> ai-memory project pages/briefing replace `cwd_overlay`.
+
 **Spec:** `.specs/features/project-scoped-memory/spec.md`
 **Status:** ✅ Validated
 

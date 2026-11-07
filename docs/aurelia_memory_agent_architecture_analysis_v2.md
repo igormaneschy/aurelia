@@ -1,4 +1,11 @@
 # Aurelia — Análise de Arquitectura de Memória e Roadmap
+
+> **Superseded (2026-11-07):** este documento descreve o contrato de memória
+> anterior ao ai-memory nativo no NAS. As quatro layers locais e o Sprint F
+> (Wiki Memory Gateway) são agora legado. O contrato actual está em
+> `openspec/changes/memory-consolidation/` (proposal/spec/design) e no runbook
+> `docs/NAS_OPERATIONS.md`; o ai-memory é a fonte de memória e o Aurelia é o
+> context adapter.
 **Versão 2 — Actualizada em 24 de Maio de 2026 após merge de v0.14.0–v0.16.0**
 
 ---
