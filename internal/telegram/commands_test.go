@@ -1223,7 +1223,7 @@ func TestHelpMessageIncludesNaturalExamples(t *testing.T) {
 	t.Parallel()
 
 	help := helpMessage()
-	for _, want := range []string{"💡", "/stop", "agenda todo dia às 9h", "muda modelo", "limpa o contexto"} {
+	for _, want := range []string{"💡", "/stop", "/reset", "agenda todo dia às 9h", "muda modelo", "limpa o contexto"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("help missing %q: %q", want, help)
 		}
@@ -1323,7 +1323,7 @@ func TestSlashMenuCommands_IncludesMode(t *testing.T) {
 
 	cmds := slashMenuCommands()
 	want := map[string]bool{
-		"new": false, "usage": false, "status": false, "cwd": false,
+		"new": false, "reset": false, "usage": false, "status": false, "cwd": false,
 		"topic": false,
 		"cron":  false, "agents": false, "memory": false, "model": false,
 		"mode": false, "stop": false, "users": false, "forgetme": false,

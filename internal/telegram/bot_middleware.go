@@ -99,6 +99,7 @@ func (bc *BotController) registerSlashMenu() {
 func slashMenuCommands() []telebot.Command {
 	return []telebot.Command{
 		{Text: "new", Description: "Nova sessão (limpa contexto)"},
+		{Text: "reset", Description: "Nova sessão (igual a /new)"},
 		{Text: "usage", Description: "Ver uso de tokens da sessão"},
 		{Text: "status", Description: "Ver estado atual da Aurelia"},
 		{Text: "cwd", Description: "Definir diretório de trabalho"},
@@ -122,7 +123,7 @@ func (bc *BotController) handleHelpCommand(c telebot.Context) error {
 
 func helpMessage() string {
 	return "Comandos disponíveis:\n\n" +
-		"/new — Nova sessão (limpa contexto, cancela o que estiver em andamento)\n" +
+		"/new, /reset — Nova sessão (limpa contexto, cancela o que estiver em andamento)\n" +
 		"/stop — Interromper processamento ativo (preserva sessão)\n" +
 		"/usage — Ver uso de tokens da sessão\n" +
 		"/status — Ver estado atual + trabalho ativo + fila\n" +
