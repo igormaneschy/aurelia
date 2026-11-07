@@ -309,6 +309,11 @@ The model sees relevant operational memory layers in its system prompt. Layers a
 talks to the daemon over the Unix socket at `~/.aurelia/aurelia.sock`, so the
 daemon must be installed/running first (`make deploy` or the launchd service).
 
+> **Current personal deployment (2026-11-07):** the TUI client is disabled;
+> desktop (Mac, NAS mode) + Telegram are the used surfaces. The desktop still
+> uses the TUI session namespace (`tui_sessions.db`, `-9000001…`), so do not
+> delete that database.
+
 ```bash
 # Build and run the local TUI from the repository
 go build -o ./aurelia-tui ./cmd/aurelia-tui
@@ -540,6 +545,9 @@ Aurelia supports local models via [Ollama](https://ollama.com/) or any OpenAI-co
 |----------|---------|
 | [CLAUDE.md](CLAUDE.md) | Instructions for coding agents |
 | [CHANGELOG.md](CHANGELOG.md) | Release history and changes |
+| [docs/NAS_OPERATIONS.md](docs/NAS_OPERATIONS.md) | NAS personal assistant runbook (systemd, ai-jail, ai-memory, Telegram, desktop tunnel) |
+| [desktop/README.md](desktop/README.md) | Desktop client (local and NAS/Tailscale modes) |
+| [docs/OPERATIONS.md](docs/OPERATIONS.md) | macOS local/fallback operations and current NAS pointers |
 | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) | Operational observability guide (debug, metrics, log config) |
 | [.specs/codebase/ARCHITECTURE.md](.specs/codebase/ARCHITECTURE.md) | System architecture and patterns |
 | [.specs/codebase/CONVENTIONS.md](.specs/codebase/CONVENTIONS.md) | Code conventions and Go patterns |
@@ -587,7 +595,9 @@ make deploy                 # build atomically + restart service
 journalctl --user -u aurelia -f  # tail logs
 ```
 
-Full guide: [docs/OPERATIONS.md](docs/OPERATIONS.md).
+Full guide: [docs/OPERATIONS.md](docs/OPERATIONS.md). For the personal NAS
+deployment (systemd user units, ai-jail, ai-memory, desktop/Tailscale tunnel),
+use [docs/NAS_OPERATIONS.md](docs/NAS_OPERATIONS.md).
 
 ## Troubleshooting
 
@@ -602,10 +612,15 @@ Full guide: [docs/OPERATIONS.md](docs/OPERATIONS.md).
 
 ## Current State
 
-- **v0.38.0** — see [CHANGELOG.md](CHANGELOG.md)
+- **v0.52.0** on `main`; **v0.53.0** is the NAS personal assistant + desktop
+  NAS access release PR — see [CHANGELOG.md](CHANGELOG.md)
 - Canonical repository: `https://github.com/igormaneschy/aurelia`
 - Go module: `github.com/igormaneschy/aurelia`
 - Go test suite is green
 - TypeScript Bridge compiles clean
-- Runtime target: macOS/Linux local daemon; Windows support is not a current operational target
-- Current architectural track: foundation P0–P2 closed (✅); planning/orchestration removed v0.38.0 (✅ — PI SDK owns agentic execution); active work: Prompt Profiles Phase 3, bridge adapter interface — see [.specs/project/ROADMAP.md](.specs/project/ROADMAP.md) §13
+- Runtime target: macOS/Linux local daemon and a personal native NAS deployment;
+  Windows support is not a current operational target
+- Current personal mode: NAS daemon (systemd user service) + Mac desktop over a
+  Tailscale SSH streamlocal tunnel + Telegram; the TUI client is disabled. See
+  [docs/NAS_OPERATIONS.md](docs/NAS_OPERATIONS.md) and
+  [desktop/README.md](desktop/README.md).

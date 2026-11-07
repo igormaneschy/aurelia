@@ -81,7 +81,6 @@ name = "aurelia-desktop"
 version = "0.1.0"
 dependencies = [
  "aurelia-ipc",
- "libc",
  "serde",
  "serde_json",
  "tauri",

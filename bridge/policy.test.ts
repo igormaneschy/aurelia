@@ -8,6 +8,7 @@ import {
   SecurityContext,
   DEFAULT_SENSITIVE_PATTERNS,
   translateAllowedTools,
+  waitForRegisteredTools,
 } from "./index.ts";
 
 // ── Helpers ──────────────────────────────────────────────────────────────
@@ -771,5 +772,52 @@ describe("translateAllowedTools", () => {
     // still call code_search and friends.
     assert.ok(result!.includes("code_search"));
     assert.ok(result!.includes("fetch_content"));
+  });
+});
+
+describe("waitForRegisteredTools", () => {
+  it("waits until the expected extension tools appear", async () => {
+    let calls = 0;
+    const session = {
+      getAllTools: () => {
+        calls++;
+        const names = calls < 3 ? ["read"] : ["read", "memory_query", "web_search"];
+        return names.map((name) => ({ name }));
+      },
+    };
+    const names = await waitForRegisteredTools(
+      session,
+      ["memory_query", "web_search"],
+      500,
+      10,
+    );
+    assert.deepStrictEqual(names, ["memory_query", "read", "web_search"]);
+    assert.ok(calls >= 3, "must poll until expected tools register");
+  });
+
+  it("returns the partial registry at timeout without throwing", async () => {
+    const session = {
+      getAllTools: () => [{ name: "read" }],
+    };
+    const names = await waitForRegisteredTools(
+      session,
+      ["memory_query", "web_search"],
+      40,
+      10,
+    );
+    assert.deepStrictEqual(names, ["read"]);
+  });
+
+  it("does not poll when there is no expected tool", async () => {
+    let calls = 0;
+    const session = {
+      getAllTools: () => {
+        calls++;
+        return [{ name: "read" }];
+      },
+    };
+    const names = await waitForRegisteredTools(session, [], 500, 10);
+    assert.deepStrictEqual(names, ["read"]);
+    assert.strictEqual(calls, 1);
   });
 });

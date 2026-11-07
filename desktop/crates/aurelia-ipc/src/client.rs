@@ -17,6 +17,15 @@ pub const MAX_EVENT_LINE_BYTES: usize = 1024 * 1024;
 /// Default timeout for connecting to the daemon.
 pub const DEFAULT_DIAL_TIMEOUT: Duration = Duration::from_secs(5);
 
+fn default_path_in(home: &Path) -> PathBuf {
+    let root = home.join(".aurelia");
+    if root.join("nas-tunnel.enabled").exists() {
+        root.join("nas.sock")
+    } else {
+        root.join("aurelia.sock")
+    }
+}
+
 /// A thin client for the Aurelia daemon's Unix-socket IPC.
 #[derive(Debug, Clone)]
 pub struct IpcClient {
@@ -39,12 +48,19 @@ impl IpcClient {
         }
     }
 
-    /// Resolves `~/.aurelia/aurelia.sock` using `$HOME`.
+    /// Resolves the daemon socket path using `$HOME`.
+    ///
+    /// Resolution order:
+    /// 1. `AURELIA_IPC_SOCKET` for an explicit path (tests, custom setups).
+    /// 2. `~/.aurelia/nas.sock` when the NAS tunnel marker
+    ///    `~/.aurelia/nas-tunnel.enabled` exists.
+    /// 3. `~/.aurelia/aurelia.sock` for a local daemon.
     pub fn default_path() -> Result<PathBuf, IpcError> {
+        if let Some(path) = std::env::var_os("AURELIA_IPC_SOCKET") {
+            return Ok(PathBuf::from(path));
+        }
         let home = std::env::var_os("HOME").ok_or(IpcError::NoHome)?;
-        Ok(PathBuf::from(home)
-            .join(".aurelia")
-            .join("aurelia.sock"))
+        Ok(default_path_in(Path::new(&home)))
     }
 
     pub fn socket_path(&self) -> &Path {
@@ -154,8 +170,21 @@ impl EventStream {
 mod tests {
     use super::*;
     use crate::types::{IpcMessage, EVENT_ACK, EVENT_SESSIONS};
+    use std::fs;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
     use tokio::net::UnixListener;
+
+    #[test]
+    fn default_path_uses_nas_socket_only_with_tunnel_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join(".aurelia");
+        fs::create_dir_all(&root).unwrap();
+
+        assert_eq!(default_path_in(dir.path()), root.join("aurelia.sock"));
+
+        fs::write(root.join("nas-tunnel.enabled"), b"").unwrap();
+        assert_eq!(default_path_in(dir.path()), root.join("nas.sock"));
+    }
 
     #[tokio::test]
     async fn request_reads_events_until_stream_end() {

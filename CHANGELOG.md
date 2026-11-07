@@ -4,6 +4,57 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.53.0] - 2026-11-07
+
+### Added
+- **Assistente pessoal no NAS** — execução nativa Linux como serviço systemd
+  de usuário, com ai-jail, ai-memory pessoal separado do ambiente de coding e
+  importação seletiva de 15 páginas. O Telegram passou a ser atendido
+  exclusivamente pelo NAS; o Mac foi parado e desabilitado, sem retorno
+  automático.
+- **Tópicos isolados no Telegram** — `/topic init <slug>` normaliza o nome,
+  cria `<default_cwd>/topics/<slug>`, grava o marker `.ai-memory.toml` e o
+  binding do tópico, com validação contra path traversal e operação idempotente.
+- **Desktop no modo NAS** — o cliente no Mac acessa o daemon pelo túnel SSH
+  streamlocal sobre Tailscale em `~/.aurelia/nas.sock`, mantido por launchd.
+  O app escolhe o socket pelo marcador, envia `user_id=0` (persona canónica) e
+  preserva o namespace de sessões da TUI; o cliente TUI fica desativado.
+- Runbook `docs/NAS_OPERATIONS.md` com operação, backup, tópicos, desktop e
+  matriz de memória compartilhada; README/desktop docs e OpenSpec atualizados.
+
+### Changed
+- Daemon: flags `AURELIA_ENABLE_TELEGRAM`/`AURELIA_ENABLE_CRON` para staging e
+  operação offline, sem polling nem `SetCommands` quando desativadas.
+- Bridge: aguarda o registro das tools de extensão antes do primeiro turno e
+  preserva a instalação real dos pacotes PI com dependências transitivas.
+- Instalador systemd fail-closed, launcher ai-jail root-owned e env do jail
+  encaminhado; lock de instância flock-first e resistente a symlink.
+- Desktop: seleção de `nas.sock`/`aurelia.sock`, identidade remota via persona
+  e documentação da memória compartilhada por cwd e das camadas não
+  compartilhadas (transcript, continuity, `topic`, binding, lista, modelo).
+
+### Fixed
+- Deadlock do bot em modo offline; lock seguindo symlink; fallback inseguro do
+  instalador; env não encaminhado; dependências ausentes do pi-web-access.
+- Desktop: o usuário remoto era rejeitado por enviar o UID local do Mac; agora
+  a identidade é resolvida no daemon sem afrouxar a checagem de peer UID.
+
+### Security
+- `sshd` do NAS com `AllowTcpForwarding local` e
+  `AllowStreamLocalForwarding yes`; sockets 0600, sem porta TCP pública,
+  `StrictHostKeyChecking=yes` e a chave existente via keychain.
+- ai-jail com mapa de `$HOME`, rede permitida e negação de `.ssh`, `.config`,
+  `.docker`, ai-memory db/wiki/raw e diretórios de serviço.
+
+### Validation
+- `go build ./...`, `go vet ./...` e `go test ./... -short -count=1` (todas as
+  packages) passaram após o rebase em `main` v0.52.0.
+- Bridge: typecheck e 177/177 testes. Desktop: 5+1 testes Rust,
+  `svelte-check` 0 erros e build Tauri debug.
+- Live: Telegram run 17 no NAS, sem 409; desktop online via `nas.sock`;
+  reconexão do túnel e IPC `sessions`/`history`/`project_state` com
+  `user_id=0` validados.
+
 ## [0.52.0] - 2026-11-07
 
 ### Added

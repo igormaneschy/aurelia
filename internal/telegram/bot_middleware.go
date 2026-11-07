@@ -54,6 +54,7 @@ func safeSenderID(u *telebot.User) int64 {
 func (bc *BotController) registerContentRoutes() {
 	bc.bot.Handle("/help", bc.handleHelpCommand)
 	bc.bot.Handle("/cwd", bc.handleCwdCommand)
+	bc.bot.Handle("/topic", bc.handleTopicCommand)
 	bc.bot.Handle("/reset", bc.handleResetCommand)
 	bc.bot.Handle("/new", bc.handleResetCommand)
 	bc.bot.Handle("/compact", bc.handleResetCommand)
@@ -85,6 +86,9 @@ func (bc *BotController) registerContentRoutes() {
 }
 
 func (bc *BotController) registerSlashMenu() {
+	if bc.offline {
+		return
+	}
 	if err := bc.bot.SetCommands(slashMenuCommands()); err != nil {
 		log.Printf("Failed to set bot commands: %v", err)
 	}
@@ -98,6 +102,7 @@ func slashMenuCommands() []telebot.Command {
 		{Text: "usage", Description: "Ver uso de tokens da sessão"},
 		{Text: "status", Description: "Ver estado atual da Aurelia"},
 		{Text: "cwd", Description: "Definir diretório de trabalho"},
+		{Text: "topic", Description: "Isolar este tópico em um projeto de memória"},
 		{Text: "cron", Description: "Gerenciar agendamentos"},
 		{Text: "agents", Description: "Listar agentes disponíveis + modo ativo"},
 		{Text: "memory", Description: "Ver status da memória e criar checkpoints"},
@@ -122,6 +127,7 @@ func helpMessage() string {
 		"/usage — Ver uso de tokens da sessão\n" +
 		"/status — Ver estado atual + trabalho ativo + fila\n" +
 		"/cwd <path> — Definir diretório de trabalho (tópicos herdam do grupo)\n" +
+		"/topic init <slug> — Isolar este tópico em um projeto de memória\n" +
 		"/cron — Gerenciar agendamentos\n" +
 		"/agents — Listar perfis de Prompt disponíveis\n" +
 		"/mode <perfil> — Definir perfil padrão (ex: developer, researcher)\n" +

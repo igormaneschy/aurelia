@@ -207,6 +207,13 @@ func EnsureBridge(targetDir string, bundleJS []byte) (string, error) {
 						slog.Warn("failed to create npm/node_modules dir", "error", err)
 						continue
 					}
+					// A real package installation carries its transitive
+					// dependencies; replacing it with a package-only symlink
+					// makes extension imports such as p-limit fail. Keep it.
+					if info, localErr := os.Lstat(aureliaPkg); localErr == nil && info.IsDir() {
+						slog.Info("Keeping local PI extension install", "package", pkg)
+						continue
+					}
 					linkTarget, linkErr := os.Readlink(aureliaPkg)
 					if linkErr != nil || linkTarget != piPkg {
 						_ = os.Remove(aureliaPkg)

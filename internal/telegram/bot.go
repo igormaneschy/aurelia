@@ -30,6 +30,7 @@ import (
 // BotController wires Telegram I/O to the application services.
 type BotController struct {
 	bot              *telebot.Bot
+	offline          bool
 	config           *config.AppConfig
 	bridge           *bridge.Bridge
 	modelLister      modelLister
@@ -118,11 +119,13 @@ func NewBotController(
 	sessions *session.Store,
 	resolver *runtime.PathResolver,
 	bindings projectbinding.Store,
+	offline bool,
 ) (*BotController, error) {
 
 	pref := telebot.Settings{
-		Token:  cfg.TelegramBotToken,
-		Poller: &telebot.LongPoller{Timeout: 10 * time.Second},
+		Token:   cfg.TelegramBotToken,
+		Poller:  &telebot.LongPoller{Timeout: 10 * time.Second},
+		Offline: offline,
 	}
 
 	b, err := telebot.NewBot(pref)
@@ -146,6 +149,7 @@ func NewBotController(
 
 	bc := &BotController{
 		bot:              b,
+		offline:          offline,
 		config:           cfg,
 		bridge:           br,
 		modelLister:      br,
@@ -249,11 +253,17 @@ func (bc *BotController) SetDreamer(d interface {
 
 // ChatSender returns a cron.ChatSender backed by this bot instance.
 func (bc *BotController) ChatSender() cron.ChatSender {
+	if bc.offline {
+		return offlineChatSender{}
+	}
 	return &botChatSender{bot: bc.bot}
 }
 
 // SendNudge sends a nudge receipt, optionally as a reply to a prior Telegram message.
 func (bc *BotController) SendNudge(ctx context.Context, chatID int64, threadID int, replyToMessageID int64, text string) error {
+	if bc.offline {
+		return nil
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -275,6 +285,12 @@ func (bc *BotController) SendNudge(ctx context.Context, chatID int64, threadID i
 }
 
 // botChatSender adapts a telebot.Bot to the cron.ChatSender interface.
+type offlineChatSender struct{}
+
+func (offlineChatSender) Send(int64, string) error { return nil }
+
+func (offlineChatSender) SendWithThread(int64, int, string) error { return nil }
+
 type botChatSender struct {
 	bot *telebot.Bot
 }
@@ -339,6 +355,11 @@ func (bc *BotController) Start() {
 
 // Stop ends Telegram polling.
 func (bc *BotController) Stop() {
+	// telebot Stop waits for Start to receive on an unbuffered channel. An
+	// offline controller never starts polling, so Stop would block shutdown.
+	if bc.offline {
+		return
+	}
 	bc.bot.Stop()
 }
 

@@ -1324,7 +1324,8 @@ func TestSlashMenuCommands_IncludesMode(t *testing.T) {
 	cmds := slashMenuCommands()
 	want := map[string]bool{
 		"new": false, "usage": false, "status": false, "cwd": false,
-		"cron": false, "agents": false, "memory": false, "model": false,
+		"topic": false,
+		"cron":  false, "agents": false, "memory": false, "model": false,
 		"mode": false, "stop": false, "users": false, "forgetme": false,
 		"help": false,
 	}

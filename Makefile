@@ -129,6 +129,15 @@ install-desktop:
 	fi
 	@echo "Atalho pronto: aurelia-desktop"
 
+# macOS: keep an SSH streamlocal tunnel to the NAS daemon alive via launchd.
+install-macos-nas-tunnel:
+	@chmod +x scripts/install-macos-nas-tunnel.sh scripts/macos/aurelia-nas-tunnel.sh
+	@./scripts/install-macos-nas-tunnel.sh
+
+uninstall-macos-nas-tunnel:
+	@chmod +x scripts/install-macos-nas-tunnel.sh
+	@./scripts/install-macos-nas-tunnel.sh --uninstall
+
 install-path:
 	@chmod +x scripts/install-path.sh
 	@./scripts/install-path.sh

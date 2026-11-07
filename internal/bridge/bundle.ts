@@ -1189,6 +1189,33 @@ const EXTENSION_UTILITY_TOOLS: readonly string[] = [
   "get_search_content",
 ];
 
+export interface RegisteredToolSession {
+  getAllTools(): Array<{ name: string }>;
+}
+
+// Extension tools (pi-web-access, pi-mcp-adapter, ai-memory) register
+// asynchronously after bindExtensions. Wait briefly for the allowed subset
+// before the first turn so the model's tool list is not built from a partial
+// registry. Missing tools are logged but do not fail the request.
+export async function waitForRegisteredTools(
+  session: RegisteredToolSession,
+  expected: readonly string[],
+  timeoutMs = 5000,
+  pollMs = 50,
+): Promise<string[]> {
+  if (expected.length === 0) {
+    return session.getAllTools().map((tool) => tool.name).sort();
+  }
+  const deadline = Date.now() + timeoutMs;
+  let names = session.getAllTools().map((tool) => tool.name).sort();
+  while (Date.now() < deadline) {
+    if (expected.every((name) => names.includes(name))) return names;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    names = session.getAllTools().map((tool) => tool.name).sort();
+  }
+  return names;
+}
+
 export function translateAllowedTools(
   allowed: string[] | undefined,
   disallowed: string[] | undefined,
@@ -2483,10 +2510,32 @@ async function handleQuery(req: Request): Promise<void> {
     lastSessionID = sessionID;
     rememberSession(sessionID, { id: sessionID, file: liveSession.sessionFile });
 
-    // Report tools from our computed allowlist (authoritative) rather than
-    // getActiveToolNames() which may omit extension-registered tools due to
-    // PI SDK internal timing (see _refreshToolRegistry / setActiveToolsByName).
-    const piActive = liveSession.getActiveToolNames();
+    // Extension tools register asynchronously after bindExtensions. Wait for
+    // the allowed subset before the first turn; without this, the model can be
+    // started with a partial registry (observed with web_search/fetch_content
+    // and the ai-memory tools).
+    const expectedExtensionTools = [
+      "web_search",
+      "fetch_content",
+      "memory_query",
+      "memory_write_page",
+    ].filter((name) => effectiveToolNames.includes(name));
+    const piActive = await waitForRegisteredTools(
+      liveSession as unknown as RegisteredToolSession,
+      expectedExtensionTools,
+    );
+    if (canceled || !ownsChatSession(cKey, sessionOwner)) {
+      await disposeBridgeSession(liveSession);
+      throw new Error("request canceled");
+    }
+    const missingExtensionTools = expectedExtensionTools.filter(
+      (name) => !piActive.includes(name),
+    );
+    if (missingExtensionTools.length > 0) {
+      redactedLog(
+        `extension tools missing after wait — rid=${reqId} missing=[${missingExtensionTools.join(",")}] registered=[${piActive.join(",")}]`,
+      );
+    }
     const hasMcpProxy = effectiveToolNames.includes("mcp");
     const hasWebSearch = effectiveToolNames.includes("web_search");
     const profile = opts?.security?.profile ?? "none";
