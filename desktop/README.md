@@ -107,8 +107,8 @@ mesmo tempo; não há lock entre superfícies.
 > `memory_provider=legacy`. Com a flag `ai-memory`, o painel do projeto mostra
 > o projeto/páginas/handoffs do ai-memory em vez das camadas de ficheiro, e o
 > prompt recebe um working set ai-memory limitado. As 23 páginas legadas
-> importadas têm a tag `legacy-import`; `shadow` mantém o prompt legacy e
-> registra a comparação.
+> importadas têm a tag `legacy-import`; `shadow` está reservado para a
+> comparação pendente e, até ser implementado, mantém o prompt legacy.
 
 ## Desenvolvimento
 

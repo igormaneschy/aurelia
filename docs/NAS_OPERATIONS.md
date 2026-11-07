@@ -633,8 +633,9 @@ The live daemon remains on `memory_provider=legacy`; the imported pages are not
 automatically injected in legacy mode. In the feature-flagged `ai-memory` mode,
 the daemon injects a bounded project working set from `memory_briefing`/
 `memory_read_page`, while the Pi extension continues to inject the handoff and
-register the MCP tools. `shadow` keeps the legacy prompt and logs the
-ai-memory comparison; `legacy` remains the rollback path.
+register the MCP tools. `shadow` is reserved for the pending comparison task:
+until it is implemented, the mode logs the selection and keeps the legacy
+prompt. `legacy` remains the rollback path.
 
 The `/memory` command reports ai-memory project/page/handoff state in
 `ai-memory` mode; the local checkpoint command is disabled there and is
