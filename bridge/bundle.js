@@ -677,6 +677,19 @@ var EXTENSION_UTILITY_TOOLS = [
   "fetch_content",
   "get_search_content"
 ];
+async function waitForRegisteredTools(session, expected, timeoutMs = 5e3, pollMs = 50) {
+  if (expected.length === 0) {
+    return session.getAllTools().map((tool) => tool.name).sort();
+  }
+  const deadline = Date.now() + timeoutMs;
+  let names = session.getAllTools().map((tool) => tool.name).sort();
+  while (Date.now() < deadline) {
+    if (expected.every((name) => names.includes(name))) return names;
+    await new Promise((resolve2) => setTimeout(resolve2, pollMs));
+    names = session.getAllTools().map((tool) => tool.name).sort();
+  }
+  return names;
+}
 function translateAllowedTools(allowed, disallowed) {
   const hasRestriction = allowed && allowed.length > 0 || disallowed && disallowed.length > 0;
   let result;
@@ -1591,7 +1604,28 @@ async function handleQuery(req) {
     const sessionID = liveSession.sessionId;
     lastSessionID = sessionID;
     rememberSession(sessionID, { id: sessionID, file: liveSession.sessionFile });
-    const piActive = liveSession.getActiveToolNames();
+    const expectedExtensionTools = [
+      "web_search",
+      "fetch_content",
+      "memory_query",
+      "memory_write_page"
+    ].filter((name) => effectiveToolNames.includes(name));
+    const piActive = await waitForRegisteredTools(
+      liveSession,
+      expectedExtensionTools
+    );
+    if (canceled || !ownsChatSession(cKey, sessionOwner)) {
+      await disposeBridgeSession(liveSession);
+      throw new Error("request canceled");
+    }
+    const missingExtensionTools = expectedExtensionTools.filter(
+      (name) => !piActive.includes(name)
+    );
+    if (missingExtensionTools.length > 0) {
+      redactedLog(
+        "extension tools missing after wait \u2014 rid=".concat(reqId, " missing=[").concat(missingExtensionTools.join(","), "] registered=[").concat(piActive.join(","), "]")
+      );
+    }
     const hasMcpProxy = effectiveToolNames.includes("mcp");
     const hasWebSearch = effectiveToolNames.includes("web_search");
     const profile = opts?.security?.profile ?? "none";
@@ -2622,5 +2656,6 @@ export {
   stallTelemetryFor,
   translateAllowedTools,
   validateBridgeRequest,
-  waitForPendingMessageCount
+  waitForPendingMessageCount,
+  waitForRegisteredTools
 };

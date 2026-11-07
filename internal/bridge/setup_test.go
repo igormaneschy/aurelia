@@ -415,6 +415,47 @@ func TestEnsureBridge_KeepsLocalExtensionsDirectory(t *testing.T) {
 	}
 }
 
+// TestEnsureBridge_KeepsLocalPackageInstall verifies a real package
+// installation in the daemon agent dir survives restart. The symlink strategy
+// only shares the package directory, not its transitive dependencies, so a
+// local npm install must not be replaced.
+func TestEnsureBridge_KeepsLocalPackageInstall(t *testing.T) {
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	piPkg := filepath.Join(homeDir, ".pi", "agent", "npm", "node_modules", "pi-web-access")
+	if err := os.MkdirAll(piPkg, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(piPkg, "package.json"), []byte(`{"name":"pi-web-access"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	localPkg := filepath.Join(homeDir, ".aurelia", "pi-agent", "npm", "node_modules", "pi-web-access")
+	if err := os.MkdirAll(localPkg, 0700); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(localPkg, "dependencies-installed")
+	if err := os.WriteFile(sentinel, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := EnsureBridge(readyBridgeTarget(t), nil); err != nil {
+		t.Fatalf("EnsureBridge failed: %v", err)
+	}
+
+	info, err := os.Lstat(localPkg)
+	if err != nil {
+		t.Fatalf("local package install must remain: %v", err)
+	}
+	if !info.IsDir() {
+		t.Fatal("local package install was replaced by a symlink")
+	}
+	if _, err := os.Stat(sentinel); err != nil {
+		t.Fatalf("local package contents must survive EnsureBridge: %v", err)
+	}
+}
+
 // TestBuildSecurityContext_GrantsExtensionTools verifies the resolved allowlist
 // carries the extension-registered tools the PI SDK would otherwise filter out,
 // while destructive memory operations stay out of execute_safe.

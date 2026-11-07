@@ -2,18 +2,41 @@
 Description=Aurelia OS Agent Daemon
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
-ExecStart=__BINARY__
+# ai-jail is the main process but the daemon runs in its cgroup. Wait for the
+# whole cgroup so ai-jail exiting does not SIGKILL the daemon mid-shutdown.
+ExitType=cgroup
+TimeoutStopSec=30s
+ExecStart=__EXEC_START__
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=aurelia
-Environment="PATH=__PATH__"
+Environment="PATH=__NODE_BIN__:__PATH__"
 Environment="HOME=__HOME__"
-WorkingDirectory=__HOME__
+Environment="AURELIA_HOME=__AURELIA_HOME__"
+Environment="AURELIA_ALLOWED_CWD_PREFIXES=__HOME__"
+EnvironmentFile=-__AURELIA_HOME__/config/staging.env
+WorkingDirectory=__AURELIA_HOME__
+UMask=0077
+
+# Defense in depth for a service that runs as the personal owner. This is not
+# an OS privilege boundary; the ai-jail profile remains the accident-prevention
+# layer for filesystem and network access.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
 
 [Install]
 WantedBy=default.target

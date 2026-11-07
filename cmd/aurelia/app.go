@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -253,9 +254,11 @@ func bootstrapApp() (*app, error) {
 		}
 	})
 
+	telegramEnabled := envFlag("AURELIA_ENABLE_TELEGRAM", true)
 	bot, err := telegram.NewBotController(
 		cfg, br, agentReg, personaSvc, transcriber,
 		cronHandler, resolver.MemoryPersonas(), resolver.Memory(), exePath, sessions, resolver, bindings,
+		!telegramEnabled,
 	)
 	if err != nil {
 		if closeErr := onboardingStore.Close(); closeErr != nil {
@@ -516,13 +519,42 @@ func setupCronScheduler(
 	return scheduler, nil
 }
 
+// envFlag reads a boolean environment flag. An unset or empty value uses
+// defaultValue; an invalid value turns the surface off so a typo cannot
+// silently start a production consumer.
+func envFlag(name string, defaultValue bool) bool {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return defaultValue
+	}
+	switch strings.ToLower(raw) {
+	case "on", "yes":
+		return true
+	case "off", "no":
+		return false
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		log.Printf("invalid %s=%q; treating as false", name, raw)
+		return false
+	}
+	return value
+}
+
 func (a *app) start() {
+	cronEnabled := envFlag("AURELIA_ENABLE_CRON", true)
+	telegramEnabled := envFlag("AURELIA_ENABLE_TELEGRAM", true)
+
 	if a.scheduler != nil {
-		goSafe("cron scheduler", func() {
-			if err := a.scheduler.Start(a.cronCtx); err != nil && err != context.Canceled {
-				log.Printf("Warning: cron scheduler stopped with error: %v", err)
-			}
-		})
+		if cronEnabled {
+			goSafe("cron scheduler", func() {
+				if err := a.scheduler.Start(a.cronCtx); err != nil && err != context.Canceled {
+					log.Printf("Warning: cron scheduler stopped with error: %v", err)
+				}
+			})
+		} else {
+			log.Printf("cron scheduler disabled (AURELIA_ENABLE_CRON=0)")
+		}
 	}
 	a.startSessionGC()
 	if a.ipcServer != nil {
@@ -530,17 +562,21 @@ func (a *app) start() {
 		a.ipcServer.StreamHandler = makeTUIHandler(a)
 		goSafe("ipc server", func() { a.ipcServer.Start() })
 	}
-	goSafe("bot", func() { a.bot.Start() })
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				log.Printf("panic in interrupted session notifier: %v", r)
-			}
+	if telegramEnabled && a.bot != nil {
+		goSafe("bot", func() { a.bot.Start() })
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("panic in interrupted session notifier: %v", r)
+				}
+			}()
+			time.Sleep(2 * time.Second)
+			maxAge := a.bot.InterruptedSessionMaxAgeFromConfig()
+			a.bot.NotifyRecentInterruptedSessions(maxAge)
 		}()
-		time.Sleep(2 * time.Second)
-		maxAge := a.bot.InterruptedSessionMaxAgeFromConfig()
-		a.bot.NotifyRecentInterruptedSessions(maxAge)
-	}()
+	} else if !telegramEnabled {
+		log.Printf("telegram polling disabled (AURELIA_ENABLE_TELEGRAM=0)")
+	}
 
 	// Reconcile stale run_journal rows from before this process start
 	go a.reconcileStaleRuns()
