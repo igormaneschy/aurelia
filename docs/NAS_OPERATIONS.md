@@ -1,9 +1,9 @@
 # NAS Personal Assistant — Operations Runbook
 
-Status: **live (2026-11-07)**. The NAS is the sole Telegram consumer; the Mac
-runs only the desktop client connected over Tailscale; the TUI client is
-disabled. The release PR for this work targets **v0.53.0** and is rebased on
-`main` at v0.52.0.
+Status: **live (2026-11-07), release v0.53.0**. The NAS is the sole Telegram
+consumer; the Mac runs only the desktop client connected over Tailscale; the
+TUI client is disabled. v0.53.0 was merged (`d44b319`), tagged and deployed to
+the NAS; the next release is TBD.
 
 Sections 1–8 are the pre-cutover plan and validation history. Sections 9–18 are
 the current operating state, desktop access, memory-sharing rules and daily
@@ -36,13 +36,12 @@ Related change: `openspec/changes/nas-personal-assistant/`.
 
 Initial candidate baseline: branch `feature/nas-personal-assistant`, commit
 `bbf64642345ebc2bfea28743b9948f1387828d32` (Aurelia v0.51.0). The v0.52.0
-attachments feature is now on `main` and is included when the branch is
-rebased for the v0.53.0 release PR.
+attachments feature entered the base and the v0.53.0 release was rebased on it.
 
 | Component | Pinned version | Source / verification |
 |---|---|---|
-| Aurelia candidate | `bbf6464` / v0.51.0 initial; PR rebased on `main` v0.52.0 | `git rev-parse HEAD`; `git show HEAD:internal/version/version.go` |
-| Release PR target | v0.53.0 | `feature/nas-personal-assistant` rebased on `main` (`7ab5459`, v0.52.0) |
+| Aurelia release | `d44b319` / v0.53.0 | `main` after PR #88; annotated tag `v0.53.0` |
+| Initial candidate | `bbf6464` / v0.51.0 | historical baseline |
 | Go toolchain (build only) | 1.27 | `go.mod` `go 1.27`; build elsewhere is acceptable |
 | Node.js Linux x64 | v22.23.4 (LTS Jod), npm 10.9.9 | nodejs.org `SHASUMS256.txt`; linux-x64 `.tar.xz` SHA-256 `1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce` |
 | PI SDK | 1.5.0 | `bridge/package.json`; `internal/bridge/pi_sdk.go` |
@@ -244,7 +243,7 @@ excluded from agent file access wherever the runtime allows it.
 | Component | State |
 |---|---|
 | Node/npm | v22.23.4 / npm 10.9.9 under `/home/<nas-user>/.local/node/bin` |
-| Aurelia binary | v0.51.0 feature-branch Linux amd64 under `/home/<nas-user>/.aurelia/bin/aurelia`; release PR target is v0.53.0 after the rebase on `main` v0.52.0 |
+| Aurelia binary | v0.53.0 Linux amd64 under `/home/<nas-user>/.aurelia/bin/aurelia`; SHA-256 `291ec8cd4dd7e1cb2c65b8de1b4dd44093b7b1dbefe0982a51406d880388d970`; previous binary backed up as `aurelia.prev-20261107213352` |
 | Aurelia service | **active**; Telegram and cron enabled; `ExitType=cgroup`; IPC socket listening; cron store has 0 jobs; stop logs graceful shutdown with no orphans |
 | ai-jail | 3.2.0; bubblewrap 0.8.0; `/usr/local/bin/ai-jail` and `/usr/local/lib/aurelia/aurelia-jail` are root-owned; unit `ExecStart` points to the root-owned wrapper |
 | Lingering | `Linger=yes` for `<nas-user>`; user manager running |
@@ -310,8 +309,8 @@ Residual risks accepted for this personal deployment:
   destination is available.
 - Whether the broad personal-root grant needs a narrower review after the first
   real tasks reveal which folders are actually used.
-- Promote v0.53.0 after the PR review, then rebuild/redeploy the NAS binary and
-  re-run the live Telegram + desktop checks.
+- Next release: accumulate the next set of changes on a new feature branch from
+  `main` v0.53.0; do not reuse the merged feature branch.
 
 **No return to Mac:** cutover is one-way. If the NAS fails, the service is
 stopped, data is preserved, and recovery is through backup/restore only.
@@ -325,9 +324,9 @@ stopped and disabled; the NAS is the sole Telegram consumer as of 2026-11-07
 19:05 WET. The desktop connects to the same NAS daemon through the Tailscale
 tunnel; the TUI client is disabled. No return to Mac.
 
-The release PR is the only remaining delivery step: rebase on `main` v0.52.0,
-bump to v0.53.0, review, merge, rebuild the Linux binary, redeploy and re-check
-Telegram + desktop.
+The v0.53.0 release is complete: merged as `d44b319`, tagged `v0.53.0`, NAS
+redeployed and the desktop reconnected. The next release is TBD; start a new
+feature branch from `main`.
 
 ## 13. Cutover window C
 
@@ -660,8 +659,8 @@ Mac. No source data is deleted during backup/restore tests.
 
 ### 16.5 Release/update
 
-The release target is **v0.53.0** on `feature/nas-personal-assistant`, rebased on
-`main` v0.52.0. After the PR is approved and merged:
+**v0.53.0 is live** (`d44b319`, tag `v0.53.0`). For the next release, use a new
+feature branch from `main`; after approval and merge:
 
 1. Build the Linux binary from the merged commit and replace
    `~/.aurelia/bin/aurelia` atomically (`.new` + `mv`).
@@ -699,13 +698,13 @@ The release target is **v0.53.0** on `feature/nas-personal-assistant`, rebased o
 
 ## 18. Release and PR state
 
-- Branch: `feature/nas-personal-assistant`.
-- Initial base: `main` `bbf6464` / v0.51.0.
-- Current `main`: `7ab5459` / v0.52.0 (document uploads).
-- Release target: **v0.53.0** (minor), PR to `main` after rebasing the feature
-  branch on v0.52.0.
-- The NAS currently runs the v0.51.0 feature-branch binary; after the PR merge,
-  rebuild and redeploy v0.53.0, then re-run the live checks.
+- Released: **v0.53.0** on 2026-11-07; merge commit `d44b319`; annotated tag
+  `v0.53.0`.
+- `main` is at `d44b319`; the NAS runs v0.53.0; the previous binary is backed
+  up on the NAS.
+- The v0.53.0 PR (#88) is merged; the feature branch is not reused for the next
+  release.
+- Next release: TBD; start a new feature branch from `main` v0.53.0.
 - The TUI client remains disabled; desktop + Telegram are the supported
   personal surfaces.
 
