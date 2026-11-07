@@ -4,9 +4,10 @@ Structural baseline for the `memory-consolidation` change. Collected read-only
 on the NAS personal instance (ai-memory 3.4.3, Aurelia v0.53.0). No note,
 prompt, session or page content is reproduced here.
 
-Status: **structural baseline complete; legacy migration applied; recall
-fixtures pending** (the recall run happens in the shadow phase before the
-provider switch).
+Status: **structural baseline + legacy migration + live ai-memory switch
+complete; Telegram acceptance and failure-mode fixtures pending.** The live
+switch was performed directly after the import; the shadow-mode comparison was
+not run, and the direct-switch validation is recorded below.
 
 ## ai-memory instance
 
@@ -110,9 +111,23 @@ document.
 
 ## Recall fixtures
 
-The following fixtures will be measured against the legacy mode now and the
-ai-memory mode in the shadow phase. Results are pending and must be recorded
-before the switch.
+The legacy prompt baseline and the first live ai-memory check are recorded
+below. The remaining fixtures are still pending and must be run for acceptance.
+
+| Measurement | Legacy | ai-memory live |
+|---|---:|---:|
+| DM prompt-memory characters | 542 (~135 tokens) | 3,126 (3 sources) |
+| Working-set cap | none | 4,000 characters |
+| Desktop recall without tools | not measured | **passed** (see below) |
+| End-to-end latency reference | p95 81.5s (54 runs) | live sample pending |
+
+The desktop recall probe created a temporary TUI session on the NAS, asked the
+model to answer **without tools** using the injected project working set, and
+was then deleted. The question was about the most recent `/status` session page
+in `personal/aurelia`; the answer correctly returned the prompt `/status` and
+`19 observations`. No memory content is reproduced here.
+
+Pending fixtures:
 
 1. Cross-surface recall: record a durable fact in Telegram, retrieve it from the
    desktop in the same project.
@@ -159,6 +174,26 @@ observations, 1.9 MiB storage. The observation increase may include unrelated
 live extension capture; it is not attributed solely to the migration.
 
 The legacy files, continuity database and memoryux files were only read; their
-originals remain untouched. The live daemon still runs `memory_provider=legacy`
-and was not restarted or switched. The imported pages are tagged
-`legacy-import` and remain available for the shadow/live recall phase.
+originals remain untouched. The imported pages are tagged `legacy-import`.
+
+## Live ai-memory switch (2026-11-07)
+
+The live NAS config was switched to `memory_provider=ai-memory`; the pre-switch
+backups are `~/.aurelia/config/app.json.pre-memory-switch-20261107230812` and
+`~/.aurelia/bin/aurelia.prev-memory-switch-20261107230812`. The service
+restarted cleanly and logged the first working set:
+
+```text
+memory: ai-memory working set project=personal/aurelia chars=3126 sources=3 degraded=false pending_handoffs=1
+```
+
+A TUI smoke turn over the same Unix socket used by the desktop replied `OK`.
+The desktop then showed `bridge online`, the `personal/aurelia` scope and the
+project state, with no error banner. The recall probe described above passed
+without tool calls.
+
+Rollback before the legacy removal: set `memory_provider=legacy` in
+`~/.aurelia/config/app.json` and restart `aurelia.service`; the legacy files and
+continuity DB are still present. After the user accepts the live behavior, the
+remaining OpenSpec tasks remove the legacy packages, paths, commands and prompt
+layers.
