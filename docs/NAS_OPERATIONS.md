@@ -651,8 +651,10 @@ Rollback after the removal uses the binary/config backups, not a provider flag:
 `~/.aurelia/config/app.json.pre-memory-switch-20261107230812`,
 `~/.aurelia/bin/aurelia.prev-memory-switch-20261107230812`,
 `~/.aurelia/bin/aurelia.pre-cwd-reset-20261107232917`, and the pre-removal
-binary backup created at deploy time. Restore the previous binary and restart
-`aurelia.service` to return to the legacy stack.
+binary `~/.aurelia/bin/aurelia.pre-legacy-removal-20261108000833` (SHA-256
+`c1a886c4ced741afe3a7aa52522925e7793ae8ce7d5ee57c9c2abbabb4976cd0`). Restore
+the previous binary and restart `aurelia.service` to return to the legacy
+stack.
 
 The `/memory` command reports ai-memory project/page/handoff state. The local
 checkpoint command is gone, and `/reset` clears the PI session and cancels

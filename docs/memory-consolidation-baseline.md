@@ -197,8 +197,9 @@ Rollback after the runtime removal uses the binary/config backups, not a
 provider flag: restore `~/.aurelia/config/app.json.pre-memory-switch-20261107230812`
 and the previous `aurelia` binary, then restart `aurelia.service`. The legacy
 files and continuity DB may remain on disk for audit, but the current runtime no
-longer reads or writes them. The pre-removal binary backup is recorded in the
-deployment notes.
+longer reads or writes them. The pre-removal binary is
+`~/.aurelia/bin/aurelia.pre-legacy-removal-20261108000833` (SHA-256
+`c1a886c4ced741afe3a7aa52522925e7793ae8ce7d5ee57c9c2abbabb4976cd0`).
 
 ### Project attribution check (2026-11-07)
 
