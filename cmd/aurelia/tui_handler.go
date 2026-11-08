@@ -257,6 +257,16 @@ func makeTUIHandler(a *app) func(context.Context, ipc.IPCMessage, func(ipc.IPCEv
 // ThreadID is always 0; UserID maps to the canonical persona ID when
 // configured (so TUI and Telegram share memory/dream/nudge), falling
 // back to os.Getuid() when no persona is configured.
+// tuiPersonaUserID returns the canonical persona ID used by desktop sessions.
+func tuiPersonaUserID(a *app) int64 {
+	if a != nil && a.config != nil {
+		if id := a.config.PersonaUserID(); id != 0 {
+			return id
+		}
+	}
+	return int64(os.Getuid())
+}
+
 func forceTUIIDs(msg *ipc.IPCMessage, personaUserID int64) {
 	if !ipc.IsReservedTUIID(msg.ChatID) {
 		msg.ChatID = ipc.ReservedTUIChatID

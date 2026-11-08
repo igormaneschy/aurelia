@@ -199,6 +199,13 @@ func handleTUISessionCreate(ctx context.Context, a *app, msg ipc.IPCMessage, emi
 
 		sess, err := a.tuiSessions.Create(ctx, nextID, name)
 		if err == nil {
+			if a.sessions != nil {
+				a.sessions.ClearSessionForUser(sess.ChatID, 0, tuiPersonaUserID(a))
+				a.sessions.ClearCwd(sess.ChatID, 0)
+			}
+			if a.bindings != nil {
+				_ = a.bindings.Delete(ctx, projectbinding.ConversationKey{ChatID: sess.ChatID, ThreadID: 0})
+			}
 			body, _ := json.Marshal(sessionJSON{ChatID: sess.ChatID, Name: sess.Name})
 			if emitErr := emit(ipc.IPCEvent{Type: ipc.EventTypeSessionCreated, Body: string(body), RequestID: msg.RequestID}); emitErr != nil {
 				return emitErr
@@ -314,7 +321,8 @@ func handleTUISessionDelete(ctx context.Context, a *app, msg ipc.IPCMessage, emi
 
 	// Also clean up session state and project binding for this ChatID.
 	if a.sessions != nil {
-		a.sessions.Clear(chatID, 0)
+		a.sessions.ClearSessionForUser(chatID, 0, tuiPersonaUserID(a))
+		a.sessions.ClearCwd(chatID, 0)
 	}
 	if a.bindings != nil {
 		_ = a.bindings.Delete(ctx, projectbinding.ConversationKey{ChatID: chatID, ThreadID: 0})
