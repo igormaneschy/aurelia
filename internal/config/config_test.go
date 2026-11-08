@@ -25,6 +25,9 @@ func TestMain(m *testing.M) {
 	if err := os.Unsetenv("TELEGRAM_BOT_TOKEN"); err != nil {
 		panic("config test: unsetenv TELEGRAM_BOT_TOKEN: " + err.Error())
 	}
+	if err := os.Unsetenv("AURELIA_MEMORY_PROVIDER"); err != nil {
+		panic("config test: unsetenv AURELIA_MEMORY_PROVIDER: " + err.Error())
+	}
 	os.Exit(m.Run())
 }
 

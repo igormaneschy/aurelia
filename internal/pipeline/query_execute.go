@@ -216,10 +216,10 @@ func (s *Service) tryQueryFallback(ctx context.Context, req bridge.Request, onNo
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("query_execute: panic in continuitySnapshot: %v", r)
+					log.Printf("query_execute: panic in recoverySnapshot: %v", r)
 				}
 			}()
-			snapshot := s.continuitySnapshot(ctx, chatID, threadID, userID)
+			snapshot := s.recoverySnapshot(ctx, chatID, threadID, userID)
 			if snapshot != "" {
 				snapshotBlock := "\n\n## Previous Session Context (recovered)\n\n" +
 					"The following is recovered context from the previous session that was interrupted. " +
@@ -231,7 +231,7 @@ func (s *Service) tryQueryFallback(ctx context.Context, req bridge.Request, onNo
 				} else {
 					fallbackReq.Options.SystemPrompt = snapshotBlock
 				}
-				log.Printf("resilience: injected continuity snapshot into fallback prompt (chat=%d thread=%d)", chatID, threadID)
+				log.Printf("resilience: injected ai-memory recovery snapshot into fallback prompt (chat=%d thread=%d)", chatID, threadID)
 			}
 		}()
 	}

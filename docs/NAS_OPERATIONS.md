@@ -1,9 +1,9 @@
 # NAS Personal Assistant — Operations Runbook
 
-Status: **live (2026-11-07), release v0.53.0**. The NAS is the sole Telegram
+Status: **live (2026-11-08), release v0.54.0**. The NAS is the sole Telegram
 consumer; the Mac runs only the desktop client connected over Tailscale; the
-TUI client is disabled. v0.53.0 was merged (`d44b319`), tagged and deployed to
-the NAS; the next release is TBD.
+TUI client is disabled. v0.54.0 replaces the legacy memory stack with the
+ai-memory-only runtime; the annotated tag is `v0.54.0`.
 
 Sections 1–8 are the pre-cutover plan and validation history. Sections 9–18 are
 the current operating state, desktop access, memory-sharing rules and daily
@@ -40,7 +40,8 @@ attachments feature entered the base and the v0.53.0 release was rebased on it.
 
 | Component | Pinned version | Source / verification |
 |---|---|---|
-| Aurelia release | `d44b319` / v0.53.0 | `main` after PR #88; annotated tag `v0.53.0` |
+| Aurelia release | v0.54.0 | `main` after the memory-consolidation PR; annotated tag `v0.54.0` |
+| Previous release | `d44b319` / v0.53.0 | historical baseline |
 | Initial candidate | `bbf6464` / v0.51.0 | historical baseline |
 | Go toolchain (build only) | 1.27 | `go.mod` `go 1.27`; build elsewhere is acceptable |
 | Node.js Linux x64 | v22.23.4 (LTS Jod), npm 10.9.9 | nodejs.org `SHASUMS256.txt`; linux-x64 `.tar.xz` SHA-256 `1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce` |
@@ -80,7 +81,7 @@ Confirmed by the user on 2026-11-07:
 | PI agent dir | `/home/<nas-user>/.aurelia/pi-agent` | Approved |
 | Node/npm | `/home/<nas-user>/.local/node` | Approved |
 | ai-memory data | `/home/<nas-user>/.local/share/ai-memory` | Approved; hidden from agent file access by policy/jail |
-| Local memory extraction | Dream/Nudge disabled for first validation | Approved for first validation |
+| Local memory extraction | ai-memory consolidation (Dream/Nudge removed) | Approved; single backend |
 | Model/provider | Same provider/model family as current, new key provisioned by private file | Approved |
 | Staging surface | Headless tests without production Telegram token; no test bot | Approved |
 | Backup destination | Continue under `/home/<nas-user>/.aurelia/backup-test` for now; no second disk is available | Approved interim; not a long-term off-volume backup |
@@ -92,7 +93,11 @@ The ai-jail profile and Aurelia policy must still deny the exclusions and any
 path outside the approved root. `#recycle` and hidden service/credential
 directories are never read or written by the assistant.
 
-## 3.1 Personal memory import
+## 3.1 Personal memory import (historical)
+
+> **Historical cutover record:** the legacy user-global files below were later
+> migrated into the personal ai-memory as `legacy-import` pages and the legacy
+> runtime layers were removed. The current memory contract is section 15.6.
 
 The user approved importing all personal memory. The source is the Mac
 user-global memory layer:
@@ -238,17 +243,17 @@ against hostile code. ai-jail remains accident prevention. This residual risk
 is accepted for the personal assistant; secrets and service state must still be
 excluded from agent file access wherever the runtime allows it.
 
-## 9. Current installed state (2026-11-07)
+## 9. Current installed state (2026-11-08)
 
 | Component | State |
 |---|---|
 | Node/npm | v22.23.4 / npm 10.9.9 under `/home/<nas-user>/.local/node/bin` |
-| Aurelia binary | v0.53.0 Linux amd64 under `/home/<nas-user>/.aurelia/bin/aurelia`; SHA-256 `291ec8cd4dd7e1cb2c65b8de1b4dd44093b7b1dbefe0982a51406d880388d970`; previous binary backed up as `aurelia.prev-20261107213352` |
+| Aurelia binary | v0.54.0 Linux amd64 under `/home/<nas-user>/.aurelia/bin/aurelia`; SHA-256 `22b9c32f8edd32a8bdbdd721ad6e4ea2c79de2d6d69806b2f760ccf2632dbf44`; pre-removal binary backed up as `aurelia.pre-legacy-removal-20261108000833` |
 | Aurelia service | **active**; Telegram and cron enabled; `ExitType=cgroup`; IPC socket listening; cron store has 0 jobs; stop logs graceful shutdown with no orphans |
 | ai-jail | 3.2.0; bubblewrap 0.8.0; `/usr/local/bin/ai-jail` and `/usr/local/lib/aurelia/aurelia-jail` are root-owned; unit `ExecStart` points to the root-owned wrapper |
 | Lingering | `Linger=yes` for `<nas-user>`; user manager running |
 | ai-memory | 3.4.3 active on `127.0.0.1:49374`; data under `/home/<nas-user>/.local/share/ai-memory`; token/config 600, data dir 700; db/wiki/raw/config denied to the jail |
-| ai-memory projects | `personal/aurelia` with 24 pages at last check; 15 personal pages imported under `imported/`; per-topic projects are created on demand |
+| ai-memory projects | `personal/aurelia` with 42 pages; 23 legacy pages imported with tag `legacy-import`; per-topic projects are created on demand |
 | PI runtime | PI SDK 1.5.0, pi-web-access 0.47.0, pi-mcp-adapter 7.0.1; the daemon agent dir keeps a real npm tree with transitive dependencies |
 | Tool surface | `web_search`, `fetch_content`, `get_search_content`, `memory_query`, `memory_write_page` and the rest of the allowlist registered and exercised through the daemon |
 | Model test | `deepseek/deepseek-v4-pro` returned `OK`; web research and memory tools exercised through the IPC surface |
@@ -310,7 +315,7 @@ Residual risks accepted for this personal deployment:
 - Whether the broad personal-root grant needs a narrower review after the first
   real tasks reveal which folders are actually used.
 - Next release: accumulate the next set of changes on a new feature branch from
-  `main` v0.53.0; do not reuse the merged feature branch.
+  `main` v0.54.0; do not reuse the merged feature branch.
 
 **No return to Mac:** cutover is one-way. If the NAS fails, the service is
 stopped, data is preserved, and recovery is through backup/restore only.
@@ -324,9 +329,10 @@ stopped and disabled; the NAS is the sole Telegram consumer as of 2026-11-07
 19:05 WET. The desktop connects to the same NAS daemon through the Tailscale
 tunnel; the TUI client is disabled. No return to Mac.
 
-The v0.53.0 release is complete: merged as `d44b319`, tagged `v0.53.0`, NAS
-redeployed and the desktop reconnected. The next release is TBD; start a new
-feature branch from `main`.
+The v0.54.0 release removes the legacy memory stack. The NAS runs the
+ai-memory-only binary; the desktop and Telegram remain the supported surfaces.
+The previous v0.53.0 release (`d44b319`, tag `v0.53.0`) remains the historical
+baseline.
 
 ## 13. Cutover window C
 
@@ -386,16 +392,16 @@ starts with a fresh session and no inherited Mac context.
 
 Inside an already allowed **forum supergroup**, new topics need no allowlist
 change or restart. `<telegram-group-name>` is a forum (`is_forum=true`): each topic is a
-separate thread, with its own session, continuity and topic memory. A
-group-level `/cwd --group /home/<nas-user>/Aurelia` provides the default; `/cwd`
-inside a topic overrides it. Topics that share the same cwd also share the
-cwd overlay and the ai-memory `personal/aurelia` project.
+separate thread with its own PI session and ai-memory project. A group-level
+`/cwd --group /home/<nas-user>/Aurelia` provides the default; `/cwd` inside a
+topic overrides it. Topics that share the same cwd also share the ai-memory
+`personal/aurelia` project.
 
-Initial NAS state (2026-11-07): no `~/.aurelia/topics/` directory, zero
-`conversation_project_binding` rows, and one group-level continuity row
-(thread 0, empty cwd) from the first interaction. Telegram topics may exist in
-the group, but Aurelia topic-specific state is created on first use; nothing
-was migrated from the Mac.
+Initial NAS state (2026-11-07, historical): no `~/.aurelia/topics/` directory,
+zero `conversation_project_binding` rows, and one group-level continuity row
+from the first interaction. Telegram topics may exist in the group, but Aurelia
+topic-specific state is created on first use. The legacy continuity/topic
+layers have since been migrated to ai-memory and removed.
 
 The **private DM does not need `/cwd`**: the user profile has
 `default_cwd=/home/<nas-user>/Aurelia`, applied automatically because
@@ -403,13 +409,12 @@ The **private DM does not need `/cwd`**: the user profile has
 `/cwd clear` removes the override and restores the profile default. Groups do
 not use `DefaultCWD`; they need `/cwd --group` or a per-topic `/cwd`.
 
-**Memory scope caveat:** ai-memory is scoped by workspace/project derived from
-cwd, not by Telegram topic. Topics sharing the same cwd also share
-`cwd_overlay` and the same ai-memory project (`personal/aurelia` for the main
-workspace). Sessions, continuity and `~/.aurelia/topics/chat_*/thread_*` are
-per thread, but captured observations and wiki writes are not. For isolated
-topics, use distinct cwds with distinct `.ai-memory.toml` projects; otherwise
-accept cross-topic recall.
+**Memory scope:** ai-memory is scoped by workspace/project derived from the cwd
+and `.ai-memory.toml` marker. Topics sharing the same cwd share the same
+ai-memory project (`personal/aurelia` for the main workspace); sessions and
+captured observations are per thread but durable pages are project-scoped. For
+isolated topics, use distinct cwds with distinct `.ai-memory.toml` projects;
+otherwise accept cross-topic recall.
 
 Current Telegram topic map for `<telegram-group-name>` (`<telegram-group-id>`).
 Private thread IDs, topic labels and slugs are intentionally omitted from this
@@ -578,12 +583,8 @@ each session.
 | Layer | Shared? | Detail |
 |---|---|---|
 | cwd and files | **Yes** | Both surfaces read/write the same project directory. |
-| `cwd_overlay` | **Yes** | `~/.aurelia/projects/<slug>/cwd_overlay/`; project-scoped and loaded by every frontend with the same cwd. The desktop `/cwd` bootstraps it if missing. |
-| ai-memory project | **Yes** | The topic `.ai-memory.toml` marker selects the project (for example `personal/aurelia-<topic>`). Pages/observations written there are available to both sides. |
-| `user_global` memory | **Yes** | Both surfaces use the same persona user ID. |
+| ai-memory project | **Yes** | The topic `.ai-memory.toml` marker selects the project (for example `personal/aurelia-<topic>`). Pages/observations/handoffs written there are available to both sides. This is the only durable memory path. |
 | PI session/transcript | **No** | The desktop session has its own `chat_id` and session file; it does not load the Telegram topic history. |
-| Continuity | **No** | Continuity is keyed by chat/thread/user; the desktop starts without the Telegram topic's last goal/summary. |
-| Telegram `topic` layer | **No** | `~/.aurelia/topics/chat_<id>/thread_<id>/` exists only for forum threads (thread > 0). The desktop session has thread 0, so it never loads the Telegram topic's `topic` layer. Use `cwd_overlay`/ai-memory for cross-surface notes. |
 | `/cwd` binding | **No** | Each chat/session has its own binding. Setting the desktop cwd does not change the Telegram topic, and vice versa. |
 | Session list | **No** | The desktop lists TUI-namespace sessions; the Telegram topic is not a desktop session. |
 | Model | **No** | Model is per session/config; use `/model` in the desktop to align with the Telegram profile. |
@@ -591,20 +592,75 @@ each session.
 Practical consequences:
 
 - To continue the **project**, run `/cwd` in the desktop session and rely on
-  the shared `cwd_overlay`/ai-memory. To continue the **exact Telegram
+  the shared ai-memory project. To continue the **exact Telegram
   conversation**, use the Telegram topic; its PI session file is not
   transferred.
-- In Telegram, `/memory checkpoint <summary>` writes to the shared
-  `cwd_overlay` (the checkpoint target prefers `cwd_overlay` over `topic`), so
-  the desktop loads that context on its next turn.
+- `/memory checkpoint` no longer exists: the durable note path is a page
+  write/handoff in ai-memory, and the desktop reads the bounded project working
+  set on its next turn. `/memory` reports project pages, observations,
+  sessions, pending handoffs and degraded state.
+- `/reset` clears the PI session and expires pending ai-memory handoffs for the
+  conversation, so the next session does not consume a handoff created before
+  the reset.
+- Changing `/cwd` to a different ai-memory project resets the PI session for
+  that conversation, so the ai-memory session row, observations and handoff
+  belong to the new project. A session created before the topic binding was set
+  keeps the old project attribution until `/reset` (or a later `/cwd` change)
+  starts a new session.
 - The desktop and the Telegram topic can run concurrently. There is no
-  cross-surface lock over the shared files/overlay; avoid simultaneous edits to
-  the same file.
+  cross-surface lock over the shared files; avoid simultaneous edits to the
+  same file.
 - Current project-topic state (2026-11-07): one existing topic has a PI session
-  file, but its `cwd_overlay` and `topics/.../thread_...` directory do not exist
-  yet, and its ai-memory project has no pages. A desktop `/cwd` creates an empty
-  overlay; future writes are shared by both sides. The private mapping is in
+  file and an ai-memory project. The private mapping is in
   `~/.aurelia/config/app.json` and `project_bindings.db`.
+
+### 15.7 ai-memory Pi extension handoff
+
+The shared Pi extension `ai-memory-pi.ts` injects the pending handoff at
+`before_agent_start` and posts session-start, prompt, tool, stop, pre-compact
+and session-end events with the PI session id. Handoff creation/consumption is
+therefore automatic and project-scoped; do not reimplement it in the daemon.
+
+The Pi extension does **not** inject a project briefing/pinned digest. The thin
+`internal/memorycontext` adapter reads `memory_briefing`/`memory_read_page`
+through the loopback MCP endpoint, formats a bounded working set (counts, rules,
+recent page excerpts and pending handoff count), and never duplicates the
+handoff. ai-memory is now the unconditional backend; there is no legacy,
+shadow or env-selected provider path. The personal instance is the only
+backend: Aurelia never falls back to the coding ai-memory instance, and the
+ai-memory capture exclusions remain enforced in the shared configuration.
+
+### 15.8 Memory consolidation rollout (2026-11-07)
+
+The legacy memory migration is complete: 23/23 pages were written and verified
+in the personal ai-memory, tagged `legacy-import`. The pre-import backup is
+`~/.aurelia/backup-test/pre-memory-consolidation-20261107224526.tar.gz`
+(SHA-256 `c51be982b22bced158d8f5ae2217c8759d8e47d54c3466d047a2fa4a8d91d07a`).
+The original files/continuity DB were only read.
+
+The live NAS daemon switched to the ai-memory working set on 2026-11-07. The
+first live turn logged
+`memory: ai-memory working set project=personal/aurelia chars=3126 sources=3
+degraded=false pending_handoffs=1`, a TUI smoke turn replied `OK`, and the
+desktop showed `bridge online` with the `personal/aurelia` scope.
+
+The legacy runtime stack (continuity, `cwd_overlay`/`topic`/`user_global`,
+memoryux, Dream/Nudge and the old migration commands) was then removed from
+the daemon. The original files may remain on disk for audit/rollback, but the
+runtime no longer reads or writes them.
+
+Rollback after the removal uses the binary/config backups, not a provider flag:
+`~/.aurelia/config/app.json.pre-memory-switch-20261107230812`,
+`~/.aurelia/bin/aurelia.prev-memory-switch-20261107230812`,
+`~/.aurelia/bin/aurelia.pre-cwd-reset-20261107232917`, and the pre-removal
+binary `~/.aurelia/bin/aurelia.pre-legacy-removal-20261108000833` (SHA-256
+`c1a886c4ced741afe3a7aa52522925e7793ae8ce7d5ee57c9c2abbabb4976cd0`). Restore
+the previous binary and restart `aurelia.service` to return to the legacy
+stack.
+
+The `/memory` command reports ai-memory project/page/handoff state. The local
+checkpoint command is gone, and `/reset` clears the PI session and cancels
+pending handoffs instead of resetting continuity.
 
 ## 16. Daily operations
 
@@ -641,9 +697,9 @@ re-enabling a local daemon.
   directory, marker and binding; the existing topics need no action.
 - New desktop session: create it, then `/cwd <path>`; new sessions do not
   inherit the DM/topic cwd. Use `/status` and `/model` from the composer.
-- Cross-surface context: `/memory checkpoint <summary>` in Telegram writes to
-  the shared `cwd_overlay`; the desktop loads it on the next turn. The raw
-  transcript and continuity remain separate (section 15.6).
+- Cross-surface context: durable notes go to ai-memory pages/handoffs; the
+  desktop reads the bounded project working set on its next turn. The raw
+  transcript and PI session remain separate (section 15.6).
 
 ### 16.4 Backup
 
@@ -659,8 +715,8 @@ Mac. No source data is deleted during backup/restore tests.
 
 ### 16.5 Release/update
 
-**v0.53.0 is live** (`d44b319`, tag `v0.53.0`). For the next release, use a new
-feature branch from `main`; after approval and merge:
+**v0.54.0 is live** (tag `v0.54.0`; ai-memory-only runtime). For the next
+release, use a new feature branch from `main`; after approval and merge:
 
 1. Build the Linux binary from the merged commit and replace
    `~/.aurelia/bin/aurelia` atomically (`.new` + `mv`).
@@ -674,9 +730,9 @@ feature branch from `main`; after approval and merge:
 - **Desktop attachments in NAS mode:** images/documents are sent as Mac-local
   paths and the NAS daemon cannot read them. Text, commands and streaming work;
   use Telegram for attachments until byte uploads are implemented.
-- **Telegram `topic` layer:** it is thread-specific and not loaded by desktop
-  sessions (thread 0). The shared project layer is `cwd_overlay`; use it or
-  ai-memory for cross-surface memory.
+- **Telegram topics:** each topic has its own PI session and ai-memory project
+  selected by its cwd marker. Desktop sessions with the same cwd share the
+  ai-memory project; they do not load the Telegram transcript.
 - **Concurrency:** desktop and Telegram can run at the same time. There is no
   cross-surface lock; avoid simultaneous edits to the same files/overlay.
 - **Model selection:** the desktop model badge is a client selection; the
@@ -698,13 +754,10 @@ feature branch from `main`; after approval and merge:
 
 ## 18. Release and PR state
 
-- Released: **v0.53.0** on 2026-11-07; merge commit `d44b319`; annotated tag
-  `v0.53.0`.
-- `main` is at `d44b319`; the NAS runs v0.53.0; the previous binary is backed
-  up on the NAS.
-- The v0.53.0 PR (#88) is merged; the feature branch is not reused for the next
-  release.
-- Next release: TBD; start a new feature branch from `main` v0.53.0.
+- Released: **v0.54.0** on 2026-11-08; annotated tag `v0.54.0`.
+- The NAS runs v0.54.0; the pre-removal binary is backed up on the NAS.
+- Previous release: v0.53.0 (`d44b319`, tag `v0.53.0`, PR #88).
+- Next release: TBD; start a new feature branch from `main` v0.54.0.
 - The TUI client remains disabled; desktop + Telegram are the supported
   personal surfaces.
 

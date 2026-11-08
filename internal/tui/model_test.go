@@ -2162,7 +2162,7 @@ func TestModel_ProjectPanelRendersFields(t *testing.T) {
 			{Name: "Global", Scope: "global", Exists: true, FileCount: 14},
 			{Name: "Team", Scope: "team", Exists: true, FileCount: 8},
 		},
-		CheckpointLayer: "cwd_overlay",
+		CheckpointLayer: "ai-memory",
 	})
 	m.messages = []chatMessage{{Sender: "Igor", Text: "hello"}}
 

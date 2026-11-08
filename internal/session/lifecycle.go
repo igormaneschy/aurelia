@@ -115,7 +115,7 @@ func DefaultLifecyclePolicy() LifecyclePolicy {
 //  4. Healthy → continue.
 //
 // ActionCompact and ActionRotate are reserved for explicit/manual/emergency
-// flows only, not automatic token management. The PI SDK owns continuity.
+// flows only, not automatic token management. The PI SDK owns session state.
 func EvaluateLifecycle(signals HealthSignals, policy LifecyclePolicy) Decision {
 	// 1. Cold/inactive: session is not active (e.g. restored from disk after
 	// restart or user returned after a long idle). Cold wins over every
@@ -155,7 +155,7 @@ func EvaluateLifecycle(signals HealthSignals, policy LifecyclePolicy) Decision {
 		return Decision{
 			State:  HealthLarge,
 			Action: ActionContinue,
-			Reason: fmt.Sprintf("context_usage=%.1f%% >= warn_context_pct=%d (PI SDK owns compaction/continuity)", signals.ContextUsagePct, policy.WarnContextPct),
+			Reason: fmt.Sprintf("context_usage=%.1f%% >= warn_context_pct=%d (PI SDK owns compaction/session state)", signals.ContextUsagePct, policy.WarnContextPct),
 		}
 	}
 
@@ -169,7 +169,7 @@ func EvaluateLifecycle(signals HealthSignals, policy LifecyclePolicy) Decision {
 
 // NeedsRotation reports whether suspect signals crossed the legacy rotation
 // threshold. EvaluateLifecycle uses this as severity metadata only; automatic
-// rotation is disabled so PI can preserve continuity through the original
+// rotation is disabled so PI can preserve context through the original
 // session_file.
 func (p LifecyclePolicy) NeedsRotation(signals HealthSignals) bool {
 	if signals.RecentEmptyResults >= p.MaxEmptyResultsBeforeRotate {

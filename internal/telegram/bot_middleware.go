@@ -14,7 +14,6 @@ import (
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
-	"github.com/igormaneschy/aurelia/internal/runtime"
 )
 
 func (bc *BotController) whitelistMiddleware() telebot.MiddlewareFunc {
@@ -99,6 +98,7 @@ func (bc *BotController) registerSlashMenu() {
 func slashMenuCommands() []telebot.Command {
 	return []telebot.Command{
 		{Text: "new", Description: "Nova sessão (limpa contexto)"},
+		{Text: "reset", Description: "Nova sessão (igual a /new)"},
 		{Text: "usage", Description: "Ver uso de tokens da sessão"},
 		{Text: "status", Description: "Ver estado atual da Aurelia"},
 		{Text: "cwd", Description: "Definir diretório de trabalho"},
@@ -122,7 +122,7 @@ func (bc *BotController) handleHelpCommand(c telebot.Context) error {
 
 func helpMessage() string {
 	return "Comandos disponíveis:\n\n" +
-		"/new — Nova sessão (limpa contexto, cancela o que estiver em andamento)\n" +
+		"/new, /reset — Nova sessão (limpa contexto, cancela o que estiver em andamento)\n" +
 		"/stop — Interromper processamento ativo (preserva sessão)\n" +
 		"/usage — Ver uso de tokens da sessão\n" +
 		"/status — Ver estado atual + trabalho ativo + fila\n" +
@@ -241,12 +241,18 @@ func (bc *BotController) handleCwdCommand(c telebot.Context) error {
 		return SendTextWithThread(bc.bot, c.Chat(), status, threadID)
 	}
 
+	userID := safeSenderID(c.Sender())
+	isPrivateChat := c.Chat().Type == telebot.ChatPrivate
+
 	if clearThreadID, clear, err := cwdClearThread(args, threadID); err != nil {
 		return SendTextWithThread(bc.bot, c.Chat(), "❌ "+err.Error(), threadID)
 	} else if clear {
+		oldCwd := bc.currentCwdForContext(chatID, clearThreadID, userID, isPrivateChat)
 		if err := bc.clearCurrentCwd(chatID, clearThreadID); err != nil {
 			return SendErrorWithThread(bc.bot, c.Chat(), err.Error(), threadID)
 		}
+		newCwd := bc.currentCwdForContext(chatID, clearThreadID, userID, isPrivateChat)
+		bc.resetSessionOnProjectChange(chatID, clearThreadID, userID, oldCwd, newCwd)
 		msg := "✅ Binding de projeto removido deste tópico."
 		if clearThreadID == 0 {
 			msg = "✅ Binding de projeto removido do grupo."
@@ -260,24 +266,14 @@ func (bc *BotController) handleCwdCommand(c telebot.Context) error {
 		return SendTextWithThread(bc.bot, c.Chat(), "❌ "+err.Error(), threadID)
 	}
 
-	userID := int64(0)
-	if c.Sender() != nil {
-		userID = c.Sender().ID
-	}
+	oldCwd := bc.currentCwdForContext(chatID, target.ThreadID, userID, isPrivateChat)
 	cwd, err := bc.setCurrentCwd(chatID, target.ThreadID, userID, target.Path)
 	if err != nil {
 		log.Printf("cwd: rejected binding chat=%d thread=%d err=%v", chatID, target.ThreadID, err)
 		msg := fmt.Sprintf("❌ Diretório inválido, inexistente ou não permitido. Detalhe: %s", err.Error())
 		return SendTextWithThread(bc.bot, c.Chat(), msg, threadID)
 	}
-	if bc.resolver != nil {
-		if err := runtime.BootstrapConversationProjectMemory(bc.resolver, cwd, chatID, target.ThreadID); err != nil {
-			log.Printf("cwd: failed to bootstrap project memory for %s: %v", cwd, err)
-		}
-	}
-	// Invalidate overlay cache — project changed; user/topic layers are unchanged.
-	bc.InvalidateMemoryOverlay(cwd)
-
+	bc.resetSessionOnProjectChange(chatID, target.ThreadID, userID, oldCwd, cwd)
 	var msg string
 	switch target.Scope {
 	case "group":
@@ -777,11 +773,6 @@ func (bc *BotController) handleForgetMeConfirm(c telebot.Context) error {
 	}
 	if err := bc.userStore.Delete(senderID); err != nil {
 		return err
-	}
-
-	// Clear nudge buffer (pending transcripts) for this user
-	if bc.pipeline != nil && bc.pipeline.NudgeBuffer() != nil {
-		bc.pipeline.NudgeBuffer().ClearUser(senderID)
 	}
 
 	// Edit the original message to show confirmation

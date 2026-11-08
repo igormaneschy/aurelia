@@ -70,16 +70,16 @@ func testApp(t *testing.T) (*app, context.Context, func()) {
 	}
 
 	return &app{
-			bindings:    bindings,
-			sessions:    sessions,
-			config:      cfg,
-			resolver:    resolver,
-			tuiRunGuard: &tuiRunGuard{},
-			tuiSessions: tuiSessions,
-		}, ctx, func() {
-			bindings.Close()
-			tuiSessions.Close()
-		}
+		bindings:    bindings,
+		sessions:    sessions,
+		config:      cfg,
+		resolver:    resolver,
+		tuiRunGuard: &tuiRunGuard{},
+		tuiSessions: tuiSessions,
+	}, ctx, func() {
+		bindings.Close()
+		tuiSessions.Close()
+	}
 }
 
 func TestTUIHandler_StatusReturnsMessageAndStreamEnd(t *testing.T) {
@@ -861,6 +861,41 @@ func TestTUIHandler_ProjectStateNoBindingReturnsNone(t *testing.T) {
 	}
 	if payload.Model == "" {
 		t.Error("expected non-empty model")
+	}
+	if payload.MemoryLayers == nil {
+		t.Error("expected memory_layers field (may be empty)")
+	}
+}
+
+func TestTUIHandler_ProjectStateFallsBackToSessionCwd(t *testing.T) {
+	a, ctx, cleanup := testApp(t)
+	defer cleanup()
+
+	sessionCwd := t.TempDir()
+	a.sessions.SetCwd(ipc.ReservedTUIChatID, 0, sessionCwd)
+
+	handler := makeTUIHandler(a)
+	te := &testEmit{}
+	err := handler(ctx, ipc.IPCMessage{
+		Type:      ipc.MsgTypeProjectState,
+		RequestID: "proj-test-session-cwd",
+	}, te.emit)
+	if err != nil {
+		t.Fatalf("handler error: %v", err)
+	}
+	if te.count() != 3 {
+		t.Fatalf("expected 3 events (ack, project_state, stream_end), got %d", te.count())
+	}
+
+	var payload ipc.ProjectStatePayload
+	if err := json.Unmarshal([]byte(te.events[1].Body), &payload); err != nil {
+		t.Fatalf("unmarshal project state: %v", err)
+	}
+	if payload.BindingSource != "session" {
+		t.Errorf("binding_source = %q, want session", payload.BindingSource)
+	}
+	if payload.CWD != sessionCwd {
+		t.Errorf("cwd = %q, want %q", payload.CWD, sessionCwd)
 	}
 	if payload.MemoryLayers == nil {
 		t.Error("expected memory_layers field (may be empty)")

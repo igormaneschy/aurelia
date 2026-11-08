@@ -13,7 +13,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
-	"github.com/igormaneschy/aurelia/internal/continuity"
+	"github.com/igormaneschy/aurelia/internal/memorycontext"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/persona"
 	"github.com/igormaneschy/aurelia/internal/profiles"
@@ -87,40 +87,24 @@ type Output interface {
 	ConfirmMessage(chatID int64, messageID int)
 }
 
-// Dreamer receives turn lifecycle notifications for memory/nudge updates.
-type Dreamer interface {
-	AfterTurn(userID int64)
-	AfterTurnNudge(chatID int64, threadID int, userID int64, cwd string, sessionFile string, buffer *session.NudgeBuffer)
-	FlushNudge(chatID int64, threadID int, userID int64, cwd string, sessionFile string, buffer *session.NudgeBuffer)
-}
-
 // Config contains dependencies needed by the business pipeline.
 type Config struct {
-	AppConfig    *config.AppConfig
-	Bridge       *bridge.Bridge
-	Agents       *agents.Registry
-	Profiles     *profiles.Resolver // Phase 1: canonical profile resolver
-	Persona      *persona.CanonicalIdentityService
-	Sessions     *session.Store
-	Resolver     *runtime.PathResolver
-	MemoryDir    string
-	ExePath      string
-	BotCwd       string
-	Output       Output
-	Dreamer      Dreamer
-	ProjectIndex *runtime.ProjectIndex
-	Bindings     projectbinding.Store
-	RunLog       runlog.Store
-	Continuity   continuity.Store
-	UsersStore   *users.Store
-	UserResolver *users.Resolver
-	// NudgeBuffer, when set, is shared across pipeline instances (e.g. TUI
-	// creates a pipeline per send). When nil, NewService creates a fresh one.
-	NudgeBuffer *session.NudgeBuffer
-	// MemoryCache, when set, is shared across pipeline instances so the TUI
-	// (which creates a pipeline per send) reuses the mtime cache between turns.
-	// When nil, NewService creates a fresh one.
-	MemoryCache *MemoryCache
+	AppConfig      *config.AppConfig
+	Bridge         *bridge.Bridge
+	Agents         *agents.Registry
+	Profiles       *profiles.Resolver // Phase 1: canonical profile resolver
+	Persona        *persona.CanonicalIdentityService
+	Sessions       *session.Store
+	Resolver       *runtime.PathResolver
+	ExePath        string
+	BotCwd         string
+	Output         Output
+	ProjectIndex   *runtime.ProjectIndex
+	Bindings       projectbinding.Store
+	RunLog         runlog.Store
+	MemoryProvider memorycontext.Provider
+	UsersStore     *users.Store
+	UserResolver   *users.Resolver
 	// TokenGuard, when set, is shared across pipeline instances so the TUI
 	// (which creates a pipeline per send) retains stall-turn compaction state.
 	// When nil, NewService creates a fresh one.
@@ -153,13 +137,9 @@ type Service struct {
 	persona            *persona.CanonicalIdentityService
 	sessions           *session.Store
 	resolver           *runtime.PathResolver
-	memoryDir          string
 	exePath            string
 	botCwd             string
 	output             Output
-	dreamer            Dreamer
-	nudgeBuffer        *session.NudgeBuffer
-	memoryCache        *MemoryCache
 	projectIndex       *runtime.ProjectIndex
 	bindings           projectbinding.Store
 	bridgeFailures     FailureTracker
@@ -167,9 +147,7 @@ type Service struct {
 	runLog             runlog.Store
 	runLogMu           sync.Mutex
 	runLogStates       map[string]*runLogState
-	continuity         continuity.Store
-	summaryCounter     *summaryCounter
-	summaryInterval    int
+	memoryProvider     memorycontext.Provider
 	tokenGuard         *session.TokenGuard
 	usersStore         *users.Store
 	userResolver       *users.Resolver
@@ -188,8 +166,6 @@ type activeToolState struct {
 	detector *loopDetector
 }
 
-const defaultSummaryInterval = 5
-
 // NewService builds a pipeline service with explicit dependencies.
 func NewService(cfg Config) *Service {
 	s := &Service{
@@ -201,20 +177,14 @@ func NewService(cfg Config) *Service {
 		persona:          cfg.Persona,
 		sessions:         cfg.Sessions,
 		resolver:         cfg.Resolver,
-		memoryDir:        cfg.MemoryDir,
 		exePath:          cfg.ExePath,
 		botCwd:           cfg.BotCwd,
 		output:           cfg.Output,
-		dreamer:          cfg.Dreamer,
-		nudgeBuffer:      cfg.NudgeBuffer,
-		memoryCache:      cfg.MemoryCache,
 		projectIndex:     cfg.ProjectIndex,
 		bindings:         cfg.Bindings,
 		runLog:           cfg.RunLog,
 		runLogStates:     make(map[string]*runLogState),
-		continuity:       cfg.Continuity,
-		summaryCounter:   &summaryCounter{counts: make(map[continuity.ConversationKey]int)},
-		summaryInterval:  defaultSummaryInterval,
+		memoryProvider:   cfg.MemoryProvider,
 		tokenGuard:       cfg.TokenGuard,
 		usersStore:       cfg.UsersStore,
 		userResolver:     cfg.UserResolver,
@@ -222,12 +192,6 @@ func NewService(cfg Config) *Service {
 	}
 
 	// Backward compat: create fresh instances when not injected by the caller.
-	if s.nudgeBuffer == nil {
-		s.nudgeBuffer = session.NewNudgeBuffer()
-	}
-	if s.memoryCache == nil {
-		s.memoryCache = NewMemoryCache()
-	}
 	if s.tokenGuard == nil {
 		s.tokenGuard = session.NewTokenGuard()
 	}
@@ -250,10 +214,6 @@ func NewService(cfg Config) *Service {
 		}
 	}
 
-	if s.config != nil && s.config.SummaryInterval > 0 {
-		s.summaryInterval = s.config.SummaryInterval
-	}
-
 	return s
 }
 
@@ -267,7 +227,6 @@ func normalizeEntryPoint(ep string) string {
 	case observability.EntryPointTelegram,
 		observability.EntryPointTUI,
 		observability.EntryPointCron,
-		observability.EntryPointNudge,
 		observability.EntryPointCLI:
 		return ep
 	default:
@@ -454,31 +413,14 @@ func (s *Service) SetProjectIndex(pi *runtime.ProjectIndex) {
 	s.projectIndex = pi
 }
 
-// SetDreamer injects the dream system after construction.
-func (s *Service) SetDreamer(d Dreamer) {
-	s.dreamer = d
-}
-
 // SetRunLog injects the run log store after construction (optional).
 func (s *Service) SetRunLog(rl runlog.Store) {
 	s.runLog = rl
 }
 
-// SetContinuity injects the continuity store after construction (optional).
-func (s *Service) SetContinuity(cs continuity.Store) {
-	s.continuity = cs
-}
-
-// NudgeBuffer returns the per-service nudge buffer for command-triggered flushes.
-func (s *Service) NudgeBuffer() *session.NudgeBuffer {
-	return s.nudgeBuffer
-}
-
-// MemoryCache returns the memory directory cache. Exposed so callers can
-// verify sharing across pipeline instances (e.g. Telegram singleton vs TUI
-// per-send pipelines should hold the same cache pointer).
-func (s *Service) MemoryCache() *MemoryCache {
-	return s.memoryCache
+// SetMemoryProvider swaps the ai-memory working-set provider after construction.
+func (s *Service) SetMemoryProvider(provider memorycontext.Provider) {
+	s.memoryProvider = provider
 }
 
 // TokenGuard returns the session token guard. Exposed so callers can share one

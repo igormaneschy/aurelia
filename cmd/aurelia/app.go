@@ -17,11 +17,10 @@ import (
 	"github.com/igormaneschy/aurelia/internal/agents"
 	"github.com/igormaneschy/aurelia/internal/bridge"
 	"github.com/igormaneschy/aurelia/internal/config"
-	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/cron"
 	"github.com/igormaneschy/aurelia/internal/deps"
-	"github.com/igormaneschy/aurelia/internal/dream"
 	"github.com/igormaneschy/aurelia/internal/ipc"
+	"github.com/igormaneschy/aurelia/internal/memorycontext"
 	"github.com/igormaneschy/aurelia/internal/persona"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
@@ -35,22 +34,22 @@ import (
 )
 
 type app struct {
-	config      *config.AppConfig
-	resolver    *runtime.PathResolver
-	bridge      *bridge.Bridge
-	agents      *agents.Registry
-	cronStore   *cron.SQLiteCronStore
-	bindings    projectbinding.Store
-	runLog      runlog.Store
-	continuity  continuity.Store
-	bot         *telegram.BotController
-	sessions    *session.Store
-	scheduler   *cron.Scheduler
-	cronCtx     context.Context
-	cronCancel  context.CancelFunc
-	ipcServer   *ipc.Server
-	tuiRunGuard *tuiRunGuard
-	tuiSessions tuisessions.Store
+	config         *config.AppConfig
+	resolver       *runtime.PathResolver
+	bridge         *bridge.Bridge
+	agents         *agents.Registry
+	cronStore      *cron.SQLiteCronStore
+	bindings       projectbinding.Store
+	runLog         runlog.Store
+	memoryProvider memorycontext.Provider
+	bot            *telegram.BotController
+	sessions       *session.Store
+	scheduler      *cron.Scheduler
+	cronCtx        context.Context
+	cronCancel     context.CancelFunc
+	ipcServer      *ipc.Server
+	tuiRunGuard    *tuiRunGuard
+	tuiSessions    tuisessions.Store
 
 	onboardingStore *users.OnboardingStore
 }
@@ -82,15 +81,15 @@ func bootstrapApp() (*app, error) {
 		return nil, fmt.Errorf("bootstrap instance directory: %w", err)
 	}
 
-	if err := checkMigrationLock(resolver); err != nil {
-		return nil, err
-	}
-
 	cfg, err := config.Load(resolver)
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 	setProviderEnv(cfg)
+
+	baseProvider := memorycontext.NewAIMemoryProvider(memorycontext.AIMemoryOptions{})
+	memProvider := memorycontext.NewCachedProvider(baseProvider, memorycontext.NewCache(memorycontext.DefaultCacheTTL))
+	log.Printf("memory provider: ai-memory (MCP read-only working set)")
 
 	// Check runtime dependencies before touching the bridge.
 	checkResult := deps.CheckAll()
@@ -151,25 +150,8 @@ func bootstrapApp() (*app, error) {
 		return nil, fmt.Errorf("initialize runlog store: %w", err)
 	}
 
-	continuityStore, err := continuity.NewSQLiteStore(resolver.DBPath("continuity.db"))
-	if err != nil {
-		if closeErr := runLogStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close runlog store: %v", closeErr)
-		}
-		if closeErr := bindings.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close project binding store: %v", closeErr)
-		}
-		if closeErr := cronStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close cron store: %v", closeErr)
-		}
-		return nil, fmt.Errorf("initialize continuity store: %w", err)
-	}
-
 	onboardingStore, err := users.NewOnboardingStoreFromFile(resolver.DBPath("onboarding.db"))
 	if err != nil {
-		if closeErr := continuityStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close continuity store: %v", closeErr)
-		}
 		if closeErr := runLogStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close runlog store: %v", closeErr)
 		}
@@ -186,9 +168,6 @@ func bootstrapApp() (*app, error) {
 	if err != nil {
 		if closeErr := onboardingStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close onboarding store: %v", closeErr)
-		}
-		if closeErr := continuityStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close continuity store: %v", closeErr)
 		}
 		if closeErr := runLogStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close runlog store: %v", closeErr)
@@ -214,9 +193,6 @@ func bootstrapApp() (*app, error) {
 	if err != nil {
 		if closeErr := onboardingStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close onboarding store: %v", closeErr)
-		}
-		if closeErr := continuityStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close continuity store: %v", closeErr)
 		}
 		if closeErr := runLogStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close runlog store: %v", closeErr)
@@ -245,27 +221,17 @@ func bootstrapApp() (*app, error) {
 	br.SetOnDeath(func() {
 		log.Printf("bridge: process died, deactivating all sessions")
 		sessions.DeactivateAll()
-		if continuityStore != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			defer cancel()
-			if err := continuityStore.MarkColdForSessions(ctx, "bridge process died"); err != nil {
-				log.Printf("Warning: failed to mark continuity cold after bridge death: %v", err)
-			}
-		}
 	})
 
 	telegramEnabled := envFlag("AURELIA_ENABLE_TELEGRAM", true)
 	bot, err := telegram.NewBotController(
 		cfg, br, agentReg, personaSvc, transcriber,
-		cronHandler, resolver.MemoryPersonas(), resolver.Memory(), exePath, sessions, resolver, bindings,
+		cronHandler, resolver.MemoryPersonas(), exePath, sessions, resolver, bindings,
 		!telegramEnabled,
 	)
 	if err != nil {
 		if closeErr := onboardingStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close onboarding store: %v", closeErr)
-		}
-		if closeErr := continuityStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close continuity store: %v", closeErr)
 		}
 		if closeErr := runLogStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close runlog store: %v", closeErr)
@@ -279,52 +245,13 @@ func bootstrapApp() (*app, error) {
 		return nil, fmt.Errorf("initialize telegram bot: %w", err)
 	}
 	bot.SetRunLog(runLogStore)
-	bot.SetContinuity(continuityStore)
+	bot.SetMemoryProvider(memProvider)
 	bot.SetOnboardingStore(onboardingStore)
 
 	// When the user changes the default model via /model, the live cfg has been
 	// mutated already; re-export the provider env vars so the bridge picks up
 	// the right API key on its next query.
 	bot.SetProviderEnvRefresher(func() { setProviderEnv(cfg) })
-
-	// Wire dreamer — background memory consolidation + nudge review.
-	// Fall back to the user's default model so dream/nudge work on any provider
-	// (avoids 402 errors when the hardcoded Anthropic models aren't available).
-	dreamCfg := dream.DefaultConfig()
-	dreamCfg.Provider = cfg.DefaultProvider
-	userModel := cfg.DefaultModel
-	if userModel != "" {
-		dreamCfg.Model = userModel
-		dreamCfg.ExtractModel = userModel
-		dreamCfg.NudgeModel = userModel
-	}
-	if cfg.DreamModel != "" {
-		dreamCfg.Model = cfg.DreamModel
-	}
-	if cfg.ExtractModel != "" {
-		dreamCfg.ExtractModel = cfg.ExtractModel
-	}
-	if cfg.NudgeEnabled != nil {
-		dreamCfg.NudgeEnabled = *cfg.NudgeEnabled
-	}
-	if cfg.NudgeTurns > 0 {
-		dreamCfg.NudgeTurns = cfg.NudgeTurns
-	}
-	if cfg.NudgeModel != "" {
-		dreamCfg.NudgeModel = cfg.NudgeModel
-	}
-	if cfg.NudgeMinTranscript > 0 {
-		dreamCfg.NudgeMinTranscript = cfg.NudgeMinTranscript
-	}
-	if cfg.NudgeMaxTranscript > 0 {
-		dreamCfg.NudgeMaxTranscript = cfg.NudgeMaxTranscript
-	}
-	dreamCfg.RunLog = runLogStore
-	dreamCfg.NudgeSender = bot
-	dreamCfg.MemoryCache = bot.MemoryCache()
-	userResolver := users.NewResolver(resolver.Root())
-	dreamer := dream.New(userResolver, resolver, br, dreamCfg)
-	bot.SetDreamer(dreamer)
 
 	// Wire project index for fast project lookup.
 	if homeDir == "" {
@@ -358,9 +285,6 @@ func bootstrapApp() (*app, error) {
 	if err != nil {
 		if closeErr := onboardingStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close onboarding store: %v", closeErr)
-		}
-		if closeErr := continuityStore.Close(); closeErr != nil {
-			log.Printf("Warning: failed to close continuity store: %v", closeErr)
 		}
 		if closeErr := runLogStore.Close(); closeErr != nil {
 			log.Printf("Warning: failed to close runlog store: %v", closeErr)
@@ -400,7 +324,7 @@ func bootstrapApp() (*app, error) {
 		cronStore:       cronStore,
 		bindings:        bindings,
 		runLog:          runLogStore,
-		continuity:      continuityStore,
+		memoryProvider:  memProvider,
 		bot:             bot,
 		sessions:        sessions,
 		scheduler:       scheduler,
@@ -611,13 +535,6 @@ func (a *app) reconcileStaleRuns() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Mark continuity sessions as cold with deploy reason
-	if a.continuity != nil {
-		if err := a.continuity.MarkColdForSessions(ctx, "daemon restarted/deployed"); err != nil {
-			log.Printf("Warning: failed to mark continuity cold on startup: %v", err)
-		}
-	}
-
 	// Mark stale run_journal rows as interrupted: any row still running
 	// after a restart belonged to the previous process. This keeps the
 	// timeline honest (A5/T5) — a run cut off by deploy/shutdown is
@@ -735,11 +652,6 @@ func (a *app) close() {
 	if a.runLog != nil {
 		if err := a.runLog.Close(); err != nil {
 			log.Printf("Warning: failed to close runlog store: %v", err)
-		}
-	}
-	if a.continuity != nil {
-		if err := a.continuity.Close(); err != nil {
-			log.Printf("Warning: failed to close continuity store: %v", err)
 		}
 	}
 	if a.onboardingStore != nil {

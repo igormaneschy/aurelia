@@ -62,7 +62,7 @@ func TestBuildUserTemplateFromProfile_FallsBackToTelegramName(t *testing.T) {
 func TestExtractNameFromProfile(t *testing.T) {
 	cases := map[string]string{
 		"Me chamo Igor e quero respostas diretas.": "Igor",
-		"Meu nome e Ana Silva.":                "Ana Silva",
+		"Meu nome e Ana Silva.":                    "Ana Silva",
 		"Sou Igor.":                                "Igor",
 		"Quero respostas diretas.":                 "",
 	}

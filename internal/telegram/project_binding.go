@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/igormaneschy/aurelia/internal/memorycontext"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 )
@@ -87,6 +88,20 @@ func (bc *BotController) clearCurrentCwd(chatID int64, threadID int) error {
 		bc.sessions.ClearCwd(chatID, threadID)
 	}
 	return nil
+}
+
+// resetSessionOnProjectChange clears the PI session when a /cwd change moves
+// the conversation to a different ai-memory project. The
+// ai-memory session row is fixed at session start, so reusing it across
+// projects would attribute observations and handoffs to the old project.
+func (bc *BotController) resetSessionOnProjectChange(chatID int64, threadID int, userID int64, oldCwd, newCwd string) {
+	if bc == nil || bc.memoryProvider == nil {
+		return
+	}
+	if memorycontext.ProjectRefFor(oldCwd) == memorycontext.ProjectRefFor(newCwd) {
+		return
+	}
+	bc.ResetSessionForProjectChange(chatID, threadID, userID)
 }
 
 // cwdSetTarget holds the parsed result of /cwd [--group|--topic] <path>.

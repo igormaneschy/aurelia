@@ -22,11 +22,12 @@ development and fallback.
 | Mac tunnel logs | `~/.aurelia/logs/nas-tunnel.log` |
 | Desktop | `~/.aurelia/bin/aurelia-desktop` (NAS mode via `~/.aurelia/nas.sock`) |
 | Telegram | NAS is the sole consumer; topics use `/topic init` and `/cwd` |
+| Memory | live ai-memory (only backend) since 2026-11-07; legacy runtime removed; rollback via binary/config backups; 23 imported legacy pages tagged `legacy-import` |
 | TUI | disabled; do not delete `tui_sessions.db` (the desktop uses it) |
 
 The NAS binary is rebuilt/redeployed with the Linux artifact and a systemd
 restart; `make deploy` below is the macOS launchd path and is not used for the
-NAS. v0.53.0 is live (`d44b319`, tag `v0.53.0`); the next release is TBD. See
+NAS. v0.54.0 is live (tag `v0.54.0`, ai-memory-only runtime); the next release is TBD. See
 the runbook for the current state.
 
 ## TL;DR (macOS local/fallback)

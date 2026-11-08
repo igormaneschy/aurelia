@@ -188,15 +188,6 @@ type AppConfig struct {
 	DBPath           string `json:"db_path"`
 	MCPConfigPath    string `json:"mcp_servers_config_path"`
 
-	DreamModel   string `json:"dream_model,omitempty"`
-	ExtractModel string `json:"extract_model,omitempty"`
-
-	NudgeEnabled       *bool  `json:"nudge_enabled,omitempty"`        // nil = default true
-	NudgeTurns         int    `json:"nudge_turns,omitempty"`
-	NudgeModel         string `json:"nudge_model,omitempty"`
-	NudgeMinTranscript int    `json:"nudge_min_transcript_len,omitempty"`
-	NudgeMaxTranscript int    `json:"nudge_max_transcript_bytes,omitempty"`
-
 	VisionModel    string `json:"vision_model,omitempty"`
 	VisionProvider string `json:"vision_provider,omitempty"`
 	LogLevel       string `json:"log_level,omitempty"`
@@ -211,10 +202,6 @@ type AppConfig struct {
 
 	// SecurityConfig governs capability profiles, tool policies, and audit mode.
 	SecurityConfig security.SecurityConfig `json:"security,omitempty"`
-
-	// SummaryInterval controls how many successful turns between progressive
-	// LLM summarization for continuity. 0 disables summarization (default 5).
-	SummaryInterval int `json:"summary_interval,omitempty"`
 
 	// DefaultOwnerUserID is the fallback user ID when none is explicitly provided.
 	DefaultOwnerUserID int64 `json:"default_owner_user_id,omitempty"`
@@ -348,7 +335,6 @@ type fileConfig struct {
 	LogFormat       string                  `json:"log_format,omitempty"`
 	DiskScanEnabled bool                    `json:"disk_scan_enabled,omitempty"`
 	SecurityConfig  security.SecurityConfig `json:"security,omitempty"`
-	SummaryInterval int                     `json:"summary_interval,omitempty"`
 
 	DefaultOwnerUserID int64 `json:"default_owner_user_id"`
 
@@ -356,6 +342,8 @@ type fileConfig struct {
 	SessionLifecycle SessionLifecycleConfig `json:"session_lifecycle,omitempty"`
 
 	Observability ObservabilityConfig `json:"observability,omitempty"`
+
+	// MemoryProvider selects the durable memory backend.
 }
 
 // ValidateConfig checks the full fileConfig for consistency.
@@ -616,7 +604,6 @@ func toAppConfig(cfg fileConfig) *AppConfig {
 		LogFormat:               cfg.LogFormat,
 		DiskScanEnabled:         cfg.DiskScanEnabled,
 		SecurityConfig:          cfg.SecurityConfig,
-		SummaryInterval:         cfg.SummaryInterval,
 		DefaultOwnerUserID:      cfg.DefaultOwnerUserID,
 		SessionLifecycle:        cfg.SessionLifecycle,
 		Observability:           cfg.Observability,

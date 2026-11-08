@@ -94,14 +94,25 @@ configurações locais específicas.
 
 Uma sessão nova do desktop apontada para o cwd de um tópico do Telegram é uma
 **conversa nova no mesmo projeto**, não uma continuação do thread. Ela
-compartilha cwd, arquivos, `cwd_overlay` (`~/.aurelia/projects/<slug>/cwd_overlay/`)
-e o projeto ai-memory definido pelo `.ai-memory.toml`. Não compartilha o
-session file/transcript, a continuidade, a camada `topic` do Telegram, o
-binding de `/cwd`, a lista de sessões nem o modelo. Novas sessões não herdam o
-cwd do DM; use `/cwd` em cada uma. No Telegram,
-`/memory checkpoint <resumo>` grava no `cwd_overlay` compartilhado e o desktop
-carrega no turno seguinte. Evite editar os mesmos arquivos nos dois lados ao
-mesmo tempo; não há lock entre superfícies.
+compartilha cwd, arquivos e o projeto ai-memory definido pelo
+`.ai-memory.toml`. Não compartilha o session file/transcript, o binding de
+`/cwd`, a lista de sessões nem o modelo. Novas sessões não herdam o cwd do DM;
+use `/cwd` em cada uma. Em `ai-memory` mode, `/memory` mostra o projeto, páginas,
+observações, sessões e handoffs pendentes; `/memory checkpoint` fica desativado
+e as notas duráveis passam por páginas/handoff do ai-memory. Evite editar os
+mesmos arquivos nos dois lados ao mesmo tempo; não há lock entre superfícies.
+
+> **Memory consolidation rollout:** o daemon live usa ai-memory como único
+> backend desde 2026-11-07. O painel do projeto mostra o
+> projeto/páginas/handoffs do ai-memory, e o prompt recebe um working set
+> limitado (3.126 caracteres no primeiro turno live). As 23 páginas legadas
+> importadas têm a tag `legacy-import`. As camadas `cwd_overlay`/`topic`/
+> `user_global`, continuity, memoryux e Dream/Nudge foram removidas do runtime;
+> ficheiros antigos podem ficar em disco para auditoria/rollback, mas já não são
+> lidos. Mudar `/cwd` para outro projeto reinicia a sessão PI dessa conversa (a
+> sessão nomeada do desktop mantém-se) para que observações e handoff fiquem no
+> projeto novo; `/reset` limpa a sessão e cancela handoffs pendentes. O rollback
+> é feito com o binário/config anteriores, não com uma flag de provider.
 
 ## Desenvolvimento
 

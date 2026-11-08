@@ -42,8 +42,8 @@ type Store struct {
 	// s.mu during disk I/O, the final rename cannot regress to an older snapshot.
 	// persistGen is incremented before each serialise under s.mu; the atomic read
 	// under persistMu is race-free.
-	persistMu   sync.Mutex
-	persistGen  atomic.Int64
+	persistMu  sync.Mutex
+	persistGen atomic.Int64
 }
 
 type entry struct {

@@ -1223,7 +1223,7 @@ func TestHelpMessageIncludesNaturalExamples(t *testing.T) {
 	t.Parallel()
 
 	help := helpMessage()
-	for _, want := range []string{"💡", "/stop", "agenda todo dia às 9h", "muda modelo", "limpa o contexto"} {
+	for _, want := range []string{"💡", "/stop", "/reset", "agenda todo dia às 9h", "muda modelo", "limpa o contexto"} {
 		if !strings.Contains(help, want) {
 			t.Fatalf("help missing %q: %q", want, help)
 		}
@@ -1323,7 +1323,7 @@ func TestSlashMenuCommands_IncludesMode(t *testing.T) {
 
 	cmds := slashMenuCommands()
 	want := map[string]bool{
-		"new": false, "usage": false, "status": false, "cwd": false,
+		"new": false, "reset": false, "usage": false, "status": false, "cwd": false,
 		"topic": false,
 		"cron":  false, "agents": false, "memory": false, "model": false,
 		"mode": false, "stop": false, "users": false, "forgetme": false,
@@ -1481,31 +1481,6 @@ func TestDebugCommands_OwnerOnly(t *testing.T) {
 	_ = CmdDebugLast
 	_ = CmdDebugRun
 	_ = CmdDebugErrors
-}
-
-func TestAppendModeTag(t *testing.T) {
-	tests := []struct {
-		name string
-		note string
-		mode string
-		want string
-	}{
-		{"empty note, developer", "", "developer", "[mode:developer]"},
-		{"note, developer", "before refactor", "developer", "before refactor [mode:developer]"},
-		{"note, researcher", "research findings", "researcher", "research findings [mode:researcher]"},
-		{"note, general", "some note", "", "some note"},
-		{"note, auto", "some note", "general", "some note"},
-		{"note, invalid ignored", "some note", "invalid", "some note"},
-		{"empty note, empty mode", "", "", ""},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := appendModeTag(tc.note, tc.mode)
-			if got != tc.want {
-				t.Errorf("appendModeTag(%q, %q) = %q, want %q", tc.note, tc.mode, got, tc.want)
-			}
-		})
-	}
 }
 
 func TestUserTimezone_NoStore(t *testing.T) {

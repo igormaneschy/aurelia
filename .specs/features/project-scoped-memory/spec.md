@@ -1,5 +1,11 @@
 # Project-Scoped CWD Overlay — Specification
 
+> **Superseded (2026-11-07):** `cwd_overlay` is legacy in the ai-memory-native
+> contract. See `openspec/changes/memory-consolidation/` and
+> `docs/NAS_OPERATIONS.md`. The project-scoped overlay was an intermediate
+> fix for cross-frontend sharing; ai-memory project pages/briefing now own
+> that role.
+
 **Roadmap step:** 5.5 (pós Context-Scoped Memory)
 **Status:** ✅ Validated (v0.37.0 code, v0.38.1 closure)
 **Depende de:** `.specs/features/project-binding/` (binding persistente), `.specs/features/project-memory/` (camadas de memória)

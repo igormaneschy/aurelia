@@ -113,22 +113,6 @@ func (bc *BotController) processBridgeEventsAsyncWithThread(chat *telebot.Chat, 
 	return bridgeOutcome(bc.ensurePipeline().ProcessBridgeEvents(chat.ID, threadID, messageID, ch, progress, userText, nil, uid, chat.Type == telebot.ChatPrivate, nil, nil, nil))
 }
 
-// InvalidateMemoryOverlay clears cached CWD overlay memory after a project binding change.
-func (bc *BotController) InvalidateMemoryOverlay(cwd string) {
-	if bc == nil {
-		return
-	}
-	bc.ensurePipeline().InvalidateMemoryOverlay(cwd)
-}
-
-// InvalidateMemorySession clears cached user global and topic memory layers.
-func (bc *BotController) InvalidateMemorySession(chatID int64, threadID int, userID int64) {
-	if bc == nil {
-		return
-	}
-	bc.ensurePipeline().InvalidateMemorySession(chatID, threadID, userID)
-}
-
 func (bc *BotController) ensurePipeline() *pipelinepkg.Service {
 	if bc.pipeline != nil {
 		return bc.pipeline
@@ -142,30 +126,25 @@ func (bc *BotController) ensurePipeline() *pipelinepkg.Service {
 		userStore = users.NewStore(userResolver)
 	}
 	bc.pipeline = pipelinepkg.NewService(pipelinepkg.Config{
-		AppConfig:    bc.config,
-		Bridge:       bc.bridge,
-		Agents:       bc.agents,
-		Profiles:     bc.profiles,
-		Persona:      bc.persona,
-		Sessions:     bc.sessions,
-		Resolver:     bc.resolver,
-		MemoryDir:    bc.memoryDir,
-		ExePath:      bc.exePath,
-		BotCwd:       bc.botCwd,
-		Output:       telegramPipelineOutput{bc: bc, tg: NewTelegramTransport(bc.bot)},
-		Dreamer:      bc.dreamer,
-		ProjectIndex: bc.projectIndex,
-		Bindings:     bc.bindings,
-		RunLog:       bc.runLog,
-		Continuity:   bc.continuity,
-		UsersStore:   userStore,
-		UserResolver: userResolver,
-		NudgeBuffer:  bc.NudgeBuffer(),
-		MemoryCache:  bc.MemoryCache(),
-		TokenGuard:   bc.TokenGuard(),
-		EntryPoint:   observability.EntryPointTelegram,
+		AppConfig:      bc.config,
+		Bridge:         bc.bridge,
+		Agents:         bc.agents,
+		Profiles:       bc.profiles,
+		Persona:        bc.persona,
+		Sessions:       bc.sessions,
+		Resolver:       bc.resolver,
+		ExePath:        bc.exePath,
+		BotCwd:         bc.botCwd,
+		Output:         telegramPipelineOutput{bc: bc, tg: NewTelegramTransport(bc.bot)},
+		ProjectIndex:   bc.projectIndex,
+		Bindings:       bc.bindings,
+		RunLog:         bc.runLog,
+		MemoryProvider: bc.memoryProvider,
+		UsersStore:     userStore,
+		UserResolver:   userResolver,
+		TokenGuard:     bc.TokenGuard(),
+		EntryPoint:     observability.EntryPointTelegram,
 	})
-	bc.nudgeBuffer = bc.pipeline.NudgeBuffer()
 	return bc.pipeline
 }
 

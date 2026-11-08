@@ -45,7 +45,7 @@ It is built around a practical execution model:
 - PI SDK as the current execution harness (reasoning, tools, skills, extensions, sessions)
 - Canonical Go module and repository under `github.com/igormaneschy/aurelia`
 - PI-backed session management with `session_file` resume and SDK compaction
-- Persistent scoped memory system with automatic extraction
+- Persistent memory via ai-memory with a bounded project working set
 - Prompt profiles in markdown for context/personality injection, with legacy agent-file compatibility
 - Multi-provider: OpenRouter (recommended), opencode-go, Anthropic, Kimi, Z.ai, Alibaba
 - API key authentication (OpenRouter, opencode-go)
@@ -62,7 +62,7 @@ Aurelia is the **product layer** on top of the PI SDK engine:
 Telegram / TUI / CLI / Cron / future interfaces
         ↓
 Aurelia Product Layer
-identity · persona · prompt profiles · Telegram/TUI UX · workflows · operational memory · policies · continuity
+identity · persona · prompt profiles · Telegram/TUI UX · workflows · ai-memory working set · policies · project binding
         ↓
 PI SDK
 reasoning · tool execution · sessions · agent runtime · model/provider abstraction
@@ -74,9 +74,9 @@ The boundary is intentional:
 
 - **PI SDK owns** model/provider resolution, tool execution, session runtime, compaction, context-file loading, skills/extensions, MCP tools, and agentic execution primitives.
 - **PI + ai-memory MCP owns** transversal Wiki memory used by PI, PI Code/opencode, and other MCP-compatible clients.
-- **Aurelia owns** identity, personality, Prompt Profile selection/injection, Telegram/TUI UX, user/project scoping, operational memory, cron, audit, and continuity.
+- **Aurelia owns** identity, personality, Prompt Profile selection/injection, Telegram/TUI UX, project binding, cron, audit, and the bounded ai-memory working set.
 - When the PI SDK already owns a capability, Aurelia adapts to it rather than reimplementing it.
-- When the capability is product-specific continuity, operational memory, policy, UX, or workflow state, Aurelia remains the source of truth.
+- When the capability is product-specific policy, UX, or workflow state, Aurelia remains the source of truth; durable memory and handoffs belong to ai-memory.
 
 The long-term differentiator is the persistent local product layer over PI: Telegram for async/mobile work, the TUI for focused terminal work, and shared daemon state where it is safe. Transversal Wiki memory is delegated to PI through the existing `ai-memory` MCP rather than reimplemented as an Aurelia gateway.
 
@@ -90,12 +90,10 @@ Aurelia does **not** implement a separate planning mode, `aurelia-plan` blocks, 
 - **Local terminal UI** via `aurelia-tui` with streaming markdown, isolated local sessions, sidebar navigation, and project state overlay
 - **Autonomous coding** — reads, writes, edits files, runs commands, searches code
 - **Multi-project** — work on different projects simultaneously with isolated contexts
-- **Persistent memory** — scoped memory system (global, user, project-private, project-team, topic) that survives across sessions
+- **Persistent memory** — ai-memory is the durable memory/handoff source; Aurelia injects a bounded project working set and exposes the memory tools
 - **Prompt profiles** — `/mode` selects the default profile; `@profile` applies a one-shot profile; `/agents` lists available profiles
-- **Learning nudge** — automatic memory extraction from conversations on session reset
-- **Dream consolidation** — periodic background review that organizes and deduplicates memories
 - **Multi-provider** — OpenRouter (recommended), opencode-go, Anthropic, Kimi, Z.ai, Alibaba
-- **Session continuity** — conversation context persists across messages via PI session resume and SDK compaction
+- **Session continuity** — PI session resume plus ai-memory handoffs and session observations; Aurelia never owns a second editable memory store
 - **Profile routing** — explicit `@profile` or default `/mode` controls how Aurelia packages the request before SDK execution
 - **Persistent scheduling** — create cron jobs via natural conversation, results delivered to Telegram
 - **Bridge recovery** — automatic retry with session resume when the Bridge process crashes
@@ -124,7 +122,7 @@ Aurelia uses a TypeScript Bridge adapting the PI SDK as its inference and execut
 - **Bridge** — `bridge/index.ts` wraps `@earendil-works/pi-coding-agent` and is embedded into the Go binary.
 - **API key auth** — provider keys are configured during onboarding and exported to the bridge runtime environment.
 - **Streaming progress** — PI tool events are mapped back into Telegram progress messages.
-- **Long-lived sessions** — Bridge requests preserve PI `session_file` paths for continuity; context pruning is handled by PI SDK compaction. Aurelia does not auto-rotate sessions due to token count.
+- **Long-lived sessions** — Bridge requests preserve PI `session_file` paths; context pruning is handled by PI SDK compaction. Aurelia does not auto-rotate sessions due to token count.
 - **Observability** — every run gets a unique `run_id` with timeline events
   (`bridge_request_started`, `tool_use`, `run_completed`, etc.); phase events
   are persisted in `run_events` table and queryable via CLI or Telegram debug
@@ -160,7 +158,7 @@ flowchart LR
 1. Message arrives on Telegram
 2. Pipeline extracts text/photo/voice/document
 3. Prompt profile resolver selects `@profile`, active `/mode`, or `general`
-4. System prompt assembled: persona + profile + memory/continuity + Telegram context
+4. System prompt assembled: persona + profile + ai-memory working set/handoff + Telegram context
 5. Request sent to Bridge (long-lived TypeScript process)
 6. Bridge calls PI SDK → SDK harness executes
 7. Events streamed back: tool_use → progress, assistant → text, result → response
@@ -265,22 +263,26 @@ Created automatically via `/start` on Telegram (choose "Coder" or "Assistant" pr
 
 ## Memory System
 
-Aurelia has a scoped persistent memory that survives across sessions. Each scope isolates facts to the correct context:
+The personal ai-memory instance is the single durable memory and handoff source.
+Aurelia is a thin context adapter over it:
 
-| Layer | Location | Purpose |
-|-------|----------|---------|
-| **Global** | `~/.aurelia/memory/` | Cross-project facts, preferences, communication style |
-| **User** | `~/.aurelia/users/<id>/memory/` | Personal facts per user (cross-project) |
-| **CWD Overlay** | `~/.aurelia/topics/chat_<id>/thread_<id>/cwd_overlay/` | Private working-context notes for a declared `/cwd` in that topic |
-| **Project Team** | `~/.aurelia/projects/<slug>/team/` | Stack, conventions, architecture (shareable) |
-| **Topic** | `~/.aurelia/topics/chat_<id>/thread_<id>/` | Conversation-scoped context per Telegram topic |
-| **Procedural (future)** | `~/.aurelia/users/<id>/skills/<slug>/SKILL.md` | Reusable workflows via Auto-Skills |
+- **Project/global/profile scopes** live in ai-memory, selected by the project
+  `.ai-memory.toml` marker and explicit `workspace`/`project` arguments.
+- **Session observations and handoffs** replace the old continuity store; the
+  Pi extension records them and injects the pending handoff at session start.
+- **Bounded working set** — before each turn Aurelia reads
+  `memory_briefing`/`memory_read_page` and injects only counts, rules, recent
+  page excerpts and the pending-handoff count. It is read-only and cached.
+- **Tools** — `memory_query`, `memory_read_page`, `memory_briefing`,
+  `memory_explore`, `memory_read_session_observations`, handoff and explicit
+  write/maintenance tools are available to the model.
+- **Degraded mode** — if ai-memory is unavailable, Aurelia uses the last cached
+  working set and reports the outage; it never falls back to another instance.
 
-Memory is populated automatically:
-- **Nudge** — extracts facts from conversations when a session is explicitly reset or flushed
-- **Dream** — periodic background consolidation that organizes, deduplicates, and prunes memory files
-
-The model sees relevant operational memory layers in its system prompt. Layers are injected by the current conversation context: persona/user global first, then topic, then CWD overlay and project team only when `/cwd` is declared. Transversal Wiki memory is delegated to PI through `ai-memory` MCP rather than implemented as an Aurelia gateway.
+`/memory` shows the project page/observation/session/handoff state. There is no
+local `MEMORY.md`, `cwd_overlay`, topic/user-global file layer, Dream/Nudge
+consolidation or `/memory checkpoint`; `/reset` clears the PI session and
+cancels pending handoffs.
 
 ## Telegram Commands
 
@@ -288,7 +290,7 @@ The model sees relevant operational memory layers in its system prompt. Layers a
 |---------|-------------|
 | `/start` | Setup persona (first run) or welcome |
 | `/help` | List available commands |
-| `/new` | New session (flushes memory, clears context) |
+| `/new` | New session (clears context, cancels pending handoffs) |
 | `/cwd <path>` | Set working directory for this chat |
 | `/reset` | Reset session (alias for `/new`) |
 | `/usage` | Show session token usage and cost |
@@ -298,7 +300,7 @@ The model sees relevant operational memory layers in its system prompt. Layers a
 | `/mode` | Show or set the default prompt profile |
 | `@profile <text>` | Use a prompt profile once for the current message |
 | `/model` | Show or change the SDK model selection; refreshes from the current PI model catalog |
-| `/memory` | Show memory status or create checkpoints |
+| `/memory` | Show the ai-memory project/page/observation/handoff status |
 | `/debug last` | Show latest run summary (status, provider, cost, duration) — owner only |
 | `/debug run <id>` | Show full metadata and timeline for a specific run — owner only |
 | `/debug errors` | Show recent failed/timed-out runs — owner only |
@@ -546,6 +548,7 @@ Aurelia supports local models via [Ollama](https://ollama.com/) or any OpenAI-co
 | [CLAUDE.md](CLAUDE.md) | Instructions for coding agents |
 | [CHANGELOG.md](CHANGELOG.md) | Release history and changes |
 | [docs/NAS_OPERATIONS.md](docs/NAS_OPERATIONS.md) | NAS personal assistant runbook (systemd, ai-jail, ai-memory, Telegram, desktop tunnel) |
+| [openspec/changes/memory-consolidation/](openspec/changes/memory-consolidation/) | ai-memory-native memory/context consolidation proposal |
 | [desktop/README.md](desktop/README.md) | Desktop client (local and NAS/Tailscale modes) |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | macOS local/fallback operations and current NAS pointers |
 | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) | Operational observability guide (debug, metrics, log config) |
@@ -612,7 +615,7 @@ use [docs/NAS_OPERATIONS.md](docs/NAS_OPERATIONS.md).
 
 ## Current State
 
-- **v0.53.0** on `main` (released 2026-11-07) — see [CHANGELOG.md](CHANGELOG.md)
+- **v0.54.0** on `main` (released 2026-11-08) — see [CHANGELOG.md](CHANGELOG.md)
 - Next release: TBD
 - Canonical repository: `https://github.com/igormaneschy/aurelia`
 - Go module: `github.com/igormaneschy/aurelia`

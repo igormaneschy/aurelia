@@ -12,9 +12,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
-	"github.com/igormaneschy/aurelia/internal/continuity"
 	"github.com/igormaneschy/aurelia/internal/ipc"
-	"github.com/igormaneschy/aurelia/internal/memoryux"
+	"github.com/igormaneschy/aurelia/internal/memorycontext"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/pipeline"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
@@ -410,30 +409,24 @@ func handleTUISend(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ip
 
 	// Build pipeline config sharing the daemon's services.
 	pipeCfg := pipeline.Config{
-		AppConfig:  a.config,
-		Bridge:     a.bridge,
-		Agents:     a.agents,
-		Sessions:   a.sessions,
-		Resolver:   a.resolver,
-		MemoryDir:  a.resolver.Memory(),
-		ExePath:    a.resolver.Root(),
-		BotCwd:     a.resolver.Root(),
-		Output:     output,
-		Bindings:   a.bindings,
-		RunLog:     a.runLog,
-		Continuity: a.continuity,
-		EntryPoint: observability.EntryPointTUI,
+		AppConfig:      a.config,
+		Bridge:         a.bridge,
+		Agents:         a.agents,
+		Sessions:       a.sessions,
+		Resolver:       a.resolver,
+		ExePath:        a.resolver.Root(),
+		BotCwd:         a.resolver.Root(),
+		Output:         output,
+		Bindings:       a.bindings,
+		RunLog:         a.runLog,
+		MemoryProvider: a.memoryProvider,
+		EntryPoint:     observability.EntryPointTUI,
 	}
 	if a.bot != nil {
 		pipeCfg.Profiles = a.bot.ProfileResolver()
 		pipeCfg.Persona = a.bot.PersonaService()
 		pipeCfg.UsersStore = a.bot.UserStore()
 		pipeCfg.UserResolver = a.bot.UserResolver()
-		// Share dreamer + nudge buffer + memory cache with Telegram so TUI
-		// turns accumulate into nudge review and reuse the mtime cache.
-		pipeCfg.Dreamer = a.bot.Dreamer()
-		pipeCfg.NudgeBuffer = a.bot.NudgeBuffer()
-		pipeCfg.MemoryCache = a.bot.MemoryCache()
 		pipeCfg.TokenGuard = a.bot.TokenGuard()
 	}
 	pipeSvc := pipeline.NewService(pipeCfg)
@@ -496,12 +489,15 @@ func handleTUICwd(ctx context.Context, a *app, chatID int64, threadID int, userI
 
 	if args == "clear" {
 		key := projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID}
+		oldCwd := tuiConversationCwd(ctx, a, chatID, threadID)
 		if err := a.bindings.Delete(ctx, key); err != nil {
 			return fmt.Sprintf("❌ Error clearing cwd: %s", err)
 		}
 		if a.sessions != nil {
 			a.sessions.ClearCwd(chatID, threadID)
 		}
+		newCwd := tuiConversationCwd(ctx, a, chatID, threadID)
+		resetTUISessionOnProjectChange(a, chatID, threadID, userID, oldCwd, newCwd)
 		return "✅ Project binding removed."
 	}
 
@@ -510,6 +506,8 @@ func handleTUICwd(ctx context.Context, a *app, chatID int64, threadID int, userI
 	if err != nil {
 		return fmt.Sprintf("❌ Invalid path: %s", err)
 	}
+
+	oldCwd := tuiConversationCwd(ctx, a, chatID, threadID)
 
 	// Set binding — under the active TUI session's ChatID.
 	binding := projectbinding.ProjectBinding{
@@ -527,15 +525,64 @@ func handleTUICwd(ctx context.Context, a *app, chatID int64, threadID int, userI
 	if a.sessions != nil {
 		a.sessions.SetCwd(chatID, threadID, cwd)
 	}
-	if a.resolver != nil {
-		if err := runtime.BootstrapConversationProjectMemory(a.resolver, cwd, chatID, threadID); err != nil {
-			log.Printf("tui cwd: bootstrap project memory for %s: %v", cwd, err)
+	resetTUISessionOnProjectChange(a, chatID, threadID, userID, oldCwd, cwd)
+	return fmt.Sprintf("✅ Project set to: `%s`", cwd)
+}
+
+// tuiConversationCwd resolves the cwd from the binding or the session store.
+func tuiConversationCwd(ctx context.Context, a *app, chatID int64, threadID int) string {
+	if a.bindings != nil {
+		resolved, err := a.bindings.Resolve(ctx, projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID})
+		if err == nil && resolved != nil && resolved.Binding != nil {
+			return resolved.Binding.CWD
 		}
 	}
-	if a.bot != nil {
-		a.bot.InvalidateMemoryOverlay(cwd)
+	if a.sessions != nil {
+		return a.sessions.GetCwd(chatID, threadID)
 	}
-	return fmt.Sprintf("✅ Project set to: `%s`", cwd)
+	return ""
+}
+
+// resetTUISessionOnProjectChange clears the PI session when /cwd moves the
+// desktop conversation to another ai-memory project. The ai-memory session row
+// is fixed at session start, so reusing it across projects would attribute
+// observations and handoffs to the old project.
+func resetTUISessionOnProjectChange(a *app, chatID int64, threadID int, userID int64, oldCwd, newCwd string) {
+	if a.memoryProvider == nil {
+		return
+	}
+	if memorycontext.ProjectRefFor(oldCwd) == memorycontext.ProjectRefFor(newCwd) {
+		return
+	}
+	if a.bot != nil {
+		a.bot.ResetSessionForProjectChange(chatID, threadID, userID)
+		return
+	}
+	if a.sessions != nil {
+		a.sessions.ClearSessionForUser(chatID, threadID, userID)
+	}
+}
+
+// cancelTUIHandoffs expires open ai-memory handoffs for the desktop
+// conversation so the next session does not consume a pre-reset handoff.
+func cancelTUIHandoffs(a *app, chatID int64, threadID int, userID int64) {
+	if a.memoryProvider == nil {
+		return
+	}
+	canceler, ok := a.memoryProvider.(memorycontext.HandoffCanceler)
+	if !ok {
+		return
+	}
+	cwd := tuiConversationCwd(context.Background(), a, chatID, threadID)
+	scope, err := memorycontext.ResolveScope(cwd, userID, chatID, threadID, "")
+	if err != nil || !scope.HasProject() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := canceler.CancelHandoffs(ctx, scope); err != nil {
+		log.Printf("tui: cancel pending handoffs failed chat=%d thread=%d: %v", chatID, threadID, err)
+	}
 }
 
 // handleTUIReset clears the PI session for the active TUI chat.
@@ -549,17 +596,9 @@ func handleTUIReset(a *app, chatID int64, threadID int, userID int64) string {
 			canceled = true
 		}
 	} else {
+		cancelTUIHandoffs(a, chatID, threadID, userID)
 		if a.sessions != nil {
 			a.sessions.ClearSessionForUser(chatID, threadID, userID)
-		}
-		// Without a bot there is no ResetSession to clear the continuity
-		// context; do it here so the next message still starts fresh.
-		if a.continuity != nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-			if err := a.continuity.ResetConversation(ctx, chatID, threadID, userID, continuity.UserResetReason); err != nil {
-				log.Printf("tui: continuity reset failed chat=%d thread=%d: %v", chatID, threadID, err)
-			}
-			cancel()
 		}
 	}
 	msg := "🗑️ Session reset. Next message starts a fresh conversation."
@@ -643,7 +682,7 @@ func handleTUIStatus(ctx context.Context, a *app, chatID int64, threadID int, us
 func handleTUIProjectState(ctx context.Context, a *app, msg ipc.IPCMessage, emit func(ipc.IPCEvent) error) error {
 	chatID, threadID, userID := msg.ChatID, int(msg.ThreadID), msg.UserID
 
-	payload := ipc.ProjectStatePayload{}
+	payload := ipc.ProjectStatePayload{MemoryLayers: make([]ipc.ProjectStateMemoryLayer, 0)}
 
 	// Resolve binding (CWD + source).
 	fillTUIProjectBinding(ctx, a, chatID, threadID, &payload)
@@ -668,7 +707,7 @@ func handleTUIProjectState(ctx context.Context, a *app, msg ipc.IPCMessage, emit
 	// Active agent via profile resolver.
 	fillTUIProjectAgent(a, userID, &payload)
 
-	// Memory status via memoryux.
+	// Memory status via the ai-memory adapter.
 	fillTUIProjectMemory(ctx, a, chatID, threadID, payload.CWD, &payload)
 
 	// Latest run log entry.
@@ -705,6 +744,13 @@ func fillTUIProjectBinding(ctx context.Context, a *app, chatID int64, threadID i
 	}
 	resolved, err := a.bindings.Resolve(ctx, projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID})
 	if err != nil || resolved == nil || resolved.Binding == nil {
+		if a.sessions != nil {
+			if cwd := a.sessions.GetCwd(chatID, threadID); cwd != "" {
+				payload.CWD = cwd
+				payload.BindingSource = "session"
+				return
+			}
+		}
 		payload.CWD = ""
 		payload.BindingSource = "none"
 		return
@@ -749,27 +795,26 @@ func fillTUIProjectAgent(a *app, userID int64, payload *ipc.ProjectStatePayload)
 
 // fillTUIProjectMemory populates payload memory layers and checkpoint layer.
 func fillTUIProjectMemory(ctx context.Context, a *app, chatID int64, threadID int, cwd string, payload *ipc.ProjectStatePayload) {
-	if a.resolver == nil {
+	if a.memoryProvider == nil || cwd == "" {
 		return
 	}
-	memDir := a.resolver.Memory()
-	if memDir == "" {
+	scope, err := memorycontext.ResolveScope(cwd, 0, chatID, threadID, "")
+	if err != nil || !scope.HasProject() {
 		return
 	}
-	svc := memoryux.New(memDir, a.resolver)
-	status, err := svc.Status(chatID, threadID, cwd)
+	status, err := a.memoryProvider.Status(ctx, scope)
 	if err != nil {
-		log.Printf("tui: project state memory status error: %v", err)
+		log.Printf("tui: project state ai-memory status error: %v", err)
 		return
 	}
-	payload.CheckpointLayer = status.CheckpointLayer
-	payload.MemoryLayers = make([]ipc.ProjectStateMemoryLayer, 0, len(status.Layers))
-	for _, l := range status.Layers {
+	payload.CheckpointLayer = "ai-memory"
+	payload.MemoryLayers = []ipc.ProjectStateMemoryLayer{
+		{Name: "ai-memory project", Scope: "project", Exists: status.Available, FileCount: status.Pages},
+		{Name: "pending handoffs", Scope: "handoff", Exists: status.PendingHandoffs > 0, FileCount: status.PendingHandoffs},
+	}
+	if status.Degraded {
 		payload.MemoryLayers = append(payload.MemoryLayers, ipc.ProjectStateMemoryLayer{
-			Name:      l.Name,
-			Scope:     l.Scope,
-			Exists:    l.Exists,
-			FileCount: l.MarkdownFiles,
+			Name: "ai-memory degraded", Scope: "degraded", Exists: false,
 		})
 	}
 }

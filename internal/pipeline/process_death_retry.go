@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/igormaneschy/aurelia/internal/bridge"
+	"github.com/igormaneschy/aurelia/internal/memorycontext"
 	"github.com/igormaneschy/aurelia/internal/observability"
+	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runlog"
 )
 
@@ -166,7 +168,6 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 			log.Printf("pipeline: run canceled by user chat=%d thread=%d user=%d", chatID, threadID, userID)
 			if runLogStarted {
 				const reason = "user_cancel"
-				s.patchContinuityFailure(chatID, threadID, "canceled", reason, userID, isPrivateChat, ownership)
 				runID := s.getRunID(chatID, threadID, userID, ownership)
 				s.recordPipelineEvent(chatID, threadID, userID, observability.NewEvent(runID, observability.PhaseRunCanceled, reason), ownership)
 				s.completeRunLog(chatID, threadID, userID, runlog.RunCanceled, "", reason, ownership)
@@ -177,7 +178,6 @@ func (s *Service) executeAsync(parentCtx context.Context, chatID int64, threadID
 			if runLogStarted {
 				s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent("",
 					observability.PhaseBridgeExecuteError, "provider_error"), ownership)
-				s.patchContinuityFailure(chatID, threadID, "failed", "provider_error", userID, isPrivateChat, ownership)
 				runID := s.getRunID(chatID, threadID, userID, ownership)
 				s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent(runID, observability.PhaseRunFailed, "provider_error"), ownership)
 				s.completeRunLog(chatID, threadID, userID, runlog.RunFailed, "", "provider_error", ownership)
@@ -260,8 +260,6 @@ func (s *Service) retryAfterProcessDeath(
 
 	retryRunRequestID := ""
 	if runLogStarted {
-		const retryReason = "process_death"
-		s.patchContinuityFailure(chatID, threadID, "failed", retryReason, userID, isPrivateChat, ownership)
 		retryRunRequestID = retryRequestID(req.RequestID)
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewWarnEvent("",
 			observability.PhaseRetryStarted, fmt.Sprintf("origin=process_death request_id=%s", retryRunRequestID)), ownership)
@@ -318,10 +316,10 @@ func (s *Service) retryAfterProcessDeath(
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("process_death_retry: panic in continuitySnapshot: %v", r)
+					log.Printf("process_death_retry: panic in recoverySnapshot: %v", r)
 				}
 			}()
-			snapshot := s.continuitySnapshot(ctx, chatID, threadID, userID)
+			snapshot := s.recoverySnapshot(ctx, chatID, threadID, userID)
 			if snapshot != "" {
 				snapshotBlock := "\n\n## Previous Session Context (recovered)\n\n" +
 					"The following is recovered context from the previous session that was interrupted. " +
@@ -333,7 +331,7 @@ func (s *Service) retryAfterProcessDeath(
 				} else {
 					retryReq.Options.SystemPrompt = snapshotBlock
 				}
-				log.Printf("process_death_retry: injected continuity snapshot into retry prompt (chat=%d thread=%d)", chatID, threadID)
+				log.Printf("process_death_retry: injected ai-memory recovery snapshot into retry prompt (chat=%d thread=%d)", chatID, threadID)
 			}
 		}()
 	}
@@ -357,7 +355,6 @@ func (s *Service) retryAfterProcessDeath(
 			s.output.ConfirmMessage(chatID, messageID)
 			return
 		}
-		s.patchContinuitySessionCold(chatID, threadID, "process_death", userID, isPrivateChat, ownership)
 		if runLogStarted {
 			runID := s.getRunID(chatID, threadID, userID, ownership)
 			s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent("",
@@ -443,7 +440,6 @@ func (s *Service) handleRetryOutcome(chatID int64, threadID int, messageID int, 
 			}
 		}
 		runID := s.getRunID(chatID, threadID, userID, ownership)
-		s.patchContinuitySessionCold(chatID, threadID, "process_death", userID, isPrivateChat, ownership)
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent("",
 			observability.PhaseRetryFailed, "process_death"), ownership)
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewErrorEvent(runID,
@@ -455,4 +451,31 @@ func (s *Service) handleRetryOutcome(chatID int64, threadID int, messageID int, 
 		}
 		s.output.ConfirmMessage(chatID, messageID)
 	}
+}
+
+// recoverySnapshot returns the bounded ai-memory working set for the
+// conversation, used when a process-death retry has to recover context.
+func (s *Service) recoverySnapshot(ctx context.Context, chatID int64, threadID int, userID int64) string {
+	if s.memoryProvider == nil {
+		return ""
+	}
+	cwd := ""
+	if s.sessions != nil {
+		cwd = s.sessions.GetCwd(chatID, threadID)
+	}
+	if cwd == "" && s.bindings != nil {
+		resolved, err := s.bindings.Resolve(ctx, projectbinding.ConversationKey{ChatID: chatID, ThreadID: threadID})
+		if err == nil && resolved != nil && resolved.Binding != nil {
+			cwd = resolved.Binding.CWD
+		}
+	}
+	scope, err := memorycontext.ResolveScope(cwd, userID, chatID, threadID, "")
+	if err != nil || !scope.HasProject() {
+		return ""
+	}
+	workingSet, err := s.memoryProvider.WorkingSet(ctx, scope)
+	if err != nil || workingSet.Content == "" {
+		return ""
+	}
+	return workingSet.Content
 }
