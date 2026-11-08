@@ -102,7 +102,9 @@ needed on the NAS.
 
 ## 4. PI MCP configuration
 
-Add to `~/.aurelia/pi-agent/mcp.json`:
+Add the server to `~/.aurelia/pi-agent/mcp.json` (symlinked to the shared PI
+CLI file). Keep only standard MCP fields here — Pi's translator drops
+adapter-only fields such as `includeTools`:
 
 ```jsonc
 {
@@ -113,28 +115,41 @@ Add to `~/.aurelia/pi-agent/mcp.json`:
       "cwd": "/home/<nas-user>",
       "lifecycle": "lazy",
       "timeout": 60,
-      "includeTools": [
-        "notebooklm_notebook_list",
-        "notebooklm_notebook_describe",
-        "notebooklm_source_list",
-        "notebooklm_source_read",
-        "notebooklm_source_wait",
-        "notebooklm_chat_ask",
-        "notebooklm_chat_status",
-        "notebooklm_studio_list",
-        "notebooklm_studio_status",
-        "notebooklm_suggest_prompts",
-        "notebooklm_server_info"
-      ],
       "description": "Gemini Notebook (NotebookLM): read-only cited Q&A over notebooks and sources."
     }
   }
 }
 ```
 
-Tool names are prefixed by the adapter with the server name (`notebooklm_`).
-The `mcp` proxy tool is already part of the PI extension allowlist; no Go
-allowlist change is needed for read-only use.
+Put the read-only allowlist in the adapter-owned
+`~/.aurelia/pi-agent/mcp-adapter.json` (`0600`):
+
+```jsonc
+{
+  "mcpServers": {
+    "notebooklm": {
+      "includeTools": [
+        "notebook_list",
+        "notebook_describe",
+        "source_list",
+        "source_read",
+        "source_wait",
+        "chat_ask",
+        "chat_status",
+        "studio_list",
+        "studio_status",
+        "suggest_prompts",
+        "server_info"
+      ]
+    }
+  }
+}
+```
+
+`includeTools` matches original or prefixed names. The adapter merges this
+override with the server entry field by field. The `mcp` proxy tool is already
+part of the PI extension allowlist; no Go allowlist change is needed for
+read-only use.
 
 ## 5. Restart and smoke test
 
