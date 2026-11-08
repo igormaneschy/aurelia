@@ -27,7 +27,7 @@ development and fallback.
 
 The NAS binary is rebuilt/redeployed with the Linux artifact and a systemd
 restart; `make deploy` below is the macOS launchd path and is not used for the
-NAS. v0.54.0 is live (tag `v0.54.0`, ai-memory-only runtime); the next release is TBD. See
+NAS. v0.54.1 is live (tag `v0.54.1`, ai-memory-only runtime); the next release is TBD. See
 the runbook for the current state.
 
 ## TL;DR (macOS local/fallback)
