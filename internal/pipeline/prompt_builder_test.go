@@ -481,18 +481,3 @@ func TestBuildSystemPrompt_DefaultEntryPointUsesTelegram(t *testing.T) {
 		t.Error("Default (empty) entrypoint prompt missing 'telegram react'")
 	}
 }
-
-// --- Project Work State prompt tests ---
-
-func ptrString(s string) *string { return &s }
-
-// TestBuildProjectWorkSection_RedactsSecrets verifies that secrets in
-// LastUserIntent are redacted in the formatted Project Work State output.
-
-// TestBuildProjectWorkSection_EscapesDelimiters verifies that delimiter-
-// sensitive characters in LastUserIntent are escaped to prevent injection
-// of closing </project_work_state_untrusted> tags.
-
-// TestBuildProjectWorkSection_ZeroUserID verifies that buildContinuitySection
-// with userID=0 and /cwd active returns empty — no project lookup for
-// unidentifiable users.

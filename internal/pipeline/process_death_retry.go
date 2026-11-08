@@ -260,7 +260,6 @@ func (s *Service) retryAfterProcessDeath(
 
 	retryRunRequestID := ""
 	if runLogStarted {
-		const retryReason = "process_death"
 		retryRunRequestID = retryRequestID(req.RequestID)
 		s.recordPipelineEvent(chatID, threadID, userID, observability.NewWarnEvent("",
 			observability.PhaseRetryStarted, fmt.Sprintf("origin=process_death request_id=%s", retryRunRequestID)), ownership)
