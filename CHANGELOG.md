@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.55.0] - 2026-11-08
+
+### Added
+- **NotebookLM / Gemini Notebook MCP on the NAS.** A lazy stdio MCP server
+  (`notebooklm-py` 0.8.6) exposes read-only notebook/source listing and reading,
+  cited chat, Studio status and prompt suggestions through the PI MCP adapter.
+  Authentication uses a master-token profile; the adapter allowlist exposes
+  only 11 read-only tools, and `~/.notebooklm` is treated as a sensitive path.
+- Runbook `docs/NOTEBOOKLM_MCP.md` covering dedicated/personal account
+  trade-offs, master-token setup, the adapter-level allowlist, security
+  boundaries, migration to a dedicated account and troubleshooting.
+
 ## [0.54.1] - 2026-11-08
 
 ### Fixed

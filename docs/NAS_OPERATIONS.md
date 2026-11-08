@@ -1,9 +1,10 @@
 # NAS Personal Assistant — Operations Runbook
 
-Status: **live (2026-11-08), release v0.54.1**. The NAS is the sole Telegram
+Status: **live (2026-11-08), release v0.55.0**. The NAS is the sole Telegram
 consumer; the Mac runs only the desktop client connected over Tailscale; the
-TUI client is disabled. v0.54.1 keeps the ai-memory-only runtime and fixes
-desktop session isolation; the annotated tag is `v0.54.1`.
+TUI client is disabled. v0.55.0 keeps the ai-memory-only runtime, fixes
+desktop session isolation and adds the read-only NotebookLM MCP; the annotated
+tag is `v0.55.0`.
 
 Sections 1–8 are the pre-cutover plan and validation history. Sections 9–18 are
 the current operating state, desktop access, memory-sharing rules and daily
@@ -40,7 +41,8 @@ attachments feature entered the base and the v0.53.0 release was rebased on it.
 
 | Component | Pinned version | Source / verification |
 |---|---|---|
-| Aurelia release | v0.54.1 | `main` after the session-isolation fix; annotated tag `v0.54.1` |
+| Aurelia release | v0.55.0 | `main` after the NotebookLM MCP feature; annotated tag `v0.55.0` |
+| Previous release | v0.54.1 | desktop session-isolation fix; PR #90 |
 | Previous release | v0.54.0 | ai-memory-only runtime; PR #89 |
 | Previous release | `d44b319` / v0.53.0 | historical baseline |
 | Initial candidate | `bbf6464` / v0.51.0 | historical baseline |
@@ -249,7 +251,7 @@ excluded from agent file access wherever the runtime allows it.
 | Component | State |
 |---|---|
 | Node/npm | v22.23.4 / npm 10.9.9 under `/home/<nas-user>/.local/node/bin` |
-| Aurelia binary | v0.54.1 Linux amd64 under `/home/<nas-user>/.aurelia/bin/aurelia`; SHA-256 `6d06f07410492f57c0cb31be5a9ac42224bd88afdf681253c9e30e35bc6e7329`; previous binary backed up as `aurelia.pre-v0.54.1-20261108010052` |
+| Aurelia binary | v0.55.0 Linux amd64 under `/home/<nas-user>/.aurelia/bin/aurelia`; SHA-256 `4683ad3c65754f3684375985eac83ca37147fdb580e2981ce0a59daaf4e50fc3`; previous binary backed up as `aurelia.pre-v0.55.0-final-20261108114806` |
 | Aurelia service | **active**; Telegram and cron enabled; `ExitType=cgroup`; IPC socket listening; cron store has 0 jobs; stop logs graceful shutdown with no orphans |
 | ai-jail | 3.2.0; bubblewrap 0.8.0; `/usr/local/bin/ai-jail` and `/usr/local/lib/aurelia/aurelia-jail` are root-owned; unit `ExecStart` points to the root-owned wrapper |
 | Lingering | `Linger=yes` for `<nas-user>`; user manager running |
@@ -316,7 +318,7 @@ Residual risks accepted for this personal deployment:
 - Whether the broad personal-root grant needs a narrower review after the first
   real tasks reveal which folders are actually used.
 - Next release: accumulate the next set of changes on a new feature branch from
-  `main` v0.54.1; do not reuse the merged feature branch.
+  `main` v0.55.0; do not reuse the merged feature branch.
 
 **No return to Mac:** cutover is one-way. If the NAS fails, the service is
 stopped, data is preserved, and recovery is through backup/restore only.
@@ -330,10 +332,10 @@ stopped and disabled; the NAS is the sole Telegram consumer as of 2026-11-07
 19:05 WET. The desktop connects to the same NAS daemon through the Tailscale
 tunnel; the TUI client is disabled. No return to Mac.
 
-The v0.54.1 release keeps the ai-memory-only runtime and fixes desktop session
-isolation. The NAS runs v0.54.1; the desktop and Telegram remain the supported
-surfaces. v0.54.0 is the previous release; v0.53.0 (`d44b319`) remains the
-historical baseline.
+The v0.55.0 release keeps the ai-memory-only runtime, the desktop session
+isolation fix and adds the read-only NotebookLM MCP. The NAS runs v0.55.0; the
+desktop and Telegram remain the supported surfaces. v0.54.1 and v0.54.0 are the
+previous releases; v0.53.0 (`d44b319`) remains the historical baseline.
 
 ## 13. Cutover window C
 
@@ -735,7 +737,7 @@ Mac. No source data is deleted during backup/restore tests.
 
 ### 16.5 Release/update
 
-**v0.54.1 is live** (tag `v0.54.1`; ai-memory-only runtime). For the next
+**v0.55.0 is live** (tag `v0.55.0`; ai-memory-only runtime + NotebookLM MCP). For the next
 release, use a new feature branch from `main`; after approval and merge:
 
 1. Build the Linux binary from the merged commit and replace
@@ -774,10 +776,10 @@ release, use a new feature branch from `main`; after approval and merge:
 
 ## 18. Release and PR state
 
-- Released: **v0.54.1** on 2026-11-08; annotated tag `v0.54.1`.
-- The NAS runs v0.54.1; the pre-release binary is backed up on the NAS.
-- Previous releases: v0.54.0 (ai-memory-only), v0.53.0 (`d44b319`, PR #88).
-- Next release: TBD; start a new feature branch from `main` v0.54.1.
+- Released: **v0.55.0** on 2026-11-08; annotated tag `v0.55.0`.
+- The NAS runs v0.55.0; the pre-release binary is backed up on the NAS.
+- Previous releases: v0.54.1 (session isolation), v0.54.0 (ai-memory-only), v0.53.0 (`d44b319`, PR #88).
+- Next release: TBD; start a new feature branch from `main` v0.55.0.
 - The TUI client remains disabled; desktop + Telegram are the supported
   personal surfaces.
 

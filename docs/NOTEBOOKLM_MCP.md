@@ -154,9 +154,11 @@ Put the read-only allowlist in the adapter-owned
 ```
 
 `includeTools` matches original or prefixed names. The adapter merges this
-override with the server entry field by field. The `mcp` proxy tool is already
-part of the PI extension allowlist; no Go allowlist change is needed for
-read-only use.
+override with the server entry field by field. Because `mcp.json` is shared
+with the PI CLI, mirror the same `includeTools` block in
+`~/.pi/agent/mcp-adapter.json` as well; otherwise PI CLI sessions see the full
+38-tool server surface. The `mcp` proxy tool is already part of the PI
+extension allowlist; no Go allowlist change is needed for read-only use.
 
 ## 5. Restart and smoke test
 

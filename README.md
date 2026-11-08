@@ -616,7 +616,7 @@ use [docs/NAS_OPERATIONS.md](docs/NAS_OPERATIONS.md).
 
 ## Current State
 
-- **v0.54.1** on `main` (released 2026-11-08) — see [CHANGELOG.md](CHANGELOG.md)
+- **v0.55.0** on `main` (released 2026-11-08) — see [CHANGELOG.md](CHANGELOG.md)
 - Next release: TBD
 - Canonical repository: `https://github.com/igormaneschy/aurelia`
 - Go module: `github.com/igormaneschy/aurelia`
