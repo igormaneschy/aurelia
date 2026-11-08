@@ -17,6 +17,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/pipeline"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
+	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/transport"
 	"github.com/igormaneschy/aurelia/pkg/images"
@@ -571,10 +572,27 @@ func resetTUISessionOnProjectChange(a *app, chatID int64, threadID int, userID i
 	if a.sessions != nil {
 		a.sessions.ClearSessionForUser(chatID, threadID, userID)
 	}
+	clearTUILatestCheckpoint(a, chatID, threadID)
 }
 
-// cancelTUIHandoffs expires open ai-memory handoffs for the desktop
-// conversation so the next session does not consume a pre-reset handoff.
+// clearTUILatestCheckpoint removes the pre-reset run checkpoint for a desktop
+// conversation so the next cold-start prompt cannot re-inject old context.
+func clearTUILatestCheckpoint(a *app, chatID int64, threadID int) {
+	if a == nil || a.runLog == nil {
+		return
+	}
+	clearer, ok := a.runLog.(runlog.CheckpointClearer)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := clearer.ClearLatestCheckpoint(ctx, chatID, threadID); err != nil {
+		log.Printf("tui: clear latest checkpoint failed chat=%d thread=%d: %v", chatID, threadID, err)
+	}
+}
+
+// cancelTUIHandoffs expires open ai-memory handoffs for the desktop// conversation so the next session does not consume a pre-reset handoff.
 func cancelTUIHandoffs(a *app, chatID int64, threadID int, userID int64) {
 	if a.memoryProvider == nil {
 		return
@@ -610,6 +628,7 @@ func handleTUIReset(a *app, chatID int64, threadID int, userID int64) string {
 		if a.sessions != nil {
 			a.sessions.ClearSessionForUser(chatID, threadID, userID)
 		}
+		clearTUILatestCheckpoint(a, chatID, threadID)
 	}
 	msg := "🗑️ Session reset. Next message starts a fresh conversation."
 	if canceled {

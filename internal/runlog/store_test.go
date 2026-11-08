@@ -80,6 +80,28 @@ func TestSQLiteStore_StartAndLatest(t *testing.T) {
 	}
 }
 
+func TestSQLiteStore_ClearLatestCheckpoint(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	runID := idgen.New()
+	if err := s.Start(ctx, RunRecord{RunID: runID, ChatID: 100, ThreadID: 0, Prompt: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Complete(ctx, runID, RunCompleted, "pre-reset checkpoint", "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ClearLatestCheckpoint(ctx, 100, 0); err != nil {
+		t.Fatalf("ClearLatestCheckpoint: %v", err)
+	}
+	got, err := s.Latest(ctx, 100, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got == nil || got.Checkpoint != "" || got.Status != RunCompleted {
+		t.Fatalf("latest = %+v, want completed run without checkpoint", got)
+	}
+}
+
 func TestSQLiteStore_Latest_NoRows(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

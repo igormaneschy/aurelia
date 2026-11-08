@@ -65,6 +65,12 @@ type Store interface {
 	Close() error
 }
 
+// CheckpointClearer is optionally implemented by stores that can drop the
+// latest checkpoint after an explicit conversation reset.
+type CheckpointClearer interface {
+	ClearLatestCheckpoint(ctx context.Context, chatID int64, threadID int) error
+}
+
 // AtomicCompletionStore is an optional capability implemented by stores that
 // can commit the terminal run row and its pending timeline events together.
 // SQLiteStore is the production implementation. Generic stores may use the
