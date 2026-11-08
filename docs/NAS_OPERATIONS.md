@@ -663,6 +663,20 @@ The `/memory` command reports ai-memory project/page/handoff state. The local
 checkpoint command is gone, and `/reset` clears the PI session and cancels
 pending handoffs instead of resetting continuity.
 
+### 15.9 NotebookLM / Gemini Notebook MCP (read-only)
+
+A dedicated NotebookLM MCP server is installed on the NAS in
+`~/.aurelia/venvs/notebooklm` and registered lazily in
+`~/.aurelia/pi-agent/mcp.json` under the `notebooklm` server. It uses
+`notebooklm-py` with a dedicated Google account and a master token; no browser
+runs on the NAS. The initial tool subset is read-only: notebook/source listing
+and reading, cited chat, Studio status and prompt suggestions.
+
+Authentication, setup, security boundaries and the full tool policy live in
+[`docs/NOTEBOOKLM_MCP.md`](NOTEBOOKLM_MCP.md). The master token is a
+full-account credential and must stay `0600` under `~/.notebooklm`; agent
+Read/Bash/Grep access to that directory is blocked and audit output is redacted.
+
 ## 16. Daily operations
 
 ### 16.1 NAS services

@@ -193,6 +193,26 @@ func TestRedactAuditSensitive_AureliaConfigPath(t *testing.T) {
 	}
 }
 
+func TestRedactAuditSensitive_NotebookLMPath(t *testing.T) {
+	t.Parallel()
+	cases := []string{
+		"/home/user/.notebooklm/profiles/default/master_token.json",
+		"~/.notebooklm/profiles/default/storage_state.json",
+		"/home/user/.notebooklm",
+	}
+	for _, input := range cases {
+		t.Run(input, func(t *testing.T) {
+			got := redactAuditSensitive(input)
+			if strings.Contains(got, ".notebooklm") {
+				t.Errorf(".notebooklm path not redacted in %q: got %q", input, got)
+			}
+			if !strings.Contains(got, "[SENSITIVE_PATH_REDACTED]") {
+				t.Errorf("expected [SENSITIVE_PATH_REDACTED] for %q, got: %q", input, got)
+			}
+		})
+	}
+}
+
 func TestRedactAuditSensitive_GitConfigPath(t *testing.T) {
 	t.Parallel()
 	cases := []string{
