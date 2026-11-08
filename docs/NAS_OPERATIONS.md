@@ -1,9 +1,9 @@
 # NAS Personal Assistant — Operations Runbook
 
-Status: **live (2026-11-07), release v0.53.0**. The NAS is the sole Telegram
+Status: **live (2026-11-08), release v0.54.0**. The NAS is the sole Telegram
 consumer; the Mac runs only the desktop client connected over Tailscale; the
-TUI client is disabled. v0.53.0 was merged (`d44b319`), tagged and deployed to
-the NAS; the next release is TBD.
+TUI client is disabled. v0.54.0 replaces the legacy memory stack with the
+ai-memory-only runtime; the annotated tag is `v0.54.0`.
 
 Sections 1–8 are the pre-cutover plan and validation history. Sections 9–18 are
 the current operating state, desktop access, memory-sharing rules and daily
@@ -40,7 +40,8 @@ attachments feature entered the base and the v0.53.0 release was rebased on it.
 
 | Component | Pinned version | Source / verification |
 |---|---|---|
-| Aurelia release | `d44b319` / v0.53.0 | `main` after PR #88; annotated tag `v0.53.0` |
+| Aurelia release | v0.54.0 | `main` after the memory-consolidation PR; annotated tag `v0.54.0` |
+| Previous release | `d44b319` / v0.53.0 | historical baseline |
 | Initial candidate | `bbf6464` / v0.51.0 | historical baseline |
 | Go toolchain (build only) | 1.27 | `go.mod` `go 1.27`; build elsewhere is acceptable |
 | Node.js Linux x64 | v22.23.4 (LTS Jod), npm 10.9.9 | nodejs.org `SHASUMS256.txt`; linux-x64 `.tar.xz` SHA-256 `1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce` |
@@ -242,17 +243,17 @@ against hostile code. ai-jail remains accident prevention. This residual risk
 is accepted for the personal assistant; secrets and service state must still be
 excluded from agent file access wherever the runtime allows it.
 
-## 9. Current installed state (2026-11-07)
+## 9. Current installed state (2026-11-08)
 
 | Component | State |
 |---|---|
 | Node/npm | v22.23.4 / npm 10.9.9 under `/home/<nas-user>/.local/node/bin` |
-| Aurelia binary | v0.53.0 Linux amd64 under `/home/<nas-user>/.aurelia/bin/aurelia`; SHA-256 `291ec8cd4dd7e1cb2c65b8de1b4dd44093b7b1dbefe0982a51406d880388d970`; previous binary backed up as `aurelia.prev-20261107213352` |
+| Aurelia binary | v0.54.0 Linux amd64 under `/home/<nas-user>/.aurelia/bin/aurelia`; SHA-256 `22b9c32f8edd32a8bdbdd721ad6e4ea2c79de2d6d69806b2f760ccf2632dbf44`; pre-removal binary backed up as `aurelia.pre-legacy-removal-20261108000833` |
 | Aurelia service | **active**; Telegram and cron enabled; `ExitType=cgroup`; IPC socket listening; cron store has 0 jobs; stop logs graceful shutdown with no orphans |
 | ai-jail | 3.2.0; bubblewrap 0.8.0; `/usr/local/bin/ai-jail` and `/usr/local/lib/aurelia/aurelia-jail` are root-owned; unit `ExecStart` points to the root-owned wrapper |
 | Lingering | `Linger=yes` for `<nas-user>`; user manager running |
 | ai-memory | 3.4.3 active on `127.0.0.1:49374`; data under `/home/<nas-user>/.local/share/ai-memory`; token/config 600, data dir 700; db/wiki/raw/config denied to the jail |
-| ai-memory projects | `personal/aurelia` with 24 pages at last check; 15 personal pages imported under `imported/`; per-topic projects are created on demand |
+| ai-memory projects | `personal/aurelia` with 42 pages; 23 legacy pages imported with tag `legacy-import`; per-topic projects are created on demand |
 | PI runtime | PI SDK 1.5.0, pi-web-access 0.47.0, pi-mcp-adapter 7.0.1; the daemon agent dir keeps a real npm tree with transitive dependencies |
 | Tool surface | `web_search`, `fetch_content`, `get_search_content`, `memory_query`, `memory_write_page` and the rest of the allowlist registered and exercised through the daemon |
 | Model test | `deepseek/deepseek-v4-pro` returned `OK`; web research and memory tools exercised through the IPC surface |
@@ -314,7 +315,7 @@ Residual risks accepted for this personal deployment:
 - Whether the broad personal-root grant needs a narrower review after the first
   real tasks reveal which folders are actually used.
 - Next release: accumulate the next set of changes on a new feature branch from
-  `main` v0.53.0; do not reuse the merged feature branch.
+  `main` v0.54.0; do not reuse the merged feature branch.
 
 **No return to Mac:** cutover is one-way. If the NAS fails, the service is
 stopped, data is preserved, and recovery is through backup/restore only.
@@ -328,9 +329,10 @@ stopped and disabled; the NAS is the sole Telegram consumer as of 2026-11-07
 19:05 WET. The desktop connects to the same NAS daemon through the Tailscale
 tunnel; the TUI client is disabled. No return to Mac.
 
-The v0.53.0 release is complete: merged as `d44b319`, tagged `v0.53.0`, NAS
-redeployed and the desktop reconnected. The next release is TBD; start a new
-feature branch from `main`.
+The v0.54.0 release removes the legacy memory stack. The NAS runs the
+ai-memory-only binary; the desktop and Telegram remain the supported surfaces.
+The previous v0.53.0 release (`d44b319`, tag `v0.53.0`) remains the historical
+baseline.
 
 ## 13. Cutover window C
 
@@ -713,8 +715,8 @@ Mac. No source data is deleted during backup/restore tests.
 
 ### 16.5 Release/update
 
-**v0.53.0 is live** (`d44b319`, tag `v0.53.0`). For the next release, use a new
-feature branch from `main`; after approval and merge:
+**v0.54.0 is live** (tag `v0.54.0`; ai-memory-only runtime). For the next
+release, use a new feature branch from `main`; after approval and merge:
 
 1. Build the Linux binary from the merged commit and replace
    `~/.aurelia/bin/aurelia` atomically (`.new` + `mv`).
@@ -752,13 +754,10 @@ feature branch from `main`; after approval and merge:
 
 ## 18. Release and PR state
 
-- Released: **v0.53.0** on 2026-11-07; merge commit `d44b319`; annotated tag
-  `v0.53.0`.
-- `main` is at `d44b319`; the NAS runs v0.53.0; the previous binary is backed
-  up on the NAS.
-- The v0.53.0 PR (#88) is merged; the feature branch is not reused for the next
-  release.
-- Next release: TBD; start a new feature branch from `main` v0.53.0.
+- Released: **v0.54.0** on 2026-11-08; annotated tag `v0.54.0`.
+- The NAS runs v0.54.0; the pre-removal binary is backed up on the NAS.
+- Previous release: v0.53.0 (`d44b319`, tag `v0.53.0`, PR #88).
+- Next release: TBD; start a new feature branch from `main` v0.54.0.
 - The TUI client remains disabled; desktop + Telegram are the supported
   personal surfaces.
 
