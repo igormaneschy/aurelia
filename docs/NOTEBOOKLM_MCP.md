@@ -1,8 +1,15 @@
 # NotebookLM MCP — Gemini Notebook integration
 
-Status: **installed on the NAS, read-only MCP, authentication pending**. The
+Status: **installed and authenticated on the NAS; read-only MCP active**. The
 server is `notebooklm-py` 0.8.6 in a dedicated virtualenv; the PI MCP adapter
-will start it lazily when the assistant calls a NotebookLM tool.
+starts it lazily when the assistant calls a NotebookLM tool. `notebook_list`
+and the end-to-end `mcp` call were validated against 25 notebooks.
+
+> **Deployment note:** this NAS installation currently uses the owner's
+> personal Google account at the owner's explicit choice. That is **not** the
+> recommended production mode: the master token is a full-account credential.
+> Migrate to a dedicated automation account (sharing the notebooks as viewer)
+> when available.
 
 NotebookLM was rebranded **Gemini Notebook** in July 2026. The product and the
 underlying service are the same; this integration keeps the `notebooklm` name.

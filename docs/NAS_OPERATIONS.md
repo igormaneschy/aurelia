@@ -668,11 +668,16 @@ pending handoffs instead of resetting continuity.
 A dedicated NotebookLM MCP server is installed on the NAS in
 `~/.aurelia/venvs/notebooklm` and registered lazily in
 `~/.aurelia/pi-agent/mcp.json` under the `notebooklm` server. It uses
-`notebooklm-py` with a dedicated Google account and a master token; no browser
-runs on the NAS. The initial tool subset is read-only: notebook/source listing
-and reading, cited chat, Studio status and prompt suggestions.
+`notebooklm-py` 0.8.6 with the owner's personal Google account (explicit
+choice; a dedicated account is recommended) and a master token; no browser
+runs on the NAS. The adapter-level allowlist in
+`~/.aurelia/pi-agent/mcp-adapter.json` exposes only 11 read-only tools:
+notebook/source listing and reading, cited chat, Studio status and prompt
+suggestions.
 
-Authentication, setup, security boundaries and the full tool policy live in
+Authentication is healthy (`auth check --test`: token fetch ok) and the MCP
+`notebook_list` call returned the account's 25 notebooks. The maintenance,
+security and migration path to a dedicated account live in
 [`docs/NOTEBOOKLM_MCP.md`](NOTEBOOKLM_MCP.md). The master token is a
 full-account credential and must stay `0600` under `~/.notebooklm`; agent
 Read/Bash/Grep access to that directory is blocked and audit output is redacted.
