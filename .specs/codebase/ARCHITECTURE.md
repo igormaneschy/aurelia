@@ -1,5 +1,11 @@
 # Architecture
 
+> **Memory contract superseded (2026-11-07):** the legacy `internal/memoryux`,
+> `internal/dream`, `internal/continuity` and `cwd_overlay`/`topic`/`user_global`
+> layers were removed. ai-memory is the durable memory/handoff source and
+> Aurelia injects a bounded working set. See
+> `openspec/changes/memory-consolidation/` and `docs/NAS_OPERATIONS.md` §15.
+
 **Pattern:** Modular Monolith — single binary with well-separated internal packages
 
 ## High-Level Structure

@@ -382,11 +382,34 @@ func (bc *BotController) ResetSession(chatID int64, threadID int, userID int64, 
 		return false
 	}
 	canceledActive := bc.cancelActiveRun(chatID, threadID, userID)
+	bc.cancelPendingHandoffs(chatID, threadID, userID, isPrivateChat)
 	if bc.sessions != nil {
 		bc.sessions.ClearSessionForUser(chatID, threadID, userID)
 	}
 	log.Printf("session: reset for chat=%d thread=%d user=%d", chatID, threadID, userID)
 	return canceledActive
+}
+
+// cancelPendingHandoffs expires open ai-memory handoffs for the conversation so
+// the next session does not consume a handoff created before the reset.
+func (bc *BotController) cancelPendingHandoffs(chatID int64, threadID int, userID int64, isPrivateChat bool) {
+	if bc == nil || bc.memoryProvider == nil {
+		return
+	}
+	canceler, ok := bc.memoryProvider.(memorycontext.HandoffCanceler)
+	if !ok {
+		return
+	}
+	cwd := bc.currentCwdForContext(chatID, threadID, userID, isPrivateChat)
+	scope, err := memorycontext.ResolveScope(cwd, userID, chatID, threadID, "")
+	if err != nil || !scope.HasProject() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := canceler.CancelHandoffs(ctx, scope); err != nil {
+		log.Printf("session: cancel pending handoffs failed chat=%d thread=%d: %v", chatID, threadID, err)
+	}
 }
 
 // ResetSessionForProjectChange clears the PI session after a /cwd change moves
@@ -1276,20 +1299,6 @@ func displayTimezoneName(tzName string) string {
 		return "UTC"
 	}
 	return tzName
-}
-
-// appendModeTag appends a [mode:xxx] tag to the checkpoint note when the
-// user has an active mode. General/default mode appends nothing.
-func appendModeTag(note, mode string) string {
-	mode, _ = users.NormalizeMode(mode)
-	if mode == "" {
-		return note
-	}
-	tag := "[mode:" + mode + "]"
-	if strings.TrimSpace(note) == "" {
-		return tag
-	}
-	return strings.TrimSpace(note) + " " + tag
 }
 
 // cmdSetMode handles /mode set and query commands.

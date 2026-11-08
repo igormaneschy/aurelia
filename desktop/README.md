@@ -102,18 +102,17 @@ observações, sessões e handoffs pendentes; `/memory checkpoint` fica desativa
 e as notas duráveis passam por páginas/handoff do ai-memory. Evite editar os
 mesmos arquivos nos dois lados ao mesmo tempo; não há lock entre superfícies.
 
-> **Memory consolidation rollout:** o daemon live usa
-> `memory_provider=ai-memory` desde 2026-11-07. O painel do projeto mostra o
-> projeto/páginas/handoffs do ai-memory em vez das camadas de ficheiro, e o
-> prompt recebe um working set ai-memory limitado (3.126 caracteres no primeiro
-> turno live). As 23 páginas legadas importadas têm a tag `legacy-import`.
-> `cwd_overlay`/`topic`/`user_global` e continuity só são usados em
-> `memory_provider=legacy` (rollback). `shadow` está reservado para a comparação
-> pendente e, até ser implementado, mantém o prompt legacy. Em `ai-memory` mode,
-> mudar `/cwd` para outro projeto reinicia a sessão PI dessa conversa (a sessão
-> nomeada do desktop mantém-se) para que observações e handoff fiquem no projeto
-> novo; uma sessão criada antes do binding mantém o projeto original até
-> `/reset`.
+> **Memory consolidation rollout:** o daemon live usa ai-memory como único
+> backend desde 2026-11-07. O painel do projeto mostra o
+> projeto/páginas/handoffs do ai-memory, e o prompt recebe um working set
+> limitado (3.126 caracteres no primeiro turno live). As 23 páginas legadas
+> importadas têm a tag `legacy-import`. As camadas `cwd_overlay`/`topic`/
+> `user_global`, continuity, memoryux e Dream/Nudge foram removidas do runtime;
+> ficheiros antigos podem ficar em disco para auditoria/rollback, mas já não são
+> lidos. Mudar `/cwd` para outro projeto reinicia a sessão PI dessa conversa (a
+> sessão nomeada do desktop mantém-se) para que observações e handoff fiquem no
+> projeto novo; `/reset` limpa a sessão e cancela handoffs pendentes. O rollback
+> é feito com o binário/config anteriores, não com uma flag de provider.
 
 ## Desenvolvimento
 

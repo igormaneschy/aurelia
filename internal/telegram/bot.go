@@ -232,31 +232,6 @@ func (bc *BotController) ChatSender() cron.ChatSender {
 	return &botChatSender{bot: bc.bot}
 }
 
-// SendNudge sends a nudge receipt, optionally as a reply to a prior Telegram message.
-func (bc *BotController) SendNudge(ctx context.Context, chatID int64, threadID int, replyToMessageID int64, text string) error {
-	if bc.offline {
-		return nil
-	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-	chat := &telebot.Chat{ID: chatID}
-	opts := &telebot.SendOptions{ParseMode: telebot.ModeHTML, ThreadID: threadID}
-	if replyToMessageID != 0 {
-		opts.ReplyTo = &telebot.Message{ID: int(replyToMessageID), Chat: chat}
-	}
-	if _, err := bc.bot.Send(chat, MarkdownToHTML(text), opts); err != nil {
-		plainOpts := &telebot.SendOptions{ThreadID: threadID, ReplyTo: opts.ReplyTo}
-		_, retryErr := bc.bot.Send(chat, text, plainOpts)
-		if retryErr != nil {
-			return fmt.Errorf("html send failed: %w; plain text retry also failed: %v", err, retryErr)
-		}
-	}
-	return nil
-}
-
 // botChatSender adapts a telebot.Bot to the cron.ChatSender interface.
 type offlineChatSender struct{}
 

@@ -80,7 +80,7 @@ Confirmed by the user on 2026-11-07:
 | PI agent dir | `/home/<nas-user>/.aurelia/pi-agent` | Approved |
 | Node/npm | `/home/<nas-user>/.local/node` | Approved |
 | ai-memory data | `/home/<nas-user>/.local/share/ai-memory` | Approved; hidden from agent file access by policy/jail |
-| Local memory extraction | Dream/Nudge disabled for first validation | Approved for first validation |
+| Local memory extraction | ai-memory consolidation (Dream/Nudge removed) | Approved; single backend |
 | Model/provider | Same provider/model family as current, new key provisioned by private file | Approved |
 | Staging surface | Headless tests without production Telegram token; no test bot | Approved |
 | Backup destination | Continue under `/home/<nas-user>/.aurelia/backup-test` for now; no second disk is available | Approved interim; not a long-term off-volume backup |
@@ -92,7 +92,11 @@ The ai-jail profile and Aurelia policy must still deny the exclusions and any
 path outside the approved root. `#recycle` and hidden service/credential
 directories are never read or written by the assistant.
 
-## 3.1 Personal memory import
+## 3.1 Personal memory import (historical)
+
+> **Historical cutover record:** the legacy user-global files below were later
+> migrated into the personal ai-memory as `legacy-import` pages and the legacy
+> runtime layers were removed. The current memory contract is section 15.6.
 
 The user approved importing all personal memory. The source is the Mac
 user-global memory layer:
@@ -386,16 +390,16 @@ starts with a fresh session and no inherited Mac context.
 
 Inside an already allowed **forum supergroup**, new topics need no allowlist
 change or restart. `<telegram-group-name>` is a forum (`is_forum=true`): each topic is a
-separate thread, with its own session, continuity and topic memory. A
-group-level `/cwd --group /home/<nas-user>/Aurelia` provides the default; `/cwd`
-inside a topic overrides it. Topics that share the same cwd also share the
-cwd overlay and the ai-memory `personal/aurelia` project.
+separate thread with its own PI session and ai-memory project. A group-level
+`/cwd --group /home/<nas-user>/Aurelia` provides the default; `/cwd` inside a
+topic overrides it. Topics that share the same cwd also share the ai-memory
+`personal/aurelia` project.
 
-Initial NAS state (2026-11-07): no `~/.aurelia/topics/` directory, zero
-`conversation_project_binding` rows, and one group-level continuity row
-(thread 0, empty cwd) from the first interaction. Telegram topics may exist in
-the group, but Aurelia topic-specific state is created on first use; nothing
-was migrated from the Mac.
+Initial NAS state (2026-11-07, historical): no `~/.aurelia/topics/` directory,
+zero `conversation_project_binding` rows, and one group-level continuity row
+from the first interaction. Telegram topics may exist in the group, but Aurelia
+topic-specific state is created on first use. The legacy continuity/topic
+layers have since been migrated to ai-memory and removed.
 
 The **private DM does not need `/cwd`**: the user profile has
 `default_cwd=/home/<nas-user>/Aurelia`, applied automatically because
@@ -403,13 +407,12 @@ The **private DM does not need `/cwd`**: the user profile has
 `/cwd clear` removes the override and restores the profile default. Groups do
 not use `DefaultCWD`; they need `/cwd --group` or a per-topic `/cwd`.
 
-**Memory scope caveat:** ai-memory is scoped by workspace/project derived from
-cwd, not by Telegram topic. Topics sharing the same cwd also share
-`cwd_overlay` and the same ai-memory project (`personal/aurelia` for the main
-workspace). Sessions, continuity and `~/.aurelia/topics/chat_*/thread_*` are
-per thread, but captured observations and wiki writes are not. For isolated
-topics, use distinct cwds with distinct `.ai-memory.toml` projects; otherwise
-accept cross-topic recall.
+**Memory scope:** ai-memory is scoped by workspace/project derived from the cwd
+and `.ai-memory.toml` marker. Topics sharing the same cwd share the same
+ai-memory project (`personal/aurelia` for the main workspace); sessions and
+captured observations are per thread but durable pages are project-scoped. For
+isolated topics, use distinct cwds with distinct `.ai-memory.toml` projects;
+otherwise accept cross-topic recall.
 
 Current Telegram topic map for `<telegram-group-name>` (`<telegram-group-id>`).
 Private thread IDs, topic labels and slugs are intentionally omitted from this
@@ -578,12 +581,8 @@ each session.
 | Layer | Shared? | Detail |
 |---|---|---|
 | cwd and files | **Yes** | Both surfaces read/write the same project directory. |
-| ai-memory project | **Yes** | The topic `.ai-memory.toml` marker selects the project (for example `personal/aurelia-<topic>`). Pages/observations/handoffs written there are available to both sides. This is the active memory path. |
-| `cwd_overlay` | **Legacy** | `~/.aurelia/projects/<slug>/cwd_overlay/` is only read in `memory_provider=legacy` (rollback). It is not written or injected in `ai-memory` mode. |
-| `user_global` memory | **Legacy** | Only read in `legacy` mode. In `ai-memory` mode use the profile/global ai-memory scopes. |
+| ai-memory project | **Yes** | The topic `.ai-memory.toml` marker selects the project (for example `personal/aurelia-<topic>`). Pages/observations/handoffs written there are available to both sides. This is the only durable memory path. |
 | PI session/transcript | **No** | The desktop session has its own `chat_id` and session file; it does not load the Telegram topic history. |
-| Continuity | **Legacy** | Continuity is only written/read in `legacy` mode. In `ai-memory` mode the project handoff and session observations replace it. |
-| Telegram `topic` layer | **Legacy** | `~/.aurelia/topics/chat_<id>/thread_<id>/` is only used in `legacy` mode. Use ai-memory pages/handoffs for cross-surface notes. |
 | `/cwd` binding | **No** | Each chat/session has its own binding. Setting the desktop cwd does not change the Telegram topic, and vice versa. |
 | Session list | **No** | The desktop lists TUI-namespace sessions; the Telegram topic is not a desktop session. |
 | Model | **No** | Model is per session/config; use `/model` in the desktop to align with the Telegram profile. |
@@ -594,23 +593,24 @@ Practical consequences:
   the shared ai-memory project. To continue the **exact Telegram
   conversation**, use the Telegram topic; its PI session file is not
   transferred.
-- In `ai-memory` mode, `/memory checkpoint` is disabled: the durable note path
-  is a page write/handoff in ai-memory, and the desktop reads the bounded
-  project working set on its next turn. `/memory` reports project pages,
-  observations, sessions, pending handoffs and degraded state.
-- In `ai-memory` mode, changing `/cwd` to a different ai-memory project resets
-  the PI session and continuity for that conversation, so the ai-memory session
-  row, observations and handoff belong to the new project. A session created
-  before the topic binding was set keeps the old project attribution until
-  `/reset` (or a later `/cwd` change) starts a new session.
+- `/memory checkpoint` no longer exists: the durable note path is a page
+  write/handoff in ai-memory, and the desktop reads the bounded project working
+  set on its next turn. `/memory` reports project pages, observations,
+  sessions, pending handoffs and degraded state.
+- `/reset` clears the PI session and expires pending ai-memory handoffs for the
+  conversation, so the next session does not consume a handoff created before
+  the reset.
+- Changing `/cwd` to a different ai-memory project resets the PI session for
+  that conversation, so the ai-memory session row, observations and handoff
+  belong to the new project. A session created before the topic binding was set
+  keeps the old project attribution until `/reset` (or a later `/cwd` change)
+  starts a new session.
 - The desktop and the Telegram topic can run concurrently. There is no
   cross-surface lock over the shared files; avoid simultaneous edits to the
   same file.
 - Current project-topic state (2026-11-07): one existing topic has a PI session
-  file and an ai-memory project; its legacy `cwd_overlay` and
-  `topics/.../thread_...` directories are not used in `ai-memory` mode. The
-  private mapping is in `~/.aurelia/config/app.json` and
-  `project_bindings.db`.
+  file and an ai-memory project. The private mapping is in
+  `~/.aurelia/config/app.json` and `project_bindings.db`.
 
 ### 15.7 ai-memory Pi extension handoff
 
@@ -619,14 +619,14 @@ The shared Pi extension `ai-memory-pi.ts` injects the pending handoff at
 and session-end events with the PI session id. Handoff creation/consumption is
 therefore automatic and project-scoped; do not reimplement it in the daemon.
 
-The Pi extension does **not** inject a project briefing/pinned digest. In the
-feature-flagged `ai-memory` mode, the thin `internal/memorycontext` adapter
-reads `memory_briefing`/`memory_read_page` through the loopback MCP endpoint,
-formats a bounded working set (counts, rules, recent page excerpts and pending
-handoff count), and never duplicates the handoff. The code default remains
-`legacy` for a fresh install; the live NAS config sets
-`memory_provider=ai-memory`. `AURELIA_MEMORY_PROVIDER` can select `legacy`,
-`ai-memory` or `shadow`.
+The Pi extension does **not** inject a project briefing/pinned digest. The thin
+`internal/memorycontext` adapter reads `memory_briefing`/`memory_read_page`
+through the loopback MCP endpoint, formats a bounded working set (counts, rules,
+recent page excerpts and pending handoff count), and never duplicates the
+handoff. ai-memory is now the unconditional backend; there is no legacy,
+shadow or env-selected provider path. The personal instance is the only
+backend: Aurelia never falls back to the coding ai-memory instance, and the
+ai-memory capture exclusions remain enforced in the shared configuration.
 
 ### 15.8 Memory consolidation rollout (2026-11-07)
 
@@ -636,36 +636,27 @@ in the personal ai-memory, tagged `legacy-import`. The pre-import backup is
 (SHA-256 `c51be982b22bced158d8f5ae2217c8759d8e47d54c3466d047a2fa4a8d91d07a`).
 The original files/continuity DB were only read.
 
-The live NAS daemon was switched to `memory_provider=ai-memory` on 2026-11-07.
-The first live turn logged
+The live NAS daemon switched to the ai-memory working set on 2026-11-07. The
+first live turn logged
 `memory: ai-memory working set project=personal/aurelia chars=3126 sources=3
 degraded=false pending_handoffs=1`, a TUI smoke turn replied `OK`, and the
-desktop showed `bridge online` with the `personal/aurelia` scope. In this mode
-the daemon injects a bounded project working set from
-`memory_briefing`/`memory_read_page`, while the Pi extension continues to
-inject the handoff and register the MCP tools. `shadow` is reserved for the
-pending comparison task: until it is implemented, the mode logs the selection
-and keeps the legacy prompt.
+desktop showed `bridge online` with the `personal/aurelia` scope.
 
-Rollback before the legacy removal: set `memory_provider=legacy` in
-`~/.aurelia/config/app.json` and restart `aurelia.service`. The pre-switch
-config and binary are kept at
-`~/.aurelia/config/app.json.pre-memory-switch-20261107230812` and
-`~/.aurelia/bin/aurelia.prev-memory-switch-20261107230812`. The legacy files and
-continuity DB are untouched. The `/cwd` project-change fix was deployed with a
-second binary backup at
-`~/.aurelia/bin/aurelia.pre-cwd-reset-20261107232917`.
+The legacy runtime stack (continuity, `cwd_overlay`/`topic`/`user_global`,
+memoryux, Dream/Nudge and the old migration commands) was then removed from
+the daemon. The original files may remain on disk for audit/rollback, but the
+runtime no longer reads or writes them.
 
-In `ai-memory` mode, `/cwd` now resets the PI session and continuity when the
-conversation moves to a different ai-memory project, so the session row,
-observations and handoff stay in the new project. A topic whose session started
-before its binding was set keeps the old attribution until `/reset` starts a
-new session; `/memory` reports `Sessions: 0` in that case even though the
-project pages/observations are correct.
+Rollback after the removal uses the binary/config backups, not a provider flag:
+`~/.aurelia/config/app.json.pre-memory-switch-20261107230812`,
+`~/.aurelia/bin/aurelia.prev-memory-switch-20261107230812`,
+`~/.aurelia/bin/aurelia.pre-cwd-reset-20261107232917`, and the pre-removal
+binary backup created at deploy time. Restore the previous binary and restart
+`aurelia.service` to return to the legacy stack.
 
-The `/memory` command reports ai-memory project/page/handoff state in
-`ai-memory` mode; the local checkpoint command is disabled there and is
-replaced by ai-memory handoff/session pages.
+The `/memory` command reports ai-memory project/page/handoff state. The local
+checkpoint command is gone, and `/reset` clears the PI session and cancels
+pending handoffs instead of resetting continuity.
 
 ## 16. Daily operations
 
@@ -702,9 +693,9 @@ re-enabling a local daemon.
   directory, marker and binding; the existing topics need no action.
 - New desktop session: create it, then `/cwd <path>`; new sessions do not
   inherit the DM/topic cwd. Use `/status` and `/model` from the composer.
-- Cross-surface context: `/memory checkpoint <summary>` in Telegram writes to
-  the shared `cwd_overlay`; the desktop loads it on the next turn. The raw
-  transcript and continuity remain separate (section 15.6).
+- Cross-surface context: durable notes go to ai-memory pages/handoffs; the
+  desktop reads the bounded project working set on its next turn. The raw
+  transcript and PI session remain separate (section 15.6).
 
 ### 16.4 Backup
 
@@ -735,9 +726,9 @@ feature branch from `main`; after approval and merge:
 - **Desktop attachments in NAS mode:** images/documents are sent as Mac-local
   paths and the NAS daemon cannot read them. Text, commands and streaming work;
   use Telegram for attachments until byte uploads are implemented.
-- **Telegram `topic` layer:** it is thread-specific and not loaded by desktop
-  sessions (thread 0). The shared project layer is `cwd_overlay`; use it or
-  ai-memory for cross-surface memory.
+- **Telegram topics:** each topic has its own PI session and ai-memory project
+  selected by its cwd marker. Desktop sessions with the same cwd share the
+  ai-memory project; they do not load the Telegram transcript.
 - **Concurrency:** desktop and Telegram can run at the same time. There is no
   cross-surface lock; avoid simultaneous edits to the same files/overlay.
 - **Model selection:** the desktop model badge is a client selection; the

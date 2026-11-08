@@ -44,6 +44,12 @@ type Provider interface {
 	Status(ctx context.Context, scope Scope) (Status, error)
 }
 
+// HandoffCanceler is implemented by providers that can expire pending handoffs
+// when the user resets a conversation.
+type HandoffCanceler interface {
+	CancelHandoffs(ctx context.Context, scope Scope) error
+}
+
 type cacheEntry struct {
 	workingSet WorkingSet
 	expiresAt  time.Time
@@ -169,6 +175,15 @@ func (p *CachedProvider) Status(ctx context.Context, scope Scope) (Status, error
 
 func (p *CachedProvider) Invalidate(scope Scope) {
 	p.cache.Invalidate(scope.Key())
+}
+
+// CancelHandoffs delegates handoff cancellation to the underlying provider
+// when it supports it.
+func (p *CachedProvider) CancelHandoffs(ctx context.Context, scope Scope) error {
+	if canceler, ok := p.provider.(HandoffCanceler); ok {
+		return canceler.CancelHandoffs(ctx, scope)
+	}
+	return nil
 }
 
 func sanitizeDegradedReason(err error) string {

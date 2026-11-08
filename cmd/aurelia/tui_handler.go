@@ -563,6 +563,28 @@ func resetTUISessionOnProjectChange(a *app, chatID int64, threadID int, userID i
 	}
 }
 
+// cancelTUIHandoffs expires open ai-memory handoffs for the desktop
+// conversation so the next session does not consume a pre-reset handoff.
+func cancelTUIHandoffs(a *app, chatID int64, threadID int, userID int64) {
+	if a.memoryProvider == nil {
+		return
+	}
+	canceler, ok := a.memoryProvider.(memorycontext.HandoffCanceler)
+	if !ok {
+		return
+	}
+	cwd := tuiConversationCwd(context.Background(), a, chatID, threadID)
+	scope, err := memorycontext.ResolveScope(cwd, userID, chatID, threadID, "")
+	if err != nil || !scope.HasProject() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := canceler.CancelHandoffs(ctx, scope); err != nil {
+		log.Printf("tui: cancel pending handoffs failed chat=%d thread=%d: %v", chatID, threadID, err)
+	}
+}
+
 // handleTUIReset clears the PI session for the active TUI chat.
 func handleTUIReset(a *app, chatID int64, threadID int, userID int64) string {
 	canceled := false
@@ -574,6 +596,7 @@ func handleTUIReset(a *app, chatID int64, threadID int, userID int64) string {
 			canceled = true
 		}
 	} else {
+		cancelTUIHandoffs(a, chatID, threadID, userID)
 		if a.sessions != nil {
 			a.sessions.ClearSessionForUser(chatID, threadID, userID)
 		}

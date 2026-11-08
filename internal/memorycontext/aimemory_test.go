@@ -194,3 +194,58 @@ func writeRPCResult(t *testing.T, w http.ResponseWriter, id json.RawMessage, res
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"jsonrpc": "2.0", "id": id, "result": result})
 }
+
+func TestAIMemoryProviderCancelsOpenHandoffs(t *testing.T) {
+	var canceled []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		var req struct {
+			ID     json.RawMessage `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		if req.Method == "notifications/initialized" {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if req.Method == "initialize" {
+			writeRPCResult(t, w, req.ID, map[string]any{"protocolVersion": "2025-03-26", "capabilities": map[string]any{}, "serverInfo": map[string]any{"name": "test"}})
+			return
+		}
+		var call struct {
+			Name      string         `json:"name"`
+			Arguments map[string]any `json:"arguments"`
+		}
+		if err := json.Unmarshal(req.Params, &call); err != nil {
+			http.Error(w, "bad params", http.StatusBadRequest)
+			return
+		}
+		switch call.Name {
+		case "memory_handoff_list":
+			writeRPCResult(t, w, req.ID, toolContent(`{"handoffs":[{"id":"h1"},{"id":"h2"}]}`))
+		case "memory_handoff_cancel":
+			id, _ := call.Arguments["handoff_id"].(string)
+			canceled = append(canceled, id)
+			writeRPCResult(t, w, req.ID, toolContent(`{}`))
+		default:
+			http.Error(w, "unknown tool", http.StatusBadRequest)
+		}
+	}))
+	defer server.Close()
+
+	provider := NewAIMemoryProvider(AIMemoryOptions{BaseURL: server.URL, Token: "test-token"})
+	scope := Scope{Workspace: "personal", Project: "aurelia"}
+	if err := provider.CancelHandoffs(context.Background(), scope); err != nil {
+		t.Fatalf("CancelHandoffs: %v", err)
+	}
+	if len(canceled) != 2 || canceled[0] != "h1" || canceled[1] != "h2" {
+		t.Fatalf("canceled = %v, want [h1 h2]", canceled)
+	}
+}

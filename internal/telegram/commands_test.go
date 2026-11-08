@@ -1483,31 +1483,6 @@ func TestDebugCommands_OwnerOnly(t *testing.T) {
 	_ = CmdDebugErrors
 }
 
-func TestAppendModeTag(t *testing.T) {
-	tests := []struct {
-		name string
-		note string
-		mode string
-		want string
-	}{
-		{"empty note, developer", "", "developer", "[mode:developer]"},
-		{"note, developer", "before refactor", "developer", "before refactor [mode:developer]"},
-		{"note, researcher", "research findings", "researcher", "research findings [mode:researcher]"},
-		{"note, general", "some note", "", "some note"},
-		{"note, auto", "some note", "general", "some note"},
-		{"note, invalid ignored", "some note", "invalid", "some note"},
-		{"empty note, empty mode", "", "", ""},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := appendModeTag(tc.note, tc.mode)
-			if got != tc.want {
-				t.Errorf("appendModeTag(%q, %q) = %q, want %q", tc.note, tc.mode, got, tc.want)
-			}
-		})
-	}
-}
-
 func TestUserTimezone_NoStore(t *testing.T) {
 	bc := &BotController{}
 	name, loc := bc.userTimezone(42)

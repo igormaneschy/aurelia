@@ -150,10 +150,6 @@ func TestEffectiveCwdForContext_InvalidDefaultCWDIgnored(t *testing.T) {
 	}
 }
 
-// TestLoadMemoryContents_CwdSwitchPreservesProjectFacts verifies that changing
-// the active /cwd swaps the injected cwd_overlay layer and that returning to a
-// previous project still loads the same on-disk facts (project-scoped memory).
-
 // fakeRunLog implements runlog.Store for testing checkpoint injection.
 type fakeRunLog struct {
 	latest *runlog.RunRecord
@@ -323,35 +319,6 @@ func TestIsContinuation(t *testing.T) {
 		})
 	}
 }
-
-// TestBuildContinuitySection_HotActive_Skips verifies that continuity is NOT
-// injected when state is hot (<5min) and the session is active (saves tokens).
-
-// TestBuildContinuitySection_HotCold_Injects verifies that continuity IS
-// injected when state is hot (<5min) but the session is cold (just died).
-
-// TestBuildContinuitySection_WarmCold_Injects verifies that continuity IS
-// injected when state is warm (>5min but within retention) and session is cold.
-
-// TestBuildContinuitySection_WarmActive_Skips verifies that continuity is NOT
-// injected when state is warm and session is active.
-
-// TestBuildContinuitySection_Stale_Skips verifies that continuity is NOT
-// injected when state is stale (>7 days), regardless of session activity.
-
-// TestBuildContinuitySection_ContinuationAlwaysInjects verifies that
-// continuation text always triggers injection regardless of freshness or
-// session state.
-
-// TestBuildContinuitySection_NoState_Skips verifies that when no continuity
-// state exists, the section is empty regardless of other factors.
-
-// TestBuildContinuitySection_NilStore_ReturnsEmpty verifies nil continuity
-// store produces no section.
-
-// TestBuildContinuitySection_NilSessions_DefaultsCold verifies that a nil
-// sessions store defaults to "inactive", which means continuity is injected
-// for hot+cold and warm+cold — the conservative fallback.
 
 func TestBuildSystemPrompt_SingleActiveProfileSection(t *testing.T) {
 	resolver, err := profiles.NewResolver("", "", "")

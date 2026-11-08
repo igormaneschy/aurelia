@@ -90,8 +90,8 @@ func (bc *BotController) clearCurrentCwd(chatID int64, threadID int) error {
 	return nil
 }
 
-// resetSessionOnProjectChange clears the PI session and continuity when a
-// /cwd change moves the conversation to a different ai-memory project. The
+// resetSessionOnProjectChange clears the PI session when a /cwd change moves
+// the conversation to a different ai-memory project. The
 // ai-memory session row is fixed at session start, so reusing it across
 // projects would attribute observations and handoffs to the old project.
 func (bc *BotController) resetSessionOnProjectChange(chatID int64, threadID int, userID int64, oldCwd, newCwd string) {

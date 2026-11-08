@@ -31,26 +31,6 @@ func buildEmptyResultRecoveryMessage(toolSummary string) string {
 	return sb.String()
 }
 
-// runUsedWriteTools reports whether Write or Edit tools ran during the active turn.
-func (s *Service) runUsedWriteTools(chatID int64, threadID int, userID int64, owners ...runOwnership) bool {
-	key := runLogKey(chatID, threadID, userID)
-	ownership := firstRunOwnership(owners)
-	used := false
-	s.withRunOwnership(chatID, threadID, userID, owners, func() {
-		s.runLogMu.Lock()
-		state, ok := s.runLogStates[key]
-		s.runLogMu.Unlock()
-		if !ok || state == nil || (ownership.runID != "" && state.runID != ownership.runID) ||
-			(ownership.owner != nil && state.owner != ownership.owner) {
-			return
-		}
-		state.mu.Lock()
-		used = state.writeToolsUsed
-		state.mu.Unlock()
-	})
-	return used
-}
-
 // getRunToolSummary reads the in-memory tool summary from the active runLogState
 // without consulting the persisted store. Returns empty string if unavailable.
 func (s *Service) getRunToolSummary(chatID int64, threadID int, userID int64, owners ...runOwnership) string {

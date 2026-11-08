@@ -137,6 +137,47 @@ func (p *AIMemoryProvider) CallTool(ctx context.Context, name string, arguments 
 	return toolResultText(result)
 }
 
+// CancelHandoffs expires every open handoff for the project so a reset does
+// not inject the pre-reset handoff into the next session.
+func (p *AIMemoryProvider) CancelHandoffs(ctx context.Context, scope Scope) error {
+	if !scope.HasProject() {
+		return nil
+	}
+	text, err := p.CallTool(ctx, "memory_handoff_list", map[string]any{
+		"workspace": scope.Workspace,
+		"project":   scope.Project,
+		"limit":     50,
+	})
+	if err != nil {
+		return fmt.Errorf("list handoffs: %w", err)
+	}
+	var list struct {
+		Handoffs []struct {
+			ID string `json:"id"`
+		} `json:"handoffs"`
+	}
+	if err := json.Unmarshal([]byte(text), &list); err != nil {
+		return fmt.Errorf("decode handoff list: %w", err)
+	}
+	var failures []string
+	for _, handoff := range list.Handoffs {
+		if handoff.ID == "" {
+			continue
+		}
+		if _, err := p.CallTool(ctx, "memory_handoff_cancel", map[string]any{
+			"workspace":  scope.Workspace,
+			"project":    scope.Project,
+			"handoff_id": handoff.ID,
+		}); err != nil {
+			failures = append(failures, handoff.ID)
+		}
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("cancel %d handoff(s): %s", len(failures), strings.Join(failures, ", "))
+	}
+	return nil
+}
+
 type briefingPayload struct {
 	Counts              map[string]int    `json:"counts"`
 	PendingHandoffCount int               `json:"pending_handoff_count"`

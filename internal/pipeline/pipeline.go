@@ -1254,7 +1254,7 @@ func (s *Service) handleResultEvent(chatID int64, threadID int, messageID int, e
 				}
 			}) {
 				// A stale owner may still finish its detached runlog, but cannot
-				// install its session or continuity state into the replacement slot.
+				// install its session state into the replacement slot.
 				s.cancelClaimedRunLog(pipelineInput{chatID: chatID, threadID: threadID, userID: userID}, ownership)
 				return OutcomeCanceled
 			}

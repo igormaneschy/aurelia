@@ -18,22 +18,21 @@ const (
 	EntryPointTelegram = "telegram"
 	EntryPointTUI      = "tui"
 	EntryPointCron     = "cron"
-	EntryPointNudge    = "nudge"
 	EntryPointCLI      = "cli"
 )
 
 // Standard phase names for the run_events timeline.
 // Each phase records a single point-in-time event during a run lifecycle.
 const (
-	PhaseTelegramReceived     = "telegram_received"
-	PhaseUserGateOK           = "user_gate_ok"
-	PhaseAgentRouted          = "agent_routed"
-	PhasePromptBuilt          = "prompt_built"
-	PhaseBridgeRequestStarted = "bridge_request_started"
-	PhaseBridgeSystem         = "bridge_system"
-	PhaseBridgeToolUse        = "bridge_tool_use"
-	PhaseBridgeToolResult     = "bridge_tool_result"
-	PhaseBridgeResult           = "bridge_result"
+	PhaseTelegramReceived      = "telegram_received"
+	PhaseUserGateOK            = "user_gate_ok"
+	PhaseAgentRouted           = "agent_routed"
+	PhasePromptBuilt           = "prompt_built"
+	PhaseBridgeRequestStarted  = "bridge_request_started"
+	PhaseBridgeSystem          = "bridge_system"
+	PhaseBridgeToolUse         = "bridge_tool_use"
+	PhaseBridgeToolResult      = "bridge_tool_result"
+	PhaseBridgeResult          = "bridge_result"
 	PhaseBridgeContentDiverges = "bridge_content_diverges"
 
 	// Long-session telemetry phases. stall/steer/compaction are telemetry —
@@ -41,12 +40,10 @@ const (
 	PhaseBridgeStall      = "bridge_stall"
 	PhaseBridgeSteer      = "bridge_steer"
 	PhaseBridgeCompaction = "bridge_compaction"
-	PhaseReplyStarted         = "reply_started"
-	PhaseReplySent            = "reply_sent"
-	PhaseContinuityPatched    = "continuity_patched"
-	PhaseSessionLifecycle     = "session_lifecycle"
-	PhaseDreamNudgeScheduled  = "dream_nudge_scheduled"
-	PhaseRunCompleted         = "run_completed"
+	PhaseReplyStarted     = "reply_started"
+	PhaseReplySent        = "reply_sent"
+	PhaseSessionLifecycle = "session_lifecycle"
+	PhaseRunCompleted     = "run_completed"
 
 	// Error / edge phases
 	PhaseRunFailed          = "run_failed"
@@ -66,5 +63,5 @@ const (
 	PhaseCronPromptBuilt = "cron_prompt_built"
 	PhaseCronBridgeStart = "cron_bridge_started"
 	PhaseCronCompleted   = "cron_completed"
-	PhaseCronFailed = "cron_failed"
+	PhaseCronFailed      = "cron_failed"
 )

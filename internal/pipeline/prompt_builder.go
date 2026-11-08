@@ -87,7 +87,7 @@ func (bc *Service) buildSystemPrompt(userText string, profile *profiles.PromptPr
 	sections = append(sections, surfaceSection)
 
 	// Security Boundaries — capability profile and rules for tool usage.
-	// Injected before continuity so the model sees its restrictions early.
+	// Injected before memory so the model sees its restrictions early.
 	// Skipped for observe profile (no tools at all).
 	securitySection := bc.buildSecurityPromptSection(chatID, threadID, profile)
 	if securitySection != "" {

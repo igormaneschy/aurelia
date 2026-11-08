@@ -1,7 +1,6 @@
 package telegram
 
 import (
-	"context"
 	"testing"
 	"time"
 )
@@ -27,8 +26,5 @@ func TestBotControllerOfflineSendersAreNoOps(t *testing.T) {
 	}
 	if err := bc.ChatSender().SendWithThread(1, 2, "test"); err != nil {
 		t.Fatalf("offline ChatSender.SendWithThread: %v", err)
-	}
-	if err := bc.SendNudge(context.Background(), 1, 0, 0, "test"); err != nil {
-		t.Fatalf("offline SendNudge: %v", err)
 	}
 }

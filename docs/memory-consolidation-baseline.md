@@ -4,10 +4,11 @@ Structural baseline for the `memory-consolidation` change. Collected read-only
 on the NAS personal instance (ai-memory 3.4.3, Aurelia v0.53.0). No note,
 prompt, session or page content is reproduced here.
 
-Status: **structural baseline + legacy migration + live ai-memory switch
-complete; Telegram acceptance and failure-mode fixtures pending.** The live
-switch was performed directly after the import; the shadow-mode comparison was
-not run, and the direct-switch validation is recorded below.
+Status: **structural baseline + legacy migration + live ai-memory switch +
+legacy runtime removal complete; Telegram/desktop acceptance recorded; the
+failure-mode fixtures remain for the release validation.** The live switch was
+performed directly after the import; the shadow-mode comparison was not run, and
+the direct-switch validation is recorded below.
 
 ## ai-memory instance
 
@@ -192,11 +193,12 @@ The desktop then showed `bridge online`, the `personal/aurelia` scope and the
 project state, with no error banner. The recall probe described above passed
 without tool calls.
 
-Rollback before the legacy removal: set `memory_provider=legacy` in
-`~/.aurelia/config/app.json` and restart `aurelia.service`; the legacy files and
-continuity DB are still present. After the user accepts the live behavior, the
-remaining OpenSpec tasks remove the legacy packages, paths, commands and prompt
-layers.
+Rollback after the runtime removal uses the binary/config backups, not a
+provider flag: restore `~/.aurelia/config/app.json.pre-memory-switch-20261107230812`
+and the previous `aurelia` binary, then restart `aurelia.service`. The legacy
+files and continuity DB may remain on disk for audit, but the current runtime no
+longer reads or writes them. The pre-removal binary backup is recorded in the
+deployment notes.
 
 ### Project attribution check (2026-11-07)
 

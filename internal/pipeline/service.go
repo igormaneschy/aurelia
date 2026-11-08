@@ -227,7 +227,6 @@ func normalizeEntryPoint(ep string) string {
 	case observability.EntryPointTelegram,
 		observability.EntryPointTUI,
 		observability.EntryPointCron,
-		observability.EntryPointNudge,
 		observability.EntryPointCLI:
 		return ep
 	default:
