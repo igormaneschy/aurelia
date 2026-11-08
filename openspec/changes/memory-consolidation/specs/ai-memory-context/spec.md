@@ -70,7 +70,7 @@ ai-memory scopes SHALL map project from the cwd marker, user from the persona, a
 
 ### Requirement: Migration with rollback
 
-Existing `cwd_overlay`, `user_global`, `topic`, continuity and memoryux data SHALL be inventoried, backed up and imported into ai-memory with source metadata (source paths, tags, session, pinned where appropriate) before the legacy stores are removed. The migration SHALL support a dry run, a verification report and a feature-flagged rollback to legacy read-only mode.
+Existing `cwd_overlay`, `user_global`, `topic`, continuity and memoryux data SHALL be inventoried, backed up and imported into ai-memory with source metadata (source paths, tags, session, pinned where appropriate) before the legacy stores are removed. The migration SHALL support a dry run, a verification report and a rollback path via the pre-switch binary/config backup.
 
 #### Scenario: Dry-run inventory
 - **WHEN** the migration starts
@@ -81,8 +81,8 @@ Existing `cwd_overlay`, `user_global`, `topic`, continuity and memoryux data SHA
 - **THEN** a verification job reads the imported pages/profile/handoffs back and confirms the expected facts/links are present
 
 #### Scenario: Rollback
-- **WHEN** the ai-memory mode fails acceptance during the shadow/rollout period
-- **THEN** the feature flag restores legacy read-only behavior without losing the imported ai-memory data or the legacy originals
+- **WHEN** the ai-memory rollout fails acceptance
+- **THEN** restoring the previous binary/config restores legacy read-only behavior without losing the imported ai-memory data or the legacy originals
 
 ### Requirement: Tool access, privacy and no fallback
 

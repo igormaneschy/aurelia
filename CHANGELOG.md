@@ -4,6 +4,29 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.54.0] - 2026-11-08
+
+### Changed
+- **ai-memory is the only durable memory backend.** Aurelia injects a bounded
+  project working set from `memory_briefing`/`memory_read_page`; the Pi
+  extension owns handoff, session capture and the post-compaction anchor.
+- `/reset` clears the PI session and cancels pending ai-memory handoffs; `/cwd`
+  resets the PI session when the conversation moves to another project.
+- `/memory` reports ai-memory project pages/observations/sessions/handoffs.
+  `/reset` is listed in `/help` and the Telegram slash menu.
+
+### Removed
+- continuity store, prompt lifecycle and reset/cold patches.
+- `cwd_overlay`/`topic`/`user_global` layers, memory directories and bootstrap.
+- memoryux, Dream/Nudge memory extraction and `/memory checkpoint`.
+- legacy multi-user/context-memory/cwd-overlay migration commands.
+- `memory_provider`/`AURELIA_MEMORY_PROVIDER` selector; ai-memory is
+  unconditional.
+
+### Migration
+- 23 legacy pages imported into the personal ai-memory with tag `legacy-import`;
+  originals untouched. Pre-import and pre-removal backups are retained.
+
 ## [0.53.0] - 2026-11-07
 
 ### Added
