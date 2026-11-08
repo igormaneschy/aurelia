@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -114,6 +115,30 @@ func TestTUIHandler_SessionCreateAndList(t *testing.T) {
 	}
 	if sessions[0].MessageCount < 0 {
 		t.Errorf("sessions[0].MessageCount = %d, want >= 0", sessions[0].MessageCount)
+	}
+}
+
+func TestTUIHandler_SessionCreateClearsStaleSession(t *testing.T) {
+	a, ctx, cleanup := testApp(t)
+	defer cleanup()
+
+	userID := int64(os.Getuid())
+	nextID, err := a.tuiSessions.NextChatID(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nextID == -1 {
+		nextID = ipc.ReservedTUIChatID - 1
+	}
+	a.sessions.SetSession(nextID, 0, userID, "/tmp/stale-session.jsonl")
+
+	handler := makeTUIHandler(a)
+	te := &testEmit{}
+	if err := handler(ctx, ipc.IPCMessage{Type: ipc.MsgTypeSessionCreate, Text: "fresh"}, te.emit); err != nil {
+		t.Fatalf("create handler error: %v", err)
+	}
+	if got := a.sessions.GetSession(nextID, 0, userID); got != "" {
+		t.Fatalf("stale session = %q, want empty after creating the slot", got)
 	}
 }
 
@@ -318,12 +343,17 @@ func TestTUIHandler_SessionDelete(t *testing.T) {
 	}
 
 	// Delete it.
+	userID := int64(os.Getuid())
+	a.sessions.SetSession(created.ChatID, 0, userID, "/tmp/stale-delete.jsonl")
 	teDelete := &testEmit{}
 	if err := handler(ctx, ipc.IPCMessage{
 		Type:   ipc.MsgTypeSessionDelete,
 		ChatID: created.ChatID,
 	}, teDelete.emit); err != nil {
 		t.Fatalf("delete handler error: %v", err)
+	}
+	if got := a.sessions.GetSession(created.ChatID, 0, userID); got != "" {
+		t.Fatalf("session = %q, want empty after delete", got)
 	}
 
 	foundDeleted := false

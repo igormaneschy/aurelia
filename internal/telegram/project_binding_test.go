@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/users"
 )
@@ -459,6 +460,19 @@ func TestCurrentCwdForContext_DefaultCWDInPrivateChat(t *testing.T) {
 	got := bc.currentCwdForContext(42, 0, 1, true)
 	if got != want {
 		t.Fatalf("currentCwdForContext() = %q, want DefaultCWD %q", got, want)
+	}
+}
+
+func TestCurrentCwdForContext_DefaultCWDNotUsedInNamedTUISession(t *testing.T) {
+	t.Parallel()
+
+	repoDir := t.TempDir()
+	store := newUserStoreWithDefaultCWD(t, repoDir)
+
+	bc := &BotController{userStore: store}
+	namedSession := ipc.ReservedTUIChatID - 2
+	if got := bc.currentCwdForContext(namedSession, 0, 1, true); got != "" {
+		t.Fatalf("currentCwdForContext(named TUI) = %q, want empty", got)
 	}
 }
 

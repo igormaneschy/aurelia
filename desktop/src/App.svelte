@@ -356,6 +356,31 @@
       return false;
     }
 
+    const trimmed = text.trim();
+    if (/^\/(help|status|model|cwd|mode|agents|reset|new)(\s|$)/i.test(trimmed)) {
+      try {
+        const response = await api.runCommand(session.chat_id, trimmed);
+        if (/^\/(reset|new)(\s|$)/i.test(trimmed)) {
+          notify("info", response || "Sessão reiniciada.");
+          await loadHistory(session.chat_id);
+          await refreshProject(session.chat_id);
+        } else {
+          messages.update((current) => [
+            ...current,
+            { id: newId(), role: "user", text: trimmed },
+            { id: newId(), role: "assistant", text: response || "Comando executado." },
+          ]);
+          if (/^\/cwd(\s|$)/i.test(trimmed)) {
+            await refreshProject(session.chat_id);
+          }
+        }
+        return true;
+      } catch (error) {
+        notify("error", friendlyError(error));
+        return false;
+      }
+    }
+
     const pending = get(pendingAttachments);
     const documents = pending.filter((attachment) => attachment.kind === "document");
     if (documents.length > 0 && !get(projectState)?.cwd) {

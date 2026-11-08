@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -25,6 +26,23 @@ func TestBootstrap_CreatesAllDirectories(t *testing.T) {
 	for _, dir := range expected {
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 			t.Errorf("directory not created: %s (err=%v)", dir, err)
+		}
+	}
+}
+
+func TestBootstrap_CreatesChatModeMarker(t *testing.T) {
+	root := t.TempDir()
+	r := &PathResolver{root: root}
+	if err := Bootstrap(r); err != nil {
+		t.Fatalf("Bootstrap() error: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, ".ai-memory.toml"))
+	if err != nil {
+		t.Fatalf("chat-mode marker: %v", err)
+	}
+	for _, want := range []string{`project = "aurelia-chat"`, "deliver_on_session_start = false", "[recovery]"} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("marker missing %q: %s", want, data)
 		}
 	}
 }

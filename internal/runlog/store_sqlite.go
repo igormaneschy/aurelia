@@ -526,6 +526,25 @@ func (s *SQLiteStore) Latest(ctx context.Context, chatID int64, threadID int) (*
 	return rec, nil
 }
 
+// ClearLatestCheckpoint removes the checkpoint text from the most recent run
+// for a conversation. It preserves status/cost/tool metadata while preventing
+// an explicit reset from re-injecting the pre-reset summary.
+func (s *SQLiteStore) ClearLatestCheckpoint(ctx context.Context, chatID int64, threadID int) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE run_journal
+		SET checkpoint = ''
+		WHERE run_id = (
+			SELECT run_id FROM run_journal
+			WHERE chat_id = ? AND thread_id = ?
+			ORDER BY started_at DESC, rowid DESC
+			LIMIT 1
+		)`, chatID, threadID)
+	if err != nil {
+		return fmt.Errorf("runlog clear latest checkpoint chat=%d thread=%d: %w", chatID, threadID, err)
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // New Store methods (observability)
 // ---------------------------------------------------------------------------

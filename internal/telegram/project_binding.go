@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/internal/memorycontext"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
 	"github.com/igormaneschy/aurelia/internal/runtime"
@@ -34,8 +35,10 @@ func (bc *BotController) currentCwdForContext(chatID int64, threadID int, userID
 			return cwd
 		}
 	}
-	// DefaultCWD fallback: private chats only, no topic/thread
-	if isPrivateChat && threadID == 0 && userID != 0 && bc.userStore != nil {
+	// DefaultCWD fallback: private chats only, no topic/thread, and never for a
+	// named desktop session — those must opt in with /cwd.
+	isDefaultDM := chatID > 0 || chatID == ipc.ReservedTUIChatID
+	if isPrivateChat && threadID == 0 && userID != 0 && isDefaultDM && bc.userStore != nil {
 		profile, err := bc.userStore.Get(userID)
 		if err != nil {
 			log.Printf("cwd: currentCwdForContext failed to load profile user=%d: %v", userID, err)

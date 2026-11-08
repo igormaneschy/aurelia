@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.54.1] - 2026-11-08
+
+### Fixed
+- **Desktop named sessions no longer inherit DM memory.** A session without
+  `/cwd` no longer receives the profile DefaultCWD, the `personal/aurelia`
+  working set or the DM handoff; chat mode uses the neutral
+  `personal/aurelia-chat` scope with handoff/recovery delivery disabled.
+- Typed `/new` in the desktop composer is routed as a reset command, and
+  `/new` is also a TUI alias for `/reset`.
+- `/reset` clears the latest run checkpoint and cancels pending handoffs, so a
+  cold-start prompt cannot re-inject the discarded conversation.
+- Creating or deleting a named desktop slot clears stale PI session, cwd and
+  project-binding state before the slot is reused.
+
 ## [0.54.0] - 2026-11-08
 
 ### Changed

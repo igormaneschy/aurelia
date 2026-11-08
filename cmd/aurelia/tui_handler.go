@@ -17,6 +17,7 @@ import (
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/pipeline"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
+	"github.com/igormaneschy/aurelia/internal/runlog"
 	"github.com/igormaneschy/aurelia/internal/runtime"
 	"github.com/igormaneschy/aurelia/internal/transport"
 	"github.com/igormaneschy/aurelia/pkg/images"
@@ -257,6 +258,16 @@ func makeTUIHandler(a *app) func(context.Context, ipc.IPCMessage, func(ipc.IPCEv
 // ThreadID is always 0; UserID maps to the canonical persona ID when
 // configured (so TUI and Telegram share memory/dream/nudge), falling
 // back to os.Getuid() when no persona is configured.
+// tuiPersonaUserID returns the canonical persona ID used by desktop sessions.
+func tuiPersonaUserID(a *app) int64 {
+	if a != nil && a.config != nil {
+		if id := a.config.PersonaUserID(); id != 0 {
+			return id
+		}
+	}
+	return int64(os.Getuid())
+}
+
 func forceTUIIDs(msg *ipc.IPCMessage, personaUserID int64) {
 	if !ipc.IsReservedTUIID(msg.ChatID) {
 		msg.ChatID = ipc.ReservedTUIChatID
@@ -295,7 +306,7 @@ func handleTUICommand(ctx context.Context, a *app, msg ipc.IPCMessage, emit func
 		response = handleTUIMode(a, userID, text)
 	case text == "/agents" || strings.HasPrefix(text, "/agents "):
 		response = handleTUIAgents(a, userID, text)
-	case text == "/reset":
+	case text == "/reset" || text == "/new":
 		response = handleTUIReset(a, chatID, threadID, userID)
 	case strings.HasPrefix(text, "/status"):
 		response = handleTUIStatus(ctx, a, chatID, threadID, userID)
@@ -329,7 +340,7 @@ Commands:
 - /mode explain <profile> — safe profile summary
 - /agents — list available prompt profiles
 - /agents verbose — list with model/capability hints
-- /reset — clear PI session context and start fresh
+- /reset, /new — clear PI session context and start fresh
 - /img <path> — attach an image (png, jpg, gif, webp)
 - /attach <path> — attach a document (md, docx, pdf, etc.)
 
@@ -561,10 +572,27 @@ func resetTUISessionOnProjectChange(a *app, chatID int64, threadID int, userID i
 	if a.sessions != nil {
 		a.sessions.ClearSessionForUser(chatID, threadID, userID)
 	}
+	clearTUILatestCheckpoint(a, chatID, threadID)
 }
 
-// cancelTUIHandoffs expires open ai-memory handoffs for the desktop
-// conversation so the next session does not consume a pre-reset handoff.
+// clearTUILatestCheckpoint removes the pre-reset run checkpoint for a desktop
+// conversation so the next cold-start prompt cannot re-inject old context.
+func clearTUILatestCheckpoint(a *app, chatID int64, threadID int) {
+	if a == nil || a.runLog == nil {
+		return
+	}
+	clearer, ok := a.runLog.(runlog.CheckpointClearer)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := clearer.ClearLatestCheckpoint(ctx, chatID, threadID); err != nil {
+		log.Printf("tui: clear latest checkpoint failed chat=%d thread=%d: %v", chatID, threadID, err)
+	}
+}
+
+// cancelTUIHandoffs expires open ai-memory handoffs for the desktop// conversation so the next session does not consume a pre-reset handoff.
 func cancelTUIHandoffs(a *app, chatID int64, threadID int, userID int64) {
 	if a.memoryProvider == nil {
 		return
@@ -600,6 +628,7 @@ func handleTUIReset(a *app, chatID int64, threadID int, userID int64) string {
 		if a.sessions != nil {
 			a.sessions.ClearSessionForUser(chatID, threadID, userID)
 		}
+		clearTUILatestCheckpoint(a, chatID, threadID)
 	}
 	msg := "🗑️ Session reset. Next message starts a fresh conversation."
 	if canceled {

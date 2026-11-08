@@ -386,8 +386,26 @@ func (bc *BotController) ResetSession(chatID int64, threadID int, userID int64, 
 	if bc.sessions != nil {
 		bc.sessions.ClearSessionForUser(chatID, threadID, userID)
 	}
+	bc.clearLatestCheckpoint(chatID, threadID)
 	log.Printf("session: reset for chat=%d thread=%d user=%d", chatID, threadID, userID)
 	return canceledActive
+}
+
+// clearLatestCheckpoint removes the pre-reset run checkpoint so a cold-start
+// prompt cannot re-inject the conversation the user explicitly discarded.
+func (bc *BotController) clearLatestCheckpoint(chatID int64, threadID int) {
+	if bc == nil || bc.runLog == nil {
+		return
+	}
+	clearer, ok := bc.runLog.(runlog.CheckpointClearer)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := clearer.ClearLatestCheckpoint(ctx, chatID, threadID); err != nil {
+		log.Printf("session: clear latest checkpoint failed chat=%d thread=%d: %v", chatID, threadID, err)
+	}
 }
 
 // cancelPendingHandoffs expires open ai-memory handoffs for the conversation so
@@ -422,6 +440,7 @@ func (bc *BotController) ResetSessionForProjectChange(chatID int64, threadID int
 	if bc.sessions != nil {
 		bc.sessions.ClearSessionForUser(chatID, threadID, userID)
 	}
+	bc.clearLatestCheckpoint(chatID, threadID)
 	log.Printf("session: project change reset chat=%d thread=%d user=%d", chatID, threadID, userID)
 }
 
