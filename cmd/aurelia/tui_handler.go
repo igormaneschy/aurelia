@@ -295,7 +295,7 @@ func handleTUICommand(ctx context.Context, a *app, msg ipc.IPCMessage, emit func
 		response = handleTUIMode(a, userID, text)
 	case text == "/agents" || strings.HasPrefix(text, "/agents "):
 		response = handleTUIAgents(a, userID, text)
-	case text == "/reset":
+	case text == "/reset" || text == "/new":
 		response = handleTUIReset(a, chatID, threadID, userID)
 	case strings.HasPrefix(text, "/status"):
 		response = handleTUIStatus(ctx, a, chatID, threadID, userID)
@@ -329,7 +329,7 @@ Commands:
 - /mode explain <profile> — safe profile summary
 - /agents — list available prompt profiles
 - /agents verbose — list with model/capability hints
-- /reset — clear PI session context and start fresh
+- /reset, /new — clear PI session context and start fresh
 - /img <path> — attach an image (png, jpg, gif, webp)
 - /attach <path> — attach a document (md, docx, pdf, etc.)
 

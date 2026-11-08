@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/igormaneschy/aurelia/internal/config"
+	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/profiles"
 	"github.com/igormaneschy/aurelia/internal/projectbinding"
@@ -72,6 +73,21 @@ func TestEffectiveCwdForContext_UsesDefaultCWDWhenPrivateNoBinding(t *testing.T)
 	got := bc.effectiveCwdForContext(nil, 42, 0, 1, true)
 	if got != want {
 		t.Fatalf("effectiveCwdForContext() = %q, want DefaultCWD %q", got, want)
+	}
+}
+
+func TestEffectiveCwdForContext_DefaultCWDNotUsedInNamedTUISession(t *testing.T) {
+	dir := t.TempDir()
+	resolver := users.NewResolver(dir)
+	store := users.NewStore(resolver)
+	if err := store.Save(&users.Profile{UserID: 1, DefaultCWD: dir}); err != nil {
+		t.Fatal(err)
+	}
+
+	bc := &Service{usersStore: store}
+	namedSession := ipc.ReservedTUIChatID - 2
+	if got := bc.effectiveCwdForContext(nil, namedSession, 0, 1, true); got != "" {
+		t.Fatalf("effectiveCwdForContext(named TUI) = %q, want empty", got)
 	}
 }
 

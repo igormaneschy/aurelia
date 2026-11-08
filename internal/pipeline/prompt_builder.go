@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/igormaneschy/aurelia/internal/ipc"
 	"github.com/igormaneschy/aurelia/internal/memorycontext"
 	"github.com/igormaneschy/aurelia/internal/observability"
 	"github.com/igormaneschy/aurelia/internal/profiles"
@@ -159,8 +160,11 @@ func (bc *Service) effectiveCwdForContext(profile *profiles.PromptProfile, chatI
 			return cwd
 		}
 	}
-	// DefaultCWD fallback: private chats only, no topic/thread
-	if isPrivateChat && threadID == 0 && userID != 0 && bc.usersStore != nil {
+	// DefaultCWD fallback: private chats only, no topic/thread, and never for a
+	// named desktop session — those must opt in with /cwd so the DM project does
+	// not leak into another local session.
+	isDefaultDM := chatID > 0 || chatID == ipc.ReservedTUIChatID
+	if isPrivateChat && threadID == 0 && userID != 0 && isDefaultDM && bc.usersStore != nil {
 		profile, err := bc.usersStore.Get(userID)
 		if err != nil {
 			log.Printf("cwd: effectiveCwdForContext failed to load profile user=%d: %v", userID, err)
