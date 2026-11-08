@@ -613,7 +613,7 @@ function redactedCommandExcerpt(command, maxLen) {
   return redacted.slice(0, maxLen) + "...";
 }
 function redactAuditPath(text) {
-  return text.replace(/(?:^|[/~])\.env(?:\b|\/|$)/g, "[SENSITIVE_PATH_REDACTED]").replace(/(?:^|[/~])\.ssh(?:\/|$)/g, "[SENSITIVE_PATH_REDACTED]").replace(/(?:^|[/~])\.pi(?:\/|$)/g, "[SENSITIVE_PATH_REDACTED]").replace(/(?:^|[/~])\.aurelia\/config(?:\/|$)/g, "[SENSITIVE_PATH_REDACTED]").replace(/(?:^|[/~])\.git\/config(?:\b|\/|$)/g, "[SENSITIVE_PATH_REDACTED]");
+  return text.replace(/(?:^|[/~])\.env(?:\b|\/|$)/g, "[SENSITIVE_PATH_REDACTED]").replace(/(?:^|[/~])\.ssh(?:\/|$)/g, "[SENSITIVE_PATH_REDACTED]").replace(/(?:^|[/~])\.pi(?:\/|$)/g, "[SENSITIVE_PATH_REDACTED]").replace(/(?:^|[/~])\.aurelia\/config(?:\/|$)/g, "[SENSITIVE_PATH_REDACTED]").replace(/(?:^|[/~])\.notebooklm(?:\/|$)/g, "[SENSITIVE_PATH_REDACTED]").replace(/(?:^|[/~])\.git\/config(?:\b|\/|$)/g, "[SENSITIVE_PATH_REDACTED]");
 }
 function escapeUntrustedSummary(text) {
   return redactSDKError(text).replace(/<\/previous_session_summary_untrusted>/gi, "&lt;/previous_session_summary_untrusted&gt;").replace(/<previous_session_summary_untrusted>/gi, "&lt;previous_session_summary_untrusted&gt;");
@@ -731,6 +731,7 @@ var DEFAULT_SENSITIVE_PATTERNS = [
   ".ssh/*",
   ".pi/*",
   ".aurelia/config/*",
+  ".notebooklm/*",
   ".git/config"
 ];
 function matchesGlob(pattern, name) {
@@ -749,7 +750,7 @@ function isSensitivePath(path, patterns) {
     if (matchesGlob(pat, base)) return true;
     if (matchesGlob(pat, clean)) return true;
   }
-  for (const dir of [".ssh", ".aurelia/config", ".pi"]) {
+  for (const dir of [".ssh", ".aurelia/config", ".notebooklm", ".pi"]) {
     if (clean.includes("/" + dir + "/") || clean.startsWith(dir + "/")) {
       return true;
     }
@@ -809,6 +810,7 @@ function matchesEnvAccess(command) {
   const lower = command.trim().toLowerCase();
   if (/^env$/.test(lower) || /^printenv/.test(lower) || /^export($|\s)/.test(lower)) return true;
   if (lower.includes(".aurelia/config")) return true;
+  if (lower.includes(".notebooklm")) return true;
   if (/echo\s+\$/.test(lower) || /echo \${/.test(lower)) return true;
   if (lower.includes("cat ~/.aurelia")) return true;
   return false;
@@ -921,6 +923,7 @@ function gitHasSensitiveArgs(command) {
   if (/\.ssh(?:\/|$)/.test(args)) return true;
   if (/\.pi(?:\/|$)/.test(args)) return true;
   if (/\.aurelia\/config(?:\/|$)/.test(args)) return true;
+  if (/\.notebooklm(?:\/|$)/.test(args)) return true;
   if (/\.git\/config(?:\b|$)/.test(args)) return true;
   if (/~\/\./.test(args)) return true;
   return false;

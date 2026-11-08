@@ -489,6 +489,11 @@ describe("isSensitivePath (via evaluateToolPolicy Read)", () => {
     assert.strictEqual(r.decision, "block");
   });
 
+  it("blocks .notebooklm credential path", () => {
+    const r = evaluateToolPolicy("Read", { path: "/home/user/.notebooklm/profiles/default/master_token.json" }, execSafeCtx());
+    assert.strictEqual(r.decision, "block");
+  });
+
   it("blocks Grep outside cwd", () => {
     const r = evaluateToolPolicy("Grep", { path: "/home/user/other" }, execSafeCtx());
     assert.strictEqual(r.decision, "block");
@@ -548,6 +553,12 @@ describe("redactAuditPath", () => {
   it("redacts .aurelia/config path", () => {
     const r = redactAuditPath("/home/user/.aurelia/config/app.json");
     assert.doesNotMatch(r, /\.aurelia\/config/);
+    assert.match(r, /\[SENSITIVE_PATH_REDACTED\]/);
+  });
+
+  it("redacts .notebooklm credential path", () => {
+    const r = redactAuditPath("/home/user/.notebooklm/profiles/default/master_token.json");
+    assert.doesNotMatch(r, /\.notebooklm/);
     assert.match(r, /\[SENSITIVE_PATH_REDACTED\]/);
   });
 

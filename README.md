@@ -548,7 +548,8 @@ Aurelia supports local models via [Ollama](https://ollama.com/) or any OpenAI-co
 | [CLAUDE.md](CLAUDE.md) | Instructions for coding agents |
 | [CHANGELOG.md](CHANGELOG.md) | Release history and changes |
 | [docs/NAS_OPERATIONS.md](docs/NAS_OPERATIONS.md) | NAS personal assistant runbook (systemd, ai-jail, ai-memory, Telegram, desktop tunnel) |
-| [openspec/changes/memory-consolidation/](openspec/changes/memory-consolidation/) | ai-memory-native memory/context consolidation proposal |
+| [docs/NOTEBOOKLM_MCP.md](docs/NOTEBOOKLM_MCP.md) | NotebookLM/Gemini Notebook MCP integration (dedicated account, master token, read-only tools) |
+| [openspec/changes/archive/2026-11-08-memory-consolidation/](openspec/changes/archive/2026-11-08-memory-consolidation/) | ai-memory-native memory/context consolidation change (archived) |
 | [desktop/README.md](desktop/README.md) | Desktop client (local and NAS/Tailscale modes) |
 | [docs/OPERATIONS.md](docs/OPERATIONS.md) | macOS local/fallback operations and current NAS pointers |
 | [docs/OBSERVABILITY.md](docs/OBSERVABILITY.md) | Operational observability guide (debug, metrics, log config) |
@@ -615,7 +616,7 @@ use [docs/NAS_OPERATIONS.md](docs/NAS_OPERATIONS.md).
 
 ## Current State
 
-- **v0.54.1** on `main` (released 2026-11-08) — see [CHANGELOG.md](CHANGELOG.md)
+- **v0.55.0** on `main` (released 2026-11-08) — see [CHANGELOG.md](CHANGELOG.md)
 - Next release: TBD
 - Canonical repository: `https://github.com/igormaneschy/aurelia`
 - Go module: `github.com/igormaneschy/aurelia`

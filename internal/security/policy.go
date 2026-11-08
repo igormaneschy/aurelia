@@ -18,17 +18,17 @@ type BashPolicy struct {
 	AllowBuild     bool `json:"allow_build"`      // go build, npm run, etc.
 	AllowGitSafe   bool `json:"allow_git_safe"`   // git status, diff, log
 	AllowTest      bool `json:"allow_test"`       // go test, npm test
-	Destructive    bool `json:"destructive"`       // rm -rf, sudo, chmod
+	Destructive    bool `json:"destructive"`      // rm -rf, sudo, chmod
 	AllowEnvAccess bool `json:"allow_env_access"` // env, printenv, $VAR
 }
 
 // SecurityConfig holds the complete security policy configuration.
 type SecurityConfig struct {
-	Mode                   PolicyMode        `json:"mode"`                      // "warn" | "block"
-	DefaultProfile         CapabilityProfile `json:"default_profile"`          // default for coding contexts
-	AllowPrivilegedAgents  bool              `json:"allow_privileged"`         // allow privileged profile
-	SensitivePathPatterns  []string          `json:"sensitive_paths"`          // glob patterns for sensitive paths
-	AllowedOutsideCWDPaths []string          `json:"allowed_outside_cwd"`      // exceptions to cwd boundary
+	Mode                   PolicyMode        `json:"mode"`                // "warn" | "block"
+	DefaultProfile         CapabilityProfile `json:"default_profile"`     // default for coding contexts
+	AllowPrivilegedAgents  bool              `json:"allow_privileged"`    // allow privileged profile
+	SensitivePathPatterns  []string          `json:"sensitive_paths"`     // glob patterns for sensitive paths
+	AllowedOutsideCWDPaths []string          `json:"allowed_outside_cwd"` // exceptions to cwd boundary
 	BashRules              BashPolicy        `json:"bash_rules"`
 }
 
@@ -68,6 +68,7 @@ func DefaultConfig() SecurityConfig {
 			".ssh/*",
 			".pi/*",
 			".aurelia/config/*",
+			".notebooklm/*",
 			".git/config",
 		},
 		AllowedOutsideCWDPaths: nil,

@@ -172,26 +172,26 @@ func (l *auditLogger) rotateIfNeeded(incomingBytes int64) error {
 
 // Pre-compiled redaction regexes for credential patterns in audit output.
 var (
-	apiKeyRE       = regexp.MustCompile(`\bsk-[A-Za-z0-9]{20,}`)
-	pkKeyRE        = regexp.MustCompile(`\bpk-[A-Za-z0-9]{20,}`)
-	skAntKeyRE     = regexp.MustCompile(`\bsk-ant-[A-Za-z0-9]{20,}`)
-	skProjKeyRE    = regexp.MustCompile(`\bsk-proj-[A-Za-z0-9]{20,}`)
-	stripeLiveRE   = regexp.MustCompile(`\bsk_live_[A-Za-z0-9]+`)
-	stripeTestRE   = regexp.MustCompile(`\bsk_test_[A-Za-z0-9]+`)
-	awsKeyRE       = regexp.MustCompile(`\bAKIA[A-Z0-9]{16}`)
-	gcpKeyRE       = regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}`)
-	ghTokenRE      = regexp.MustCompile(`\bgh[puosr]_[A-Za-z0-9]{36}`)
-	ghPatRE        = regexp.MustCompile(`\bgithub_pat_[0-9A-Za-z_-]+`)
-	jwtRE          = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+`)
-	xaiKeyRE       = regexp.MustCompile(`\bxai-[A-Za-z0-9]{20,}`)
-	glTokenRE      = regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{20,}`)
-	hfTokenRE      = regexp.MustCompile(`\bhf_[A-Za-z0-9]{20,}`)
-	npmTokenRE     = regexp.MustCompile(`\bnpm_[A-Za-z0-9]{36}`)
-	slackTokenRE   = regexp.MustCompile(`\bxox[bpasa]-[A-Za-z0-9-]{20,}`)
-	slackAppRE     = regexp.MustCompile(`\bxapp-[A-Za-z0-9-]{20,}`)
-	privateKeyRE   = regexp.MustCompile(`(?s)-----BEGIN (?:OPENSSH |RSA |DSA |EC |PGP )?PRIVATE KEY-----.*?-----END (?:OPENSSH |RSA |DSA |EC |PGP )?PRIVATE KEY-----`)
-	authHeaderRE   = regexp.MustCompile(`(?i)(Authorization:\s*(?:Bearer|Basic)\s+)\S+`)
-	credValueRE    = regexp.MustCompile(`(?i)(password|secret|token|api_key|api-key|apikey|client_secret|access_token|refresh_token)\s*[=:]\s*\S+`)
+	apiKeyRE        = regexp.MustCompile(`\bsk-[A-Za-z0-9]{20,}`)
+	pkKeyRE         = regexp.MustCompile(`\bpk-[A-Za-z0-9]{20,}`)
+	skAntKeyRE      = regexp.MustCompile(`\bsk-ant-[A-Za-z0-9]{20,}`)
+	skProjKeyRE     = regexp.MustCompile(`\bsk-proj-[A-Za-z0-9]{20,}`)
+	stripeLiveRE    = regexp.MustCompile(`\bsk_live_[A-Za-z0-9]+`)
+	stripeTestRE    = regexp.MustCompile(`\bsk_test_[A-Za-z0-9]+`)
+	awsKeyRE        = regexp.MustCompile(`\bAKIA[A-Z0-9]{16}`)
+	gcpKeyRE        = regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}`)
+	ghTokenRE       = regexp.MustCompile(`\bgh[puosr]_[A-Za-z0-9]{36}`)
+	ghPatRE         = regexp.MustCompile(`\bgithub_pat_[0-9A-Za-z_-]+`)
+	jwtRE           = regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+`)
+	xaiKeyRE        = regexp.MustCompile(`\bxai-[A-Za-z0-9]{20,}`)
+	glTokenRE       = regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{20,}`)
+	hfTokenRE       = regexp.MustCompile(`\bhf_[A-Za-z0-9]{20,}`)
+	npmTokenRE      = regexp.MustCompile(`\bnpm_[A-Za-z0-9]{36}`)
+	slackTokenRE    = regexp.MustCompile(`\bxox[bpasa]-[A-Za-z0-9-]{20,}`)
+	slackAppRE      = regexp.MustCompile(`\bxapp-[A-Za-z0-9-]{20,}`)
+	privateKeyRE    = regexp.MustCompile(`(?s)-----BEGIN (?:OPENSSH |RSA |DSA |EC |PGP )?PRIVATE KEY-----.*?-----END (?:OPENSSH |RSA |DSA |EC |PGP )?PRIVATE KEY-----`)
+	authHeaderRE    = regexp.MustCompile(`(?i)(Authorization:\s*(?:Bearer|Basic)\s+)\S+`)
+	credValueRE     = regexp.MustCompile(`(?i)(password|secret|token|api_key|api-key|apikey|client_secret|access_token|refresh_token)\s*[=:]\s*\S+`)
 	jsonCredValueRE = regexp.MustCompile(`"(?:apiKey|api_key|clientSecret|client_secret|accessToken|access_token|refreshToken|refresh_token|token)"\s*:\s*"[^"]{4,}"`)
 
 	// Sensitive path patterns for audit redaction. These match path references
@@ -203,6 +203,7 @@ var (
 	sshPathRE    = regexp.MustCompile(`(?:^|[/~])\.ssh(?:/|$)`)
 	piPathRE     = regexp.MustCompile(`(?:^|[/~])\.pi(?:/|$)`)
 	aureliaCfgRE = regexp.MustCompile(`(?:^|[/~])\.aurelia/config(?:/|$)`)
+	notebookLMRE = regexp.MustCompile(`(?:^|[/~])\.notebooklm(?:/|$)`)
 	gitCfgRE     = regexp.MustCompile(`(?:^|[/~])\.git/config(?:\b|/|$)`)
 )
 
@@ -235,7 +236,7 @@ func redactAuditSensitive(s string) string {
 	// (e.g. "/home/user/.ssh/id_rsa" → "[SENSITIVE_PATH_REDACTED]")
 	// so that credential locations are not leaked in audit output.
 	for _, re := range []*regexp.Regexp{
-		sshPathRE, piPathRE, aureliaCfgRE, gitCfgRE, envFileRE,
+		sshPathRE, piPathRE, aureliaCfgRE, notebookLMRE, gitCfgRE, envFileRE,
 	} {
 		result = re.ReplaceAllString(result, "[SENSITIVE_PATH_REDACTED]")
 	}

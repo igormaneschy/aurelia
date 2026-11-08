@@ -1105,6 +1105,8 @@ export function redactAuditPath(text: string): string {
     .replace(/(?:^|[/~])\.pi(?:\/|$)/g, "[SENSITIVE_PATH_REDACTED]")
     // .aurelia/config/ directory paths
     .replace(/(?:^|[/~])\.aurelia\/config(?:\/|$)/g, "[SENSITIVE_PATH_REDACTED]")
+    // .notebooklm/ credential directory paths
+    .replace(/(?:^|[/~])\.notebooklm(?:\/|$)/g, "[SENSITIVE_PATH_REDACTED]")
     // .git/config file paths
     .replace(/(?:^|[/~])\.git\/config(?:\b|\/|$)/g, "[SENSITIVE_PATH_REDACTED]");
 }
@@ -1288,7 +1290,7 @@ export const DEFAULT_SENSITIVE_PATTERNS = [
   "id_rsa", "id_ed25519",
   "config.json", "credentials.json", "*.credentials",
   "service-account*.json",
-  ".ssh/*", ".pi/*", ".aurelia/config/*", ".git/config",
+  ".ssh/*", ".pi/*", ".aurelia/config/*", ".notebooklm/*", ".git/config",
 ];
 
 function matchesGlob(pattern: string, name: string): boolean {
@@ -1316,7 +1318,7 @@ export function isSensitivePath(path: string, patterns: string[]): boolean {
   }
 
   // Check for known sensitive directories anywhere in the path.
-  for (const dir of [".ssh", ".aurelia/config", ".pi"]) {
+  for (const dir of [".ssh", ".aurelia/config", ".notebooklm", ".pi"]) {
     if (clean.includes("/" + dir + "/") || clean.startsWith(dir + "/")) {
       return true;
     }
@@ -1383,6 +1385,7 @@ export function matchesEnvAccess(command: string): boolean {
   const lower = command.trim().toLowerCase();
   if (/^env$/.test(lower) || /^printenv/.test(lower) || /^export($|\s)/.test(lower)) return true;
   if (lower.includes(".aurelia/config")) return true;
+  if (lower.includes(".notebooklm")) return true;
   if (/echo\s+\$/.test(lower) || /echo \${/.test(lower)) return true;
   if (lower.includes("cat ~/.aurelia")) return true;
   return false;
@@ -1525,6 +1528,7 @@ export function gitHasSensitiveArgs(command: string): boolean {
   if (/\.ssh(?:\/|$)/.test(args)) return true;
   if (/\.pi(?:\/|$)/.test(args)) return true;
   if (/\.aurelia\/config(?:\/|$)/.test(args)) return true;
+  if (/\.notebooklm(?:\/|$)/.test(args)) return true;
   if (/\.git\/config(?:\b|$)/.test(args)) return true;
   if (/~\/\./.test(args)) return true; // ~/. pattern indicates home-dir access
 
