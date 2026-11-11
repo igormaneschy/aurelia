@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.55.1] - 2026-11-11
+
+### Removed
+- **Higiene do repositório local.** O binário compilado `aurelia-tui` (20 MB,
+  Jun 29) não é mais versionado — entrou no git por acidente; `/aurelia-tui`
+  entrou no `.gitignore` e a linha duplicada de `.aurelia/` foi deduplicada.
+  Artefatos gerados da árvore de trabalho (`dist/`, `bin/`, `build/`,
+  `aurelia`/`*.test` na raiz, `desktop/target|dist`, `desktop/src-tauri/gen`,
+  `.DS_Store`, backups `*.bak-*`, o diretório literal `~/` e o `.aurelia/`
+  local com nota obsoleta da v0.18.0) foram movidos para a Lixeira — o único
+  arquivo versionado afetado é o binário acima.
+
 ## [0.55.0] - 2026-11-08
 
 ### Added

@@ -65,7 +65,6 @@ USER.md
 
 # Skills and per-project runtime state
 .aurelia/
-.aurelia/
 specs/
 
 # Claude Code (local dev tooling)
@@ -78,6 +77,7 @@ specs/
 /build/
 /dist/
 /aurelia
+/aurelia-tui
 /bin/
 
 # Editor / tooling backups
